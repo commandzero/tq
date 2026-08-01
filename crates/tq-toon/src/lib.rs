@@ -5,10 +5,22 @@ use std::sync::Arc;
 use thiserror::Error;
 use tq_core::{Number, SourcePosition, Span};
 
+mod decoder;
+mod dom;
+
+pub use decoder::{DecodeIntoError, Decoder};
+pub use dom::{DomBuilder, DomDecodeError, DomError, decode_to_value};
+
 /// Bounded decoder configuration. Declared collection lengths never directly
 /// become allocation capacities.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DecoderConfig {
+    /// Spaces in one indentation level.
+    pub indent_size: usize,
+    /// Enforce counts, indentation, delimiters, and blank-line rules.
+    pub strict: bool,
+    /// Safe dotted-key expansion policy used by DOM consumers.
+    pub path_expansion: PathExpansion,
     /// Maximum structural nesting.
     pub maximum_depth: usize,
     /// Maximum bytes in one scalar/key token.
@@ -22,12 +34,25 @@ pub struct DecoderConfig {
 impl Default for DecoderConfig {
     fn default() -> Self {
         Self {
+            indent_size: 2,
+            strict: true,
+            path_expansion: PathExpansion::Off,
             maximum_depth: 256,
             maximum_token_bytes: 8 * 1024 * 1024,
             maximum_line_bytes: 16 * 1024 * 1024,
             maximum_lookahead_bytes: 64 * 1024,
         }
     }
+}
+
+/// Dotted object-key expansion mode for materialized values.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PathExpansion {
+    /// Preserve decoded keys literally.
+    #[default]
+    Off,
+    /// Expand unquoted dotted keys only when every segment is an identifier.
+    Safe,
 }
 
 /// Scalar emitted by the query-independent TOON decoder boundary.
@@ -72,6 +97,8 @@ pub enum Event {
         span: Span,
         /// Decoded key.
         value: Arc<str>,
+        /// Whether the source key was explicitly quoted.
+        quoted: bool,
     },
     /// Array boundary with optional declared count.
     ArrayStart {
@@ -111,17 +138,13 @@ pub trait EventConsumer {
 }
 
 /// Strict TOON decoder failure.
-#[derive(Clone, Debug, Error, Eq, PartialEq)]
+#[derive(Debug, Error)]
 pub enum DecodeError {
     /// Syntax violation at the best available source position.
-    #[error("invalid TOON at line {position_line}, column {position_column}: {message}")]
+    #[error("invalid TOON at {position:?}: {message}")]
     Syntax {
         /// Source position.
         position: SourcePosition,
-        /// Cached line for stable error formatting.
-        position_line: u64,
-        /// Cached column for stable error formatting.
-        position_column: u64,
         /// Concise reason.
         message: Arc<str>,
     },
@@ -130,5 +153,11 @@ pub enum DecodeError {
     Resource {
         /// Stable resource name.
         resource: Arc<str>,
+    },
+    /// Underlying reader failed.
+    #[error("TOON input I/O failed: {message}")]
+    Io {
+        /// Reader error without platform backtrace/noise.
+        message: Arc<str>,
     },
 }

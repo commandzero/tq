@@ -127,18 +127,18 @@
 
 ## 9. Incremental TOON Decoder and DOM Builder
 
-- [ ] 9.1 Import or reference official TOON conformance fixtures and write event-contract golden tests before implementing the decoder
-- [ ] 9.2 Define source-spanned document/object/key/array/scalar event types, active delimiter/schema state, and event-consumer interfaces
-- [ ] 9.3 Implement incremental buffered byte reading, UTF-8 validation, source positioning, configurable token/line limits, and bounded lookahead
-- [ ] 9.4 Implement strict root and primitive/object field decoding into events
-- [ ] 9.5 Implement strict inline primitive array and nested array decoding with incremental declared-count validation
-- [ ] 9.6 Implement strict tabular array decoding with ordered fields, delimiter scope, row-width validation, and count validation
-- [ ] 9.7 Implement expanded list-item object/array decoding and the remaining TOON v3 root/nesting forms
-- [ ] 9.8 Add hostile tests for excessive depth, huge declared counts, huge tokens, invalid escapes, indentation, delimiters, truncation, and invalid UTF-8
-- [ ] 9.9 Implement the ordered DOM builder as an event consumer using `tq-core` values
-- [ ] 9.10 Add event-to-DOM versus established decoder differential tests across all conformance fixtures
-- [ ] 9.11 Add decoder fuzz and property targets and promote every found crash into a regression fixture
-- [ ] 9.12 Stabilize a query-independent `tq-toon` event boundary, document the later `toon-rust` extraction seam, and keep upstreaming out of the MVP critical path
+- [x] 9.1 Import or reference official TOON conformance fixtures and write event-contract golden tests before implementing the decoder
+- [x] 9.2 Define source-spanned document/object/key/array/scalar event types, active delimiter/schema state, and event-consumer interfaces
+- [x] 9.3 Implement incremental buffered byte reading, UTF-8 validation, source positioning, configurable token/line limits, and bounded lookahead
+- [x] 9.4 Implement strict root and primitive/object field decoding into events
+- [x] 9.5 Implement strict inline primitive array and nested array decoding with incremental declared-count validation
+- [x] 9.6 Implement strict tabular array decoding with ordered fields, delimiter scope, row-width validation, and count validation
+- [x] 9.7 Implement expanded list-item object/array decoding and the remaining TOON v3 root/nesting forms
+- [x] 9.8 Add hostile tests for excessive depth, huge declared counts, huge tokens, invalid escapes, indentation, delimiters, truncation, and invalid UTF-8
+- [x] 9.9 Implement the ordered DOM builder as an event consumer using `tq-core` values
+- [x] 9.10 Add event-to-DOM versus established decoder differential tests across all conformance fixtures
+- [x] 9.11 Add decoder fuzz and property targets and promote every found crash into a regression fixture
+- [x] 9.12 Stabilize a query-independent `tq-toon` event boundary, document the later `toon-rust` extraction seam, and keep upstreaming out of the MVP critical path
 
 ## 10. Canonical Writers, Framing, Spooling, and Format Adapters
 
