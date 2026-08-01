@@ -586,11 +586,14 @@ impl<R: BufRead> Decoder<R> {
             "false" => return Ok(Scalar::Bool(false)),
             _ => {}
         }
-        if !forbidden_leading_zero(token)
-            && looks_numeric(token)
-            && let Ok(number) = Number::parse(token)
-        {
-            return Ok(Scalar::Number(number));
+        if !forbidden_leading_zero(token) && looks_numeric(token) {
+            match Number::parse(token) {
+                Ok(number) => return Ok(Scalar::Number(number)),
+                Err(tq_core::NumberError::Invalid) => {}
+                Err(error) => {
+                    return Err(self.resource(&format!("numeric-envelope: {error}")));
+                }
+            }
         }
         Ok(Scalar::String(token.into()))
     }

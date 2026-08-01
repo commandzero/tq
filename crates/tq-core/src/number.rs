@@ -426,8 +426,23 @@ impl DecimalParts {
 fn compare_exact(left: &DecimalParts, right: &DecimalParts) -> Ordering {
     let left_coefficient = BigInt::from_str(&left.digits).unwrap_or_else(|_| BigInt::zero());
     let right_coefficient = BigInt::from_str(&right.digits).unwrap_or_else(|_| BigInt::zero());
-    if left_coefficient.is_zero() && right_coefficient.is_zero() {
-        return Ordering::Equal;
+    match (left_coefficient.is_zero(), right_coefficient.is_zero()) {
+        (true, true) => return Ordering::Equal,
+        (true, false) => {
+            return if right.negative {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            };
+        }
+        (false, true) => {
+            return if left.negative {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            };
+        }
+        (false, false) => {}
     }
     if left.negative != right.negative {
         return if left.negative {
@@ -522,6 +537,8 @@ mod tests {
             Some(9_007_199_254_740_991)
         );
         assert_eq!(higher.exact_index(), None);
+        assert!(Number::parse("-0.01").unwrap() < Number::parse("0").unwrap());
+        assert!(Number::parse("0").unwrap() < Number::parse("0.01").unwrap());
     }
 
     #[test]

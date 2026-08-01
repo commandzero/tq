@@ -174,45 +174,45 @@
 
 ## 12. Progressive Language Wave 1: Identity, Navigation, and Generators
 
-- [ ] 12.1 Enable tq in identity/value-type compatibility cases and confirm they fail before implementation
-- [ ] 12.2 Compile and execute identity plus primitive constants through the bytecode VM
-- [ ] 12.3 Re-run identity/value cases, fix semantic/cardinality differences, and enable their tq support markers
-- [ ] 12.4 Enable field/computed/index/slice navigation compatibility cases and confirm expected failures
-- [ ] 12.5 Compile and execute field/computed/index/slice access with missing, negative, out-of-range, optional, and type-error behavior
-- [ ] 12.6 Re-run navigation cases and promote only passing cases into the tq MVP matrix
-- [ ] 12.7 Enable iteration/pipe/comma/parentheses cases and confirm expected failures
-- [ ] 12.8 Implement fork/backtrack-based array/object iteration, pipes, commas, parentheses, and `empty`
-- [ ] 12.9 Re-run generator cases and add cardinality/order regressions for every observed difference
-- [ ] 12.10 Admit the passing Wave 1 correctness-gated tq benchmarks and record the first tq performance baseline without optimization
+- [x] 12.1 Enable tq in identity/value-type compatibility cases and confirm they fail before implementation
+- [x] 12.2 Compile and execute identity plus primitive constants through the bytecode VM
+- [x] 12.3 Re-run identity/value cases, fix semantic/cardinality differences, and enable their tq support markers
+- [x] 12.4 Enable field/computed/index/slice navigation compatibility cases and confirm expected failures
+- [x] 12.5 Compile and execute field/computed/index/slice access with missing, negative, out-of-range, optional, and type-error behavior
+- [x] 12.6 Re-run navigation cases and promote only passing cases into the tq MVP matrix
+- [x] 12.7 Enable iteration/pipe/comma/parentheses cases and confirm expected failures
+- [x] 12.8 Implement fork/backtrack-based array/object iteration, pipes, commas, parentheses, and `empty`
+- [x] 12.9 Re-run generator cases and add cardinality/order regressions for every observed difference
+- [x] 12.10 Admit the passing Wave 1 correctness-gated tq benchmarks and record the first tq performance baseline without optimization
 
 ## 13. Progressive Language Wave 2: Construction, Control, and Operators
 
-- [ ] 13.1 Enable array/object construction compatibility cases and confirm expected failures
-- [ ] 13.2 Implement array collection and ordered object construction with explicit, shorthand, computed, and duplicate keys
-- [ ] 13.3 Re-run construction cases and promote only passing cases
-- [ ] 13.4 Enable conditional, truthiness, boolean, and alternative cases and confirm expected failures
-- [ ] 13.5 Implement conditionals, jq truthiness, short-circuit boolean operators, unary not, and alternative semantics
-- [ ] 13.6 Enable comparison, total ordering, equality, and arithmetic cases and confirm expected failures
-- [ ] 13.7 Implement deep equality, baseline-approved total ordering, arithmetic, overloaded addition, and type errors
-- [ ] 13.8 Re-run all Wave 2 cases including numeric edge cases and add regression fixtures for every baseline-sensitive decision
-- [ ] 13.9 Admit passing Wave 2 construction/operator/blocking benchmarks and record tq baselines
+- [x] 13.1 Enable array/object construction compatibility cases and confirm expected failures
+- [x] 13.2 Implement array collection and ordered object construction with explicit, shorthand, computed, and duplicate keys
+- [x] 13.3 Re-run construction cases and promote only passing cases
+- [x] 13.4 Enable conditional, truthiness, boolean, and alternative cases and confirm expected failures
+- [x] 13.5 Implement conditionals, jq truthiness, short-circuit boolean operators, unary not, and alternative semantics
+- [x] 13.6 Enable comparison, total ordering, equality, and arithmetic cases and confirm expected failures
+- [x] 13.7 Implement deep equality, baseline-approved total ordering, arithmetic, overloaded addition, and type errors
+- [x] 13.8 Re-run all Wave 2 cases including numeric edge cases and add regression fixtures for every baseline-sensitive decision
+- [x] 13.9 Admit passing Wave 2 construction/operator/blocking benchmarks and record tq baselines
 
 ## 14. Progressive Language Wave 3: Variables, Built-ins, Errors, and Updates
 
-- [ ] 14.1 Enable lexical/CLI variable compatibility cases and confirm expected failures
-- [ ] 14.2 Implement variable frames, `as` generator binding, scope/shadowing, and CLI variable loads
-- [ ] 14.3 Re-run variable cases and promote only passing cases
-- [ ] 14.4 Enable core built-in cases in small coherent groups and confirm expected failures before each implementation group
-- [ ] 14.5 Implement type/length/UTF-8/key/membership and type-selector built-ins
-- [ ] 14.6 Implement select/map/map-values/string-number conversion and range built-ins
-- [ ] 14.7 Implement add/min/max/sort/sort-by/unique/unique-by/reverse/flatten with blocking analysis
-- [ ] 14.8 Re-run every built-in case, verify resource classification, and promote only passing built-ins
-- [ ] 14.9 Enable error/optional/try-catch cases and confirm expected failures
-- [ ] 14.10 Implement scoped optional suppression, error values, try/catch, and deterministic error-after-output behavior
-- [ ] 14.11 Enable path and update-operator cases and confirm expected failures
-- [ ] 14.12 Implement stable lvalue path capture, path-copying assignment, relative updates, arithmetic updates, and multi-path order
-- [ ] 14.13 Re-run all update/property tests and verify unaffected subtrees remain structurally shared
-- [ ] 14.14 Admit passing Wave 3 built-in/error/update benchmarks and record tq baselines
+- [x] 14.1 Enable lexical/CLI variable compatibility cases and confirm expected failures
+- [x] 14.2 Implement variable frames, `as` generator binding, scope/shadowing, and CLI variable loads
+- [x] 14.3 Re-run variable cases and promote only passing cases
+- [x] 14.4 Enable core built-in cases in small coherent groups and confirm expected failures before each implementation group
+- [x] 14.5 Implement type/length/UTF-8/key/membership and type-selector built-ins
+- [x] 14.6 Implement select/map/map-values/string-number conversion and range built-ins
+- [x] 14.7 Implement add/min/max/sort/sort-by/unique/unique-by/reverse/flatten with blocking analysis
+- [x] 14.8 Re-run every built-in case, verify resource classification, and promote only passing built-ins
+- [x] 14.9 Enable error/optional/try-catch cases and confirm expected failures
+- [x] 14.10 Implement scoped optional suppression, error values, try/catch, and deterministic error-after-output behavior
+- [x] 14.11 Enable path and update-operator cases and confirm expected failures
+- [x] 14.12 Implement stable lvalue path capture, path-copying assignment, relative updates, arithmetic updates, and multi-path order
+- [x] 14.13 Re-run all update/property tests and verify unaffected subtrees remain structurally shared
+- [x] 14.14 Admit passing Wave 3 built-in/error/update benchmarks and record tq baselines
 
 ## 15. Streaming Plans and Resource Governance
 

@@ -259,21 +259,27 @@ pub fn decode_json(
     bytes: &[u8],
     identity: impl Into<String>,
 ) -> Result<Vec<Document>, FormatError> {
-    let json: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|error| FormatError::Parse {
-            format: InputFormat::Json,
-            message: error.to_string(),
-        })?;
-    let value = Value::from_json(json).map_err(|error| FormatError::Parse {
-        format: InputFormat::Json,
-        message: error.to_string(),
-    })?;
-    Ok(vec![Document {
-        value,
-        identity: identity.into(),
-        format: InputFormat::Json,
-        index: 0,
-    }])
+    let identity = identity.into();
+    serde_json::Deserializer::from_slice(bytes)
+        .into_iter::<serde_json::Value>()
+        .enumerate()
+        .map(|(index, json)| {
+            let json = json.map_err(|error| FormatError::Parse {
+                format: InputFormat::Json,
+                message: error.to_string(),
+            })?;
+            let value = Value::from_json(json).map_err(|error| FormatError::Parse {
+                format: InputFormat::Json,
+                message: error.to_string(),
+            })?;
+            Ok(Document {
+                value,
+                identity: identity.clone(),
+                format: InputFormat::Json,
+                index: index as u64,
+            })
+        })
+        .collect()
 }
 
 /// Decodes a YAML stream one document at a time through `yaml_serde`.

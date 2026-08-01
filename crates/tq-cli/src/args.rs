@@ -207,7 +207,8 @@ where
             "--output-format" => {
                 output_format = parse_output(&token, next_value(&mut tokens, &token)?)?;
             }
-            "--seq" | "--toon-sequence-input" => input_format = InputFormat::ToonSequence,
+            "--seq" => framing = ToonFraming::Sequence,
+            "--toon-sequence-input" => input_format = InputFormat::ToonSequence,
             "--unframed" => framing = ToonFraming::Unframed,
             "-r" | "--raw-output" => raw_output = true,
             "-j" | "--join-output" => {

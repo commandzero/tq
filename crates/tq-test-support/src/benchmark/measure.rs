@@ -305,10 +305,7 @@ fn terminate_process_group(process_id: u32, child: &mut std::process::Child) -> 
     let pid = i32::try_from(process_id).map_err(|_| io::Error::other("PID overflow"))?;
     match signal::killpg(Pid::from_raw(pid), signal::Signal::SIGKILL) {
         Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
-        Err(error) => {
-            child.kill()?;
-            Err(io::Error::other(error))
-        }
+        Err(_) => child.kill(),
     }
 }
 
