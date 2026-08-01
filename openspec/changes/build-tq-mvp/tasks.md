@@ -54,22 +54,22 @@
 
 ## 4. Performance Benchmark Harness
 
-- [ ] 4.1 Define the versioned benchmark-case and campaign schemas, including compatibility gate, dataset selector, command adapter, execution class, sampling policy, timeout, limits, and output contract
-- [ ] 4.2 Implement a correctness-gate phase that refuses to time incorrect or unnormalized tool output
-- [ ] 4.3 Implement process startup/wall-time sampling with warmups and size-aware default repetitions of 30 small, 10 medium, and 3 large samples
-- [ ] 4.4 Implement local benchmark-host collection of user CPU, system CPU, peak RSS, signal/exit outcome, and output bytes with explicit unavailable values on unsupported systems
-- [ ] 4.5 Implement time-to-first-result measurement without changing stdout framing or tool semantics
-- [ ] 4.6 Implement environment manifests for OS/kernel, architecture, CPU, memory, filesystem, power settings when observable, tool/compiler identities, corpus, limits, and exact commands
-- [ ] 4.7 Add parse-and-discard benchmark cases with small verified output to isolate input parsing and required evaluation
-- [ ] 4.8 Add scalar extraction, multi-result projection, selective filter, and reduction benchmark cases over the natural USGS corpus
-- [ ] 4.9 Add array/object construction, path update, blocking sort, and identity decode/re-encode benchmark cases
-- [ ] 4.10 Add explicit event-stream benchmark cases with time-to-first-result and peak-RSS requirements
-- [ ] 4.11 Add the explicit per-workload benchmark adapter matrix for jq/JSON; yq/JSON and YAML; tq/JSON, YAML, and TOON; plus separate jq/JSON, yq/YAML, and tq/TOON native-format views using semantically validated corpus representations
-- [ ] 4.12 Calculate and report wall time, dispersion, logical records/s, physical MiB/s, output bytes, peak RSS, and reference ratios without a composite winner score
-- [ ] 4.13 Record incorrect, unsupported, timeout, OOM/signal, and resource-limit outcomes as first-class report rows
-- [ ] 4.14 Implement machine/corpus comparability checks that visually separate non-comparable reports
-- [ ] 4.15 Implement tq self-regression thresholds as configurable report gates without making jq/yq ratios universal pass/fail requirements
-- [ ] 4.16 Add benchmark-harness self-tests with deterministic sleeper/output/memory helper processes
+- [x] 4.1 Define the versioned benchmark-case and campaign schemas, including compatibility gate, dataset selector, command adapter, execution class, sampling policy, timeout, limits, and output contract
+- [x] 4.2 Implement a correctness-gate phase that refuses to time incorrect or unnormalized tool output
+- [x] 4.3 Implement process startup/wall-time sampling with warmups and size-aware default repetitions of 30 small, 10 medium, and 3 large samples
+- [x] 4.4 Implement local benchmark-host collection of user CPU, system CPU, peak RSS, signal/exit outcome, and output bytes with explicit unavailable values on unsupported systems
+- [x] 4.5 Implement time-to-first-result measurement without changing stdout framing or tool semantics
+- [x] 4.6 Implement environment manifests for OS/kernel, architecture, CPU, memory, filesystem, power settings when observable, tool/compiler identities, corpus, limits, and exact commands
+- [x] 4.7 Add parse-and-discard benchmark cases with small verified output to isolate input parsing and required evaluation
+- [x] 4.8 Add scalar extraction, multi-result projection, selective filter, and reduction benchmark cases over the natural USGS corpus
+- [x] 4.9 Add array/object construction, path update, blocking sort, and identity decode/re-encode benchmark cases
+- [x] 4.10 Add explicit event-stream benchmark cases with time-to-first-result and peak-RSS requirements
+- [x] 4.11 Add the explicit per-workload benchmark adapter matrix for jq/JSON; yq/JSON and YAML; tq/JSON, YAML, and TOON; plus separate jq/JSON, yq/YAML, and tq/TOON native-format views using semantically validated corpus representations
+- [x] 4.12 Calculate and report wall time, dispersion, logical records/s, physical MiB/s, output bytes, peak RSS, and reference ratios without a composite winner score
+- [x] 4.13 Record incorrect, unsupported, timeout, OOM/signal, and resource-limit outcomes as first-class report rows
+- [x] 4.14 Implement machine/corpus comparability checks that visually separate non-comparable reports
+- [x] 4.15 Implement tq self-regression thresholds as configurable report gates without making jq/yq ratios universal pass/fail requirements
+- [x] 4.16 Add benchmark-harness self-tests with deterministic sleeper/output/memory helper processes
 
 ## 5. jq and yq Baseline Gate
 

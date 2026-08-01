@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 jiff = { version = "0.2.35", default-features = false, features = ["std"] }
+nix = { version = "0.29.0", features = ["process", "signal"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
