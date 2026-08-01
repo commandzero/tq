@@ -749,6 +749,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1915,13 +1917,24 @@ dependencies = [
 [[package]]
 name = "tq-core"
 version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "num-bigint",
+ "num-traits",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "tq-formats"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
+ "thiserror",
  "tq-core",
  "tq-toon",
+ "yaml_serde",
 ]
 
 [[package]]
@@ -1947,6 +1960,7 @@ dependencies = [
 name = "tq-toon"
 version = "0.1.0"
 dependencies = [
+ "thiserror",
  "tq-core",
 ]
 

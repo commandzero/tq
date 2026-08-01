@@ -6,5 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+indexmap = { version = "2.14.0", features = ["serde"] }
+num-bigint = "0.4.8"
+num-traits = "0.2.19"
+serde = { version = "1.0.229", features = ["derive", "rc"] }
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+thiserror = "2.0.19"
+
 [lints]
 workspace = true

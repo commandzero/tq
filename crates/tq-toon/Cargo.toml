@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+thiserror = "2.0.19"
 tq-core = { path = "../tq-core" }
 
 [lints]
