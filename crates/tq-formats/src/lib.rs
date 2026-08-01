@@ -1,9 +1,18 @@
 //! Ordered JSON, YAML, and TOON document-source adapters for `tq`.
 
-use std::io;
+use std::{collections::VecDeque, io};
 
 use thiserror::Error;
 use tq_core::{Diagnostic, Value};
+
+mod adapters;
+mod output;
+
+pub use adapters::{
+    DecodeOptions, ProbeReport, ReplayReader, VecDocumentSource, decode_bytes, decode_json,
+    decode_toon, decode_toon_sequence, decode_yaml, probe_format, probe_reader,
+};
+pub use output::{OutputError, OutputOptions, ToonFraming, write_results};
 
 /// Supported structured input syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,4 +70,24 @@ pub enum FormatError {
     /// Stable source-spanned format diagnostic.
     #[error(transparent)]
     Diagnostic(#[from] Box<Diagnostic>),
+    /// One selected parser rejected its input.
+    #[error("{format:?} input rejected: {message}")]
+    Parse {
+        /// Parser that rejected the input.
+        format: InputFormat,
+        /// Bounded parser context.
+        message: String,
+    },
+    /// Automatic probing exhausted all candidates.
+    #[error("input rejected by TOON, YAML, and JSON: {summary}")]
+    Probe {
+        /// Bounded combined rejection context in probe order.
+        summary: String,
+    },
+    /// YAML contains a value outside tq's JSON-shaped profile.
+    #[error("unsupported YAML value: {0}")]
+    UnsupportedYaml(String),
+    /// A source exceeds its configured byte limit.
+    #[error("input resource limit exceeded: {0}")]
+    Resource(&'static str),
 }

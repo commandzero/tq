@@ -1930,7 +1930,9 @@ dependencies = [
 name = "tq-formats"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tq-core",
  "tq-toon",
@@ -1961,6 +1963,7 @@ name = "tq-toon"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "tempfile",
  "thiserror",
  "toon-format",
  "tq-core",

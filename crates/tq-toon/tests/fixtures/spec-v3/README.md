@@ -1,6 +1,6 @@
 # Vendored TOON decoder fixtures
 
-The files under `decode/` are copied from the TOON specification test suite
+The files under `decode/` and `encode/` are copied from the TOON specification test suite
 at `toon-format/spec`, versioned by each fixture's `version` field. They are
 distributed under the adjacent MIT license.
 
