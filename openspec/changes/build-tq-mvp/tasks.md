@@ -142,20 +142,20 @@
 
 ## 10. Canonical Writers, Framing, Spooling, and Format Adapters
 
-- [ ] 10.1 Write canonical primitive/object/array output goldens covering quoting, numbers, key order, indentation, delimiters, and no document trailing newline
-- [ ] 10.2 Implement canonical standalone TOON writing for known runtime values
-- [ ] 10.3 Write unknown-length array tests for memory-threshold transition, correct count/header, tabular schema agreement/fallback, and cleanup
-- [ ] 10.4 Implement secure memory-then-disk array preparation with configurable spool directory/limits and observable spool status
-- [ ] 10.5 Implement safe key folding with explicit whole-document/materialization classification
-- [ ] 10.6 Write TOON Text Sequence tests for zero, one, many, multiline, error-after-output, and malformed input records
-- [ ] 10.7 Implement RS-prefix/LF-suffix sequence writing and explicit unframed exactly-one-result writing
-- [ ] 10.8 Implement explicit TOON Text Sequence input as multiple ordered documents
-- [ ] 10.9 Add ordered, arbitrary-precision-literal-aware JSON input/output adapters without routing TOON through lossy conversions
-- [ ] 10.10 Add canonical writer round-trip properties and JSON/TOON ordered semantic equivalence tests
-- [ ] 10.11 Spike `yaml_serde` reader, multi-document, ordering, duplicate-key, tag/alias, scalar-resolution, and hybrid-number fidelity behavior before accepting the YAML adapter design
-- [ ] 10.12 Implement the `yaml_serde` YAML-to-runtime adapter with string-key/profile validation, one-document-at-a-time execution, explicit unsupported-value diagnostics, and no silent numeric loss
-- [ ] 10.13 Implement shared `tq-formats` document sources and differential tests proving equivalent JSON, YAML, and TOON inputs produce the same ordered runtime values
-- [ ] 10.14 Implement bounded per-source format probing and replay with TOON-to-YAML-to-JSON faildown, an observable commitment point, combined rejection diagnostics, and strict single-parser overrides
+- [x] 10.1 Write canonical primitive/object/array output goldens covering quoting, numbers, key order, indentation, delimiters, and no document trailing newline
+- [x] 10.2 Implement canonical standalone TOON writing for known runtime values
+- [x] 10.3 Write unknown-length array tests for memory-threshold transition, correct count/header, tabular schema agreement/fallback, and cleanup
+- [x] 10.4 Implement secure memory-then-disk array preparation with configurable spool directory/limits and observable spool status
+- [x] 10.5 Implement safe key folding with explicit whole-document/materialization classification
+- [x] 10.6 Write TOON Text Sequence tests for zero, one, many, multiline, error-after-output, and malformed input records
+- [x] 10.7 Implement RS-prefix/LF-suffix sequence writing and explicit unframed exactly-one-result writing
+- [x] 10.8 Implement explicit TOON Text Sequence input as multiple ordered documents
+- [x] 10.9 Add ordered, arbitrary-precision-literal-aware JSON input/output adapters without routing TOON through lossy conversions
+- [x] 10.10 Add canonical writer round-trip properties and JSON/TOON ordered semantic equivalence tests
+- [x] 10.11 Spike `yaml_serde` reader, multi-document, ordering, duplicate-key, tag/alias, scalar-resolution, and hybrid-number fidelity behavior before accepting the YAML adapter design
+- [x] 10.12 Implement the `yaml_serde` YAML-to-runtime adapter with string-key/profile validation, one-document-at-a-time execution, explicit unsupported-value diagnostics, and no silent numeric loss
+- [x] 10.13 Implement shared `tq-formats` document sources and differential tests proving equivalent JSON, YAML, and TOON inputs produce the same ordered runtime values
+- [x] 10.14 Implement bounded per-source format probing and replay with TOON-to-YAML-to-JSON faildown, an observable commitment point, combined rejection diagnostics, and strict single-parser overrides
 
 ## 11. CLI Skeleton and Execution Plumbing
 

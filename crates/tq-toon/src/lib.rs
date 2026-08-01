@@ -7,9 +7,15 @@ use tq_core::{Number, SourcePosition, Span};
 
 mod decoder;
 mod dom;
+mod sequence;
+mod spool;
+mod writer;
 
 pub use decoder::{DecodeIntoError, Decoder};
 pub use dom::{DomBuilder, DomDecodeError, DomError, decode_to_value};
+pub use sequence::{CardinalityError, SequenceError, write_sequence, write_unframed};
+pub use spool::{ArrayPreparationConfig, PreparedArray, SpoolError};
+pub use writer::{Delimiter, KeyFolding, WriterConfig, WriterError, encode, write_value};
 
 /// Bounded decoder configuration. Declared collection lengths never directly
 /// become allocation capacities.

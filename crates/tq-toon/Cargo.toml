@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
 thiserror = "2.0.19"
 tq-core = { path = "../tq-core" }
 
@@ -14,5 +15,5 @@ tq-core = { path = "../tq-core" }
 workspace = true
 
 [dev-dependencies]
-serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+tempfile = "3.23.0"
 toon-format = { version = "0.5.0", default-features = false }
