@@ -55,6 +55,7 @@ fn valid_source() -> Value {
 fn valid_snapshot() -> Value {
     json!({
         "schema_version": 1,
+        "state": "cross-format-validated",
         "campaign_id": "2026-07-30T12-00-00Z",
         "source_id": "usgs-all-day",
         "retrieved_at": "2026-07-30T12:00:00Z",

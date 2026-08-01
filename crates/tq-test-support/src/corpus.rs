@@ -12,9 +12,26 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 use zip::ZipArchive;
 
+mod campaign;
+mod conversion;
 mod geojson;
+mod inventory;
+mod manifest;
+mod smoke;
 
+pub use campaign::{CampaignError, CampaignMode, FrozenSnapshot, load_frozen_snapshot};
+pub use conversion::{
+    ConversionError, DifferenceKind, SemanticDifference, compare_ordered, generate_representations,
+    validate_generated_representations,
+};
 pub use geojson::{GeoJsonError, GeoJsonMetadata, validate_geojson};
+pub use inventory::{CorpusInventory, InventoryError, SnapshotInventory, inventory_snapshots};
+pub use manifest::{
+    ArchiveIdentity, ArtifactIdentity, ArtifactSet, DocumentIdentity, GeneratedArtifacts,
+    LicenseIdentity, ManifestError, Provenance, RequestIdentity, SnapshotManifest, SnapshotState,
+    SourceSnapshotInput, ValidationIdentity, build_source_snapshot, write_snapshot_manifest,
+};
+pub use smoke::{CorpusOrigin, SmokeCorpus, SmokeError, SmokeSnapshot, discover_smoke_corpus};
 
 /// A source download request, including cache validators and integrity policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
