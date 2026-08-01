@@ -1,0 +1,28 @@
+# Rust build output
+/target/
+
+# Benchmark corpora, caches, generated representations, and local reports
+/.tq/
+/benchmark-cache/
+/benchmark-data/
+/reports/local/
+*.generated.json
+*.generated.yaml
+*.generated.yml
+*.generated.toon
+
+# Fuzzing and profiling artifacts
+**/fuzz/artifacts/
+**/fuzz/corpus/
+*.profraw
+*.profdata
+
+# Temporary spools and interrupted downloads
+*.part
+*.spool
+*.tq-spool
+
+# Editor and operating-system files
+.DS_Store
+*.swp
+*.swo

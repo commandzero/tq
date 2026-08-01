@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "id": "microsoft-us-buildings-georgia",
+  "kind": "geojson",
+  "format": "json",
+  "campaigns": [
+    "large"
+  ],
+  "fetch": {
+    "url": "https://minedbuildings.z5.web.core.windows.net/legacy/usbuildings-v2/Georgia.geojson.zip",
+    "refresh": "versioned",
+    "redirect_limit": 5,
+    "expected_content_types": [
+      "application/zip",
+      "application/octet-stream"
+    ]
+  },
+  "archive": {
+    "format": "zip",
+    "member": "Georgia.geojson"
+  },
+  "document": {
+    "root_type": "FeatureCollection",
+    "records_pointer": "/features"
+  },
+  "provenance": {
+    "title": "Microsoft US Building Footprints: Georgia",
+    "publisher": "Microsoft",
+    "landing_page": "https://github.com/microsoft/USBuildingFootprints",
+    "license": {
+      "name": "Open Data Commons Open Database License 1.0",
+      "url": "https://opendatacommons.org/licenses/odbl/1-0/"
+    }
+  }
+}

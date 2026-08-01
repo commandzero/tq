@@ -1,22 +1,22 @@
 ## 1. Standalone Repository and Test Infrastructure
 
-- [ ] 1.1 Initialize `/Users/reno/Development/commandzero/tq` as its own Git repository and verify Git resolves `tq`, not the parent `commandzero`, as the worktree root
-- [ ] 1.2 Convert the root Cargo package into a workspace with initial `tq-test-support` and placeholder `tq-cli`, `tq-core`, `tq-formats`, and `tq-toon` members while keeping engine members free of implementation
-- [ ] 1.3 Add workspace-wide Rust edition, formatting, lint, license, minimum-supported-Rust, release-profile, and `unsafe_code` policies
-- [ ] 1.4 Add repository ignore rules for benchmark caches, large downloads, generated JSON/YAML/TOON payloads, reports under local investigation, build output, fuzz artifacts, and temporary spools
-- [ ] 1.5 Add task-runner commands for formatting, linting, unit tests, compatibility smoke/full runs, benchmark smoke/standard/large campaigns, fuzz checks, and OpenSpec validation
-- [ ] 1.6 Add local preflight commands that run infrastructure tests without a tq engine and document how future automation can invoke the same commands without making CI an MVP development dependency
-- [ ] 1.7 Document the baseline-first hard gate: tasks in section 6 and later MUST NOT begin until every task in section 5 is complete
+- [x] 1.1 Initialize `/Users/reno/Development/commandzero/tq` as its own Git repository and verify Git resolves `tq`, not the parent `commandzero`, as the worktree root
+- [x] 1.2 Convert the root Cargo package into a workspace with initial `tq-test-support` and placeholder `tq-cli`, `tq-core`, `tq-formats`, and `tq-toon` members while keeping engine members free of implementation
+- [x] 1.3 Add workspace-wide Rust edition, formatting, lint, license, minimum-supported-Rust, release-profile, and `unsafe_code` policies
+- [x] 1.4 Add repository ignore rules for benchmark caches, large downloads, generated JSON/YAML/TOON payloads, reports under local investigation, build output, fuzz artifacts, and temporary spools
+- [x] 1.5 Add task-runner commands for formatting, linting, unit tests, compatibility smoke/full runs, benchmark smoke/standard/large campaigns, fuzz checks, and OpenSpec validation
+- [x] 1.6 Add local preflight commands that run infrastructure tests without a tq engine and document how future automation can invoke the same commands without making CI an MVP development dependency
+- [x] 1.7 Document the baseline-first hard gate: tasks in section 6 and later MUST NOT begin until every task in section 5 is complete
 
 ## 2. Refreshable Benchmark Corpus
 
-- [ ] 2.1 Define the machine-readable corpus-source and snapshot-manifest schemas with versioning and schema validation tests
-- [ ] 2.2 Register the natural USGS `all_hour`, `all_day`, `all_week`, and `all_month` GeoJSON endpoints with provenance and refresh metadata
-- [ ] 2.3 Register the Microsoft Georgia building-footprint GeoJSON archive as the initial natural large source with archive member, provenance, and license references
-- [ ] 2.4 Write failing tests for fetch success, redirects, HTTP validators, interrupted downloads, wrong content types, archive corruption, and digest mismatch
-- [ ] 2.5 Implement atomic source fetching into the external cache with UTC retrieval timestamps, HTTP metadata, compressed size, and SHA-256 calculation
-- [ ] 2.6 Implement secure archive inspection/decompression with archive-member validation and uncompressed size/digest recording
-- [ ] 2.7 Write failing structural-validation tests for GeoJSON root type, feature-array presence, logical feature count, invalid JSON, and unexpected document shape
+- [x] 2.1 Define the machine-readable corpus-source and snapshot-manifest schemas with versioning and schema validation tests
+- [x] 2.2 Register the natural USGS `all_hour`, `all_day`, `all_week`, and `all_month` GeoJSON endpoints with provenance and refresh metadata
+- [x] 2.3 Register the Microsoft Georgia building-footprint GeoJSON archive as the initial natural large source with archive member, provenance, and license references
+- [x] 2.4 Write failing tests for fetch success, redirects, HTTP validators, interrupted downloads, wrong content types, archive corruption, and digest mismatch
+- [x] 2.5 Implement atomic source fetching into the external cache with UTC retrieval timestamps, HTTP metadata, compressed size, and SHA-256 calculation
+- [x] 2.6 Implement secure archive inspection/decompression with archive-member validation and uncompressed size/digest recording
+- [x] 2.7 Write failing structural-validation tests for GeoJSON root type, feature-array presence, logical feature count, invalid JSON, and unexpected document shape
 - [ ] 2.8 Implement source JSON validation and manifest population for exact bytes, document shape, feature count, and digests
 - [ ] 2.9 Implement refreshed-campaign mode as the default and explicit frozen-snapshot replay mode for investigations
 - [ ] 2.10 Write failing tests proving that corpus preparation never slices, repeats, pads, samples, or truncates a natural source artifact

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "usgs-all-hour",
+  "kind": "geojson",
+  "format": "json",
+  "campaigns": [
+    "standard"
+  ],
+  "fetch": {
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
+    "refresh": "mutable",
+    "redirect_limit": 5,
+    "expected_content_types": [
+      "application/geo+json",
+      "application/json"
+    ]
+  },
+  "document": {
+    "root_type": "FeatureCollection",
+    "records_pointer": "/features"
+  },
+  "provenance": {
+    "title": "USGS All Earthquakes, Past Hour",
+    "publisher": "U.S. Geological Survey",
+    "landing_page": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+    "license": {
+      "name": "USGS Government Work in the U.S. Public Domain",
+      "url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+    }
+  }
+}

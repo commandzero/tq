@@ -1,0 +1,18 @@
+[package]
+name = "tq-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "tq"
+path = "src/main.rs"
+
+[dependencies]
+tq-core = { path = "../tq-core" }
+tq-formats = { path = "../tq-formats" }
+
+[lints]
+workspace = true
