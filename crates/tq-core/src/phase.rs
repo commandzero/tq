@@ -5,7 +5,7 @@ use std::{marker::PhantomData, sync::Arc};
 use serde::Serialize;
 
 use crate::{
-    Diagnostic, DiagnosticClass, SourceFile, Span, Value,
+    Bytecode, Diagnostic, DiagnosticClass, SourceFile, Span, Value,
     ast::{self, Expr},
 };
 
@@ -232,17 +232,24 @@ impl<P: QueryPhase> Query<P> {
 #[derive(Clone, Debug)]
 pub struct Program<P: QueryPhase> {
     inner: Arc<QueryInner>,
+    bytecode: Arc<Bytecode>,
     phase: PhantomData<P>,
 }
 
 impl Query<Analyzed> {
-    /// Compiles the analyzed query into a validated program placeholder.
-    #[must_use]
-    pub fn compile(self) -> Program<Compiled> {
-        Program {
+    /// Compiles analyzed HIR and mandates bytecode validation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a source-spanned compile/resource diagnostic when lowering or
+    /// mandatory validation fails.
+    pub fn compile(self) -> Result<Program<Compiled>, Box<Diagnostic>> {
+        let bytecode = Bytecode::compile(&self.inner.ast)?;
+        Ok(Program {
             inner: self.inner,
+            bytecode: Arc::new(bytecode),
             phase: PhantomData,
-        }
+        })
     }
 }
 
@@ -251,6 +258,26 @@ impl Program<Compiled> {
     #[must_use]
     pub fn capabilities(&self) -> Capabilities {
         self.inner.analysis.capabilities
+    }
+
+    /// Validated immutable bytecode.
+    #[must_use]
+    pub fn bytecode(&self) -> &Bytecode {
+        &self.bytecode
+    }
+
+    pub(crate) fn bytecode_arc(&self) -> Arc<Bytecode> {
+        Arc::clone(&self.bytecode)
+    }
+
+    /// Stable source-annotated disassembly.
+    #[must_use]
+    pub fn disassemble(&self) -> String {
+        format!(
+            "capabilities={:?}\n{}",
+            self.capabilities(),
+            self.bytecode.disassemble()
+        )
     }
 
     /// Converts a compatible program to a document plan.
@@ -323,7 +350,8 @@ mod tests {
                 },
                 causes: Vec::new(),
             })
-            .compile();
+            .compile()
+            .unwrap();
         assert!(program.event_plan().is_err());
     }
 }
