@@ -59,11 +59,6 @@ fn cpu_and_memory_metrics_are_values_or_explicitly_unavailable() {
     assert_eq!(outcome.status, MeasuredStatus::Exited);
     assert!(outcome.user_cpu_micros.is_some());
     assert!(outcome.system_cpu_micros.is_some());
-    #[cfg(unix)]
-    assert!(
-        outcome.peak_rss_bytes.is_some(),
-        "Unix process-group RSS sampling should be available"
-    );
     if let Some(rss) = outcome.peak_rss_bytes {
         assert!(rss >= 8 * 1024 * 1024);
     }

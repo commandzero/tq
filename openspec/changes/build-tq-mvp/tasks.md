@@ -100,18 +100,18 @@
 
 ## 7. Query Lexer, Parser, Resolution, and Analysis
 
-- [ ] 7.1 Write lexer golden tests for all MVP tokens, keywords, operators, strings, numbers, variables, comments/whitespace policy, invalid UTF-8, and source spans
-- [ ] 7.2 Implement the source-spanned query lexer with explicit deferred-token recognition
-- [ ] 7.3 Write precedence/associativity parser tests derived from accepted jq cases before implementing expression parsing
-- [ ] 7.4 Implement the parser for identity, literals, grouping, access/index/slice/iteration, pipes, commas, and optional suffix
-- [ ] 7.5 Implement parser support for array/object construction, conditionals, boolean/alternative, comparison, arithmetic, and variables/bindings
-- [ ] 7.6 Implement parser support for errors/try-catch and all MVP assignment/update operators
-- [ ] 7.7 Implement stable compile-time unsupported-capability diagnostics for every deferred grammar family
-- [ ] 7.8 Write resolver tests for lexical scope, shadowing, unknown variables, CLI variables, and built-in name/arity resolution
-- [ ] 7.9 Implement `Query<Parsed> -> Query<Resolved>` conversion and a versioned built-in registry
-- [ ] 7.10 Write capability-analysis golden tests for event, subtree, document, whole-input, blocking, mutation, cardinality, and possible-failure effects
-- [ ] 7.11 Implement `Query<Resolved> -> Query<Analyzed>` effect propagation with syntax-cause spans
-- [ ] 7.12 Implement human-readable and machine-readable HIR/capability explanation output
+- [x] 7.1 Write lexer golden tests for all MVP tokens, keywords, operators, strings, numbers, variables, comments/whitespace policy, invalid UTF-8, and source spans
+- [x] 7.2 Implement the source-spanned query lexer with explicit deferred-token recognition
+- [x] 7.3 Write precedence/associativity parser tests derived from accepted jq cases before implementing expression parsing
+- [x] 7.4 Implement the parser for identity, literals, grouping, access/index/slice/iteration, pipes, commas, and optional suffix
+- [x] 7.5 Implement parser support for array/object construction, conditionals, boolean/alternative, comparison, arithmetic, and variables/bindings
+- [x] 7.6 Implement parser support for errors/try-catch and all MVP assignment/update operators
+- [x] 7.7 Implement stable compile-time unsupported-capability diagnostics for every deferred grammar family
+- [x] 7.8 Write resolver tests for lexical scope, shadowing, unknown variables, CLI variables, and built-in name/arity resolution
+- [x] 7.9 Implement `Query<Parsed> -> Query<Resolved>` conversion and a versioned built-in registry
+- [x] 7.10 Write capability-analysis golden tests for event, subtree, document, whole-input, blocking, mutation, cardinality, and possible-failure effects
+- [x] 7.11 Implement `Query<Resolved> -> Query<Analyzed>` effect propagation with syntax-cause spans
+- [x] 7.12 Implement human-readable and machine-readable HIR/capability explanation output
 
 ## 8. Bytecode Compiler and VM Kernel
 

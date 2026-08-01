@@ -2,14 +2,22 @@
 
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::{Diagnostic, DiagnosticClass, SourceFile, SourceId, Value};
+use serde::Serialize;
+
+use crate::{
+    Diagnostic, DiagnosticClass, SourceFile, Span, Value,
+    ast::{self, Expr},
+};
 
 mod sealed {
     pub trait Sealed {}
 }
 
 /// Marker implemented only by tq query phases.
-pub trait QueryPhase: sealed::Sealed {}
+pub trait QueryPhase: sealed::Sealed {
+    /// Stable phase name used by explain output.
+    const NAME: &'static str;
+}
 
 /// Parsed but unresolved query.
 #[derive(Clone, Copy, Debug)]
@@ -28,13 +36,21 @@ impl sealed::Sealed for Parsed {}
 impl sealed::Sealed for Resolved {}
 impl sealed::Sealed for Analyzed {}
 impl sealed::Sealed for Compiled {}
-impl QueryPhase for Parsed {}
-impl QueryPhase for Resolved {}
-impl QueryPhase for Analyzed {}
-impl QueryPhase for Compiled {}
+impl QueryPhase for Parsed {
+    const NAME: &'static str = "parsed";
+}
+impl QueryPhase for Resolved {
+    const NAME: &'static str = "resolved";
+}
+impl QueryPhase for Analyzed {
+    const NAME: &'static str = "analyzed";
+}
+impl QueryPhase for Compiled {
+    const NAME: &'static str = "compiled";
+}
 
 /// Pre-input execution requirements.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "orthogonal analysis effects intentionally compose independently"
@@ -58,10 +74,51 @@ pub struct Capabilities {
     pub possible_failure: bool,
 }
 
+/// One analyzed capability and the syntax that caused it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct CapabilityCause {
+    /// Effect being introduced.
+    pub effect: Effect,
+    /// Query syntax range.
+    pub span: Span,
+}
+
+/// Stable analysis effect name.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Effect {
+    /// Event-stream compatible.
+    EventStream,
+    /// Retains a subtree.
+    Subtree,
+    /// Requires one document.
+    Document,
+    /// Requires all input documents.
+    WholeInput,
+    /// Blocks on complete input/collection.
+    Blocking,
+    /// Captures or updates paths.
+    Mutation,
+    /// May produce multiple values.
+    Generator,
+    /// May fail at runtime.
+    PossibleFailure,
+}
+
+/// Complete pre-input analysis report.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+pub struct Analysis {
+    /// Combined effect flags.
+    pub capabilities: Capabilities,
+    /// First-class syntax causes in source order.
+    pub causes: Vec<CapabilityCause>,
+}
+
 #[derive(Clone, Debug)]
 struct QueryInner {
     source: SourceFile,
-    capabilities: Capabilities,
+    ast: Arc<Expr>,
+    analysis: Analysis,
 }
 
 /// Query in one sealed compilation phase.
@@ -72,31 +129,25 @@ pub struct Query<P: QueryPhase> {
 }
 
 impl Query<Parsed> {
-    /// Creates a parsed-phase query container. The parser will replace this
-    /// convenience constructor with a fallible source-spanned transition.
-    #[must_use]
-    pub fn from_source(source: impl Into<Arc<str>>) -> Self {
+    pub(crate) fn from_ast(source: SourceFile, ast: Expr) -> Self {
         Self {
             inner: Arc::new(QueryInner {
-                source: SourceFile::new(SourceId::new(0), "<query>", source),
-                capabilities: Capabilities::default(),
+                source,
+                ast: Arc::new(ast),
+                analysis: Analysis::default(),
             }),
             phase: PhantomData,
         }
     }
 
-    /// Resolves lexical names. The resolver module enriches this transition.
-    #[must_use]
-    pub fn resolve(self) -> Query<Resolved> {
+    pub(crate) fn into_resolved(self) -> Query<Resolved> {
         self.change_phase()
     }
 }
 
 impl Query<Resolved> {
-    /// Attaches analyzed execution capabilities.
-    #[must_use]
-    pub fn analyze(mut self, capabilities: Capabilities) -> Query<Analyzed> {
-        Arc::make_mut(&mut self.inner).capabilities = capabilities;
+    pub(crate) fn with_analysis(mut self, analysis: Analysis) -> Query<Analyzed> {
+        Arc::make_mut(&mut self.inner).analysis = analysis;
         self.change_phase()
     }
 }
@@ -111,7 +162,62 @@ impl<P: QueryPhase> Query<P> {
     /// Capabilities known at this phase.
     #[must_use]
     pub fn capabilities(&self) -> Capabilities {
-        self.inner.capabilities
+        self.inner.analysis.capabilities
+    }
+
+    /// Stable source-spanned HIR explanation.
+    #[must_use]
+    pub fn hir(&self) -> String {
+        ast::display(&self.inner.ast)
+    }
+
+    /// Complete capability analysis known at this phase.
+    #[must_use]
+    pub fn analysis(&self) -> &Analysis {
+        &self.inner.analysis
+    }
+
+    /// Human-readable HIR and capability explanation.
+    #[must_use]
+    pub fn explain(&self) -> String {
+        let mut output = format!(
+            "phase: {}\nspan: {}..{}\nhir: {}\n",
+            P::NAME,
+            self.inner.ast.span.start,
+            self.inner.ast.span.end,
+            self.hir()
+        );
+        if self.inner.analysis.causes.is_empty() {
+            output.push_str("effects: none\n");
+        } else {
+            output.push_str("effects:\n");
+            for cause in &self.inner.analysis.causes {
+                use std::fmt::Write as _;
+                writeln!(
+                    output,
+                    "- {:?} at {}..{}",
+                    cause.effect, cause.span.start, cause.span.end
+                )
+                .expect("writing to String cannot fail");
+            }
+        }
+        output
+    }
+
+    /// Machine-readable HIR and capability explanation.
+    #[must_use]
+    pub fn explain_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "phase": P::NAME,
+            "span": self.inner.ast.span,
+            "hir": self.hir(),
+            "analysis": self.analysis(),
+        })
+    }
+
+    pub(crate) fn ast(&self) -> &Expr {
+        &self.inner.ast
     }
 
     fn change_phase<N: QueryPhase>(self) -> Query<N> {
@@ -144,7 +250,7 @@ impl Program<Compiled> {
     /// Pre-input capability metadata.
     #[must_use]
     pub fn capabilities(&self) -> Capabilities {
-        self.inner.capabilities
+        self.inner.analysis.capabilities
     }
 
     /// Converts a compatible program to a document plan.
@@ -201,16 +307,21 @@ pub fn execute_document(plan: &Plan<Compiled, Document>, input: Value) -> Vec<Va
 
 #[cfg(test)]
 mod tests {
-    use super::{Capabilities, Query};
+    use crate::{ResolveOptions, parse, resolve};
+
+    use super::{Analysis, Capabilities};
 
     #[test]
     fn document_requirement_rejects_event_plan_before_input() {
-        let program = Query::from_source("sort")
-            .resolve()
-            .analyze(Capabilities {
-                document: true,
-                blocking: true,
-                ..Capabilities::default()
+        let resolved = resolve(parse("sort").unwrap(), &ResolveOptions::default()).unwrap();
+        let program = resolved
+            .with_analysis(Analysis {
+                capabilities: Capabilities {
+                    document: true,
+                    blocking: true,
+                    ..Capabilities::default()
+                },
+                causes: Vec::new(),
             })
             .compile();
         assert!(program.event_plan().is_err());
