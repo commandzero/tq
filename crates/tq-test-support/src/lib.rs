@@ -5,3 +5,6 @@ pub mod corpus;
 
 /// Cross-tool executable, process, normalization, and reporting support.
 pub mod compatibility;
+
+/// Correctness-gated performance measurement and reporting.
+pub mod benchmark;

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tq.dev/schemas/benchmark-case-v1.schema.json",
+  "title": "tq benchmark case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "compatibility_gate", "dataset_selector", "query", "execution_class", "measure_first_result", "sampling", "timeout_seconds", "limits", "output_contract", "adapters"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+    "compatibility_gate": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"},
+    "dataset_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "tiers"],
+      "properties": {
+        "family": {"enum": ["natural", "usgs", "large-natural", "synthetic-helper"]},
+        "tiers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["small", "medium", "large", "startup"]}}
+      }
+    },
+    "query": {"type": "string"},
+    "execution_class": {"enum": ["startup", "streaming", "document", "blocking"]},
+    "measure_first_result": {"type": "boolean"},
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warmups", "small", "medium", "large"],
+      "properties": {
+        "warmups": {"type": "integer", "minimum": 0},
+        "small": {"type": "integer", "minimum": 30},
+        "medium": {"type": "integer", "minimum": 10},
+        "large": {"type": "integer", "minimum": 3}
+      }
+    },
+    "timeout_seconds": {"type": "integer", "minimum": 1},
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["output_bytes"],
+      "properties": {
+        "output_bytes": {"type": "integer", "minimum": 1},
+        "rss_bytes": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "output_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference_adapter"],
+      "properties": {
+        "kind": {"enum": ["semantic-sequence", "raw-bytes", "exit-only"]},
+        "reference_adapter": {"type": "string", "minLength": 1}
+      }
+    },
+    "adapters": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "tool", "input_format", "applicable", "args", "comparison_families"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "tool": {"enum": ["jq", "yq", "tq"]},
+          "input_format": {"enum": ["json", "yaml", "toon"]},
+          "applicable": {"type": "boolean"},
+          "args": {"type": "array", "items": {"type": "string"}},
+          "comparison_families": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["same-format", "native-format", "parser-specific"]}}
+        }
+      }
+    }
+  }
+}

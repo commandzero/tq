@@ -10,7 +10,21 @@ case "$campaign:$profile" in
         exec cargo run --quiet -p tq-test-support --bin tq-compat -- run \
             --profile "$profile" --json "target/compatibility/$profile.json"
         ;;
-    benchmark:smoke|benchmark:standard|benchmark:large|fuzz:default)
+    benchmark:smoke)
+        mkdir -p target/benchmarks
+        exec cargo run --quiet -p tq-test-support --bin tq-bench -- run \
+            --profile smoke --output target/benchmarks/smoke.json --max-samples 1 \
+            --case benchmark.startup --case benchmark.parse-discard \
+            --case benchmark.scalar-extraction --case benchmark.event-stream
+        ;;
+    benchmark:standard|benchmark:large)
+        mkdir -p target/benchmarks
+        exec cargo run --quiet -p tq-test-support --bin tq-bench -- run \
+            --profile "$profile" --output "target/benchmarks/$profile.json" \
+            --cache-root "${TQ_CORPUS_CACHE:-target/corpus}" \
+            --origin "${TQ_CORPUS_ORIGIN:-refreshed}"
+        ;;
+    fuzz:default)
         ;;
     *)
         echo "campaign runner: unsupported campaign '$campaign' profile '$profile'" >&2

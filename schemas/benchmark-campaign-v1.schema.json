@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tq.dev/schemas/benchmark-campaign-v1.schema.json",
+  "title": "tq benchmark campaign report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "campaign_id", "profile", "environment", "corpus", "tools", "cases", "comparability", "regression_gate", "final_status"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "campaign_id": {"type": "string", "minLength": 1},
+    "profile": {"enum": ["smoke", "standard", "large"]},
+    "environment": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["collected_at", "os", "kernel", "architecture", "logical_cpus", "physical_cpus", "cpu_model", "memory_bytes", "filesystem", "power_settings", "compiler_profile"]
+    },
+    "corpus": {"type": "array"},
+    "tools": {"type": "array"},
+    "cases": {"type": "array"},
+    "comparability": {"type": "object"},
+    "regression_gate": {"type": "object"},
+    "final_status": {"enum": ["passed", "observed-failures", "regression"]}
+  }
+}
