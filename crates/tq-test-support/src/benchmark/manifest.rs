@@ -153,6 +153,9 @@ pub struct BenchmarkAdapter {
     pub applicable: bool,
     /// Tool arguments before the query.
     pub args: Vec<String>,
+    /// Tool-specific expression when its language differs from jq syntax.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
     /// Report comparison group membership.
     pub comparison_families: Vec<ComparisonFamily>,
 }

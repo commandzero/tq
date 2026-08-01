@@ -1,0 +1,1436 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-01T17:55:00Z",
+  "catalog_identity": {
+    "path": "/Users/reno/Development/commandzero/tq/crates/tq-test-support/../../compatibility/cases",
+    "bytes": 77678,
+    "sha256": "aa58227330d93adb9859a759a09fcd433b9a3d31850e89f61b5967089045a0bc"
+  },
+  "tools": [
+    {
+      "tool": "jq",
+      "path": "/Users/reno/Development/commandzero/tq/target/reference-build/jq/jq",
+      "version": "jq-1.8.2-8-g603db3f",
+      "executable": {
+        "path": "/Users/reno/Development/commandzero/tq/target/reference-build/jq/jq",
+        "bytes": 527680,
+        "sha256": "d25a7231a8cd3ab48ecaab2854d56161860c95d8e3ff067dff0065814218691e"
+      },
+      "build_features": [
+        "--with-oniguruma=/opt/homebrew/opt/oniguruma --disable-maintainer-mode --disable-shared --enable-static"
+      ]
+    },
+    {
+      "tool": "yq",
+      "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+      "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2",
+      "executable": {
+        "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "bytes": 12996258,
+        "sha256": "b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952"
+      },
+      "build_features": [
+        "# Use the '-p/--input-format' flag to specify a format type.",
+        "-p, --input-format string               [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \"auto\")",
+        "-o, --output-format string              [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \"auto\")",
+        "-c, --yaml-compact-seq-indent           Use compact sequence indentation where '- ' is considered part of the indentation.",
+        "--yaml-fix-merge-anchor-to-spec     Fix merge anchor to match YAML spec. Will default to true in late 2025"
+      ]
+    }
+  ],
+  "summary": {
+    "jq-target-divergence": 56,
+    "common-agreement": 54,
+    "unsupported": 22,
+    "cli-adaptation": 10,
+    "deferred": 12
+  },
+  "entries": [
+    {
+      "case_id": "builtin.add",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.arrays",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.booleans",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.empty",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.error",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.flatten",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.has",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.in",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.iterables",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.keys",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.keys-unsorted",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.length",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.map",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.map-values",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.max",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.min",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.nulls",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.numbers",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.objects",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.range",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.reverse",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.scalars",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.select",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.sort",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.sort-by",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.strings",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.tonumber",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.tostring",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "builtin.type",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.unique",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.unique-by",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.utf8bytelength",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "builtin.values",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "cli.ambiguous-json-yaml",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.arg",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.argjson",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.argtoon",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.detect-order",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.exit-empty",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.exit-false",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.file",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.invalid-option",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.join-output",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.late-failure",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.null-input",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.override-json",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.override-toon",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.override-yaml",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.raw-input",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq has no jq-compatible raw-input mode"
+    },
+    {
+      "case_id": "cli.raw-output",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.raw-slurp",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq -s means split output rather than slurp input"
+    },
+    {
+      "case_id": "cli.sequence-framing",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.stdin",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "cli.stream",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.stream-errors",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.strict-toon",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.structured-slurp",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq -s means split output rather than slurp input"
+    },
+    {
+      "case_id": "cli.unframed-single",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "cli.yaml-multi-document",
+      "catalog_classification": "cli",
+      "review_classification": "cli-adaptation",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "executed",
+      "rationale": "The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics."
+    },
+    {
+      "case_id": "common.cardinality.many",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.cardinality.one-null",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.cardinality.zero-empty",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "common.identity.array",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.identity.false",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.identity.null",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.identity.number",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.identity.object-order",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.identity.string",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "common.identity.true",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "composition.comma",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "composition.downstream-multiplicity",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "composition.nested-iteration",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "composition.parentheses",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "composition.pipe",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "construction.array",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "construction.object-computed-key",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "construction.object-duplicate-key",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "construction.object-explicit",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "construction.object-shorthand",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "deferred.dates",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.environment",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.foreach",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.function",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.include",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.interpolation",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.labels",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.modules",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.platform-io",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.recursive-descent",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.reduce",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "deferred.regex",
+      "catalog_classification": "deferred",
+      "review_classification": "deferred",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The capability is explicitly outside the MVP and remains a visible marker."
+    },
+    {
+      "case_id": "error.after-output",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "error.empty",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "error.explicit",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "error.optional-suppression",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "error.source-location",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "error.try-catch",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "navigation.computed-field",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.field.missing",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.field.present",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.index.negative",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.index.out-of-range",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.index.zero",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.invalid-index-type",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "navigation.iteration.array",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.iteration.object",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.optional.type",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "navigation.slice.middle",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "numeric.arithmetic-invalidates-literal",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.division-by-zero",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.exponent-input",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "numeric.large-exact-identity",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "numeric.negative-zero",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.ordinary",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "numeric.out-of-envelope-digits",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.out-of-envelope-exponent",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-digits-max",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-digits-over",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-exponent-max",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-exponent-over",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-index-max",
+      "catalog_classification": "jq-target",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq attempts unbounded index materialization for this policy probe"
+    },
+    {
+      "case_id": "numeric.policy-index-over",
+      "catalog_classification": "jq-target",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq attempts unbounded index materialization for this policy probe"
+    },
+    {
+      "case_id": "numeric.policy-nonfinite-result",
+      "catalog_classification": "jq-target",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "The yq adapter does not provide this jq-compatible capability."
+    },
+    {
+      "case_id": "numeric.policy-overflow",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-scientific-output",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "numeric.policy-underflow",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "numeric.precision-boundary",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "operator.add.overloads",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "operator.alternative",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "operator.arithmetic.numeric",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "operator.arithmetic.type-error",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "operator.boolean.and-short-circuit",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "operator.boolean.not",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "operator.boolean.or-short-circuit",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "operator.comparison.deep-equality",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "operator.comparison.total-order",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "operator.conditional.falsey",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "operator.conditional.truthy",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "update.add",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "update.alternative",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "update.assignment",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "update.divide",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "update.invalid-lvalue",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "update.multi-path",
+      "catalog_classification": "jq-target",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "update.multiply",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "update.pipe",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "update.subtract",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "variable.binding",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "variable.cli-json",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq has no jq-compatible --argjson option"
+    },
+    {
+      "case_id": "variable.cli-string",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "unsupported",
+      "rationale": "yq has no jq-compatible --arg option"
+    },
+    {
+      "case_id": "variable.cli-toon",
+      "catalog_classification": "cli",
+      "review_classification": "unsupported",
+      "jq_yq_difference": false,
+      "jq_state": "unsupported",
+      "yq_state": "unsupported",
+      "rationale": "yq does not accept TOON-valued arguments"
+    },
+    {
+      "case_id": "variable.generator-binding",
+      "catalog_classification": "common",
+      "review_classification": "common-agreement",
+      "jq_yq_difference": false,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq and yq produce the same normalized ordered result and failure contract for this case."
+    },
+    {
+      "case_id": "variable.shadowing",
+      "catalog_classification": "common",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    },
+    {
+      "case_id": "variable.unknown",
+      "catalog_classification": "jq-target",
+      "review_classification": "jq-target-divergence",
+      "jq_yq_difference": true,
+      "jq_state": "executed",
+      "yq_state": "executed",
+      "rationale": "jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence."
+    }
+  ]
+}

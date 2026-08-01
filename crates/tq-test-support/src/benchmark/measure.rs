@@ -113,6 +113,8 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
     configure_process_group(&mut command);
     let mut child = command.spawn()?;
     let process_id = child.id();
+    let rss_sampler_stop = Arc::new(AtomicBool::new(false));
+    let rss_sampler = spawn_rss_sampler(process_id, Arc::clone(&rss_sampler_stop));
     let mut stdin = child
         .stdin
         .take()
@@ -173,6 +175,10 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
             break child.wait()?;
         }
     };
+    rss_sampler_stop.store(true, Ordering::Relaxed);
+    let sampled_peak_rss = rss_sampler
+        .join()
+        .map_err(|_| MeasureError::CaptureWorker)?;
 
     let _stdin_result = stdin_worker
         .join()
@@ -185,13 +191,17 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         .map_err(|_| MeasureError::CaptureWorker)??;
     let resources = std::fs::read_to_string(resource_file.path()).unwrap_or_default();
     let inferred_signal = infer_signal(exit, &resources);
-    let status = forced.unwrap_or_else(|| {
-        if inferred_signal.is_some() {
-            MeasuredStatus::Signaled
-        } else {
-            MeasuredStatus::Exited
-        }
-    });
+    let status = if output_exceeded.load(Ordering::Relaxed) {
+        MeasuredStatus::OutputLimit
+    } else {
+        forced.unwrap_or_else(|| {
+            if inferred_signal.is_some() {
+                MeasuredStatus::Signaled
+            } else {
+                MeasuredStatus::Exited
+            }
+        })
+    };
     let first_result_micros = *first_result
         .lock()
         .map_err(|_| io::Error::other("first-result mutex poisoned"))?;
@@ -203,11 +213,56 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         first_result_micros,
         user_cpu_micros: resource_seconds(&resources, "user"),
         system_cpu_micros: resource_seconds(&resources, "sys"),
-        peak_rss_bytes: resource_rss(&resources),
+        peak_rss_bytes: maximum_available(resource_rss(&resources), sampled_peak_rss),
         output_bytes: output_bytes.load(Ordering::Relaxed),
         stdout,
         stderr,
     })
+}
+
+fn maximum_available(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn spawn_rss_sampler(process_group: u32, stop: Arc<AtomicBool>) -> thread::JoinHandle<Option<u64>> {
+    thread::spawn(move || {
+        let mut maximum = None;
+        while !stop.load(Ordering::Relaxed) {
+            if let Some(bytes) = process_group_rss(process_group) {
+                maximum = Some(maximum.unwrap_or(0).max(bytes));
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        if let Some(bytes) = process_group_rss(process_group) {
+            maximum = Some(maximum.unwrap_or(0).max(bytes));
+        }
+        maximum
+    })
+}
+
+#[cfg(unix)]
+fn process_group_rss(process_group: u32) -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-g", &process_group.to_string()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let kibibytes = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .filter_map(|value| value.parse::<u64>().ok())
+        .sum::<u64>();
+    (kibibytes > 0).then(|| kibibytes.saturating_mul(1024))
+}
+
+#[cfg(not(unix))]
+fn process_group_rss(_process_group: u32) -> Option<u64> {
+    None
 }
 
 fn measured_command(invocation: &BenchmarkInvocation, resource_path: &std::path::Path) -> Command {

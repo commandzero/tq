@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use tq_test_support::corpus::{CorpusOrigin, generate_representations, inventory_snapshots};
+use tq_test_support::corpus::{
+    CorpusOrigin, generate_representations, inventory_snapshots, refresh_campaign,
+};
 
 fn main() {
     if let Err(error) = run() {
@@ -23,8 +25,24 @@ fn run() -> Result<(), Box<dyn Error>> {
     match command.as_str() {
         "generate" => generate(arguments),
         "inventory" => inventory(arguments),
+        "refresh" => refresh(arguments),
         _ => Err(format!("unsupported corpus command: {command}\n{}", usage()).into()),
     }
+}
+
+fn refresh(arguments: &[String]) -> Result<(), Box<dyn Error>> {
+    let [sources, cache, campaign] = arguments else {
+        return Err(usage().into());
+    };
+    let refreshed = refresh_campaign(Path::new(sources), Path::new(cache), campaign)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "campaign_id": refreshed.campaign_id,
+            "manifests": refreshed.manifests,
+        }))?
+    );
+    Ok(())
 }
 
 fn generate(arguments: &[String]) -> Result<(), Box<dyn Error>> {
@@ -64,7 +82,7 @@ fn inventory(arguments: &[String]) -> Result<(), Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
+    "usage:\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT standard|large\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
 }
 
 fn file_name(path: &Path) -> Result<&str, Box<dyn Error>> {

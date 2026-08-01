@@ -1,0 +1,1094 @@
+{
+  "schema_version": 1,
+  "catalog_identity": {
+    "path": "/Users/reno/Development/commandzero/tq/crates/tq-test-support/../../compatibility/cases",
+    "bytes": 77678,
+    "sha256": "aa58227330d93adb9859a759a09fcd433b9a3d31850e89f61b5967089045a0bc"
+  },
+  "tools": [
+    {
+      "tool": "jq",
+      "path": "/Users/reno/Development/commandzero/tq/target/reference-build/jq/jq",
+      "version": "jq-1.8.2-8-g603db3f",
+      "executable": {
+        "path": "/Users/reno/Development/commandzero/tq/target/reference-build/jq/jq",
+        "bytes": 527680,
+        "sha256": "d25a7231a8cd3ab48ecaab2854d56161860c95d8e3ff067dff0065814218691e"
+      },
+      "build_features": [
+        "--with-oniguruma=/opt/homebrew/opt/oniguruma --disable-maintainer-mode --disable-shared --enable-static"
+      ]
+    },
+    {
+      "tool": "yq",
+      "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+      "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2",
+      "executable": {
+        "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "bytes": 12996258,
+        "sha256": "b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952"
+      },
+      "build_features": [
+        "# Use the '-p/--input-format' flag to specify a format type.",
+        "-p, --input-format string               [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \"auto\")",
+        "-o, --output-format string              [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \"auto\")",
+        "-c, --yaml-compact-seq-indent           Use compact sequence indentation where '- ' is considered part of the indentation.",
+        "--yaml-fix-merge-anchor-to-spec     Fix merge anchor to match YAML spec. Will default to true in late 2025"
+      ]
+    }
+  ],
+  "final_status": "observed-differences",
+  "coverage": {
+    "arithmetic.add": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "arithmetic.divide": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "arithmetic.modulo": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "arithmetic.multiply": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "arithmetic.overloaded-add": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "arithmetic.subtract": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "arithmetic.type-error": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "blocking": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.add": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.arrays": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.booleans": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.empty": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.error": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.flatten": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.has": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.in": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.iterables": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.keys": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.keys-unsorted": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.length": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.map": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.map-values": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.max": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.min": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.nulls": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.numbers": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.objects": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.range": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.reverse": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.scalars": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.select": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.sort": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.sort-by": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.strings": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.tonumber": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.tostring": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.type": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.unique": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.unique-by": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.utf8bytelength": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "builtin.values": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cardinality": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cardinality.many": {
+      "cases": 7,
+      "executed": 13,
+      "skipped": 8,
+      "harness_errors": 0
+    },
+    "cardinality.one": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cardinality.zero": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.ambiguous-json-yaml": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "cli.arg": {
+      "cases": 2,
+      "executed": 2,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "cli.argjson": {
+      "cases": 2,
+      "executed": 2,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "cli.argtoon": {
+      "cases": 2,
+      "executed": 0,
+      "skipped": 6,
+      "harness_errors": 0
+    },
+    "cli.cardinality": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "cli.detection": {
+      "cases": 3,
+      "executed": 0,
+      "skipped": 9,
+      "harness_errors": 0
+    },
+    "cli.detection-order": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "cli.exit-empty": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.exit-false": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.exit-status": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.file": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.framing": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.input-format": {
+      "cases": 3,
+      "executed": 3,
+      "skipped": 6,
+      "harness_errors": 0
+    },
+    "cli.input-source": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.join-output": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.late-failure": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "cli.null-input": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.option-validation": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.raw-input": {
+      "cases": 2,
+      "executed": 2,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "cli.raw-output": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.sequence-output": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.slurp": {
+      "cases": 2,
+      "executed": 2,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "cli.stdin": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "cli.stream": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.stream-errors": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "cli.strict-override": {
+      "cases": 3,
+      "executed": 3,
+      "skipped": 6,
+      "harness_errors": 0
+    },
+    "cli.strictness": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "cli.unframed": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "cli.variable": {
+      "cases": 3,
+      "executed": 2,
+      "skipped": 7,
+      "harness_errors": 0
+    },
+    "cli.yaml-multi-document": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "comparison.equality": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "comparison.ordering": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "composition.comma": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "composition.parentheses": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "composition.pipe": {
+      "cases": 4,
+      "executed": 8,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "construction.array": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "construction.computed-key": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "construction.duplicate-key": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "construction.object": {
+      "cases": 4,
+      "executed": 8,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "construction.shorthand": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "control.alternative": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "control.boolean": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "control.conditional": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "control.short-circuit": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "control.truthiness": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "deferred.break": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.dates": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.environment": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.foreach": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.function": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.import": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.include": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.interpolation": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.labels": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.modules": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.platform-io": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.recursive-descent": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.reduce": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "deferred.regex": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "error.after-output": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "error.cli-usage": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "error.empty": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "error.explicit": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "error.input-parse": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "error.optional": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "error.query-compile": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "error.runtime": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "error.runtime-type": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "error.source-location": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "error.try-catch": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "execution.blocking": {
+      "cases": 12,
+      "executed": 24,
+      "skipped": 12,
+      "harness_errors": 0
+    },
+    "execution.streaming": {
+      "cases": 23,
+      "executed": 44,
+      "skipped": 25,
+      "harness_errors": 0
+    },
+    "identity": {
+      "cases": 7,
+      "executed": 14,
+      "skipped": 7,
+      "harness_errors": 0
+    },
+    "navigation.computed": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "navigation.field": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "navigation.index": {
+      "cases": 4,
+      "executed": 8,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "navigation.iteration": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "navigation.missing": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "navigation.negative-index": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "navigation.optional": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "navigation.slice": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.arithmetic": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "numeric.canonical-output": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.digit-limit": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "numeric.division-by-zero": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.envelope": {
+      "cases": 6,
+      "executed": 12,
+      "skipped": 6,
+      "harness_errors": 0
+    },
+    "numeric.expansion-limit": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.exponent": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.exponent-limit": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "numeric.identity": {
+      "cases": 4,
+      "executed": 8,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "numeric.index-range": {
+      "cases": 2,
+      "executed": 2,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "numeric.literal": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "numeric.literal-invalidation": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.negative-zero": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.nonfinite-result": {
+      "cases": 1,
+      "executed": 1,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "numeric.ordinary": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.overflow": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.precision-boundary": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "numeric.underflow": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "object.order": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "resource.numeric": {
+      "cases": 5,
+      "executed": 9,
+      "skipped": 6,
+      "harness_errors": 0
+    },
+    "resource.probe-bound": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "resource.result-count": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "result.order": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "toon.strict": {
+      "cases": 1,
+      "executed": 0,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "update.add": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.alternative": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.arithmetic": {
+      "cases": 4,
+      "executed": 8,
+      "skipped": 4,
+      "harness_errors": 0
+    },
+    "update.assignment": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.divide": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.invalid-lvalue": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.multi-path": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.multiply": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.path": {
+      "cases": 3,
+      "executed": 6,
+      "skipped": 3,
+      "harness_errors": 0
+    },
+    "update.pipe": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.stable-root": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "update.subtract": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "value.array": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "value.boolean": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "value.null": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "value.number": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "value.object": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "value.string": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "variable.binding": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "variable.cli": {
+      "cases": 3,
+      "executed": 2,
+      "skipped": 7,
+      "harness_errors": 0
+    },
+    "variable.generator": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "variable.scope": {
+      "cases": 2,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "variable.shadowing": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    },
+    "variable.unknown": {
+      "cases": 1,
+      "executed": 2,
+      "skipped": 1,
+      "harness_errors": 0
+    }
+  },
+  "case_counts": {
+    "total": 154,
+    "with_difference": 58,
+    "harness_error": 0,
+    "deferred": 12
+  },
+  "reviewed_at": "2026-08-01T17:55:00Z"
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "state": "cross-format-validated",
+  "campaign_id": "2026-08-01T17-47-56.525732Z",
+  "source_id": "usgs-all-month",
+  "retrieved_at": "2026-08-01T17:47:56.525732Z",
+  "request": {
+    "requested_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson",
+    "final_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson",
+    "status": 200,
+    "content_type": "application/json",
+    "etag": null,
+    "last_modified": "Sat, 01 Aug 2026 17:47:00 GMT"
+  },
+  "archive": null,
+  "artifacts": {
+    "download": {
+      "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.geojson",
+      "bytes": 7703746,
+      "sha256": "74095787fdc6de0035baa8037b40feb3300aec0818ae5aa9145f2269696bc0f8"
+    },
+    "source_json": {
+      "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.geojson",
+      "bytes": 7703746,
+      "sha256": "74095787fdc6de0035baa8037b40feb3300aec0818ae5aa9145f2269696bc0f8"
+    },
+    "generated": {
+      "yaml": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.yaml",
+        "bytes": 8507497,
+        "sha256": "bee064949a11fb558fb32e50fba8fc0225a5307fa4e2f0726ea52ee5234a0902"
+      },
+      "toon": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.toon",
+        "bytes": 9125429,
+        "sha256": "5f8d61f94bb86117fff3b7e9913af1e8a7da34a0a1b7bc58adc3f4b9bdc4745e"
+      }
+    }
+  },
+  "document": {
+    "root_type": "FeatureCollection",
+    "logical_records": 10847
+  },
+  "validation": {
+    "source_json": "valid",
+    "yaml_equivalent": true,
+    "toon_equivalent": true
+  },
+  "provenance": {
+    "title": "USGS All Earthquakes, Past 30 Days",
+    "publisher": "U.S. Geological Survey",
+    "landing_page": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+    "license": {
+      "name": "USGS Government Work in the U.S. Public Domain",
+      "url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+    }
+  }
+}

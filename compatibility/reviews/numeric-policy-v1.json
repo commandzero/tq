@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "policy_id": "jq-decimal-hybrid-v1",
+  "reviewed_at": "2026-07-31",
+  "reference": "jq-1.8.2-8-g603db3f",
+  "rationale": "Preserve jq decimal literals exactly for identity and construction inside a finite resource envelope; derive binary64 lazily and discard literal provenance after arithmetic.",
+  "input": {
+    "maximum_coefficient_digits": 4096,
+    "coefficient_digit_definition": "Digits in the significand after removing sign, decimal point, and insignificant leading zeroes.",
+    "maximum_absolute_decimal_exponent": 1000000,
+    "finite_only": true,
+    "out_of_envelope": "numeric-range or resource error before runtime admission",
+    "negative_zero": "Accepted; compares equal to zero and canonical structured output is 0."
+  },
+  "output": {
+    "maximum_plain_decimal_expansion_digits": 4096,
+    "maximum_rendered_number_bytes": 8192,
+    "expansion_policy": "Use normalized scientific notation rather than expanding a finite exponent beyond the plain-decimal limit; reject any representation that still exceeds the rendered token limit.",
+    "identity": "Retain the normalized source decimal value without binary64 precision loss."
+  },
+  "indexing": {
+    "minimum": -9007199254740991,
+    "maximum": 9007199254740991,
+    "requirement": "The index must be an exact integral value in the binary64 safe-integer range.",
+    "out_of_range": "numeric-range error rather than implementation-dependent cast or allocation"
+  },
+  "arithmetic": {
+    "representation": "IEEE-754 binary64 after lazy conversion; arithmetic results do not retain source literal provenance.",
+    "overflow": "Clamp to positive or negative f64::MAX, matching the observed jq 1.8.x arithmetic envelope.",
+    "underflow": "Produce signed zero according to binary64 and canonicalize structured zero output.",
+    "division_by_zero": "runtime-type-path error with no result",
+    "nonfinite_result": "Core MVP arithmetic must not admit NaN or infinity; operations that would produce them fail with numeric-range unless jq's accepted core observation is the finite overflow clamp.",
+    "nonfinite_input": "Reject in TOON, JSON, and YAML adapters."
+  },
+  "evidence_cases": [
+    "numeric.large-exact-identity",
+    "numeric.arithmetic-invalidates-literal",
+    "numeric.negative-zero",
+    "numeric.policy-digits-max",
+    "numeric.policy-digits-over",
+    "numeric.policy-exponent-max",
+    "numeric.policy-exponent-over",
+    "numeric.policy-scientific-output",
+    "numeric.policy-index-max",
+    "numeric.policy-index-over",
+    "numeric.policy-overflow",
+    "numeric.policy-underflow",
+    "numeric.division-by-zero",
+    "numeric.policy-nonfinite-result"
+  ]
+}

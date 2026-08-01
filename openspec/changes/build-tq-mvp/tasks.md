@@ -73,18 +73,18 @@
 
 ## 5. jq and yq Baseline Gate
 
-- [ ] 5.1 Build or locate the intended jq 1.8.x reference binary and record path, version, digest, and relevant numeric/regex build features
-- [ ] 5.2 Build or locate the intended yq 4.x reference binary and record path, version, digest, and format configuration
-- [ ] 5.3 Refresh the complete standard USGS corpus, generate and validate JSON, YAML, and TOON representations, and archive the campaign manifests
-- [ ] 5.4 Run the full jq/yq-applicable compatibility suite before any tq language implementation and preserve the raw plus normalized observations
-- [ ] 5.5 Review and classify every jq/yq difference as common agreement, jq-target divergence, CLI adaptation, unsupported, or deferred
-- [ ] 5.6 Resolve or explicitly accept every unexplained reference crash, timeout, malformed result, and normalization failure
-- [ ] 5.7 Review numeric baseline observations and record the digit, exponent, expansion, index, overflow, division-by-zero, and non-finite-result limits for the chosen jq decimal-literal hybrid
-- [ ] 5.8 Freeze the reviewed jq/yq MVP compatibility baseline and generate the initial coverage report
-- [ ] 5.9 Run the jq/yq standard JSON and YAML performance matrix only after correctness gates pass and archive the environment/corpus/report artifacts
-- [ ] 5.10 Refresh and prepare the complete natural large corpus on the manifest-recorded local benchmark host without resizing it
-- [ ] 5.11 Run applicable jq/yq large compatibility and performance cases and preserve success, timeout, OOM, or resource outcomes
-- [ ] 5.12 Review the baseline reports and record explicit approval that the section 1.7 gate is satisfied before starting tq engine work
+- [x] 5.1 Build or locate the intended jq 1.8.x reference binary and record path, version, digest, and relevant numeric/regex build features
+- [x] 5.2 Build or locate the intended yq 4.x reference binary and record path, version, digest, and format configuration
+- [x] 5.3 Refresh the complete standard USGS corpus, generate and validate JSON, YAML, and TOON representations, and archive the campaign manifests
+- [x] 5.4 Run the full jq/yq-applicable compatibility suite before any tq language implementation and preserve the raw plus normalized observations
+- [x] 5.5 Review and classify every jq/yq difference as common agreement, jq-target divergence, CLI adaptation, unsupported, or deferred
+- [x] 5.6 Resolve or explicitly accept every unexplained reference crash, timeout, malformed result, and normalization failure
+- [x] 5.7 Review numeric baseline observations and record the digit, exponent, expansion, index, overflow, division-by-zero, and non-finite-result limits for the chosen jq decimal-literal hybrid
+- [x] 5.8 Freeze the reviewed jq/yq MVP compatibility baseline and generate the initial coverage report
+- [x] 5.9 Run the jq/yq standard JSON and YAML performance matrix only after correctness gates pass and archive the environment/corpus/report artifacts
+- [x] 5.10 Refresh and prepare the complete natural large corpus on the manifest-recorded local benchmark host without resizing it
+- [x] 5.11 Run applicable jq/yq large compatibility and performance cases and preserve success, timeout, OOM, or resource outcomes
+- [x] 5.12 Review the baseline reports and record explicit approval that the section 1.7 gate is satisfied before starting tq engine work
 
 ## 6. tq Core Value and Diagnostic Foundation
 

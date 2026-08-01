@@ -36,6 +36,65 @@ fn json_is_generated_as_yaml_and_toon_outside_benchmark_execution() {
 }
 
 #[test]
+fn generated_yaml_uses_interoperable_numeric_scalars() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let source = temp.path().join("source.json");
+    let yaml = temp.path().join("source.yaml");
+    let toon = temp.path().join("source.toon");
+    std::fs::write(
+        &source,
+        br#"{"integer":9007199254740993,"float":0.986208946133579}"#,
+    )
+    .expect("source JSON");
+
+    generate_representations(
+        &source,
+        &yaml,
+        &toon,
+        "prepared/source.yaml",
+        "prepared/source.toon",
+    )
+    .expect("cross-format generation");
+
+    let text = std::fs::read_to_string(&yaml).expect("generated YAML");
+    assert!(!text.contains("$serde_json::private::Number"));
+    let value: yaml_serde::Value = yaml_serde::from_str(&text).expect("YAML model");
+    assert!(value["integer"].is_number());
+    assert!(value["float"].is_number());
+    validate_generated_representations(&source, &yaml, &toon)
+        .expect("ordered representations agree");
+}
+
+#[test]
+fn arbitrary_decimal_yaml_uses_lossless_json_subset_profile() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let source = temp.path().join("source.json");
+    let yaml = temp.path().join("source.yaml");
+    let toon = temp.path().join("source.toon");
+    let document = br#"{"coordinate":-80.976660999999993,"integral_float":34.0,"name":"building"}"#;
+    std::fs::write(&source, document).expect("source JSON");
+
+    generate_representations(
+        &source,
+        &yaml,
+        &toon,
+        "prepared/source.yaml",
+        "prepared/source.toon",
+    )
+    .expect("lossless cross-format generation");
+
+    assert_eq!(std::fs::read(&yaml).expect("YAML bytes"), document);
+    assert!(
+        std::fs::read_to_string(&toon)
+            .expect("TOON text")
+            .contains("-80.976660999999993")
+    );
+    let _: yaml_serde::Value = yaml_serde::from_slice(document).expect("JSON is YAML");
+    validate_generated_representations(&source, &yaml, &toon)
+        .expect("ordered representations agree exactly");
+}
+
+#[test]
 fn semantic_comparison_rejects_type_value_and_array_order_changes() {
     let type_error =
         compare_ordered(&json!({"value": 1}), &json!({"value": "1"})).expect_err("type change");

@@ -110,6 +110,7 @@ fn adapter() -> BenchmarkAdapter {
         input_format: InputFormat::Json,
         applicable: true,
         args: Vec::new(),
+        query: None,
         comparison_families: vec![ComparisonFamily::SameFormat],
     }
 }

@@ -17,6 +17,7 @@ mod conversion;
 mod geojson;
 mod inventory;
 mod manifest;
+mod refresh;
 mod smoke;
 
 pub use campaign::{CampaignError, CampaignMode, FrozenSnapshot, load_frozen_snapshot};
@@ -31,6 +32,7 @@ pub use manifest::{
     LicenseIdentity, ManifestError, Provenance, RequestIdentity, SnapshotManifest, SnapshotState,
     SourceSnapshotInput, ValidationIdentity, build_source_snapshot, write_snapshot_manifest,
 };
+pub use refresh::{RefreshCampaign, RefreshError, refresh_campaign};
 pub use smoke::{CorpusOrigin, SmokeCorpus, SmokeError, SmokeSnapshot, discover_smoke_corpus};
 
 /// A source download request, including cache validators and integrity policy.

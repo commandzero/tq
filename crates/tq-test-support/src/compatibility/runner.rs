@@ -152,6 +152,20 @@ fn execute(
     let bytes = fixture_bytes(case, repository_root)?;
     let mut temporary = None;
     let mut args = adapter.args.clone();
+    if identity.tool == ToolKind::Yq
+        && matches!(
+            case.expected.contract,
+            ContractKind::ResultSequence | ContractKind::Error
+        )
+        && !args.iter().any(|argument| {
+            argument == "-o"
+                || argument.starts_with("-o=")
+                || argument == "--output-format"
+                || argument.starts_with("--output-format=")
+        })
+    {
+        args.extend(["--output-format=json".to_owned(), "--indent=0".to_owned()]);
+    }
     args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
     let stdin = match case.invocation_mode {
         InvocationMode::Stdin => bytes,
@@ -191,6 +205,7 @@ fn execute(
             tool: identity.tool,
             state: ObservationState::Executed,
             results: value.results,
+            stdout_hex: Some(encode_hex(&outcome.stdout)),
             raw_stdout_hex: value.raw_bytes.as_deref().map(encode_hex),
             stderr_hex: (!value.stderr.is_empty()).then(|| encode_hex(&value.stderr)),
             process_status: Some(value.process_status),
@@ -226,6 +241,7 @@ fn skipped(tool: ToolKind, state: ObservationState, note: &str) -> ToolObservati
         tool,
         state,
         results: Vec::new(),
+        stdout_hex: None,
         raw_stdout_hex: None,
         stderr_hex: None,
         process_status: None,
@@ -249,6 +265,7 @@ fn normalization_error(
         tool,
         state: ObservationState::HarnessError,
         results: Vec::new(),
+        stdout_hex: Some(encode_hex(&outcome.stdout)),
         raw_stdout_hex: Some(encode_hex(&outcome.stdout)),
         stderr_hex: (!outcome.stderr.is_empty()).then(|| encode_hex(&outcome.stderr)),
         process_status: Some(outcome.status),

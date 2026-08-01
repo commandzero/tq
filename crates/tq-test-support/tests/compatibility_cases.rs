@@ -129,6 +129,13 @@ fn composition_construction_operator_numeric_and_variable_groups_are_complete() 
             "numeric.precision-boundary",
             "numeric.literal-invalidation",
             "numeric.envelope",
+            "numeric.digit-limit",
+            "numeric.exponent-limit",
+            "numeric.expansion-limit",
+            "numeric.index-range",
+            "numeric.overflow",
+            "numeric.underflow",
+            "numeric.nonfinite-result",
         ],
     );
     assert_capabilities(
