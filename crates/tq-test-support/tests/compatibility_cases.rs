@@ -79,3 +79,223 @@ fn common_and_navigation_capability_groups_are_present() {
         assert!(navigation.contains(capability), "missing {capability}");
     }
 }
+
+#[test]
+fn composition_construction_operator_numeric_and_variable_groups_are_complete() {
+    assert_capabilities(
+        "composition.jsonl",
+        &[
+            "composition.pipe",
+            "composition.comma",
+            "composition.parentheses",
+            "composition.nested-iteration",
+            "composition.downstream-multiplicity",
+        ],
+    );
+    assert_capabilities(
+        "construction.jsonl",
+        &[
+            "construction.array",
+            "construction.object",
+            "construction.shorthand",
+            "construction.computed-key",
+            "construction.duplicate-key",
+        ],
+    );
+    assert_capabilities(
+        "operators.jsonl",
+        &[
+            "control.conditional",
+            "control.truthiness",
+            "control.short-circuit",
+            "control.alternative",
+            "comparison.equality",
+            "comparison.ordering",
+            "arithmetic.add",
+            "arithmetic.subtract",
+            "arithmetic.multiply",
+            "arithmetic.divide",
+            "arithmetic.modulo",
+            "arithmetic.type-error",
+        ],
+    );
+    assert_capabilities(
+        "numeric.jsonl",
+        &[
+            "numeric.ordinary",
+            "numeric.literal",
+            "numeric.exponent",
+            "numeric.negative-zero",
+            "numeric.precision-boundary",
+            "numeric.literal-invalidation",
+            "numeric.envelope",
+        ],
+    );
+    assert_capabilities(
+        "variables.jsonl",
+        &[
+            "variable.binding",
+            "variable.scope",
+            "variable.generator",
+            "variable.unknown",
+            "cli.arg",
+            "cli.argjson",
+            "cli.argtoon",
+        ],
+    );
+}
+
+#[test]
+fn every_mvp_builtin_has_a_case_and_execution_classification() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases/builtins.jsonl");
+    let cases = fs::read_to_string(path).expect("built-in cases");
+    for builtin in [
+        "empty",
+        "error",
+        "type",
+        "length",
+        "utf8bytelength",
+        "keys",
+        "keys-unsorted",
+        "has",
+        "in",
+        "select",
+        "map",
+        "map-values",
+        "values",
+        "scalars",
+        "arrays",
+        "objects",
+        "iterables",
+        "booleans",
+        "numbers",
+        "strings",
+        "nulls",
+        "tostring",
+        "tonumber",
+        "add",
+        "min",
+        "max",
+        "sort",
+        "sort-by",
+        "unique",
+        "unique-by",
+        "reverse",
+        "flatten",
+        "range",
+    ] {
+        assert!(
+            cases.contains(&format!("\"builtin.{builtin}\"")),
+            "missing built-in case for {builtin}"
+        );
+    }
+    for (index, line) in cases.lines().enumerate() {
+        let case: Value = serde_json::from_str(line).expect("built-in case JSON");
+        let capabilities = case["capabilities"].as_array().expect("capability array");
+        assert!(
+            capabilities.iter().any(|value| {
+                matches!(
+                    value.as_str(),
+                    Some("execution.streaming" | "execution.blocking")
+                )
+            }),
+            "builtins.jsonl:{} lacks execution classification",
+            index + 1
+        );
+    }
+}
+
+#[test]
+fn error_update_cli_and_deferred_groups_cover_the_spec() {
+    assert_capabilities(
+        "errors.jsonl",
+        &[
+            "error.empty",
+            "error.explicit",
+            "error.optional",
+            "error.try-catch",
+            "error.after-output",
+            "error.source-location",
+        ],
+    );
+    assert_capabilities(
+        "updates.jsonl",
+        &[
+            "update.assignment",
+            "update.pipe",
+            "update.add",
+            "update.subtract",
+            "update.multiply",
+            "update.divide",
+            "update.alternative",
+            "update.multi-path",
+            "update.invalid-lvalue",
+        ],
+    );
+    assert_capabilities(
+        "cli.jsonl",
+        &[
+            "cli.detection-order",
+            "cli.ambiguous-json-yaml",
+            "cli.strict-override",
+            "cli.late-failure",
+            "cli.stdin",
+            "cli.file",
+            "cli.yaml-multi-document",
+            "cli.null-input",
+            "cli.raw-input",
+            "cli.slurp",
+            "cli.stream",
+            "cli.stream-errors",
+            "cli.raw-output",
+            "cli.join-output",
+            "cli.framing",
+            "cli.strictness",
+            "cli.variable",
+            "cli.option-validation",
+            "cli.exit-status",
+        ],
+    );
+    assert_capabilities(
+        "deferred.jsonl",
+        &[
+            "deferred.function",
+            "deferred.modules",
+            "deferred.reduce",
+            "deferred.foreach",
+            "deferred.labels",
+            "deferred.recursive-descent",
+            "deferred.interpolation",
+            "deferred.regex",
+            "deferred.dates",
+            "deferred.environment",
+            "deferred.platform-io",
+        ],
+    );
+
+    let deferred = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases/deferred.jsonl"),
+    )
+    .expect("deferred cases");
+    for (index, line) in deferred.lines().enumerate() {
+        let case: Value = serde_json::from_str(line).expect("deferred case JSON");
+        assert_eq!(case["classification"], "deferred", "line {}", index + 1);
+        assert_eq!(case["status"], "deferred", "line {}", index + 1);
+    }
+}
+
+fn assert_capabilities(file: &str, required: &[&str]) {
+    let cases = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compatibility/cases")
+            .join(file),
+    )
+    .unwrap_or_else(|error| panic!("failed to read {file}: {error}"));
+    for capability in required {
+        assert!(
+            cases.contains(&format!("\"{capability}\"")),
+            "{file} is missing {capability}"
+        );
+    }
+}

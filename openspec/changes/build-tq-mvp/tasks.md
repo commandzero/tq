@@ -38,19 +38,19 @@
 - [x] 3.8 Implement stable error classes for CLI usage, query parse/compile, input parse, runtime type/path, resource, timeout, signal, and unsupported capability
 - [x] 3.9 Add common compatibility cases for identity, all primitive types, arrays/objects, ordering, and zero-versus-null cardinality
 - [x] 3.10 Add navigation cases for field/computed access, missing keys, indices, negative indices, slices, iteration, optional access, and invalid index types
-- [ ] 3.11 Add generator/composition cases for pipes, commas, parentheses, nested iteration, and downstream multiplicity
-- [ ] 3.12 Add construction cases for arrays, objects, shorthand keys, computed keys, and duplicate-key behavior
-- [ ] 3.13 Add control/operator cases for conditionals, truthiness, boolean short circuiting, alternative, comparison, ordering, arithmetic, and type errors
-- [ ] 3.14 Add numeric cases covering jq-compatible ordinary values, large exact identity, exponent input, negative zero, precision boundaries, and out-of-envelope policy inputs
-- [ ] 3.15 Add variable cases for `as`, scope, generator bindings, unknown variables, string arguments, JSON arguments, and TOON arguments
-- [ ] 3.16 Add core built-in cases for every built-in named by the `jq-core-language` spec, with blocking/resource classification metadata
-- [ ] 3.17 Add error cases for `empty`, `error`, optional suppression, `try/catch`, errors after prior output, and source-location expectations
-- [ ] 3.18 Add path-update cases for `=`, `|=`, arithmetic updates, alternative update, selected multi-path updates, and invalid lvalues
-- [ ] 3.19 Add CLI cases for TOON-to-YAML-to-JSON automatic faildown, ambiguous JSON-as-YAML selection, strict format overrides, bounded late failure, stdin/files, YAML multi-document input, null/raw/slurp/stream modes, raw/join output, framing, strictness, variables, option validation, and jq-aligned exit status
-- [ ] 3.20 Add deferred cases/markers for functions, modules, reduce/foreach, labels, recursive descent, interpolation, regex, dates, environment, and platform I/O
-- [ ] 3.21 Implement human-readable and machine-readable reports with corpus/tool identities, per-case observations, semantic diffs, coverage groups, and final status
-- [ ] 3.22 Implement reviewed baseline update workflow that shows every changed observation and offers no unreviewed bulk bless operation
-- [ ] 3.23 Add harness self-tests using fake executables that emit controlled values, errors, timeouts, signals, and malformed output
+- [x] 3.11 Add generator/composition cases for pipes, commas, parentheses, nested iteration, and downstream multiplicity
+- [x] 3.12 Add construction cases for arrays, objects, shorthand keys, computed keys, and duplicate-key behavior
+- [x] 3.13 Add control/operator cases for conditionals, truthiness, boolean short circuiting, alternative, comparison, ordering, arithmetic, and type errors
+- [x] 3.14 Add numeric cases covering jq-compatible ordinary values, large exact identity, exponent input, negative zero, precision boundaries, and out-of-envelope policy inputs
+- [x] 3.15 Add variable cases for `as`, scope, generator bindings, unknown variables, string arguments, JSON arguments, and TOON arguments
+- [x] 3.16 Add core built-in cases for every built-in named by the `jq-core-language` spec, with blocking/resource classification metadata
+- [x] 3.17 Add error cases for `empty`, `error`, optional suppression, `try/catch`, errors after prior output, and source-location expectations
+- [x] 3.18 Add path-update cases for `=`, `|=`, arithmetic updates, alternative update, selected multi-path updates, and invalid lvalues
+- [x] 3.19 Add CLI cases for TOON-to-YAML-to-JSON automatic faildown, ambiguous JSON-as-YAML selection, strict format overrides, bounded late failure, stdin/files, YAML multi-document input, null/raw/slurp/stream modes, raw/join output, framing, strictness, variables, option validation, and jq-aligned exit status
+- [x] 3.20 Add deferred cases/markers for functions, modules, reduce/foreach, labels, recursive descent, interpolation, regex, dates, environment, and platform I/O
+- [x] 3.21 Implement human-readable and machine-readable reports with corpus/tool identities, per-case observations, semantic diffs, coverage groups, and final status
+- [x] 3.22 Implement reviewed baseline update workflow that shows every changed observation and offers no unreviewed bulk bless operation
+- [x] 3.23 Add harness self-tests using fake executables that emit controlled values, errors, timeouts, signals, and malformed output
 
 ## 4. Performance Benchmark Harness
 

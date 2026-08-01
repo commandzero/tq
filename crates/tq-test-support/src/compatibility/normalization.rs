@@ -1,13 +1,14 @@
 //! Cross-tool result-sequence and failure normalization.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
 use super::{ProcessOutcome, ProcessStatus, ToolKind};
 
 /// Stable compatibility error taxonomy.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ErrorClass {
     /// Invalid command-line usage or option combination.
     CliUsage,

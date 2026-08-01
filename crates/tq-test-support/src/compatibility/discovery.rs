@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
@@ -14,7 +14,7 @@ use super::process::{Invocation, ProcessError, ProcessStatus, run_process};
 use crate::corpus::ArtifactIdentity;
 
 /// Tool role in the compatibility matrix.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolKind {
     /// jq semantic reference.
@@ -67,7 +67,7 @@ impl ExecutableConfig {
 }
 
 /// Immutable executable identity recorded in baselines and reports.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ToolIdentity {
     /// Tool role.
     pub tool: ToolKind,
