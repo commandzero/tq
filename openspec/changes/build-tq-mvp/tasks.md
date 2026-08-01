@@ -28,16 +28,16 @@
 
 ## 3. Cross-Tool Compatibility Suite
 
-- [ ] 3.1 Define the versioned compatibility-case schema with stable ID, classification, capability tags, fixture, query/adapters, invocation mode, expected result contract, and MVP/deferred status
-- [ ] 3.2 Implement executable discovery/configuration and identity capture for jq, yq, and an optional not-yet-present tq binary
-- [ ] 3.3 Implement subprocess isolation with stdin/files, timeout, stdout/stderr capture, signal/exit classification, and secret-safe command recording
-- [ ] 3.4 Write normalization tests for zero results, one null, multiple ordered results, multiline structured values, raw bytes, stderr, and exit statuses
-- [ ] 3.5 Implement JSON result-text normalization for jq without sorting objects or result sequences
-- [ ] 3.6 Implement YAML result normalization for yq while preserving JSON-model types, result sequence, and documented YAML-specific divergence metadata
-- [ ] 3.7 Implement TOON Text Sequence normalization as a tq adapter placeholder that can remain inactive until tq exists
-- [ ] 3.8 Implement stable error classes for CLI usage, query parse/compile, input parse, runtime type/path, resource, timeout, signal, and unsupported capability
-- [ ] 3.9 Add common compatibility cases for identity, all primitive types, arrays/objects, ordering, and zero-versus-null cardinality
-- [ ] 3.10 Add navigation cases for field/computed access, missing keys, indices, negative indices, slices, iteration, optional access, and invalid index types
+- [x] 3.1 Define the versioned compatibility-case schema with stable ID, classification, capability tags, fixture, query/adapters, invocation mode, expected result contract, and MVP/deferred status
+- [x] 3.2 Implement executable discovery/configuration and identity capture for jq, yq, and an optional not-yet-present tq binary
+- [x] 3.3 Implement subprocess isolation with stdin/files, timeout, stdout/stderr capture, signal/exit classification, and secret-safe command recording
+- [x] 3.4 Write normalization tests for zero results, one null, multiple ordered results, multiline structured values, raw bytes, stderr, and exit statuses
+- [x] 3.5 Implement JSON result-text normalization for jq without sorting objects or result sequences
+- [x] 3.6 Implement YAML result normalization for yq while preserving JSON-model types, result sequence, and documented YAML-specific divergence metadata
+- [x] 3.7 Implement TOON Text Sequence normalization as a tq adapter placeholder that can remain inactive until tq exists
+- [x] 3.8 Implement stable error classes for CLI usage, query parse/compile, input parse, runtime type/path, resource, timeout, signal, and unsupported capability
+- [x] 3.9 Add common compatibility cases for identity, all primitive types, arrays/objects, ordering, and zero-versus-null cardinality
+- [x] 3.10 Add navigation cases for field/computed access, missing keys, indices, negative indices, slices, iteration, optional access, and invalid index types
 - [ ] 3.11 Add generator/composition cases for pipes, commas, parentheses, nested iteration, and downstream multiplicity
 - [ ] 3.12 Add construction cases for arrays, objects, shorthand keys, computed keys, and duplicate-key behavior
 - [ ] 3.13 Add control/operator cases for conditionals, truthiness, boolean short circuiting, alternative, comparison, ordering, arithmetic, and type errors

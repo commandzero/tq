@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tq.dev/schemas/compatibility-case-v1.schema.json",
+  "title": "tq cross-tool compatibility case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "title",
+    "classification",
+    "capabilities",
+    "status",
+    "fixture",
+    "query",
+    "adapters",
+    "invocation_mode",
+    "expected"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "classification": {
+      "enum": [
+        "common",
+        "jq-target",
+        "cli",
+        "deferred"
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+      }
+    },
+    "status": {
+      "enum": [
+        "mvp",
+        "deferred"
+      ]
+    },
+    "fixture": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "inline"
+          ],
+          "properties": {
+            "format": {
+              "enum": [
+                "json",
+                "yaml",
+                "toon",
+                "raw",
+                "none"
+              ]
+            },
+            "inline": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "path"
+          ],
+          "properties": {
+            "format": {
+              "enum": [
+                "json",
+                "yaml",
+                "toon",
+                "raw"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[^/].*"
+            }
+          }
+        }
+      ]
+    },
+    "query": {
+      "type": "string"
+    },
+    "adapters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jq": {
+          "$ref": "#/$defs/adapter"
+        },
+        "yq": {
+          "$ref": "#/$defs/adapter"
+        },
+        "tq": {
+          "$ref": "#/$defs/adapter"
+        }
+      }
+    },
+    "invocation_mode": {
+      "enum": [
+        "stdin",
+        "file",
+        "null-input"
+      ]
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract",
+        "baseline"
+      ],
+      "properties": {
+        "contract": {
+          "enum": [
+            "result-sequence",
+            "raw-bytes",
+            "error",
+            "exit-status"
+          ]
+        },
+        "baseline": {
+          "enum": [
+            "required",
+            "informative",
+            "not-applicable"
+          ]
+        },
+        "error_class": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
