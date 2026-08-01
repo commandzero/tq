@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tq.dev/schemas/corpus-source-v1.schema.json",
+  "title": "tq natural corpus source",
+  "description": "A refreshable, naturally sized source document used by tq test campaigns.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "kind",
+    "format",
+    "campaigns",
+    "fetch",
+    "document",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "kind": {
+      "const": "geojson"
+    },
+    "format": {
+      "const": "json"
+    },
+    "campaigns": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "standard",
+          "large"
+        ]
+      }
+    },
+    "fetch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "refresh",
+        "redirect_limit",
+        "expected_content_types"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "refresh": {
+          "enum": [
+            "mutable",
+            "versioned"
+          ]
+        },
+        "redirect_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "expected_content_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "member"
+      ],
+      "properties": {
+        "format": {
+          "const": "zip"
+        },
+        "member": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\\\\].*"
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_type",
+        "records_pointer"
+      ],
+      "properties": {
+        "root_type": {
+          "const": "FeatureCollection"
+        },
+        "records_pointer": {
+          "const": "/features"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "publisher",
+        "landing_page",
+        "license"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "landing_page": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "url"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "pattern": "^https://"
+            }
+          }
+        }
+      }
+    }
+  }
+}

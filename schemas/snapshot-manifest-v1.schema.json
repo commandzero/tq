@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tq.dev/schemas/snapshot-manifest-v1.schema.json",
+  "title": "tq corpus snapshot manifest",
+  "description": "The byte, HTTP, document, and validation identity of one natural corpus snapshot.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "source_id",
+    "retrieved_at",
+    "request",
+    "archive",
+    "artifacts",
+    "document",
+    "validation",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "campaign_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "retrieved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_url",
+        "final_url",
+        "status",
+        "content_type",
+        "etag",
+        "last_modified"
+      ],
+      "properties": {
+        "requested_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "final_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "etag": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_modified": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "archive": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "member"
+          ],
+          "properties": {
+            "format": {
+              "const": "zip"
+            },
+            "member": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "download",
+        "source_json",
+        "generated"
+      ],
+      "properties": {
+        "download": {
+          "$ref": "#/$defs/artifact"
+        },
+        "source_json": {
+          "$ref": "#/$defs/artifact"
+        },
+        "generated": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "yaml",
+            "toon"
+          ],
+          "properties": {
+            "yaml": {
+              "$ref": "#/$defs/artifact"
+            },
+            "toon": {
+              "$ref": "#/$defs/artifact"
+            }
+          }
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_type",
+        "logical_records"
+      ],
+      "properties": {
+        "root_type": {
+          "const": "FeatureCollection"
+        },
+        "logical_records": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_json",
+        "yaml_equivalent",
+        "toon_equivalent"
+      ],
+      "properties": {
+        "source_json": {
+          "const": "valid"
+        },
+        "yaml_equivalent": {
+          "const": true
+        },
+        "toon_equivalent": {
+          "const": true
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "publisher",
+        "landing_page",
+        "license"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "publisher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "landing_page": {
+          "type": "string",
+          "format": "uri"
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "url"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\\\\].*"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}
