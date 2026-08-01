@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 tq-core = { path = "../crates/tq-core" }
+tq-toon = { path = "../crates/tq-toon" }
 
 [[bin]]
 name = "bytecode_decode"
@@ -21,6 +22,13 @@ bench = false
 [[bin]]
 name = "vm_program"
 path = "fuzz_targets/vm_program.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "toon_decoder"
+path = "fuzz_targets/toon_decoder.rs"
 test = false
 doc = false
 bench = false

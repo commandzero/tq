@@ -1960,7 +1960,9 @@ dependencies = [
 name = "tq-toon"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "thiserror",
+ "toon-format",
  "tq-core",
 ]
 

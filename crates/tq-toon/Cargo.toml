@@ -12,3 +12,7 @@ tq-core = { path = "../tq-core" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+toon-format = { version = "0.5.0", default-features = false }
