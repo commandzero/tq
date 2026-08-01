@@ -186,13 +186,23 @@ fn run_filter<R: Read, W: Write, E: Write>(
     let mut results = Vec::new();
     let mut last = None;
     let mut observations = Vec::new();
-    for input in values {
+    let mut runtime_error = None;
+    'documents: for input in values {
         let mut vm =
             Vm::new_with_variables(&program, input, VmLimits::default(), variables.clone())
                 .with_trace_limit(options.trace_limit);
-        while let Some(value) = vm.next_result()? {
-            last = Some(value.clone());
-            results.push(value);
+        loop {
+            match vm.next_result() {
+                Ok(Some(value)) => {
+                    last = Some(value.clone());
+                    results.push(value);
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    runtime_error = Some(error);
+                    break;
+                }
+            }
         }
         if options.trace_limit != 0 {
             for entry in vm.trace() {
@@ -200,6 +210,9 @@ fn run_filter<R: Read, W: Write, E: Write>(
             }
         }
         observations.push(vm.observations());
+        if runtime_error.is_some() {
+            break 'documents;
+        }
     }
 
     if options.raw_output {
@@ -218,6 +231,9 @@ fn run_filter<R: Read, W: Write, E: Write>(
     }
     if let Some(path) = &options.report_file {
         write_report(path, &observations, results.len())?;
+    }
+    if let Some(error) = runtime_error {
+        return Err(RunError::Runtime(error));
     }
     Ok(exit_status(options.exit_status, last.as_ref()))
 }

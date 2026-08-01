@@ -1,5 +1,6 @@
 //! Pull-based bytecode VM kernel with explicit bounded stacks and forks.
 
+use std::collections::VecDeque;
 use std::{collections::BTreeMap, sync::Arc};
 
 use thiserror::Error;
@@ -128,6 +129,7 @@ pub struct Vm {
     trace_limit: usize,
     done: bool,
     tree_started: bool,
+    tree_results: VecDeque<Result<Value, VmError>>,
 }
 
 impl Vm {
@@ -175,6 +177,7 @@ impl Vm {
             trace_limit: 0,
             done: false,
             tree_started: false,
+            tree_results: VecDeque::new(),
         }
     }
 
@@ -194,6 +197,22 @@ impl Vm {
     pub fn next_result(&mut self) -> Result<Option<Value>, VmError> {
         if self.done {
             return Ok(None);
+        }
+        if let Some(result) = self.tree_results.pop_front() {
+            match result {
+                Ok(value) => {
+                    self.observations.results += 1;
+                    if self.tree_results.is_empty() {
+                        self.done = true;
+                    }
+                    return Ok(Some(value));
+                }
+                Err(error) => {
+                    self.tree_results.clear();
+                    self.done = true;
+                    return Err(error);
+                }
+            }
         }
         if !self.tree_started {
             self.tree_started = true;
@@ -241,10 +260,32 @@ impl Vm {
                     return Ok(None);
                 }
                 operation if !super::bytecode::kernel(operation) => {
+                    self.tree_results = crate::eval::evaluate(
+                        &self.bytecode,
+                        &self.input,
+                        &self.variables,
+                        self.limits,
+                        &mut self.observations,
+                    )
+                    .into();
+                    if let Some(result) = self.tree_results.pop_front() {
+                        return match result {
+                            Ok(value) => {
+                                self.observations.results += 1;
+                                if self.tree_results.is_empty() {
+                                    self.done = true;
+                                }
+                                Ok(Some(value))
+                            }
+                            Err(error) => {
+                                self.tree_results.clear();
+                                self.done = true;
+                                Err(error)
+                            }
+                        };
+                    }
                     self.done = true;
-                    return Err(VmError::Unsupported {
-                        operation: format!("{operation:?}").into(),
-                    });
+                    return Ok(None);
                 }
                 _ => {}
             }

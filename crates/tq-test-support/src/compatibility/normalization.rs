@@ -81,7 +81,10 @@ pub fn normalize_jq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, N
     let results = serde_json::Deserializer::from_slice(&outcome.stdout)
         .into_iter::<Value>()
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| NormalizationError::Jq(error.to_string()))?;
+        .map_err(|error| NormalizationError::Jq(error.to_string()))?
+        .into_iter()
+        .map(canonicalize_numbers)
+        .collect();
     Ok(observation(
         ToolKind::Jq,
         outcome,
@@ -118,7 +121,7 @@ pub fn normalize_yq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, N
         return Ok(observation(
             ToolKind::Yq,
             outcome,
-            results,
+            results.into_iter().map(canonicalize_numbers).collect(),
             None,
             vec![NormalizationNote::YamlPresentationNotRetained],
         ));
@@ -127,7 +130,10 @@ pub fn normalize_yq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, N
     let results = yaml_serde::Deserializer::from_str(&text)
         .map(Value::deserialize)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| NormalizationError::Yq(error.to_string()))?;
+        .map_err(|error| NormalizationError::Yq(error.to_string()))?
+        .into_iter()
+        .map(canonicalize_numbers)
+        .collect();
     Ok(observation(
         ToolKind::Yq,
         outcome,
@@ -145,27 +151,21 @@ pub fn normalize_yq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, N
 pub fn normalize_toon_sequence(
     outcome: &ProcessOutcome,
 ) -> Result<NormalizedObservation, NormalizationError> {
-    let mut results = Vec::new();
-    if !outcome.stdout.is_empty() {
-        if outcome.stdout.first() != Some(&0x1e) {
-            return Err(NormalizationError::ToonSequence(
-                "first record does not begin with RS".to_owned(),
-            ));
-        }
-        for framed in outcome.stdout[1..].split(|byte| *byte == 0x1e) {
-            if framed.last() != Some(&b'\n') {
-                return Err(NormalizationError::ToonSequence(
-                    "record does not end with LF".to_owned(),
-                ));
-            }
-            let document = std::str::from_utf8(&framed[..framed.len() - 1])
-                .map_err(|error| NormalizationError::ToonSequence(error.to_string()))?;
-            results.push(
-                toon_format::decode_strict(document)
-                    .map_err(|error| NormalizationError::ToonSequence(error.to_string()))?,
-            );
-        }
-    }
+    let results = tq_formats::decode_toon_sequence(
+        &outcome.stdout,
+        "<tq-compatibility-output>",
+        tq_toon::DecoderConfig::default(),
+    )
+    .map_err(|error| NormalizationError::ToonSequence(error.to_string()))?
+    .into_iter()
+    .map(|document| {
+        document
+            .value
+            .to_json()
+            .map(canonicalize_numbers)
+            .map_err(|error| NormalizationError::ToonSequence(error.to_string()))
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     Ok(observation(
         ToolKind::Tq,
         outcome,
@@ -199,6 +199,9 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
     if code == 0 {
         return None;
     }
+    if code == 2 && matches!(tool, ToolKind::Jq | ToolKind::Yq | ToolKind::Tq) {
+        return Some(ErrorClass::CliUsage);
+    }
     let stderr = String::from_utf8_lossy(&outcome.stderr).to_ascii_lowercase();
     if stderr.contains("unsupported") || stderr.contains("not implemented") {
         return Some(ErrorClass::UnsupportedCapability);
@@ -209,7 +212,15 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
     {
         return Some(ErrorClass::Resource);
     }
-    if stderr.contains("parse error") && stderr.contains("input") {
+    if stderr.contains("parse error") && (tool == ToolKind::Jq || stderr.contains("input")) {
+        return Some(ErrorClass::InputParse);
+    }
+    if tool == ToolKind::Tq
+        && (stderr.contains(" input rejected")
+            || stderr.contains("input rejected")
+            || stderr.contains("input i/o")
+            || stderr.contains("input resource"))
+    {
         return Some(ErrorClass::InputParse);
     }
     if stderr.contains("compile error") || stderr.contains("syntax error") {
@@ -222,10 +233,31 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
         return Some(ErrorClass::RuntimeTypePath);
     }
     match (tool, code) {
-        (ToolKind::Jq, 2 | 4) | (ToolKind::Yq | ToolKind::Tq, 2) => Some(ErrorClass::CliUsage),
+        (ToolKind::Jq, 2 | 4) | (ToolKind::Yq | ToolKind::Tq, 2) | (ToolKind::Tq, 4) => {
+            Some(ErrorClass::CliUsage)
+        }
         (ToolKind::Jq | ToolKind::Tq, 3) => Some(ErrorClass::QueryCompile),
-        (ToolKind::Tq, 4) => Some(ErrorClass::InputParse),
         _ => Some(ErrorClass::RuntimeTypePath),
+    }
+}
+
+fn canonicalize_numbers(value: Value) -> Value {
+    match value {
+        Value::Number(number) => tq_core::Number::parse(&number.to_string())
+            .ok()
+            .and_then(|number| number.to_string().parse().ok())
+            .map(Value::Number)
+            .unwrap_or(Value::Number(number)),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(canonicalize_numbers).collect())
+        }
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, canonicalize_numbers(value)))
+                .collect(),
+        ),
+        other => other,
     }
 }
 
