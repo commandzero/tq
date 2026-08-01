@@ -115,15 +115,15 @@
 
 ## 8. Bytecode Compiler and VM Kernel
 
-- [ ] 8.1 Define the minimal instruction set, operand encoding, constant pool, source map, stack effects, forks, paths, calls, errors, and returns
-- [ ] 8.2 Write bytecode validation tests for invalid jumps, constants, stack effects, fork targets, call arity, instruction boundaries, and source maps
-- [ ] 8.3 Implement `Query<Analyzed> -> Program<Compiled>` and mandatory bytecode validation
-- [ ] 8.4 Implement stable bytecode disassembly with instruction offsets, operands, stack effects, capability metadata, and source spans
-- [ ] 8.5 Write VM-kernel tests for load, duplicate, pop, branch, jump, return, error, fork, backtrack, and zero-result completion
-- [ ] 8.6 Implement bounded explicit value, call-frame, path, and fork stacks with high-water observations
-- [ ] 8.7 Implement pull-based `next_result` execution and cleanup when a caller stops before exhausting results
-- [ ] 8.8 Implement deterministic error unwinding and optional/try catch points without native-stack recursion
-- [ ] 8.9 Add malformed-bytecode and arbitrary-program fuzz targets that require validation failure or panic-free bounded execution
+- [x] 8.1 Define the minimal instruction set, operand encoding, constant pool, source map, stack effects, forks, paths, calls, errors, and returns
+- [x] 8.2 Write bytecode validation tests for invalid jumps, constants, stack effects, fork targets, call arity, instruction boundaries, and source maps
+- [x] 8.3 Implement `Query<Analyzed> -> Program<Compiled>` and mandatory bytecode validation
+- [x] 8.4 Implement stable bytecode disassembly with instruction offsets, operands, stack effects, capability metadata, and source spans
+- [x] 8.5 Write VM-kernel tests for load, duplicate, pop, branch, jump, return, error, fork, backtrack, and zero-result completion
+- [x] 8.6 Implement bounded explicit value, call-frame, path, and fork stacks with high-water observations
+- [x] 8.7 Implement pull-based `next_result` execution and cleanup when a caller stops before exhausting results
+- [x] 8.8 Implement deterministic error unwinding and optional/try catch points without native-stack recursion
+- [x] 8.9 Add malformed-bytecode and arbitrary-program fuzz targets that require validation failure or panic-free bounded execution
 
 ## 9. Incremental TOON Decoder and DOM Builder
 

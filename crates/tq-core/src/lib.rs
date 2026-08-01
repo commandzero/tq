@@ -19,6 +19,7 @@
 //! ```
 
 mod ast;
+mod bytecode;
 mod diagnostic;
 mod lexer;
 mod number;
@@ -27,7 +28,9 @@ mod path;
 mod phase;
 mod resolve;
 mod value;
+mod vm;
 
+pub use bytecode::{Bytecode, BytecodeError};
 pub use diagnostic::{
     Diagnostic, DiagnosticClass, Label, SourceFile, SourceId, SourcePosition, Span,
 };
@@ -43,3 +46,4 @@ pub use resolve::{
     resolve,
 };
 pub use value::{Object, Value, ValueKind};
+pub use vm::{Vm, VmError, VmLimits, VmObservations};
