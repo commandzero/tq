@@ -17,14 +17,14 @@
 - [x] 2.5 Implement atomic source fetching into the external cache with UTC retrieval timestamps, HTTP metadata, compressed size, and SHA-256 calculation
 - [x] 2.6 Implement secure archive inspection/decompression with archive-member validation and uncompressed size/digest recording
 - [x] 2.7 Write failing structural-validation tests for GeoJSON root type, feature-array presence, logical feature count, invalid JSON, and unexpected document shape
-- [ ] 2.8 Implement source JSON validation and manifest population for exact bytes, document shape, feature count, and digests
-- [ ] 2.9 Implement refreshed-campaign mode as the default and explicit frozen-snapshot replay mode for investigations
-- [ ] 2.10 Write failing tests proving that corpus preparation never slices, repeats, pads, samples, or truncates a natural source artifact
-- [ ] 2.11 Add JSON-to-YAML and JSON-to-TOON generation commands that execute outside benchmark timing, use `yaml_serde` rather than deprecated `serde_yaml`, and use library-only format dependencies
-- [ ] 2.12 Implement ordered JSON-model semantic comparison for source JSON, generated YAML, and generated TOON, including numeric-fidelity diagnostics
-- [ ] 2.13 Add tests that reject generated formats with changed types, values, result ordering, object ordering, or unsupported numeric loss
-- [ ] 2.14 Add smoke-corpus support for checked-in `examples/` snapshots and require reports to label it separately from refreshed campaigns
-- [ ] 2.15 Produce a corpus inventory command showing source, snapshot, sizes, feature counts, generated representations, digests, and validation status
+- [x] 2.8 Implement source JSON validation and manifest population for exact bytes, document shape, feature count, and digests
+- [x] 2.9 Implement refreshed-campaign mode as the default and explicit frozen-snapshot replay mode for investigations
+- [x] 2.10 Write failing tests proving that corpus preparation never slices, repeats, pads, samples, or truncates a natural source artifact
+- [x] 2.11 Add JSON-to-YAML and JSON-to-TOON generation commands that execute outside benchmark timing, use `yaml_serde` rather than deprecated `serde_yaml`, and use library-only format dependencies
+- [x] 2.12 Implement ordered JSON-model semantic comparison for source JSON, generated YAML, and generated TOON, including numeric-fidelity diagnostics
+- [x] 2.13 Add tests that reject generated formats with changed types, values, result ordering, object ordering, or unsupported numeric loss
+- [x] 2.14 Add smoke-corpus support for checked-in `examples/` snapshots and require reports to label it separately from refreshed campaigns
+- [x] 2.15 Produce a corpus inventory command showing source, snapshot, sizes, feature counts, generated representations, digests, and validation status
 
 ## 3. Cross-Tool Compatibility Suite
 

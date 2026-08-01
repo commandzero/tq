@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version",
+    "state",
     "campaign_id",
     "source_id",
     "retrieved_at",
@@ -20,6 +21,12 @@
   "properties": {
     "schema_version": {
       "const": 1
+    },
+    "state": {
+      "enum": [
+        "source-validated",
+        "cross-format-validated"
+      ]
     },
     "campaign_id": {
       "type": "string",
@@ -107,8 +114,7 @@
       "additionalProperties": false,
       "required": [
         "download",
-        "source_json",
-        "generated"
+        "source_json"
       ],
       "properties": {
         "download": {
@@ -156,9 +162,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "source_json",
-        "yaml_equivalent",
-        "toon_equivalent"
+        "source_json"
       ],
       "properties": {
         "source_json": {
@@ -215,6 +219,32 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "cross-format-validated"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "required": [
+              "generated"
+            ]
+          },
+          "validation": {
+            "required": [
+              "yaml_equivalent",
+              "toon_equivalent"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "artifact": {
       "type": "object",
