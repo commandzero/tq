@@ -1,6 +1,6 @@
 //! Pull-based bytecode VM kernel with explicit bounded stacks and forks.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use thiserror::Error;
 
@@ -116,6 +116,7 @@ struct CatchFrame {
 pub struct Vm {
     bytecode: Arc<Bytecode>,
     input: Value,
+    variables: BTreeMap<Arc<str>, Value>,
     pc: usize,
     values: Vec<Value>,
     calls: Vec<CatchFrame>,
@@ -133,19 +134,36 @@ impl Vm {
     /// Creates a VM for a validated compiled program and one document value.
     #[must_use]
     pub fn new(program: &Program<Compiled>, input: Value, limits: VmLimits) -> Self {
-        Self::from_bytecode(program.bytecode_arc(), input, limits)
+        Self::new_with_variables(program, input, limits, BTreeMap::new())
+    }
+
+    /// Creates a VM with immutable CLI/external variable values.
+    #[must_use]
+    pub fn new_with_variables(
+        program: &Program<Compiled>,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
+        Self::from_bytecode(program.bytecode_arc(), input, limits, variables)
     }
 
     /// Creates a VM from an independently decoded and validated bytecode value.
     #[must_use]
     pub fn from_validated_bytecode(bytecode: Bytecode, input: Value, limits: VmLimits) -> Self {
-        Self::from_bytecode(Arc::new(bytecode), input, limits)
+        Self::from_bytecode(Arc::new(bytecode), input, limits, BTreeMap::new())
     }
 
-    fn from_bytecode(bytecode: Arc<Bytecode>, input: Value, limits: VmLimits) -> Self {
+    fn from_bytecode(
+        bytecode: Arc<Bytecode>,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
         Self {
             bytecode,
             input,
+            variables,
             pc: 0,
             values: Vec::new(),
             calls: Vec::new(),
@@ -206,6 +224,17 @@ impl Vm {
                     self.done = true;
                     self.observations.results += 1;
                     return Ok(Some(value));
+                }
+                Operation::Variable(name) => {
+                    let name = self.bytecode.string(*name).ok_or(VmError::InvalidProgram {
+                        message: "variable name missing after validation",
+                    })?;
+                    let value = self.variables.get(name).ok_or_else(|| VmError::Runtime {
+                        message: format!("variable ${name} has no runtime value").into(),
+                    })?;
+                    self.done = true;
+                    self.observations.results += 1;
+                    return Ok(Some(value.clone()));
                 }
                 Operation::Empty => {
                     self.done = true;

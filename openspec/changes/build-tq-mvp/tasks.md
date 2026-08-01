@@ -159,18 +159,18 @@
 
 ## 11. CLI Skeleton and Execution Plumbing
 
-- [ ] 11.1 Write CLI parsing tests for `tq [OPTIONS] FILTER [FILE...]`, `-f`, stdin `-`, conflicting inputs, help, version, and unsupported options
-- [ ] 11.2 Implement command parsing and stable usage/unsupported/compile/input/runtime/resource exit-status categories
-- [ ] 11.3 Implement ordered stdin/file document sources, one-document-at-a-time lifecycle, and source identity propagation
-- [ ] 11.4 Implement default best-effort TOON-to-YAML-to-JSON input detection, strict `--input-format` overrides, TOON/JSON output selection, TOON output defaults, and incompatible-option validation
-- [ ] 11.5 Implement stdout-only data, stderr-only diagnostics/explain/trace, and report-file behavior
-- [ ] 11.6 Implement structured sequence output, unframed output, raw output, join output, and JSON result-text output
-- [ ] 11.7 Implement null input, raw input, slurp, stream, stream-errors, and TOON sequence-input plumbing
-- [ ] 11.8 Implement `--arg`, `--argjson`, and `--argtoon` parsing and resolved-variable injection
-- [ ] 11.9 Implement strictness and TOON/JSON/YAML option validation with explicit input/output format compatibility
-- [ ] 11.10 Implement `-e/--exit-status` last-result and no-result tracking using the accepted jq baseline statuses
-- [ ] 11.11 Implement help/version output with tq, TOON target, jq compatibility target, and build revision
-- [ ] 11.12 Implement `tq compatibility` from the shared compatibility manifest rather than a hand-maintained feature list
+- [x] 11.1 Write CLI parsing tests for `tq [OPTIONS] FILTER [FILE...]`, `-f`, stdin `-`, conflicting inputs, help, version, and unsupported options
+- [x] 11.2 Implement command parsing and stable usage/unsupported/compile/input/runtime/resource exit-status categories
+- [x] 11.3 Implement ordered stdin/file document sources, one-document-at-a-time lifecycle, and source identity propagation
+- [x] 11.4 Implement default best-effort TOON-to-YAML-to-JSON input detection, strict `--input-format` overrides, TOON/JSON output selection, TOON output defaults, and incompatible-option validation
+- [x] 11.5 Implement stdout-only data, stderr-only diagnostics/explain/trace, and report-file behavior
+- [x] 11.6 Implement structured sequence output, unframed output, raw output, join output, and JSON result-text output
+- [x] 11.7 Implement null input, raw input, slurp, stream, stream-errors, and TOON sequence-input plumbing
+- [x] 11.8 Implement `--arg`, `--argjson`, and `--argtoon` parsing and resolved-variable injection
+- [x] 11.9 Implement strictness and TOON/JSON/YAML option validation with explicit input/output format compatibility
+- [x] 11.10 Implement `-e/--exit-status` last-result and no-result tracking using the accepted jq baseline statuses
+- [x] 11.11 Implement help/version output with tq, TOON target, jq compatibility target, and build revision
+- [x] 11.12 Implement `tq compatibility` from the shared compatibility manifest rather than a hand-maintained feature list
 
 ## 12. Progressive Language Wave 1: Identity, Navigation, and Generators
 

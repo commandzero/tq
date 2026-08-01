@@ -198,6 +198,9 @@ pub(crate) enum KeyOperand {
 }
 
 impl Bytecode {
+    pub(crate) fn string(&self, index: u32) -> Option<&Arc<str>> {
+        self.strings.get(index as usize)
+    }
     /// Decodes and validates a kernel bytecode word stream. This format is
     /// intended for fuzzing, persistence tests, and untrusted program rejection.
     ///

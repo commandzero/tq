@@ -1,4 +1,13 @@
-//! Library boundary for tq command parsing and execution.
+//! Command parsing and execution boundary for `tq`.
+
+mod args;
+mod runner;
+
+pub use args::{
+    CliError, Command, ExplainFormat, ExternalArgument, ExternalArgumentKind, FilterSource,
+    RunOptions, parse_args,
+};
+pub use runner::{RunError, run, run_with_io};
 
 /// Stable process exit categories. Exact jq-aligned status selection is
 /// performed by the command runner.
@@ -11,12 +20,18 @@ pub enum ExitStatus {
     FalseOrNull = 1,
     /// No result under `--exit-status`.
     NoResult = 4,
-    /// Runtime or input failure.
-    Runtime = 5,
     /// CLI usage failure.
     Usage = 2,
     /// Query compilation failure.
     Compile = 3,
+    /// Structured or raw input failure.
+    Input = 5,
+    /// Query runtime failure.
+    Runtime = 6,
+    /// Configured resource limit failure.
+    Resource = 7,
+    /// Recognized but intentionally unsupported capability.
+    Unsupported = 8,
 }
 
 impl ExitStatus {
