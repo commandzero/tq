@@ -88,15 +88,15 @@
 
 ## 6. tq Core Value and Diagnostic Foundation
 
-- [ ] 6.1 Create the real `tq-core`, `tq-formats`, `tq-toon`, and `tq-cli` crate APIs and ensure production crates do not depend on test-support or subprocess code
-- [ ] 6.2 Add compile-fail tests demonstrating that unresolved/analyzed/compiled typestate phases and document/event plans cannot be interchanged through safe APIs
-- [ ] 6.3 Implement source files, byte spans, line/column mapping, labels, stable diagnostic classes, and bounded context rendering
-- [ ] 6.4 Write value-model tests for every primitive, insertion-ordered objects, shallow clones, deep equality, total ordering, and canonical display boundaries
-- [ ] 6.5 Implement immediate scalar values and reference-counted immutable string/array/object nodes with shallow handle cloning
-- [ ] 6.6 Implement the baseline-approved jq decimal-literal hybrid with arbitrary-precision literal preservation, lazy binary64 interpretation, jq-compatible arithmetic literal invalidation, canonical rendering, and range/resource errors
-- [ ] 6.7 Add structural-sharing tests using pointer/identity observations for read-only branches and nested path updates
-- [ ] 6.8 Implement path component and root-anchored path types without storing mutable references into values
-- [ ] 6.9 Add property tests for ordered conversion between runtime values and serde-compatible JSON values within the supported numeric envelope
+- [x] 6.1 Create the real `tq-core`, `tq-formats`, `tq-toon`, and `tq-cli` crate APIs and ensure production crates do not depend on test-support or subprocess code
+- [x] 6.2 Add compile-fail tests demonstrating that unresolved/analyzed/compiled typestate phases and document/event plans cannot be interchanged through safe APIs
+- [x] 6.3 Implement source files, byte spans, line/column mapping, labels, stable diagnostic classes, and bounded context rendering
+- [x] 6.4 Write value-model tests for every primitive, insertion-ordered objects, shallow clones, deep equality, total ordering, and canonical display boundaries
+- [x] 6.5 Implement immediate scalar values and reference-counted immutable string/array/object nodes with shallow handle cloning
+- [x] 6.6 Implement the baseline-approved jq decimal-literal hybrid with arbitrary-precision literal preservation, lazy binary64 interpretation, jq-compatible arithmetic literal invalidation, canonical rendering, and range/resource errors
+- [x] 6.7 Add structural-sharing tests using pointer/identity observations for read-only branches and nested path updates
+- [x] 6.8 Implement path component and root-anchored path types without storing mutable references into values
+- [x] 6.9 Add property tests for ordered conversion between runtime values and serde-compatible JSON values within the supported numeric envelope
 
 ## 7. Query Lexer, Parser, Resolution, and Analysis
 

@@ -7,8 +7,11 @@ license.workspace = true
 publish = false
 
 [dependencies]
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+thiserror = "2.0.19"
 tq-core = { path = "../tq-core" }
 tq-toon = { path = "../tq-toon" }
+yaml_serde = "0.10.4"
 
 [lints]
 workspace = true
