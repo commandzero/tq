@@ -15,8 +15,14 @@ name = "tq_cli"
 path = "src/lib.rs"
 
 [dependencies]
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+thiserror = "2.0.19"
 tq-core = { path = "../tq-core" }
 tq-formats = { path = "../tq-formats" }
+tq-toon = { path = "../tq-toon" }
+
+[dev-dependencies]
+tempfile = "3.23.0"
 
 [lints]
 workspace = true
