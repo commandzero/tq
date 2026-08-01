@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use wait_timeout::ChildExt;
 
@@ -27,7 +28,8 @@ pub struct Invocation {
 }
 
 /// Classified process completion.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ProcessStatus {
     /// Process exited normally, including nonzero exit codes.
     Exited,
