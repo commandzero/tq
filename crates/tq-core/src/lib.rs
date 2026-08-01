@@ -5,9 +5,9 @@
 //! executor:
 //!
 //! ```compile_fail
-//! use tq_core::{Parsed, Query, execute_document};
+//! use tq_core::{Parsed, Query, execute_document, parse};
 //!
-//! let parsed = Query::<Parsed>::from_source(".");
+//! let parsed: Query<Parsed> = parse(".").unwrap();
 //! execute_document(&parsed, tq_core::Value::Null);
 //! ```
 //!
@@ -18,19 +18,28 @@
 //! execute_document(&event_plan, tq_core::Value::Null);
 //! ```
 
+mod ast;
 mod diagnostic;
+mod lexer;
 mod number;
+mod parser;
 mod path;
 mod phase;
+mod resolve;
 mod value;
 
 pub use diagnostic::{
     Diagnostic, DiagnosticClass, Label, SourceFile, SourceId, SourcePosition, Span,
 };
 pub use number::{Number, NumberError, NumberLimits};
+pub use parser::{parse, parse_bytes};
 pub use path::{Path, PathComponent, PathError};
 pub use phase::{
-    Analyzed, Capabilities, Compiled, Document, Event, Parsed, Plan, Program, Query, Resolved,
-    execute_document,
+    Analysis, Analyzed, Capabilities, CapabilityCause, Compiled, Document, Effect, Event, Parsed,
+    Plan, Program, Query, Resolved, execute_document,
+};
+pub use resolve::{
+    AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,
+    resolve,
 };
 pub use value::{Object, Value, ValueKind};
