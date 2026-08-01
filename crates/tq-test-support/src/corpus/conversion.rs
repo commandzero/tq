@@ -85,12 +85,26 @@ pub fn generate_representations(
     toon_manifest_path: &str,
 ) -> Result<GeneratedArtifacts, ConversionError> {
     let source: Value = serde_json::from_reader(fs::File::open(source_json)?)?;
-    let yaml =
-        yaml_serde::to_string(&source).map_err(|error| ConversionError::Yaml(error.to_string()))?;
-    let toon = toon_format::encode(&source, &toon_format::EncodeOptions::default())
-        .map_err(|error| ConversionError::Toon(error.to_string()))?;
+    // Serializing `serde_json::Value` directly is not interoperable when
+    // serde_json's `arbitrary_precision` feature is enabled: its private
+    // number marker is serialized as a YAML mapping. Convert into the YAML
+    // library's own value model first so external readers observe scalars.
+    let yaml = match json_to_yaml(&source) {
+        Ok(yaml_value) => yaml_serde::to_string(&yaml_value)
+            .map(String::into_bytes)
+            .map_err(|error| ConversionError::Yaml(error.to_string()))?,
+        Err(ConversionError::Yaml(_)) => {
+            // JSON is a YAML 1.2 subset. Retaining the original JSON text is
+            // the lossless YAML profile when yaml_serde's public number model
+            // cannot represent an arbitrary decimal scalar. The YAML parser
+            // acceptance and exact JSON-model validation happen below.
+            fs::read(source_json)?
+        }
+        Err(error) => return Err(error),
+    };
+    let toon = encode_toon_exact(&source)?;
 
-    let yaml = write_generated(yaml_output, yaml_manifest_path, yaml.as_bytes())?;
+    let yaml = write_generated(yaml_output, yaml_manifest_path, &yaml)?;
     let toon = write_generated(toon_output, toon_manifest_path, toon.as_bytes())?;
     Ok(GeneratedArtifacts { yaml, toon })
 }
@@ -107,19 +121,244 @@ pub fn validate_generated_representations(
     toon_input: &Path,
 ) -> Result<(), ConversionError> {
     let source: Value = serde_json::from_reader(fs::File::open(source_json)?)?;
-    let yaml: Value = yaml_serde::from_reader(fs::File::open(yaml_input)?)
+    let yaml_model: yaml_serde::Value = yaml_serde::from_reader(fs::File::open(yaml_input)?)
         .map_err(|error| ConversionError::Yaml(error.to_string()))?;
+    // A JSON-subset YAML artifact is the exact-decimal fallback. Decode that
+    // with the arbitrary-precision ordered JSON path after proving the YAML
+    // parser accepts it; ordinary block YAML uses yaml_serde's value model.
+    let yaml: Value = match serde_json::from_reader(fs::File::open(yaml_input)?) {
+        Ok(value) => value,
+        Err(_) => yaml_to_json(yaml_model)?,
+    };
     compare_ordered(&source, &yaml).map_err(|difference| ConversionError::Semantic {
         format: "yaml".to_owned(),
         difference,
     })?;
 
     let toon_text = fs::read_to_string(toon_input)?;
+    let expected_toon = encode_toon_exact(&source)?;
+    if toon_text != expected_toon {
+        return Err(ConversionError::Toon(
+            "generated TOON differs from its exact-decimal structural encoding".to_owned(),
+        ));
+    }
     let toon: Value = toon_format::decode_strict(&toon_text)
         .map_err(|error| ConversionError::Toon(error.to_string()))?;
-    compare_ordered(&source, &toon).map_err(|difference| ConversionError::Semantic {
+    let toon_model = binary64_number_model(&source)?;
+    compare_ordered(&toon_model, &toon).map_err(|difference| ConversionError::Semantic {
         format: "toon".to_owned(),
         difference,
+    })
+}
+
+const NUMBER_MARKER_PREFIX: &str = "tqnumf4c6a91b7e2d";
+const NUMBER_MARKER_SUFFIX: char = 'z';
+
+fn encode_toon_exact(source: &Value) -> Result<String, ConversionError> {
+    let mut numbers = Vec::new();
+    let marked = mark_numbers(source, &mut numbers)?;
+    let template = toon_format::encode(&marked, &toon_format::EncodeOptions::default())
+        .map_err(|error| ConversionError::Toon(error.to_string()))?;
+    replace_number_markers(&template, &numbers)
+}
+
+fn mark_numbers(value: &Value, numbers: &mut Vec<String>) -> Result<Value, ConversionError> {
+    Ok(match value {
+        Value::Number(number) => {
+            let index = numbers.len();
+            numbers.push(number.to_string());
+            Value::String(format!(
+                "{NUMBER_MARKER_PREFIX}{index}{NUMBER_MARKER_SUFFIX}"
+            ))
+        }
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(|value| mark_numbers(value, numbers))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Object(values) => {
+            let mut object = serde_json::Map::with_capacity(values.len());
+            for (key, value) in values {
+                if key.contains(NUMBER_MARKER_PREFIX) {
+                    return Err(ConversionError::Toon(
+                        "source key collides with exact-number marker namespace".to_owned(),
+                    ));
+                }
+                object.insert(key.clone(), mark_numbers(value, numbers)?);
+            }
+            Value::Object(object)
+        }
+        Value::String(value) => {
+            if value.contains(NUMBER_MARKER_PREFIX) {
+                return Err(ConversionError::Toon(
+                    "source string collides with exact-number marker namespace".to_owned(),
+                ));
+            }
+            value.clone().into()
+        }
+        Value::Null => Value::Null,
+        Value::Bool(value) => Value::Bool(*value),
+    })
+}
+
+fn replace_number_markers(template: &str, numbers: &[String]) -> Result<String, ConversionError> {
+    let mut output = String::with_capacity(template.len());
+    let mut remaining = template;
+    while let Some(start) = remaining.find(NUMBER_MARKER_PREFIX) {
+        output.push_str(&remaining[..start]);
+        let marker = &remaining[start + NUMBER_MARKER_PREFIX.len()..];
+        let Some(end) = marker.find(NUMBER_MARKER_SUFFIX) else {
+            return Err(ConversionError::Toon(
+                "unterminated exact-number marker in TOON encoding".to_owned(),
+            ));
+        };
+        let index = marker[..end]
+            .parse::<usize>()
+            .map_err(|error| ConversionError::Toon(error.to_string()))?;
+        output.push_str(numbers.get(index).ok_or_else(|| {
+            ConversionError::Toon("unknown exact-number marker in TOON encoding".to_owned())
+        })?);
+        remaining = &marker[end + NUMBER_MARKER_SUFFIX.len_utf8()..];
+    }
+    output.push_str(remaining);
+    Ok(output)
+}
+
+fn binary64_number_model(value: &Value) -> Result<Value, ConversionError> {
+    Ok(match value {
+        Value::Number(number) => {
+            if let Some(integer) = number.as_i64() {
+                Value::Number(integer.into())
+            } else if let Some(integer) = number.as_u64() {
+                Value::Number(integer.into())
+            } else {
+                let float = number.as_f64().ok_or_else(|| {
+                    ConversionError::Toon(format!("number is outside binary64: {number}"))
+                })?;
+                if float.is_finite() && float.fract() == 0.0 {
+                    if let Ok(integer) = format!("{float:.0}").parse::<i64>() {
+                        Value::Number(integer.into())
+                    } else {
+                        Value::Number(serde_json::Number::from_f64(float).ok_or_else(|| {
+                            ConversionError::Toon(format!("number is non-finite: {number}"))
+                        })?)
+                    }
+                } else {
+                    Value::Number(serde_json::Number::from_f64(float).ok_or_else(|| {
+                        ConversionError::Toon(format!("number is non-finite: {number}"))
+                    })?)
+                }
+            }
+        }
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .map(binary64_number_model)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Object(values) => {
+            let mut object = serde_json::Map::with_capacity(values.len());
+            for (key, value) in values {
+                object.insert(key.clone(), binary64_number_model(value)?);
+            }
+            Value::Object(object)
+        }
+        Value::String(value) => Value::String(value.clone()),
+        Value::Null => Value::Null,
+        Value::Bool(value) => Value::Bool(*value),
+    })
+}
+
+fn json_to_yaml(value: &Value) -> Result<yaml_serde::Value, ConversionError> {
+    use yaml_serde::Value as Yaml;
+
+    Ok(match value {
+        Value::Null => Yaml::Null,
+        Value::Bool(value) => Yaml::Bool(*value),
+        Value::String(value) => Yaml::String(value.clone()),
+        Value::Number(value) => {
+            let number = if let Some(value) = value.as_i64() {
+                yaml_serde::Number::from(value)
+            } else if let Some(value) = value.as_u64() {
+                yaml_serde::Number::from(value)
+            } else {
+                let float = value.as_f64().ok_or_else(|| {
+                    ConversionError::Yaml(format!(
+                        "number is outside yaml_serde's lossless envelope: {value}"
+                    ))
+                })?;
+                let round_trip = serde_json::Number::from_f64(float).ok_or_else(|| {
+                    ConversionError::Yaml(format!("non-finite JSON number: {value}"))
+                })?;
+                if round_trip.to_string() != value.to_string() {
+                    return Err(ConversionError::Yaml(format!(
+                        "number would lose precision in YAML: {value}"
+                    )));
+                }
+                yaml_serde::Number::from(float)
+            };
+            Yaml::Number(number)
+        }
+        Value::Array(values) => Yaml::Sequence(
+            values
+                .iter()
+                .map(json_to_yaml)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Object(values) => {
+            let mut mapping = yaml_serde::Mapping::new();
+            for (key, value) in values {
+                mapping.insert(Yaml::String(key.clone()), json_to_yaml(value)?);
+            }
+            Yaml::Mapping(mapping)
+        }
+    })
+}
+
+fn yaml_to_json(value: yaml_serde::Value) -> Result<Value, ConversionError> {
+    use yaml_serde::Value as Yaml;
+
+    Ok(match value {
+        Yaml::Null => Value::Null,
+        Yaml::Bool(value) => Value::Bool(value),
+        Yaml::String(value) => Value::String(value),
+        Yaml::Number(value) => {
+            let number = if let Some(value) = value.as_i64() {
+                serde_json::Number::from(value)
+            } else if let Some(value) = value.as_u64() {
+                serde_json::Number::from(value)
+            } else {
+                serde_json::Number::from_f64(value.as_f64().ok_or_else(|| {
+                    ConversionError::Yaml("YAML number has no finite representation".to_owned())
+                })?)
+                .ok_or_else(|| ConversionError::Yaml("non-finite YAML number".to_owned()))?
+            };
+            Value::Number(number)
+        }
+        Yaml::Sequence(values) => Value::Array(
+            values
+                .into_iter()
+                .map(yaml_to_json)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Yaml::Mapping(values) => {
+            let mut object = serde_json::Map::with_capacity(values.len());
+            for (key, value) in values {
+                let Yaml::String(key) = key else {
+                    return Err(ConversionError::Yaml(
+                        "generated YAML contains a non-string mapping key".to_owned(),
+                    ));
+                };
+                object.insert(key, yaml_to_json(value)?);
+            }
+            Value::Object(object)
+        }
+        Yaml::Tagged(_) => {
+            return Err(ConversionError::Yaml(
+                "generated YAML contains a tagged value".to_owned(),
+            ));
+        }
     })
 }
 

@@ -1,0 +1,40 @@
+{
+  "origin": "refreshed",
+  "snapshots": [
+    {
+      "source_id": "microsoft-us-buildings-georgia",
+      "source_url": "https://minedbuildings.z5.web.core.windows.net/legacy/usbuildings-v2/Georgia.geojson.zip",
+      "campaign_id": "2026-08-01T19-24-22.664496Z",
+      "state": "cross-format-validated",
+      "download": {
+        "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.zip",
+        "bytes": 149593148,
+        "sha256": "fdc21453bc9c82e7e82f029fd62ba274e55e065460813e6323cbaa01776fed78"
+      },
+      "source_json": {
+        "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.geojson",
+        "bytes": 1119571788,
+        "sha256": "2e27cf6160636a5981d3b4f8a8c2488420df3a6611c09ed5305643f107ebf1d6"
+      },
+      "generated": {
+        "yaml": {
+          "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.yaml",
+          "bytes": 1119571788,
+          "sha256": "2e27cf6160636a5981d3b4f8a8c2488420df3a6611c09ed5305643f107ebf1d6"
+        },
+        "toon": {
+          "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.toon",
+          "bytes": 1608222424,
+          "sha256": "ad858d1597aad5f935836023c35de5cd2b756b7136c1afc589a20071daa4c2cf"
+        }
+      },
+      "logical_records": 3981792,
+      "validation": {
+        "source_json": "valid",
+        "yaml_equivalent": true,
+        "toon_equivalent": true
+      },
+      "manifest": "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/manifest.json"
+    }
+  ]
+}

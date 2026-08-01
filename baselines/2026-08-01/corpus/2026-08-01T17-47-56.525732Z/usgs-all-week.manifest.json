@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "state": "cross-format-validated",
+  "campaign_id": "2026-08-01T17-47-56.525732Z",
+  "source_id": "usgs-all-week",
+  "retrieved_at": "2026-08-01T17:47:56.525732Z",
+  "request": {
+    "requested_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson",
+    "final_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson",
+    "status": 200,
+    "content_type": "application/json",
+    "etag": null,
+    "last_modified": "Sat, 01 Aug 2026 17:48:04 GMT"
+  },
+  "archive": null,
+  "artifacts": {
+    "download": {
+      "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.geojson",
+      "bytes": 1577836,
+      "sha256": "7e9ca4231f0410fefb786976a8ef84306238543d85ae2d68341d12acd13f6022"
+    },
+    "source_json": {
+      "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.geojson",
+      "bytes": 1577836,
+      "sha256": "7e9ca4231f0410fefb786976a8ef84306238543d85ae2d68341d12acd13f6022"
+    },
+    "generated": {
+      "yaml": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.yaml",
+        "bytes": 1742185,
+        "sha256": "24d1c53b2bc345159a11c7f9955f2e4be98fc46f70f1ef9aa4187e3c22559e12"
+      },
+      "toon": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.toon",
+        "bytes": 1868574,
+        "sha256": "d7690d7f2ec0391cf46e01ff93f574456dde267e9daeea3cfff9319bf7a78395"
+      }
+    }
+  },
+  "document": {
+    "root_type": "FeatureCollection",
+    "logical_records": 2219
+  },
+  "validation": {
+    "source_json": "valid",
+    "yaml_equivalent": true,
+    "toon_equivalent": true
+  },
+  "provenance": {
+    "title": "USGS All Earthquakes, Past 7 Days",
+    "publisher": "U.S. Geological Survey",
+    "landing_page": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+    "license": {
+      "name": "USGS Government Work in the U.S. Public Domain",
+      "url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+    }
+  }
+}

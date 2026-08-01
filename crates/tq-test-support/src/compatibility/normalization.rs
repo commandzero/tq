@@ -97,6 +97,32 @@ pub fn normalize_jq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, N
 ///
 /// Returns a yq normalization error when stdout contains malformed YAML.
 pub fn normalize_yq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, NormalizationError> {
+    if outcome.stdout.is_empty() {
+        return Ok(observation(
+            ToolKind::Yq,
+            outcome,
+            Vec::new(),
+            None,
+            vec![NormalizationNote::YamlPresentationNotRetained],
+        ));
+    }
+    // Compatibility and benchmark adapters request compact JSON from yq.
+    // Its stdout is a JSON text sequence, just like jq's. Prefer that strict
+    // framing so adjacent scalar results cannot collapse into one YAML plain
+    // scalar (for example `1\n2\n`). Retain YAML-document decoding for the
+    // explicitly exercised YAML presentation boundary.
+    if let Ok(results) = serde_json::Deserializer::from_slice(&outcome.stdout)
+        .into_iter::<Value>()
+        .collect::<Result<Vec<_>, _>>()
+    {
+        return Ok(observation(
+            ToolKind::Yq,
+            outcome,
+            results,
+            None,
+            vec![NormalizationNote::YamlPresentationNotRetained],
+        ));
+    }
     let text = String::from_utf8_lossy(&outcome.stdout);
     let results = yaml_serde::Deserializer::from_str(&text)
         .map(Value::deserialize)

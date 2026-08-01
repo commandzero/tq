@@ -90,6 +90,11 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
                 pair[0].as_str() == Some("--input-format") && pair[1].as_str() == Some(format)
             }));
         }
+        for adapter in adapters.iter().filter(|adapter| adapter["tool"] == "yq") {
+            if let Some(query) = adapter.get("query") {
+                assert!(!query.as_str().expect("adapter query").is_empty());
+            }
+        }
     }
     assert_eq!(ids.len(), 13);
 }

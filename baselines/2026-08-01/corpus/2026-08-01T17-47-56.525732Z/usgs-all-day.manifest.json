@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "state": "cross-format-validated",
+  "campaign_id": "2026-08-01T17-47-56.525732Z",
+  "source_id": "usgs-all-day",
+  "retrieved_at": "2026-08-01T17:47:56.525732Z",
+  "request": {
+    "requested_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+    "final_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+    "status": 200,
+    "content_type": "application/json",
+    "etag": null,
+    "last_modified": "Sat, 01 Aug 2026 17:47:20 GMT"
+  },
+  "archive": null,
+  "artifacts": {
+    "download": {
+      "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.geojson",
+      "bytes": 169550,
+      "sha256": "f8cb177dd2671c33f7ebbcf5d5f6c6664b2672bdd97fd3cb32279e28d11f843c"
+    },
+    "source_json": {
+      "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.geojson",
+      "bytes": 169550,
+      "sha256": "f8cb177dd2671c33f7ebbcf5d5f6c6664b2672bdd97fd3cb32279e28d11f843c"
+    },
+    "generated": {
+      "yaml": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.yaml",
+        "bytes": 187107,
+        "sha256": "7de05cd2e89e8c8d20937dd50e6c4a4a12caf17e781a0bf765ea855e3867b460"
+      },
+      "toon": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.toon",
+        "bytes": 200601,
+        "sha256": "5a10369f7c55b0e247627059cec7bf62d8b81eea3ff1d9bfdef0177dd8966c4e"
+      }
+    }
+  },
+  "document": {
+    "root_type": "FeatureCollection",
+    "logical_records": 237
+  },
+  "validation": {
+    "source_json": "valid",
+    "yaml_equivalent": true,
+    "toon_equivalent": true
+  },
+  "provenance": {
+    "title": "USGS All Earthquakes, Past Day",
+    "publisher": "U.S. Geological Survey",
+    "landing_page": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+    "license": {
+      "name": "USGS Government Work in the U.S. Public Domain",
+      "url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits"
+    }
+  }
+}

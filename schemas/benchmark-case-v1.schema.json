@@ -64,6 +64,7 @@
           "input_format": {"enum": ["json", "yaml", "toon"]},
           "applicable": {"type": "boolean"},
           "args": {"type": "array", "items": {"type": "string"}},
+          "query": {"type": "string"},
           "comparison_families": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["same-format", "native-format", "parser-specific"]}}
         }
       }

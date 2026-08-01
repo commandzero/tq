@@ -52,6 +52,8 @@ pub struct ToolObservation {
     pub state: ObservationState,
     /// Ordered structured values.
     pub results: Vec<Value>,
+    /// Exact stdout bytes encoded as lowercase hexadecimal.
+    pub stdout_hex: Option<String>,
     /// Exact raw bytes encoded as lowercase hexadecimal.
     pub raw_stdout_hex: Option<String>,
     /// Lossless stderr bytes encoded as lowercase hexadecimal.

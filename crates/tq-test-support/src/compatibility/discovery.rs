@@ -171,6 +171,7 @@ pub fn discover_tool(
         &outcome.stdout
     };
     let version = String::from_utf8_lossy(version_bytes).trim().to_owned();
+    let build_features = capture_build_features(kind, &path, repository_root);
     Ok(Some(ToolIdentity {
         tool: kind,
         path: path.clone(),
@@ -181,8 +182,48 @@ pub fn discover_tool(
                 .map_err(|_| io::Error::other("executable length does not fit in u64"))?,
             sha256,
         },
-        build_features: Vec::new(),
+        build_features,
     }))
+}
+
+fn capture_build_features(kind: ToolKind, path: &Path, repository_root: &Path) -> Vec<String> {
+    let args = match kind {
+        ToolKind::Jq => vec!["--build-configuration".to_owned()],
+        ToolKind::Yq => vec!["--help".to_owned()],
+        ToolKind::Tq => return Vec::new(),
+    };
+    let Ok(outcome) = run_process(&Invocation {
+        executable: path.to_owned(),
+        args,
+        stdin: Vec::new(),
+        timeout: Duration::from_secs(5),
+        current_dir: Some(repository_root.to_owned()),
+    }) else {
+        return Vec::new();
+    };
+    if outcome.status != ProcessStatus::Exited || outcome.exit_code != Some(0) {
+        return Vec::new();
+    }
+    let output = String::from_utf8_lossy(&outcome.stdout);
+    match kind {
+        ToolKind::Jq => output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        ToolKind::Yq => output
+            .lines()
+            .map(str::trim)
+            .filter(|line| {
+                line.contains("--input-format")
+                    || line.contains("--output-format")
+                    || line.contains("--yaml-")
+            })
+            .map(str::to_owned)
+            .collect(),
+        ToolKind::Tq => Vec::new(),
+    }
 }
 
 fn candidates(kind: ToolKind, root: &Path) -> Vec<PathBuf> {

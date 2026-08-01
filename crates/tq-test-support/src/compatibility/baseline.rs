@@ -34,6 +34,8 @@ pub struct BaselineObservation {
     pub state: ObservationState,
     /// Ordered structured values.
     pub results: Vec<serde_json::Value>,
+    /// Exact raw process stdout in hexadecimal.
+    pub stdout_hex: Option<String>,
     /// Exact raw stdout in hexadecimal.
     pub raw_stdout_hex: Option<String>,
     /// Exact stderr in hexadecimal.
@@ -53,6 +55,7 @@ impl From<&ToolObservation> for BaselineObservation {
         Self {
             state: value.state,
             results: value.results.clone(),
+            stdout_hex: value.stdout_hex.clone(),
             raw_stdout_hex: value.raw_stdout_hex.clone(),
             stderr_hex: value.stderr_hex.clone(),
             process_status: value.process_status,

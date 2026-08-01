@@ -419,7 +419,7 @@ fn invocation(
         .ok_or("missing format")?
         .0;
     let mut args = adapter.args.clone();
-    args.push(case.query.clone());
+    args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
     args.push(path.display().to_string());
     Ok(BenchmarkInvocation {
         executable: identity.path.clone(),

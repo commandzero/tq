@@ -51,6 +51,17 @@ fn yq_preserves_document_sequence_and_records_yaml_boundary() {
 }
 
 #[test]
+fn yq_distinguishes_empty_output_and_compact_json_text_sequences() {
+    assert!(normalize_yq(&outcome(b"")).unwrap().results.is_empty());
+    assert_eq!(
+        normalize_yq(&outcome(b"1\nnull\n{\"z\":2}\n"))
+            .unwrap()
+            .results,
+        [json!(1), json!(null), json!({"z": 2})]
+    );
+}
+
+#[test]
 fn toon_text_sequence_preserves_zero_one_and_multiline_results() {
     assert!(
         normalize_toon_sequence(&outcome(b""))

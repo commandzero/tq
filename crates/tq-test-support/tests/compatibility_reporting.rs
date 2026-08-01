@@ -28,6 +28,7 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
                 tool: ToolKind::Jq,
                 state: ObservationState::Executed,
                 results: vec![json!(value)],
+                stdout_hex: Some(format!("{value:02x}")),
                 raw_stdout_hex: None,
                 stderr_hex: None,
                 process_status: Some(ProcessStatus::Exited),
