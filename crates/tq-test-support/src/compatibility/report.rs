@@ -26,8 +26,62 @@ pub struct CompatibilityReport {
     pub cases: Vec<CaseReport>,
     /// Aggregate capability coverage.
     pub coverage: BTreeMap<String, CoverageCount>,
+    /// Generated tq disposition for every capability tag.
+    #[serde(default)]
+    pub capability_matrix: BTreeMap<String, CapabilityDisposition>,
+    /// Aggregate counts from the generated capability matrix.
+    #[serde(default)]
+    pub capability_counts: CapabilityCounts,
     /// Final campaign result.
     pub final_status: FinalStatus,
+}
+
+/// tq implementation disposition for a capability tag.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CapabilityDisposition {
+    /// Every applicable MVP case executes and has no jq-target difference.
+    Supported,
+    /// Some applicable MVP cases execute while others remain unsupported.
+    Partial,
+    /// An executed tq case has a reviewed semantic difference from jq.
+    Divergent,
+    /// MVP cases exist but none are supported by tq.
+    Unsupported,
+    /// Every case for this capability is intentionally deferred.
+    Deferred,
+    /// tq was unavailable, so support was not observed.
+    Untested,
+}
+
+/// Counts of capability tags by tq disposition.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CapabilityCounts {
+    /// Fully supported capability tags.
+    pub supported: usize,
+    /// Partially supported capability tags.
+    pub partial: usize,
+    /// Capability tags with an observed jq-target divergence.
+    pub divergent: usize,
+    /// Unsupported MVP capability tags.
+    pub unsupported: usize,
+    /// Intentionally deferred capability tags.
+    pub deferred: usize,
+    /// Capability tags not exercised with tq available.
+    pub untested: usize,
+}
+
+impl CapabilityCounts {
+    pub(crate) fn record(&mut self, disposition: CapabilityDisposition) {
+        match disposition {
+            CapabilityDisposition::Supported => self.supported += 1,
+            CapabilityDisposition::Partial => self.partial += 1,
+            CapabilityDisposition::Divergent => self.divergent += 1,
+            CapabilityDisposition::Unsupported => self.unsupported += 1,
+            CapabilityDisposition::Deferred => self.deferred += 1,
+            CapabilityDisposition::Untested => self.untested += 1,
+        }
+    }
 }
 
 /// One logical case across tools.

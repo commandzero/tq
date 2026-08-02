@@ -34,3 +34,9 @@ strip = "symbols"
 
 [profile.bench]
 debug = "line-tables-only"
+
+[patch.crates-io]
+# The published 0.5.0 reference decoder uses `usize::is_multiple_of`,
+# stabilized after tq's Rust 1.85 MSRV. This exact-source patch replaces that
+# one expression with equivalent remainder arithmetic; see vendor/README.md.
+toon-format = { path = "vendor/toon-format" }

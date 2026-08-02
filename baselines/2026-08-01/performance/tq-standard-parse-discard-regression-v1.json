@@ -1,0 +1,2440 @@
+{
+  "schema_version": 1,
+  "campaign_id": "2026-08-02T05:54:55.717241Z",
+  "profile": "standard",
+  "environment": {
+    "collected_at": "2026-08-02T05:54:55.71726Z",
+    "os": "macos",
+    "kernel": "Darwin 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:28:34 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6041",
+    "architecture": "aarch64",
+    "logical_cpus": 14,
+    "physical_cpus": null,
+    "cpu_model": null,
+    "memory_bytes": null,
+    "filesystem": "",
+    "power_settings": "AC Power:\n Sleep On Power Button 1\n lowpowermode         0\n standby              1\n ttyskeepawake        1\n hibernatemode        3\n powernap             1\n hibernatefile        /var/vm/sleepimage\n displaysleep         10\n womp                 1\n networkoversleep     0\n sleep                1\n tcpkeepalive         1\n disksleep            10",
+    "compiler_profile": "release-benchmark",
+    "machine_identity": "08b8ce91ba80003df6ac9fb3f9dc39685746dff93f169c1aa39af744e1ea5ba7"
+  },
+  "corpus": [
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "format": "json",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.geojson",
+        "bytes": 6865,
+        "sha256": "bd4b1ead7ec615ba5395864cc5326b3ab0787e0e94d213c7ca17ccc251e26f4b"
+      },
+      "logical_records": 9,
+      "manifest_sha256": "5822a0c5e63a62909852fd089f356931ae87aae38f498b75a2198fb6f49d5424"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "format": "toon",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.toon",
+        "bytes": 8050,
+        "sha256": "1caa5321b502ea9a0cc91387f06333f6760bf2e24861fb57aece55f874f397b3"
+      },
+      "logical_records": 9,
+      "manifest_sha256": "5822a0c5e63a62909852fd089f356931ae87aae38f498b75a2198fb6f49d5424"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "format": "yaml",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.yaml",
+        "bytes": 7538,
+        "sha256": "7aa3fe43253b80043cb094e8ee05d3fddb5755e66ebba45bc3621718be1523ba"
+      },
+      "logical_records": 9,
+      "manifest_sha256": "5822a0c5e63a62909852fd089f356931ae87aae38f498b75a2198fb6f49d5424"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "format": "json",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.geojson",
+        "bytes": 169550,
+        "sha256": "f8cb177dd2671c33f7ebbcf5d5f6c6664b2672bdd97fd3cb32279e28d11f843c"
+      },
+      "logical_records": 237,
+      "manifest_sha256": "0f629a5d82a13120527c4880ade89fdc0629ac512689993343e2c75d92b5a4bc"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "format": "toon",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.toon",
+        "bytes": 200601,
+        "sha256": "5a10369f7c55b0e247627059cec7bf62d8b81eea3ff1d9bfdef0177dd8966c4e"
+      },
+      "logical_records": 237,
+      "manifest_sha256": "0f629a5d82a13120527c4880ade89fdc0629ac512689993343e2c75d92b5a4bc"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "format": "yaml",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.yaml",
+        "bytes": 187107,
+        "sha256": "7de05cd2e89e8c8d20937dd50e6c4a4a12caf17e781a0bf765ea855e3867b460"
+      },
+      "logical_records": 237,
+      "manifest_sha256": "0f629a5d82a13120527c4880ade89fdc0629ac512689993343e2c75d92b5a4bc"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "format": "json",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.geojson",
+        "bytes": 1577836,
+        "sha256": "7e9ca4231f0410fefb786976a8ef84306238543d85ae2d68341d12acd13f6022"
+      },
+      "logical_records": 2219,
+      "manifest_sha256": "238651fff5a22a5d4665676d933ac22900b387ff8fffcdceb047f7e5da1dfa69"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "format": "toon",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.toon",
+        "bytes": 1868574,
+        "sha256": "d7690d7f2ec0391cf46e01ff93f574456dde267e9daeea3cfff9319bf7a78395"
+      },
+      "logical_records": 2219,
+      "manifest_sha256": "238651fff5a22a5d4665676d933ac22900b387ff8fffcdceb047f7e5da1dfa69"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "format": "yaml",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.yaml",
+        "bytes": 1742185,
+        "sha256": "24d1c53b2bc345159a11c7f9955f2e4be98fc46f70f1ef9aa4187e3c22559e12"
+      },
+      "logical_records": 2219,
+      "manifest_sha256": "238651fff5a22a5d4665676d933ac22900b387ff8fffcdceb047f7e5da1dfa69"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "format": "json",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.geojson",
+        "bytes": 7703746,
+        "sha256": "74095787fdc6de0035baa8037b40feb3300aec0818ae5aa9145f2269696bc0f8"
+      },
+      "logical_records": 10847,
+      "manifest_sha256": "5c0fcff6aa0014058ba89e3c76c6b6a69f5d75c9279a780ff9077a454d962a6f"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "format": "toon",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.toon",
+        "bytes": 9125429,
+        "sha256": "5f8d61f94bb86117fff3b7e9913af1e8a7da34a0a1b7bc58adc3f4b9bdc4745e"
+      },
+      "logical_records": 10847,
+      "manifest_sha256": "5c0fcff6aa0014058ba89e3c76c6b6a69f5d75c9279a780ff9077a454d962a6f"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "format": "yaml",
+      "artifact": {
+        "path": "campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.yaml",
+        "bytes": 8507497,
+        "sha256": "bee064949a11fb558fb32e50fba8fc0225a5307fa4e2f0726ea52ee5234a0902"
+      },
+      "logical_records": 10847,
+      "manifest_sha256": "5c0fcff6aa0014058ba89e3c76c6b6a69f5d75c9279a780ff9077a454d962a6f"
+    }
+  ],
+  "tools": [
+    {
+      "tool": "jq",
+      "path": "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+      "version": "jq-1.8.2-8-g603db3f",
+      "executable": {
+        "path": "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "bytes": 527680,
+        "sha256": "d25a7231a8cd3ab48ecaab2854d56161860c95d8e3ff067dff0065814218691e"
+      },
+      "build_features": [
+        "--with-oniguruma=/opt/homebrew/opt/oniguruma --disable-maintainer-mode --disable-shared --enable-static"
+      ]
+    },
+    {
+      "tool": "yq",
+      "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+      "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2",
+      "executable": {
+        "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "bytes": 12996258,
+        "sha256": "b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952"
+      },
+      "build_features": [
+        "# Use the '-p/--input-format' flag to specify a format type.",
+        "-p, --input-format string               [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \"auto\")",
+        "-o, --output-format string              [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \"auto\")",
+        "-c, --yaml-compact-seq-indent           Use compact sequence indentation where '- ' is considered part of the indentation.",
+        "--yaml-fix-merge-anchor-to-spec     Fix merge anchor to match YAML spec. Will default to true in late 2025"
+      ]
+    },
+    {
+      "tool": "tq",
+      "path": "$HOME/Development/commandzero/tq/target/release/tq",
+      "version": "tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)",
+      "executable": {
+        "path": "$HOME/Development/commandzero/tq/target/release/tq",
+        "bytes": 1704928,
+        "sha256": "ca2ee81407b7bc26a76b155aa5649d833c05bfe0b21e5d2770aa22bbc8214f97"
+      },
+      "build_features": []
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "jq-json",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 31141,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31857,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32209,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31886,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32121,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31886.0,
+          "median_absolute_deviation": 235.0,
+          "p95": 32209.0,
+          "minimum": 31141.0,
+          "maximum": 32209.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 282.2555353446654,
+        "physical_mib_per_second": 0.20532441140716637
+      },
+      "reference_ratios": {
+        "jq-json": 1.0,
+        "yq-json": 0.9986532619248959,
+        "yq-yaml": 0.9958151155527795
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-json",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "json",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 28230,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32010,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31929,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 28444,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32181,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31929.0,
+          "median_absolute_deviation": 252.0,
+          "p95": 32181.0,
+          "minimum": 28230.0,
+          "maximum": 32181.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 281.8754110683078,
+        "physical_mib_per_second": 0.20504789320457598
+      },
+      "reference_ratios": {
+        "jq-json": 1.0013485542244245,
+        "yq-json": 1.0,
+        "yq-yaml": 0.997158026233604
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-yaml",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "yaml",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 32135,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32020,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31833,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32033,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31688,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 32020.0,
+          "median_absolute_deviation": 115.0,
+          "p95": 32135.0,
+          "minimum": 31688.0,
+          "maximum": 32135.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 281.0743285446596,
+        "physical_mib_per_second": 0.22450958766615592
+      },
+      "reference_ratios": {
+        "jq-json": 1.0042024713040205,
+        "yq-json": 1.0028500736008017,
+        "yq-yaml": 1.0
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-json",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "json",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 31284,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 29631,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 29964,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 28340,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32311,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 29964.0,
+          "median_absolute_deviation": 1320.0,
+          "p95": 32311.0,
+          "minimum": 28340.0,
+          "maximum": 32311.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 300.3604325190228,
+        "physical_mib_per_second": 0.21849466633723488
+      },
+      "reference_ratios": {
+        "jq-json": 0.9397227623408393,
+        "yq-json": 0.9384572019167527,
+        "yq-yaml": 0.93579013116802
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-yaml",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "yaml",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 31908,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32039,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32084,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 30044,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32112,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 32039.0,
+          "median_absolute_deviation": 73.0,
+          "p95": 32112.0,
+          "minimum": 30044.0,
+          "maximum": 32112.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 280.90764380910764,
+        "physical_mib_per_second": 0.22437644736322335
+      },
+      "reference_ratios": {
+        "jq-json": 1.0047983441008592,
+        "yq-json": 1.0034451439130572,
+        "yq-yaml": 1.0005933791380388
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-toon",
+      "source_id": "usgs-all-hour",
+      "tier": "small",
+      "input_format": "toon",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "native-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "toon",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-hour/source.toon"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 32103,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 29528,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32393,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32181,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 29459,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 32103.0,
+          "median_absolute_deviation": 290.0,
+          "p95": 32393.0,
+          "minimum": 29459.0,
+          "maximum": 32393.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 280.3476310625175,
+        "physical_mib_per_second": 0.23913896667197185
+      },
+      "reference_ratios": {
+        "jq-json": 1.0068054945744214,
+        "yq-json": 1.005449591280654,
+        "yq-yaml": 1.0025921299188008
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "jq-json",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 32266,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31728,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32122,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32091,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 29340,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 32091.0,
+          "median_absolute_deviation": 175.0,
+          "p95": 32266.0,
+          "minimum": 29340.0,
+          "maximum": 32266.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 7385.248200430026,
+        "physical_mib_per_second": 5.038655085434535
+      },
+      "reference_ratios": {
+        "jq-json": 1.0,
+        "yq-json": 1.005703719953618,
+        "yq-yaml": 1.0055146482845057
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-json",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "json",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 31909,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32125,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31942,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31802,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 30784,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31909.0,
+          "median_absolute_deviation": 107.0,
+          "p95": 32125.0,
+          "minimum": 30784.0,
+          "maximum": 32125.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 7427.371587953242,
+        "physical_mib_per_second": 5.067394162984728
+      },
+      "reference_ratios": {
+        "jq-json": 0.9943286279642267,
+        "yq-json": 1.0,
+        "yq-yaml": 0.9998120006266645
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-yaml",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "yaml",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 32144,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31697,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31769,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31915,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32122,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31915.0,
+          "median_absolute_deviation": 207.0,
+          "p95": 32144.0,
+          "minimum": 31697.0,
+          "maximum": 32144.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 10000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 7425.975246749178,
+        "physical_mib_per_second": 5.591074426439738
+      },
+      "reference_ratios": {
+        "jq-json": 0.9945155962730984,
+        "yq-json": 1.0001880347237457,
+        "yq-yaml": 1.0
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-json",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "json",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 32012,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 30056,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32149,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 28898,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 29650,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 30056.0,
+          "median_absolute_deviation": 1158.0,
+          "p95": 32149.0,
+          "minimum": 28898.0,
+          "maximum": 32149.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 7885.280809156242,
+        "physical_mib_per_second": 5.37980703841761
+      },
+      "reference_ratios": {
+        "jq-json": 0.9365865819076999,
+        "yq-json": 0.9419286094832179,
+        "yq-yaml": 0.9417515274949083
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-yaml",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "yaml",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 32098,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31965,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31987,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 27376,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32000,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31987.0,
+          "median_absolute_deviation": 22.0,
+          "p95": 32098.0,
+          "minimum": 27376.0,
+          "maximum": 32098.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 7409.2600118798255,
+        "physical_mib_per_second": 5.578489396311758
+      },
+      "reference_ratios": {
+        "jq-json": 0.9967592159795581,
+        "yq-json": 1.0024444514086934,
+        "yq-yaml": 1.0022559924800252
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-toon",
+      "source_id": "usgs-all-day",
+      "tier": "medium",
+      "input_format": "toon",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "native-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "toon",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-day/source.toon"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 26796,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31837,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31815,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31908,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 27223,
+          "user_cpu_micros": 0,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31815.0,
+          "median_absolute_deviation": 93.0,
+          "p95": 31908.0,
+          "minimum": 26796.0,
+          "maximum": 31908.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 0.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 7449.316360207448,
+        "physical_mib_per_second": 6.013139133911996
+      },
+      "reference_ratios": {
+        "jq-json": 0.9913994577919043,
+        "yq-json": 0.9970541226613181,
+        "yq-yaml": 0.9968666771110763
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "jq-json",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 27654,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31661,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 27855,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31865,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 30863,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 30863.0,
+          "median_absolute_deviation": 1002.0,
+          "p95": 31865.0,
+          "minimum": 27654.0,
+          "maximum": 31865.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 10000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 71898.38965751871,
+        "physical_mib_per_second": 48.755521780163036
+      },
+      "reference_ratios": {
+        "jq-json": 1.0,
+        "yq-json": 0.5121809552258622,
+        "yq-yaml": 0.34692730522363735
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-json",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "json",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 60258,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 61460,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 58266,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 58300,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 61593,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 60258.0,
+          "median_absolute_deviation": 1335.0,
+          "p95": 61593.0,
+          "minimum": 58266.0,
+          "maximum": 61593.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 40000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 36824.98589398918,
+        "physical_mib_per_second": 24.971649717899233
+      },
+      "reference_ratios": {
+        "jq-json": 1.9524349544762336,
+        "yq-json": 1.0,
+        "yq-yaml": 0.6773529973808747
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-yaml",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "yaml",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 93713,
+          "user_cpu_micros": 90000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 87190,
+          "user_cpu_micros": 90000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 88961,
+          "user_cpu_micros": 100000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 89339,
+          "user_cpu_micros": 90000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 88662,
+          "user_cpu_micros": 90000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 88961.0,
+          "median_absolute_deviation": 378.0,
+          "p95": 93713.0,
+          "minimum": 87190.0,
+          "maximum": 93713.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 90000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 24943.514573802004,
+        "physical_mib_per_second": 18.67646596742643
+      },
+      "reference_ratios": {
+        "jq-json": 2.882448238991673,
+        "yq-json": 1.4763350924358591,
+        "yq-yaml": 1.0
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-json",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "json",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 31734,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31752,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31782,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32268,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31924,
+          "user_cpu_micros": 10000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 31782.0,
+          "median_absolute_deviation": 48.0,
+          "p95": 32268.0,
+          "minimum": 31734.0,
+          "maximum": 32268.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 10000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 69819.39462588888,
+        "physical_mib_per_second": 47.34571986348159
+      },
+      "reference_ratios": {
+        "jq-json": 1.0297767553381072,
+        "yq-json": 0.5274320422184606,
+        "yq-yaml": 0.35725767471139036
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-yaml",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "yaml",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 58972,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 59326,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 62668,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 58196,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 60688,
+          "user_cpu_micros": 40000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 59326.0,
+          "median_absolute_deviation": 1130.0,
+          "p95": 62668.0,
+          "minimum": 58196.0,
+          "maximum": 62668.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 40000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 37403.49930890335,
+        "physical_mib_per_second": 28.005884248528854
+      },
+      "reference_ratios": {
+        "jq-json": 1.9222369827949324,
+        "yq-json": 0.9845331740183876,
+        "yq-yaml": 0.6668764964422612
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-toon",
+      "source_id": "usgs-all-week",
+      "tier": "medium",
+      "input_format": "toon",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "native-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "toon",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-week/source.toon"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 59408,
+          "user_cpu_micros": 20000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 61193,
+          "user_cpu_micros": 20000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 32051,
+          "user_cpu_micros": 20000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31917,
+          "user_cpu_micros": 20000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 31898,
+          "user_cpu_micros": 20000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 32051.0,
+          "median_absolute_deviation": 153.0,
+          "p95": 61193.0,
+          "minimum": 31898.0,
+          "maximum": 61193.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 20000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 69233.40925400142,
+        "physical_mib_per_second": 55.59923347491473
+      },
+      "reference_ratios": {
+        "jq-json": 1.0384926935165084,
+        "yq-json": 0.5318961797603637,
+        "yq-yaml": 0.36028147165611896
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "jq-json",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 89956,
+          "user_cpu_micros": 60000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 90718,
+          "user_cpu_micros": 60000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 93546,
+          "user_cpu_micros": 60000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 84223,
+          "user_cpu_micros": 60000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 85223,
+          "user_cpu_micros": 60000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 89956.0,
+          "median_absolute_deviation": 3590.0,
+          "p95": 93546.0,
+          "minimum": 84223.0,
+          "maximum": 93546.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 60000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 120581.17301791988,
+        "physical_mib_per_second": 81.67175841875343
+      },
+      "reference_ratios": {
+        "jq-json": 1.0,
+        "yq-json": 0.6112636242559322,
+        "yq-yaml": 0.2814379125864281
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-json",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "json",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 143124,
+          "user_cpu_micros": 180000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 147164,
+          "user_cpu_micros": 180000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 150384,
+          "user_cpu_micros": 180000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 149898,
+          "user_cpu_micros": 180000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 142437,
+          "user_cpu_micros": 180000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 147164.0,
+          "median_absolute_deviation": 3220.0,
+          "p95": 150384.0,
+          "minimum": 142437.0,
+          "maximum": 150384.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 180000.0,
+        "system_cpu_micros": 10000.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 73706.88483596532,
+        "physical_mib_per_second": 49.92297505040216
+      },
+      "reference_ratios": {
+        "jq-json": 1.6359553559517988,
+        "yq-json": 1.0,
+        "yq-yaml": 0.4604198604636611
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "yq-yaml",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "yaml",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(false)",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 324219,
+          "user_cpu_micros": 480000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 319272,
+          "user_cpu_micros": 470000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 323603,
+          "user_cpu_micros": 440000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 319630,
+          "user_cpu_micros": 460000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 311926,
+          "user_cpu_micros": 440000,
+          "system_cpu_micros": 20000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 319630.0,
+          "median_absolute_deviation": 3973.0,
+          "p95": 324219.0,
+          "minimum": 311926.0,
+          "maximum": 324219.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 460000.0,
+        "system_cpu_micros": 20000.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 33936.11363138629,
+        "physical_mib_per_second": 25.383666695251453
+      },
+      "reference_ratios": {
+        "jq-json": 3.5531815554270976,
+        "yq-json": 2.171930635209698,
+        "yq-yaml": 1.0
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-json",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "json",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 120313,
+          "user_cpu_micros": 70000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 124541,
+          "user_cpu_micros": 70000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 112435,
+          "user_cpu_micros": 70000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 92350,
+          "user_cpu_micros": 70000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 119746,
+          "user_cpu_micros": 70000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 119746.0,
+          "median_absolute_deviation": 4795.0,
+          "p95": 124541.0,
+          "minimum": 92350.0,
+          "maximum": 124541.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 70000.0,
+        "system_cpu_micros": 10000.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 90583.40153324537,
+        "physical_mib_per_second": 61.353737914564014
+      },
+      "reference_ratios": {
+        "jq-json": 1.331161901374005,
+        "yq-json": 0.813690848305292,
+        "yq-yaml": 0.37463942683728063
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-yaml",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "yaml",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.yaml"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 240468,
+          "user_cpu_micros": 210000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 229113,
+          "user_cpu_micros": 200000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 237819,
+          "user_cpu_micros": 200000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 224059,
+          "user_cpu_micros": 200000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 258100,
+          "user_cpu_micros": 210000,
+          "system_cpu_micros": 10000,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 237819.0,
+          "median_absolute_deviation": 8706.0,
+          "p95": 258100.0,
+          "minimum": 224059.0,
+          "maximum": 258100.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 200000.0,
+        "system_cpu_micros": 10000.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 45610.317089887685,
+        "physical_mib_per_second": 34.11578295175416
+      },
+      "reference_ratios": {
+        "jq-json": 2.6437258215127395,
+        "yq-json": 1.6160134271968687,
+        "yq-yaml": 0.744044676657385
+      }
+    },
+    {
+      "case_id": "benchmark.parse-discard",
+      "adapter_id": "tq-toon",
+      "source_id": "usgs-all-month",
+      "tier": "medium",
+      "input_format": "toon",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "native-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "toon",
+        "empty",
+        "target/corpus/campaigns/2026-08-01T17-47-56.525732Z/usgs-all-month/source.toon"
+      ],
+      "outcome": "timed",
+      "warmups": 1,
+      "requested_samples": 5,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 1024,
+        "rss_bytes": null
+      },
+      "samples": [
+        {
+          "wall_time_micros": 141494,
+          "user_cpu_micros": 110000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 146495,
+          "user_cpu_micros": 110000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 144343,
+          "user_cpu_micros": 110000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 148066,
+          "user_cpu_micros": 110000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        },
+        {
+          "wall_time_micros": 145629,
+          "user_cpu_micros": 110000,
+          "system_cpu_micros": 0,
+          "peak_rss_bytes": null,
+          "first_result_micros": null,
+          "output_bytes": 0
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 5,
+          "median": 145629.0,
+          "median_absolute_deviation": 1286.0,
+          "p95": 148066.0,
+          "minimum": 141494.0,
+          "maximum": 148066.0
+        },
+        "first_result_micros": null,
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 110000.0,
+        "system_cpu_micros": 0.0,
+        "output_bytes": 0,
+        "logical_records_per_second": 74483.79100316558,
+        "physical_mib_per_second": 59.75930112469885
+      },
+      "reference_ratios": {
+        "jq-json": 1.618891458046156,
+        "yq-json": 0.9895694599222636,
+        "yq-yaml": 0.4556174326565091
+      }
+    }
+  ],
+  "comparability": {
+    "comparable": true,
+    "reasons": []
+  },
+  "regression_gate": {
+    "evaluated": true,
+    "thresholds": {
+      "wall_time_percent": 50.0,
+      "peak_rss_percent": 20.0,
+      "minimum_samples": 5
+    },
+    "failures": []
+  },
+  "final_status": "passed"
+}

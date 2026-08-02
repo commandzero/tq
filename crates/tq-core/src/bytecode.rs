@@ -630,14 +630,14 @@ fn validate_instruction(
         Operation::Call { name, arguments } => {
             string(*name)?;
             let name_value = &bytecode.strings[*name as usize];
-            if let Some(builtin) = BuiltinRegistry.get(name_value)
-                && !(builtin.minimum_arity..=builtin.maximum_arity).contains(&arguments.len())
-            {
-                return Err(BytecodeError::CallArity {
-                    instruction: index,
-                    name: Arc::clone(name_value),
-                    arity: arguments.len(),
-                });
+            if let Some(builtin) = BuiltinRegistry.get(name_value) {
+                if !(builtin.minimum_arity..=builtin.maximum_arity).contains(&arguments.len()) {
+                    return Err(BytecodeError::CallArity {
+                        instruction: index,
+                        name: Arc::clone(name_value),
+                        arity: arguments.len(),
+                    });
+                }
             }
             for argument in arguments {
                 target(*argument)?;

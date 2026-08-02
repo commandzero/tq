@@ -16,4 +16,4 @@ workspace = true
 
 [dev-dependencies]
 tempfile = "3.23.0"
-toon-format = { version = "0.5.0", default-features = false }
+toon-format = { version = "=0.5.0", default-features = false }

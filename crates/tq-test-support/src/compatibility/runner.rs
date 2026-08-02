@@ -5,11 +5,12 @@ use std::{collections::BTreeMap, fs, io, io::Write, path::Path, time::Duration};
 use thiserror::Error;
 
 use super::{
-    CaseAdapter, CaseClassification, CaseReport, CaseStatus, CompatibilityCase,
-    CompatibilityCatalog, CompatibilityReport, ContractKind, CoverageCount, ExecutableConfig,
-    FinalStatus, Invocation, InvocationMode, NormalizationError, ObservationState, ProcessError,
-    SemanticDiff, ToolIdentity, ToolKind, ToolObservation, discover_tool, encode_hex, normalize_jq,
-    normalize_raw, normalize_toon_sequence, normalize_yq, run_process,
+    CapabilityCounts, CapabilityDisposition, CaseAdapter, CaseClassification, CaseReport,
+    CaseStatus, CompatibilityCase, CompatibilityCatalog, CompatibilityReport, ContractKind,
+    CoverageCount, ExecutableConfig, FinalStatus, Invocation, InvocationMode, NormalizationError,
+    ObservationState, ProcessError, SemanticDiff, ToolIdentity, ToolKind, ToolObservation,
+    discover_tool, encode_hex, normalize_jq, normalize_raw, normalize_toon_sequence, normalize_yq,
+    run_process,
 };
 
 /// Compatibility campaign size.
@@ -79,6 +80,7 @@ pub fn run_campaign(
         .map(|case| run_case(case, &tools, repository_root, timeout))
         .collect::<Result<Vec<_>, _>>()?;
     let coverage = coverage(&reports);
+    let (capability_matrix, capability_counts) = capability_matrix(catalog, &reports);
     let has_harness_error = reports.iter().any(|case| {
         case.observations
             .iter()
@@ -99,8 +101,81 @@ pub fn run_campaign(
         tools,
         cases: reports,
         coverage,
+        capability_matrix,
+        capability_counts,
         final_status,
     })
+}
+
+fn capability_matrix(
+    catalog: &CompatibilityCatalog,
+    reports: &[CaseReport],
+) -> (BTreeMap<String, CapabilityDisposition>, CapabilityCounts) {
+    let report_by_id = reports
+        .iter()
+        .map(|report| (report.id.as_str(), report))
+        .collect::<BTreeMap<_, _>>();
+    let mut cases_by_capability = BTreeMap::<String, Vec<&CompatibilityCase>>::new();
+    for case in &catalog.cases {
+        if !report_by_id.contains_key(case.id.as_str()) {
+            continue;
+        }
+        for capability in &case.capabilities {
+            cases_by_capability
+                .entry(capability.clone())
+                .or_default()
+                .push(case);
+        }
+    }
+
+    let mut matrix = BTreeMap::new();
+    let mut counts = CapabilityCounts::default();
+    for (capability, cases) in cases_by_capability {
+        let disposition = if cases.iter().all(|case| case.status == CaseStatus::Deferred) {
+            CapabilityDisposition::Deferred
+        } else {
+            let mut executed = 0_usize;
+            let mut skipped = 0_usize;
+            let mut unavailable = 0_usize;
+            let mut divergent = false;
+            for case in cases
+                .into_iter()
+                .filter(|case| case.status == CaseStatus::Mvp)
+            {
+                let report = report_by_id[case.id.as_str()];
+                let tq = report
+                    .observations
+                    .iter()
+                    .find(|observation| observation.tool == ToolKind::Tq)
+                    .expect("runner always records tq disposition");
+                match tq.state {
+                    ObservationState::Executed => executed += 1,
+                    ObservationState::Unavailable => unavailable += 1,
+                    ObservationState::Unsupported | ObservationState::HarnessError => skipped += 1,
+                }
+                divergent |= report.semantic_diffs.iter().any(|difference| {
+                    matches!(
+                        (difference.left, difference.right),
+                        (ToolKind::Jq, ToolKind::Tq) | (ToolKind::Tq, ToolKind::Jq)
+                    )
+                });
+            }
+            if divergent {
+                CapabilityDisposition::Divergent
+            } else if executed > 0 && (skipped > 0 || unavailable > 0) {
+                CapabilityDisposition::Partial
+            } else if executed > 0 {
+                CapabilityDisposition::Supported
+            } else if unavailable > 0 {
+                CapabilityDisposition::Untested
+            } else {
+                CapabilityDisposition::Unsupported
+            }
+        };
+        counts.record(disposition);
+        matrix.insert(capability, disposition);
+    }
+    (matrix, counts)
 }
 
 fn run_case(

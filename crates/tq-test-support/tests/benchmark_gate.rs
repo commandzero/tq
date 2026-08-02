@@ -52,6 +52,23 @@ fn correct_candidate_runs_warmup_and_requested_samples() {
     assert!(row.summary.is_some());
 }
 
+#[test]
+fn signaled_correctness_candidate_is_not_misclassified_as_incorrect() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "signaled", "kill -TERM $$");
+    let row = run_gated_row(
+        &case(),
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(executable),
+        &reference(),
+    )
+    .expect("gated row");
+    assert_eq!(row.outcome, BenchmarkOutcome::OomOrSignal);
+    assert!(row.samples.is_empty());
+}
+
 fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {
     let path = directory.join(name);
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("script");

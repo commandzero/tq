@@ -329,13 +329,13 @@ fn read_stream(
         if read == 0 {
             break;
         }
-        if total.fetch_add(read as u64, Ordering::Relaxed) == 0
-            && let Some((slot, started)) = first
-        {
-            *slot
-                .lock()
-                .map_err(|_| io::Error::other("first-result mutex poisoned"))? =
-                Some(started.elapsed().as_micros());
+        if total.fetch_add(read as u64, Ordering::Relaxed) == 0 {
+            if let Some((slot, started)) = first {
+                *slot
+                    .lock()
+                    .map_err(|_| io::Error::other("first-result mutex poisoned"))? =
+                    Some(started.elapsed().as_micros());
+            }
         }
         let remaining =
             usize::try_from(limit.saturating_sub(captured.len() as u64)).unwrap_or(usize::MAX);
