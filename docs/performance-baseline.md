@@ -1,6 +1,6 @@
 # MVP performance baseline review
 
-The accepted local baseline is evidence, not a claim that tq wins every row.
+The accepted local baseline is evidence. It does not claim that tq wins every row.
 All reports below were collected on machine identity
 `08b8ce91ba80003df6ac9fb3f9dc39685746dff93f169c1aa39af744e1ea5ba7`.
 Direct regression comparisons additionally require identical corpus and tool
@@ -13,8 +13,8 @@ over four natural USGS snapshots and all JSON, YAML, and TOON representations.
 All 276 applicable rows passed their ordered semantic correctness gate and
 timed; 12 YAML/event-stream rows are explicitly unsupported.
 
-The one-sample campaign is broad release evidence, not a statistical
-regression baseline. On the natural 7.7 MB JSON month feed:
+The one-sample campaign provides broad release evidence. It is not a
+statistical regression baseline. On the natural 7.7 MB JSON month feed:
 
 - identity/re-encode took about 177 ms for tq JSON, 316 ms for tq YAML, and
   200 ms for tq TOON, versus 305 ms for jq JSON and 627 ms for yq YAML;
@@ -26,9 +26,9 @@ regression baseline. On the natural 7.7 MB JSON month feed:
 - object construction exposed an unfavorable jq comparison: tq JSON was
   about 6.0 times jq, although it was far faster than the equivalent yq rows.
 
-Startup-dominated small rows and single observations are not used to infer a
-winner. The full JSON report preserves CPU, first-result, throughput, output,
-command, and unavailable-RSS fields.
+Do not use startup-dominated small rows or single observations to select a
+winner. The full JSON report records CPU, first result, throughput, output,
+command, and unavailable RSS fields.
 
 ## Natural-large campaign
 

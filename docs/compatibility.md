@@ -10,9 +10,9 @@ FILTER` for its plan and retention classification.
 
 ## Input and output
 
-Input detection tries TOON, then YAML, then JSON for every source. Use
-`--input-format toon|yaml|json` to override probing; JSON is valid YAML but the
-override is the only way to require JSON parsing.
+Input detection tries TOON, then YAML, then JSON for each source. Use
+`--input-format toon|yaml|json` to select one parser. JSON is valid YAML, so
+this option is the only way to require JSON parsing.
 
 Structured output is a TOON Text Sequence: each result is `RS`, canonical TOON,
 and `LF`. This deliberately differs from jq's newline-delimited JSON and keeps
@@ -47,8 +47,8 @@ intentionally small:
 | `numeric.policy-exponent-over` | result/exit/error | bounded exponent expansion envelope |
 | `numeric.policy-index-over` | result/exit/error | bounded index envelope |
 
-Features outside the MVP are reported as stable unsupported/deferred
-capabilities: user functions/modules, `reduce`/`foreach`, labels/breaks,
-recursive descent, interpolation, regex/date/platform/environment operations,
-automatic stream planning, and extended jq CLI switches. Their next steps are
-separate OpenSpec changes under `openspec/changes/`.
+Features outside the MVP have stable unsupported or deferred status. These
+features include user functions and modules, `reduce` and `foreach`, labels and
+breaks, recursive descent, interpolation, regex, date, platform, and
+environment operations, automatic stream planning, and extended jq CLI
+switches. Each feature has a separate OpenSpec change under `openspec/changes/`.

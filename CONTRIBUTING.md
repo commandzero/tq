@@ -7,10 +7,10 @@ make help
 make preflight
 ```
 
-`make preflight` is deliberately usable before the `tq` engine exists. It checks
-formatting, compilation, lint policy, workspace tests, and the active OpenSpec
-change. Future automation should call this same target; hosted CI is not an MVP
-development dependency.
+`make preflight` works before the `tq` engine exists. It checks formatting,
+compilation, lint policy, workspace tests, and the active OpenSpec change.
+Use this target for future automation. Hosted CI is not required for MVP
+development.
 
 The compatibility, benchmark, and fuzz targets all execute real harnesses:
 
@@ -31,9 +31,9 @@ support only when its ordered normalized result, cardinality, error class, and
 exit behavior satisfy the reviewed jq-target contract. Do not sort objects or
 result streams to hide differences.
 
-Baseline updates are reviewed diffs, never a bulk bless. A changed observation
-must be classified as common agreement, jq-target divergence, CLI adaptation,
-unsupported, or deferred. Preserve raw and normalized evidence for unexpected
+Review each baseline update as a diff. Do not accept all changes in one step.
+Classify each changed observation as common agreement, jq-target divergence,
+CLI adaptation, unsupported, or deferred. Keep raw and normalized evidence for
 crashes, timeouts, signals, and malformed output.
 
 ## Benchmark correctness gates
