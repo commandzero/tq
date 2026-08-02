@@ -10,7 +10,22 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 tq-core = { path = "../crates/tq-core" }
+tq-cli = { path = "../crates/tq-cli" }
 tq-toon = { path = "../crates/tq-toon" }
+
+[[bin]]
+name = "query_parser"
+path = "fuzz_targets/query_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cli_args"
+path = "fuzz_targets/cli_args.rs"
+test = false
+doc = false
+bench = false
 
 [[bin]]
 name = "bytecode_decode"

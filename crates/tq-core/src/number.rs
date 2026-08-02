@@ -210,10 +210,10 @@ impl Number {
         if self.as_f64() == 0.0 && other.as_f64() == 0.0 {
             return Ordering::Equal;
         }
-        if let (Some(left), Some(right)) = (&self.literal, &other.literal)
-            && let (Ok(left), Ok(right)) = (DecimalParts::parse(left), DecimalParts::parse(right))
-        {
-            return compare_exact(&left, &right);
+        if let (Some(left), Some(right)) = (&self.literal, &other.literal) {
+            if let (Ok(left), Ok(right)) = (DecimalParts::parse(left), DecimalParts::parse(right)) {
+                return compare_exact(&left, &right);
+            }
         }
         self.as_f64().total_cmp(&other.as_f64())
     }

@@ -236,13 +236,13 @@ pub fn fetch(
     temporary.flush()?;
     temporary.as_file().sync_all()?;
     let sha256 = encode_hex(&hasher.finalize());
-    if let Some(expected) = &request.expected_sha256
-        && !expected.eq_ignore_ascii_case(&sha256)
-    {
-        return Err(FetchError::DigestMismatch {
-            expected: expected.clone(),
-            actual: sha256,
-        });
+    if let Some(expected) = &request.expected_sha256 {
+        if !expected.eq_ignore_ascii_case(&sha256) {
+            return Err(FetchError::DigestMismatch {
+                expected: expected.clone(),
+                actual: sha256,
+            });
+        }
     }
 
     temporary.persist(destination)?;
@@ -404,13 +404,13 @@ pub fn extract_zip_member(
     temporary.flush()?;
     temporary.as_file().sync_all()?;
     let sha256 = encode_hex(&hasher.finalize());
-    if let Some(expected) = expected_sha256
-        && !expected.eq_ignore_ascii_case(&sha256)
-    {
-        return Err(ArchiveError::DigestMismatch {
-            expected: expected.to_owned(),
-            actual: sha256,
-        });
+    if let Some(expected) = expected_sha256 {
+        if !expected.eq_ignore_ascii_case(&sha256) {
+            return Err(ArchiveError::DigestMismatch {
+                expected: expected.to_owned(),
+                actual: sha256,
+            });
+        }
     }
 
     temporary.persist(destination)?;

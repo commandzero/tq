@@ -11,8 +11,9 @@ use super::{
     summarize_samples,
 };
 use crate::compatibility::{
-    Invocation, NormalizationError, NormalizedObservation, ProcessError, ProcessOutcome, ToolKind,
-    normalize_jq, normalize_raw, normalize_toon_sequence, normalize_yq, run_process,
+    Invocation, NormalizationError, NormalizedObservation, ProcessError, ProcessOutcome,
+    ProcessStatus, ToolKind, normalize_jq, normalize_raw, normalize_toon_sequence, normalize_yq,
+    run_process,
 };
 
 /// Benchmark row construction failures at the harness boundary.
@@ -70,6 +71,19 @@ pub fn run_gated_row(
 ) -> Result<BenchmarkRow, BenchmarkRunnerError> {
     let tool = tool_kind(adapter);
     let candidate = normalize_correctness_run(invocation, tool, case.output_contract.kind);
+    if let Ok(observation) = &candidate {
+        if let Some(outcome) = correctness_process_failure(observation.process_status) {
+            return Ok(row(
+                case,
+                adapter,
+                corpus,
+                tier,
+                invocation,
+                outcome,
+                Vec::new(),
+            ));
+        }
+    }
     let decision = match &candidate {
         Ok(observation) => correctness_gate(case.output_contract.kind, reference, Ok(observation)),
         Err(error) => correctness_gate(
@@ -123,6 +137,14 @@ pub fn run_gated_row(
         BenchmarkOutcome::Timed,
         samples,
     ))
+}
+
+const fn correctness_process_failure(status: ProcessStatus) -> Option<BenchmarkOutcome> {
+    match status {
+        ProcessStatus::Exited => None,
+        ProcessStatus::TimedOut => Some(BenchmarkOutcome::Timeout),
+        ProcessStatus::Signaled => Some(BenchmarkOutcome::OomOrSignal),
+    }
 }
 
 /// Constructs an explicit not-applicable row without invoking a process.
@@ -188,10 +210,10 @@ fn failed_outcome(case: &BenchmarkCase, measured: &MeasuredOutcome) -> Option<Be
             if case.measure_first_result && measured.first_result_micros.is_none() {
                 return Some(BenchmarkOutcome::ResourceLimit);
             }
-            if let (Some(limit), Some(actual)) = (case.limits.rss_bytes, measured.peak_rss_bytes)
-                && actual > limit
-            {
-                return Some(BenchmarkOutcome::ResourceLimit);
+            if let (Some(limit), Some(actual)) = (case.limits.rss_bytes, measured.peak_rss_bytes) {
+                if actual > limit {
+                    return Some(BenchmarkOutcome::ResourceLimit);
+                }
             }
             None
         }

@@ -97,6 +97,21 @@ fn non_comparable_machine_and_corpus_are_visibly_separated() {
 }
 
 #[test]
+fn different_campaign_profiles_are_not_regression_comparable() {
+    let left = campaign("machine-a", "digest-a", 100, 1024);
+    let mut right = left.clone();
+    right.profile = "large".to_owned();
+    let comparison = compare_reports(&left, &right);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("profile"))
+    );
+}
+
+#[test]
 fn tq_regression_gate_uses_configured_self_thresholds_only() {
     let baseline = campaign("machine-a", "digest-a", 100, 1024);
     let candidate = campaign("machine-a", "digest-a", 130, 2048);

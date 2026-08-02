@@ -321,6 +321,9 @@ pub fn compare_reports(
     right: &BenchmarkCampaignReport,
 ) -> Comparability {
     let mut reasons = Vec::new();
+    if left.profile != right.profile {
+        reasons.push("campaign profile differs".to_owned());
+    }
     if left.environment.machine_identity != right.environment.machine_identity {
         reasons.push("machine identity differs".to_owned());
     }
@@ -370,11 +373,11 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 row.tier.clone(),
                 (*reference).to_owned(),
             );
-            if let Some(reference_median) = medians.get(&key)
-                && *reference_median > 0.0
-            {
-                row.reference_ratios
-                    .insert((*reference).to_owned(), own / reference_median);
+            if let Some(reference_median) = medians.get(&key) {
+                if *reference_median > 0.0 {
+                    row.reference_ratios
+                        .insert((*reference).to_owned(), own / reference_median);
+                }
             }
         }
     }
@@ -434,12 +437,13 @@ pub fn evaluate_regression(
         if let (Some(old), Some(new)) = (
             baseline_summary.peak_rss_bytes,
             candidate_summary.peak_rss_bytes,
-        ) && percent_change(old as f64, new as f64) > thresholds.peak_rss_percent
-        {
-            failures.push(format!(
-                "{}/{} peak RSS regressed",
-                candidate_row.case_id, candidate_row.adapter_id
-            ));
+        ) {
+            if percent_change(old as f64, new as f64) > thresholds.peak_rss_percent {
+                failures.push(format!(
+                    "{}/{} peak RSS regressed",
+                    candidate_row.case_id, candidate_row.adapter_id
+                ));
+            }
         }
     }
     RegressionGate {

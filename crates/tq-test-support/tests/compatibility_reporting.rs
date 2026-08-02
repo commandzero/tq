@@ -1,12 +1,17 @@
 //! Compatibility report and reviewed-baseline tests.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+};
 
 use serde_json::json;
 use tq_test_support::{
     compatibility::{
-        CompatibilityBaseline, CompatibilityReport, CoverageCount, FinalStatus, ObservationState,
-        ProcessStatus, ToolKind, ToolObservation, accept_reviewed_candidate, diff_baselines,
+        CapabilityCounts, CapabilityDisposition, CompatibilityBaseline, CompatibilityReport,
+        CoverageCount, FinalStatus, ObservationState, ProcessStatus, ToolKind, ToolObservation,
+        accept_reviewed_candidate, diff_baselines,
     },
     corpus::ArtifactIdentity,
 };
@@ -48,6 +53,14 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
                 harness_errors: 0,
             },
         )]),
+        capability_matrix: BTreeMap::from([(
+            "value.identity".to_owned(),
+            CapabilityDisposition::Supported,
+        )]),
+        capability_counts: CapabilityCounts {
+            supported: 1,
+            ..CapabilityCounts::default()
+        },
         final_status: FinalStatus::Passed,
     }
 }
@@ -56,7 +69,15 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
 fn machine_and_human_reports_include_required_sections() {
     let report = report(1, 10);
     let json = serde_json::to_value(&report).expect("report JSON");
-    for field in ["corpus", "tools", "cases", "coverage", "final_status"] {
+    for field in [
+        "corpus",
+        "tools",
+        "cases",
+        "coverage",
+        "capability_matrix",
+        "capability_counts",
+        "final_status",
+    ] {
         assert!(json.get(field).is_some(), "missing report field {field}");
     }
     let human = report.render_human();
@@ -89,4 +110,42 @@ fn baseline_candidate_requires_exact_explicit_case_reviews() {
 
     let extra = BTreeSet::from(["common.identity".to_owned(), "unchanged.case".to_owned()]);
     assert!(accept_reviewed_candidate(Some(&old), changed, &extra).is_err());
+}
+
+#[test]
+fn published_full_report_has_only_reviewed_jq_target_divergences() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../compatibility/reviews/coverage-v1.json");
+    let report: CompatibilityReport =
+        serde_json::from_slice(&fs::read(path).expect("published compatibility report"))
+            .expect("valid compatibility report");
+    let actual = report
+        .cases
+        .iter()
+        .flat_map(|case| {
+            case.semantic_diffs
+                .iter()
+                .filter(|difference| {
+                    difference.left == ToolKind::Jq && difference.right == ToolKind::Tq
+                })
+                .map(|difference| (case.id.clone(), difference.summary.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let expected = BTreeMap::from([
+        ("cli.sequence-framing".to_owned(), "raw stdout".to_owned()),
+        (
+            "numeric.policy-digits-over".to_owned(),
+            "result sequence, exit code, error class".to_owned(),
+        ),
+        (
+            "numeric.policy-exponent-over".to_owned(),
+            "result sequence, exit code, error class".to_owned(),
+        ),
+        (
+            "numeric.policy-index-over".to_owned(),
+            "result sequence, exit code, error class".to_owned(),
+        ),
+    ]);
+    assert_eq!(actual, expected, "unreviewed jq-target compatibility drift");
+    assert_eq!(report.capability_counts.untested, 0);
 }

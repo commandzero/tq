@@ -231,15 +231,15 @@
 
 ## 16. Hardening, Release Gates, and Deferred Roadmap
 
-- [ ] 16.1 Run formatting, lint, documentation, all unit/integration/property tests, OpenSpec validation, and `cargo test` under the minimum and stable Rust toolchains
-- [ ] 16.2 Run query parser, TOON decoder, bytecode validator, VM, and CLI fuzz targets for the release budget and land all discovered regressions
-- [ ] 16.3 Run the complete refreshed jq/yq/tq MVP compatibility campaign and require zero unexplained tq jq-target failures
-- [ ] 16.4 Publish the generated compatibility matrix with supported, partial, divergent, unsupported, deferred, and untested capability counts
-- [ ] 16.5 Run refreshed standard and natural-large JSON, YAML, and TOON performance campaigns with correctness gates and archive full machine/corpus/tool manifests
-- [ ] 16.6 Review tq startup, throughput, time-to-first-result, peak RSS, spooling, blocking, and failure outcomes without suppressing unfavorable comparisons
-- [ ] 16.7 Establish accepted tq self-regression thresholds from the first stable local baselines and enable manifest-aware local regression reporting
-- [ ] 16.8 Add user documentation for jq-compatible syntax, TOON framing, raw/unframed modes, memory classifications, limits, benchmark reproduction, and known divergences
-- [ ] 16.9 Add contributor documentation for compatibility-case-first development, baseline review, benchmark correctness gates, and capability promotion
-- [ ] 16.10 Create separate follow-up OpenSpec proposals for user functions/modules, reduce/foreach, recursive descent/interpolation, regex/date/platform built-ins, automatic stream planning, and extended jq CLI parity
-- [ ] 16.11 Verify every requirement scenario in all eight MVP capability specs maps to an automated test, report assertion, or explicitly documented manual release check
-- [ ] 16.12 Mark the MVP change ready for archive only after implementation, compatibility, performance, and documentation gates all pass
+- [x] 16.1 Run formatting, lint, documentation, all unit/integration/property tests, OpenSpec validation, and `cargo test` under the minimum and stable Rust toolchains
+- [x] 16.2 Run query parser, TOON decoder, bytecode validator, VM, and CLI fuzz targets for the release budget and land all discovered regressions
+- [x] 16.3 Run the complete refreshed jq/yq/tq MVP compatibility campaign and require zero unexplained tq jq-target failures
+- [x] 16.4 Publish the generated compatibility matrix with supported, partial, divergent, unsupported, deferred, and untested capability counts
+- [x] 16.5 Run refreshed standard and natural-large JSON, YAML, and TOON performance campaigns with correctness gates and archive full machine/corpus/tool manifests
+- [x] 16.6 Review tq startup, throughput, time-to-first-result, peak RSS, spooling, blocking, and failure outcomes without suppressing unfavorable comparisons
+- [x] 16.7 Establish accepted tq self-regression thresholds from the first stable local baselines and enable manifest-aware local regression reporting
+- [x] 16.8 Add user documentation for jq-compatible syntax, TOON framing, raw/unframed modes, memory classifications, limits, benchmark reproduction, and known divergences
+- [x] 16.9 Add contributor documentation for compatibility-case-first development, baseline review, benchmark correctness gates, and capability promotion
+- [x] 16.10 Create separate follow-up OpenSpec proposals for user functions/modules, reduce/foreach, recursive descent/interpolation, regex/date/platform built-ins, automatic stream planning, and extended jq CLI parity
+- [x] 16.11 Verify every requirement scenario in all eight MVP capability specs maps to an automated test, report assertion, or explicitly documented manual release check
+- [x] 16.12 Mark the MVP change ready for archive only after implementation, compatibility, performance, and documentation gates all pass

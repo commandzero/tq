@@ -25,7 +25,8 @@ pub use normalization::{
 };
 pub use process::{Invocation, ProcessError, ProcessOutcome, ProcessStatus, run_process};
 pub use report::{
-    CaseReport, CompatibilityReport, CoverageCount, FinalStatus, ObservationState,
-    REPORT_SCHEMA_VERSION, SemanticDiff, ToolObservation, encode_hex,
+    CapabilityCounts, CapabilityDisposition, CaseReport, CompatibilityReport, CoverageCount,
+    FinalStatus, ObservationState, REPORT_SCHEMA_VERSION, SemanticDiff, ToolObservation,
+    encode_hex,
 };
 pub use runner::{CampaignProfile, RunnerError, run_campaign};

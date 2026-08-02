@@ -12,8 +12,7 @@ formatting, compilation, lint policy, workspace tests, and the active OpenSpec
 change. Future automation should call this same target; hosted CI is not an MVP
 development dependency.
 
-The compatibility, benchmark, and fuzz targets are named now so their interface
-does not drift while their harnesses are built:
+The compatibility, benchmark, and fuzz targets all execute real harnesses:
 
 ```console
 make compatibility-smoke
@@ -24,9 +23,38 @@ make benchmark-large
 make fuzz
 ```
 
-Until the corresponding harness is implemented, these targets fail with an
-explicit staged-implementation message. They must never report a placeholder
-campaign as a successful test or measurement.
+## Compatibility-case-first development
+
+Behavior changes begin as a versioned case under `compatibility/cases/`. Run
+the case against jq and, where applicable, yq before changing tq. Promote tq
+support only when its ordered normalized result, cardinality, error class, and
+exit behavior satisfy the reviewed jq-target contract. Do not sort objects or
+result streams to hide differences.
+
+Baseline updates are reviewed diffs, never a bulk bless. A changed observation
+must be classified as common agreement, jq-target divergence, CLI adaptation,
+unsupported, or deferred. Preserve raw and normalized evidence for unexpected
+crashes, timeouts, signals, and malformed output.
+
+## Benchmark correctness gates
+
+A benchmark row is timed only after its output passes the same semantic
+normalization contract. JSON, YAML, and TOON representations are generated
+outside timing and must match the ordered source model. Natural source files
+are not sliced, repeated, padded, sampled, or truncated. Reports from different
+host or corpus manifests are informative but not directly comparable.
+
+Add a self-regression threshold only after a stable local baseline exists.
+jq/yq ratios are comparisons, not universal tq pass/fail gates. Preserve
+incorrect, unsupported, timeout, signal/OOM, and resource-limit rows.
+
+## Capability promotion
+
+When adding syntax or a built-in, update the resolver registry and capability
+analysis together with parser, evaluator, compatibility, and benchmark cases.
+If a feature retains a complete document, all inputs, or blocking operator
+state, make that visible in `--explain`. Event-plan APIs must remain separated
+from document/whole-input plans by Rust typestate.
 
 ## Baseline-first gate
 

@@ -15,8 +15,9 @@ use tq_test_support::{
     benchmark::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus,
         BenchmarkInvocation, BenchmarkOutcome, BenchmarkSampling, BenchmarkTool, Comparability,
-        DatasetTier, InputFormat, RegressionGate, collect_environment, load_benchmark_catalog,
-        normalize_correctness_run, populate_reference_ratios, run_gated_row, unsupported_row,
+        DatasetTier, InputFormat, RegressionGate, RegressionThresholds, collect_environment,
+        compare_reports, evaluate_regression, load_benchmark_catalog, normalize_correctness_run,
+        populate_reference_ratios, run_gated_row, unsupported_row,
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
     corpus::{
@@ -43,6 +44,8 @@ struct Options {
     origin: String,
     max_samples: Option<usize>,
     selected_cases: Vec<String>,
+    baseline: Option<PathBuf>,
+    regression_thresholds: RegressionThresholds,
 }
 
 struct PreparedDataset {
@@ -171,7 +174,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             BenchmarkOutcome::Timed | BenchmarkOutcome::Unsupported
         )
     });
-    let report = BenchmarkCampaignReport {
+    let mut report = BenchmarkCampaignReport {
         schema_version: 1,
         campaign_id: jiff::Timestamp::now().to_string(),
         profile: options.profile,
@@ -187,11 +190,24 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             BenchmarkFinalStatus::Passed
         },
     };
+    if let Some(path) = &options.baseline {
+        let baseline: BenchmarkCampaignReport = serde_json::from_reader(fs::File::open(path)?)?;
+        report.comparability = compare_reports(&baseline, &report);
+        report.regression_gate =
+            evaluate_regression(&baseline, &report, options.regression_thresholds.clone());
+        if report.regression_gate.evaluated && !report.regression_gate.failures.is_empty() {
+            report.final_status = BenchmarkFinalStatus::Regression;
+        }
+    }
     write_report(&options.output, &report)?;
     print!("{}", report.render_human());
     Ok(ExitCode::SUCCESS)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the command-line grammar stays intentionally explicit and dependency-free"
+)]
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut profile = "smoke".to_owned();
     let mut output = PathBuf::from("target/benchmarks/smoke.json");
@@ -200,6 +216,10 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut origin = "frozen".to_owned();
     let mut max_samples = None;
     let mut selected_cases = Vec::new();
+    let mut baseline = None;
+    let mut wall_time_percent: f64 = 50.0;
+    let mut peak_rss_percent: f64 = 20.0;
+    let mut minimum_samples = 5;
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -222,9 +242,32 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
                 );
             }
             "--case" => selected_cases.push(arguments.next().ok_or("--case needs an ID")?),
+            "--baseline" => {
+                baseline = Some(PathBuf::from(
+                    arguments.next().ok_or("--baseline needs a path")?,
+                ));
+            }
+            "--wall-regression-percent" => {
+                wall_time_percent = arguments
+                    .next()
+                    .ok_or("--wall-regression-percent needs a value")?
+                    .parse()?;
+            }
+            "--rss-regression-percent" => {
+                peak_rss_percent = arguments
+                    .next()
+                    .ok_or("--rss-regression-percent needs a value")?
+                    .parse()?;
+            }
+            "--minimum-regression-samples" => {
+                minimum_samples = arguments
+                    .next()
+                    .ok_or("--minimum-regression-samples needs a value")?
+                    .parse()?;
+            }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench run --profile smoke|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--case ID]"
+                    "Usage: tq-bench run --profile smoke|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
                 );
                 std::process::exit(0);
             }
@@ -256,6 +299,15 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if !matches!(origin.as_str(), "refreshed" | "frozen") {
         return Err(format!("invalid origin: {origin}").into());
     }
+    if !wall_time_percent.is_finite() || wall_time_percent < 0.0 {
+        return Err("--wall-regression-percent must be a finite non-negative number".into());
+    }
+    if !peak_rss_percent.is_finite() || peak_rss_percent < 0.0 {
+        return Err("--rss-regression-percent must be a finite non-negative number".into());
+    }
+    if minimum_samples == 0 {
+        return Err("--minimum-regression-samples must be at least 1".into());
+    }
     Ok(Options {
         profile,
         output,
@@ -264,6 +316,12 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
         origin,
         max_samples,
         selected_cases,
+        baseline,
+        regression_thresholds: RegressionThresholds {
+            wall_time_percent,
+            peak_rss_percent,
+            minimum_samples,
+        },
     })
 }
 

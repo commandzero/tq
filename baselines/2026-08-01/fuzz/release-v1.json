@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "campaign": "build-tq-mvp-release",
+  "tool": {
+    "cargo_fuzz_version": "0.12.0",
+    "toolchain": "nightly"
+  },
+  "budget_seconds_per_target": 10,
+  "targets": [
+    {
+      "name": "toon_decoder",
+      "outcome": "passed",
+      "crashes": 0
+    },
+    {
+      "name": "query_parser",
+      "outcome": "passed",
+      "crashes": 0
+    },
+    {
+      "name": "bytecode_decode",
+      "outcome": "passed",
+      "crashes": 0
+    },
+    {
+      "name": "vm_program",
+      "outcome": "passed",
+      "crashes": 0
+    },
+    {
+      "name": "cli_args",
+      "outcome": "passed",
+      "crashes": 0
+    }
+  ],
+  "notes": [
+    "Each target completed its bounded local release budget without a crash artifact.",
+    "Generated corpora and build products remain ignored; this summary is the release evidence."
+  ]
+}

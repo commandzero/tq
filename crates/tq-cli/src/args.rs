@@ -177,7 +177,7 @@ pub enum CliError {
     Incompatible(String),
 }
 
-/// Parses a jq-shaped argument vector excluding argv[0].
+/// Parses a jq-shaped argument vector excluding `argv[0]`.
 ///
 /// # Errors
 ///

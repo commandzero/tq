@@ -113,7 +113,8 @@ pub enum ToolDiscoveryError {
 /// Discovers and identifies a tool, returning `None` when no candidate exists.
 ///
 /// Explicit configuration is authoritative and invalid overrides return an
-/// error. Otherwise local sibling builds are preferred before `PATH`.
+/// error. Otherwise local sibling builds and repository-local reference builds
+/// are preferred before `PATH`.
 ///
 /// # Errors
 ///
@@ -229,8 +230,14 @@ fn capture_build_features(kind: ToolKind, path: &Path, repository_root: &Path) -
 fn candidates(kind: ToolKind, root: &Path) -> Vec<PathBuf> {
     let sibling = root.parent().unwrap_or(root);
     match kind {
-        ToolKind::Jq => vec![sibling.join("jq/jq")],
-        ToolKind::Yq => vec![sibling.join("yq/yq")],
+        ToolKind::Jq => vec![
+            sibling.join("jq/jq"),
+            root.join("target/reference-build/jq/jq"),
+        ],
+        ToolKind::Yq => vec![
+            sibling.join("yq/yq"),
+            root.join("target/reference-build/yq/yq"),
+        ],
         ToolKind::Tq => vec![root.join("target/release/tq"), root.join("target/debug/tq")],
     }
 }
