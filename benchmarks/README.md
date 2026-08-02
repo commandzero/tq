@@ -9,8 +9,7 @@ USGS feeds for standard small/medium coverage, and the Microsoft US building
 footprint archive for the ~1 GB-class large profile. Representation generation,
 archive extraction, and JSON/YAML/TOON equivalence checks happen before timing.
 
-The Make targets refresh or replay the appropriate corpus and write local
-reports:
+The Make targets refresh or replay the selected corpus and write local reports:
 
 ```console
 make benchmark-smoke

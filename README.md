@@ -21,9 +21,9 @@ target/release/tq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
 Input is read from stdin when no file is supplied. Multiple files and `-` are
-processed in argument order. Best-effort detection tries TOON, then YAML, then
-JSON; use `--input-format toon|yaml|json` when the syntax is ambiguous or an
-exact parser is required.
+processed in argument order. Input detection tries TOON, then YAML, then JSON.
+Use `--input-format toon|yaml|json` when the syntax is ambiguous or when you
+need one parser.
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
@@ -40,22 +40,22 @@ required.
 
 ## Streaming and memory
 
-`--stream` forms jq-compatible `[path,value]` records and container-end
-`[path]` records directly from JSON or TOON decoder events. YAML remains a
-document-at-a-time input. Explicit streaming is the bounded-memory mode for
-large sources:
+`--stream` creates jq-compatible `[path,value]` records and container-end
+`[path]` records from JSON or TOON decoder events. YAML is processed one
+document at a time. Use explicit streaming to limit memory use for large
+sources:
 
 ```console
 tq --stream --input-format json \
   'select(length == 2 and (.[0] | length) == 1)' buildings.geojson
 ```
 
-Use `--explain` or `--explain-json` to see whether a query uses an event,
-subtree, document, whole-input, or blocking plan, what it retains, and its
-resource envelope. Document plans retain one decoded input document. Slurp
-retains all input documents. Sorting, uniqueness, and aggregate operators also
-retain blocking state. Automatic conversion of ordinary document queries into
-stream plans is deliberately deferred.
+Use `--explain` or `--explain-json` to see the query plan and its memory
+limits. The plan can be event, subtree, document, whole-input, or blocking.
+Document plans retain one decoded input document. Slurp retains all input
+documents. Sorting, uniqueness, and aggregate operators also retain blocking
+state. tq does not convert ordinary document queries to stream plans in the
+MVP.
 
 Resource controls include `--max-input-bytes`, `--max-depth`,
 `--max-token-bytes`, `--max-line-bytes`, `--max-lookahead-bytes`,

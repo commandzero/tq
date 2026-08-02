@@ -4,6 +4,7 @@
 /fuzz/Cargo.lock
 
 # Benchmark corpora, caches, generated representations, and local reports
+.local/
 /.tq/
 /benchmark-cache/
 /benchmark-data/

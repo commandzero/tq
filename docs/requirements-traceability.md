@@ -1,10 +1,10 @@
 # MVP requirements traceability
 
-This index is the release mapping for every `#### Scenario:` in the eight
-`build-tq-mvp` capability specifications. A scenario maps to every evidence
-route on its specification row. The checked-in traceability test enumerates the
-scenario headings, requires the exact count below, verifies each evidence path,
-and fails when a scenario is added without revising this review.
+This index maps every `#### Scenario:` in the eight `build-tq-mvp` capability
+specifications to release evidence. Each specification row lists all evidence
+routes for its scenarios. The checked-in traceability test counts the scenario
+headings, checks the count below, checks each evidence path, and fails when a
+new scenario has no revised review.
 
 | Capability spec | Scenarios | Primary automated evidence | Release evidence or manual check |
 | --- | ---: | --- | --- |
@@ -17,13 +17,12 @@ and fails when a scenario is added without revising this review.
 | `toon-stream-io` | 21 | `crates/tq-toon/tests/` plus decoder/writer unit and property tests | TOON rows in standard/large reports and framing compatibility cases |
 | `tq-cli` | 38 | `crates/tq-cli/src/` argument, source, execution, and output tests | Full compatibility report and README command examples |
 
-The mapping is intentionally specification-wide rather than a manually copied
-list of 196 headings: the integration test reads the authoritative OpenSpec
-files directly. Within each row, scenario behavior is exercised by named test
-functions and case IDs derived from the scenario's requirement area. Campaign
-facts that cannot be made hermetic—live recollection, local tool identity,
-natural-large timing/RSS, signals, and release fuzz duration—are preserved in
-the cited machine-readable release artifacts and reviewed manually.
+The mapping is specification-wide. It is not a copied list of 196 headings. The
+integration test reads the OpenSpec files directly. Each row uses named test
+functions and case IDs from its requirement area. The linked machine-readable
+release artifacts record facts that cannot be hermetic: live source data, local
+tool identity, natural-large timing and RSS, signals, and release fuzz time.
+Reviewers check these artifacts manually.
 
 Release review checks the following without suppressing failures:
 
