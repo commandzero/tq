@@ -5,7 +5,7 @@ mod runner;
 
 pub use args::{
     CliError, Command, ExplainFormat, ExternalArgument, ExternalArgumentKind, FilterSource,
-    RunOptions, parse_args,
+    ResourceLimits, RunOptions, parse_args,
 };
 pub use runner::{RunError, run, run_with_io};
 
@@ -31,6 +31,8 @@ pub enum ExitStatus {
     Resource,
     /// Recognized but intentionally unsupported capability.
     Unsupported,
+    /// Execution interrupted by the user.
+    Interrupted,
 }
 
 impl ExitStatus {
@@ -44,6 +46,7 @@ impl ExitStatus {
             Self::Compile => 3,
             Self::NoResult => 4,
             Self::Input | Self::Runtime | Self::Resource => 5,
+            Self::Interrupted => 130,
         }
     }
 }

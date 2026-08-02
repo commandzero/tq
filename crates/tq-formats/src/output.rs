@@ -56,6 +56,20 @@ pub enum OutputError {
     Io(#[from] std::io::Error),
 }
 
+impl OutputError {
+    /// Whether output stopped because the downstream reader closed its pipe.
+    #[must_use]
+    pub fn is_broken_pipe(&self) -> bool {
+        match self {
+            Self::Toon(SequenceError::Io(error)) | Self::Io(error) => {
+                error.kind() == std::io::ErrorKind::BrokenPipe
+            }
+            Self::Json(error) => error.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe),
+            Self::Toon(SequenceError::Cardinality(_)) => false,
+        }
+    }
+}
+
 /// Writes ordered results in the selected structured format.
 ///
 /// JSON emits one jq-compatible JSON text plus LF per result. TOON defaults to

@@ -1,6 +1,12 @@
 //! Bounded evaluator for source-mapped expression bytecode.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use indexmap::IndexMap;
 
@@ -19,11 +25,13 @@ pub(crate) fn evaluate(
     variables: &Environment,
     limits: VmLimits,
     observations: &mut VmObservations,
+    cancellation: Option<&AtomicBool>,
 ) -> Outcomes {
     let mut evaluator = Evaluator {
         bytecode,
         limits,
         observations,
+        cancellation,
     };
     evaluator.node(bytecode.root(), input, variables, 0)
 }
@@ -32,6 +40,7 @@ struct Evaluator<'a> {
     bytecode: &'a Bytecode,
     limits: VmLimits,
     observations: &'a mut VmObservations,
+    cancellation: Option<&'a AtomicBool>,
 }
 
 impl Evaluator<'_> {
@@ -46,6 +55,12 @@ impl Evaluator<'_> {
         environment: &Environment,
         depth: usize,
     ) -> Outcomes {
+        if self
+            .cancellation
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            return one_error(VmError::Interrupted);
+        }
         if depth >= self.limits.call_stack {
             return one_error(resource("call-stack"));
         }

@@ -294,7 +294,7 @@ impl Program<Compiled> {
     /// # Errors
     ///
     /// Returns a pre-input capability diagnostic for document-only programs.
-    pub fn event_plan(self) -> Result<Plan<Compiled, Event>, Box<Diagnostic>> {
+    pub fn event_plan(self) -> Result<Plan<Compiled, Events>, Box<Diagnostic>> {
         let capabilities = self.capabilities();
         if capabilities.document || capabilities.whole_input || capabilities.mutation {
             return Err(Box::new(Diagnostic::new(
@@ -308,20 +308,98 @@ impl Program<Compiled> {
             mode: PhantomData,
         })
     }
+
+    /// Converts a subtree-requiring program to its explicit typed plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pre-input diagnostic when analysis did not require a subtree
+    /// or when the query instead requires all input documents.
+    pub fn subtree_plan(self) -> Result<Plan<Compiled, Subtree>, Box<Diagnostic>> {
+        let capabilities = self.capabilities();
+        if !capabilities.subtree || capabilities.whole_input {
+            return Err(plan_error(
+                "TQ-CAP-SUBTREE-001",
+                "query does not admit the requested subtree plan",
+            ));
+        }
+        Ok(Plan {
+            program: self,
+            mode: PhantomData,
+        })
+    }
+
+    /// Converts a whole-input program to its explicit typed plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pre-input diagnostic unless analysis requires all documents.
+    pub fn whole_input_plan(self) -> Result<Plan<Compiled, WholeInput>, Box<Diagnostic>> {
+        if !self.capabilities().whole_input {
+            return Err(plan_error(
+                "TQ-CAP-WHOLE-001",
+                "query does not require a whole-input plan",
+            ));
+        }
+        Ok(Plan {
+            program: self,
+            mode: PhantomData,
+        })
+    }
+
+    /// Converts a blocking program to a typed blocking document plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pre-input diagnostic unless analysis contains a blocking
+    /// operator.
+    pub fn blocking_plan(self) -> Result<Plan<Compiled, Blocking<Document>>, Box<Diagnostic>> {
+        if !self.capabilities().blocking {
+            return Err(plan_error(
+                "TQ-CAP-BLOCKING-001",
+                "query does not require a blocking plan",
+            ));
+        }
+        Ok(Plan {
+            program: self,
+            mode: PhantomData,
+        })
+    }
+}
+
+fn plan_error(code: &'static str, message: &'static str) -> Box<Diagnostic> {
+    Box::new(Diagnostic::new(code, DiagnosticClass::Compile, message))
 }
 
 /// Document execution marker.
 #[derive(Clone, Copy, Debug)]
 pub struct Document;
-/// Event execution marker.
+/// Event-stream execution marker.
 #[derive(Clone, Copy, Debug)]
-pub struct Event;
+pub struct Events;
+/// Complete-subtree execution marker.
+#[derive(Clone, Copy, Debug)]
+pub struct Subtree;
+/// All-documents execution marker.
+#[derive(Clone, Copy, Debug)]
+pub struct WholeInput;
+/// Blocking execution wrapper around another input mode.
+#[derive(Clone, Copy, Debug)]
+pub struct Blocking<M>(PhantomData<M>);
 
 /// Mode-safe compiled execution plan.
 #[derive(Clone, Debug)]
 pub struct Plan<P: QueryPhase, M> {
     program: Program<P>,
     mode: PhantomData<M>,
+}
+
+impl<M> Plan<Compiled, M> {
+    /// Compiled program admitted by this typed plan.
+    #[must_use]
+    pub fn program(&self) -> &Program<Compiled> {
+        &self.program
+    }
 }
 
 /// Temporary document executor proving phase/mode constraints. The bytecode VM
@@ -334,7 +412,7 @@ pub fn execute_document(plan: &Plan<Compiled, Document>, input: Value) -> Vec<Va
 
 #[cfg(test)]
 mod tests {
-    use crate::{ResolveOptions, parse, resolve};
+    use crate::{AnalysisContext, ResolveOptions, analyze_with_context, parse, resolve};
 
     use super::{Analysis, Capabilities};
 
@@ -353,5 +431,38 @@ mod tests {
             .compile()
             .unwrap();
         assert!(program.event_plan().is_err());
+    }
+
+    #[test]
+    fn analyzed_effects_admit_only_matching_typed_plans() {
+        let event = analyze_with_context(
+            resolve(parse(".").unwrap(), &ResolveOptions::default()).unwrap(),
+            AnalysisContext {
+                event_input: true,
+                whole_input: false,
+            },
+        )
+        .compile()
+        .unwrap();
+        assert!(event.event_plan().is_ok());
+
+        let whole = analyze_with_context(
+            resolve(parse(".").unwrap(), &ResolveOptions::default()).unwrap(),
+            AnalysisContext {
+                event_input: false,
+                whole_input: true,
+            },
+        )
+        .compile()
+        .unwrap();
+        assert!(whole.whole_input_plan().is_ok());
+
+        let blocking = analyze_with_context(
+            resolve(parse("sort").unwrap(), &ResolveOptions::default()).unwrap(),
+            AnalysisContext::default(),
+        )
+        .compile()
+        .unwrap();
+        assert!(blocking.blocking_plan().is_ok());
     }
 }
