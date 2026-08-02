@@ -216,18 +216,18 @@
 
 ## 15. Streaming Plans and Resource Governance
 
-- [ ] 15.1 Write typed plan-selection tests for document, event, subtree, whole-input, blocking, and rejected combinations
-- [ ] 15.2 Implement `Program<Compiled> -> Plan<Document>` and `Plan<Events>` conversions with pre-input incompatibility errors
-- [ ] 15.3 Implement jq-compatible stream path/value event formation from TOON and JSON decoder events
-- [ ] 15.4 Enable explicit stream compatibility cases for jq, yq where applicable, and tq; resolve path, empty-container, and stream-error differences
-- [ ] 15.5 Implement `--explain` human and machine reports with syntax causes, input-detection policy or override, retained working set, blocking, and spool requirements
-- [ ] 15.6 Write resource-limit tests for format-detection lookahead/replay, depth, token/line, VM stacks, preparation memory, spool bytes, result count, output bytes, and VM steps
-- [ ] 15.7 Implement coherent CLI/library resource configuration and stable limit diagnostics with high-water observations
-- [ ] 15.8 Ensure untrusted declared lengths never trigger proportional unchecked allocation and add allocation-regression tests
-- [ ] 15.9 Implement interrupt cancellation, downstream broken-pipe handling, VM cleanup, and spool cleanup
-- [ ] 15.10 Add partial-output tests proving prior framed results remain valid when a later runtime/resource error occurs
-- [ ] 15.11 Run the opt-in large explicit-stream tq benchmark locally, record the complete host manifest, and evaluate the 128 MiB peak-RSS objective
-- [ ] 15.12 Profile any failed memory objective, fix retained-input growth, and add a regression benchmark before claiming bounded streaming
+- [x] 15.1 Write typed plan-selection tests for document, event, subtree, whole-input, blocking, and rejected combinations
+- [x] 15.2 Implement `Program<Compiled> -> Plan<Document>` and `Plan<Events>` conversions with pre-input incompatibility errors
+- [x] 15.3 Implement jq-compatible stream path/value event formation from TOON and JSON decoder events
+- [x] 15.4 Enable explicit stream compatibility cases for jq, yq where applicable, and tq; resolve path, empty-container, and stream-error differences
+- [x] 15.5 Implement `--explain` human and machine reports with syntax causes, input-detection policy or override, retained working set, blocking, and spool requirements
+- [x] 15.6 Write resource-limit tests for format-detection lookahead/replay, depth, token/line, VM stacks, preparation memory, spool bytes, result count, output bytes, and VM steps
+- [x] 15.7 Implement coherent CLI/library resource configuration and stable limit diagnostics with high-water observations
+- [x] 15.8 Ensure untrusted declared lengths never trigger proportional unchecked allocation and add allocation-regression tests
+- [x] 15.9 Implement interrupt cancellation, downstream broken-pipe handling, VM cleanup, and spool cleanup
+- [x] 15.10 Add partial-output tests proving prior framed results remain valid when a later runtime/resource error occurs
+- [x] 15.11 Run the opt-in large explicit-stream tq benchmark locally, record the complete host manifest, and evaluate the 128 MiB peak-RSS objective
+- [x] 15.12 Profile any failed memory objective, fix retained-input growth, and add a regression benchmark before claiming bounded streaming
 
 ## 16. Hardening, Release Gates, and Deferred Roadmap
 

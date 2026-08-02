@@ -7,12 +7,14 @@ use tq_core::{Diagnostic, Value};
 
 mod adapters;
 mod output;
+mod stream;
 
 pub use adapters::{
     DecodeOptions, ProbeReport, ReplayReader, VecDocumentSource, decode_bytes, decode_json,
     decode_toon, decode_toon_sequence, decode_yaml, probe_format, probe_reader,
 };
 pub use output::{OutputError, OutputOptions, ToonFraming, write_results};
+pub use stream::{StreamOptions, stream_json, stream_toon};
 
 /// Supported structured input syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

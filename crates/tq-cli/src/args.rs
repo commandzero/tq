@@ -10,7 +10,7 @@ use tq_toon::{Delimiter, KeyFolding, WriterConfig};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
     /// Compile and run a filter.
-    Run(RunOptions),
+    Run(Box<RunOptions>),
     /// Print generated compatibility coverage.
     Compatibility,
     /// Print stable help.
@@ -57,6 +57,48 @@ pub struct ExternalArgument {
     pub value: String,
     /// Parser selected by the option.
     pub kind: ExternalArgumentKind,
+}
+
+/// Coherent untrusted-input, evaluation, and output resource envelope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResourceLimits {
+    /// Maximum bytes read from one input source.
+    pub input_bytes: u64,
+    /// Maximum structured nesting depth.
+    pub depth: usize,
+    /// Maximum bytes in one scalar/key token.
+    pub token_bytes: usize,
+    /// Maximum bytes in one physical TOON line.
+    pub line_bytes: usize,
+    /// Maximum format-detection lookahead bytes.
+    pub lookahead_bytes: usize,
+    /// Maximum VM work per input document or stream record.
+    pub vm_steps: u64,
+    /// Maximum emitted results across the invocation.
+    pub results: u64,
+    /// Maximum bytes written to stdout.
+    pub output_bytes: u64,
+    /// Maximum in-memory unknown-array preparation bytes.
+    pub preparation_memory_bytes: usize,
+    /// Maximum disk-backed unknown-array spool bytes.
+    pub spool_bytes: u64,
+}
+
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        Self {
+            input_bytes: 2 * 1024 * 1024 * 1024,
+            depth: 256,
+            token_bytes: 8 * 1024 * 1024,
+            line_bytes: 16 * 1024 * 1024,
+            lookahead_bytes: 64 * 1024,
+            vm_steps: 10_000_000,
+            results: 100_000_000,
+            output_bytes: 8 * 1024 * 1024 * 1024,
+            preparation_memory_bytes: 8 * 1024 * 1024,
+            spool_bytes: 8 * 1024 * 1024 * 1024,
+        }
+    }
 }
 
 /// Validated run configuration.
@@ -106,6 +148,8 @@ pub struct RunOptions {
     pub trace_limit: usize,
     /// Optional machine report file.
     pub report_file: Option<PathBuf>,
+    /// Invocation resource envelope.
+    pub limits: ResourceLimits,
 }
 
 /// Stable CLI parse/validation failure.
@@ -179,6 +223,7 @@ where
     let mut explain = None;
     let mut trace_limit = 0;
     let mut report_file = None;
+    let mut limits = ResourceLimits::default();
     let mut positional_only = false;
 
     while let Some(token) = tokens.next() {
@@ -290,6 +335,20 @@ where
             "--report-file" => {
                 report_file = Some(PathBuf::from(next_value(&mut tokens, &token)?));
             }
+            "--max-input-bytes" => limits.input_bytes = parse_limit(&mut tokens, &token)?,
+            "--max-depth" => limits.depth = parse_limit(&mut tokens, &token)?,
+            "--max-token-bytes" => limits.token_bytes = parse_limit(&mut tokens, &token)?,
+            "--max-line-bytes" => limits.line_bytes = parse_limit(&mut tokens, &token)?,
+            "--max-lookahead-bytes" => {
+                limits.lookahead_bytes = parse_limit(&mut tokens, &token)?;
+            }
+            "--max-vm-steps" => limits.vm_steps = parse_limit(&mut tokens, &token)?,
+            "--max-results" => limits.results = parse_limit(&mut tokens, &token)?,
+            "--max-output-bytes" => limits.output_bytes = parse_limit(&mut tokens, &token)?,
+            "--prepare-memory-bytes" => {
+                limits.preparation_memory_bytes = parse_limit(&mut tokens, &token)?;
+            }
+            "--max-spool-bytes" => limits.spool_bytes = parse_limit(&mut tokens, &token)?,
             "-" => positional(&mut inline_filter, &mut files, token, filter_file.is_some()),
             value if value.starts_with('-') => return Err(CliError::Unsupported(token)),
             _ => positional(&mut inline_filter, &mut files, token, filter_file.is_some()),
@@ -335,7 +394,7 @@ where
         ));
     }
 
-    Ok(Command::Run(RunOptions {
+    Ok(Command::Run(Box::new(RunOptions {
         filter,
         files,
         input_format,
@@ -356,7 +415,19 @@ where
         explain,
         trace_limit,
         report_file,
-    }))
+        limits,
+    })))
+}
+
+fn parse_limit<T: std::str::FromStr>(
+    tokens: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<T, CliError> {
+    let value = next_value(tokens, option)?;
+    value.parse().map_err(|_| CliError::InvalidValue {
+        option: option.to_owned(),
+        value,
+    })
 }
 
 fn positional(

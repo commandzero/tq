@@ -12,9 +12,9 @@
 //! ```
 //!
 //! ```compile_fail
-//! use tq_core::{Compiled, Event, Plan, execute_document};
+//! use tq_core::{Compiled, Events, Plan, execute_document};
 //!
-//! let event_plan: Plan<Compiled, Event> = todo!();
+//! let event_plan: Plan<Compiled, Events> = todo!();
 //! execute_document(&event_plan, tq_core::Value::Null);
 //! ```
 
@@ -39,8 +39,8 @@ pub use number::{Number, NumberError, NumberLimits};
 pub use parser::{parse, parse_bytes};
 pub use path::{Path, PathComponent, PathError};
 pub use phase::{
-    Analysis, Analyzed, Capabilities, CapabilityCause, Compiled, Document, Effect, Event, Parsed,
-    Plan, Program, Query, Resolved, execute_document,
+    Analysis, Analyzed, Blocking, Capabilities, CapabilityCause, Compiled, Document, Effect,
+    Events, Parsed, Plan, Program, Query, Resolved, Subtree, WholeInput, execute_document,
 };
 pub use resolve::{
     AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,

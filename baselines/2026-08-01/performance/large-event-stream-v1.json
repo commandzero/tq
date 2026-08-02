@@ -1,0 +1,405 @@
+{
+  "schema_version": 1,
+  "campaign_id": "2026-08-02T00:40:03.989942Z",
+  "profile": "large",
+  "environment": {
+    "collected_at": "2026-08-02T00:40:03.990011Z",
+    "os": "macos",
+    "kernel": "Darwin 25.5.0 Darwin Kernel Version 25.5.0: Tue Jun  9 22:28:34 PDT 2026; root:xnu-12377.121.10~1/RELEASE_ARM64_T6041",
+    "architecture": "aarch64",
+    "logical_cpus": 14,
+    "physical_cpus": null,
+    "cpu_model": null,
+    "memory_bytes": null,
+    "filesystem": "",
+    "power_settings": "AC Power:\n Sleep On Power Button 1\n lowpowermode         0\n standby              1\n ttyskeepawake        1\n hibernatemode        3\n powernap             1\n hibernatefile        /var/vm/sleepimage\n displaysleep         10\n womp                 1\n networkoversleep     0\n sleep                1\n tcpkeepalive         1\n disksleep            10",
+    "compiler_profile": "release-benchmark",
+    "machine_identity": "08b8ce91ba80003df6ac9fb3f9dc39685746dff93f169c1aa39af744e1ea5ba7"
+  },
+  "corpus": [
+    {
+      "origin": "frozen",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "format": "json",
+      "artifact": {
+        "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.geojson",
+        "bytes": 1119571788,
+        "sha256": "2e27cf6160636a5981d3b4f8a8c2488420df3a6611c09ed5305643f107ebf1d6"
+      },
+      "logical_records": 3981792,
+      "manifest_sha256": "8c54314e352ccecd2942f9a80407debcb88267a782df0ea65a8ebab94f08790e"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "format": "toon",
+      "artifact": {
+        "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.toon",
+        "bytes": 1608222424,
+        "sha256": "ad858d1597aad5f935836023c35de5cd2b756b7136c1afc589a20071daa4c2cf"
+      },
+      "logical_records": 3981792,
+      "manifest_sha256": "8c54314e352ccecd2942f9a80407debcb88267a782df0ea65a8ebab94f08790e"
+    },
+    {
+      "origin": "frozen",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "format": "yaml",
+      "artifact": {
+        "path": "campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.yaml",
+        "bytes": 1119571788,
+        "sha256": "2e27cf6160636a5981d3b4f8a8c2488420df3a6611c09ed5305643f107ebf1d6"
+      },
+      "logical_records": 3981792,
+      "manifest_sha256": "8c54314e352ccecd2942f9a80407debcb88267a782df0ea65a8ebab94f08790e"
+    }
+  ],
+  "tools": [
+    {
+      "tool": "jq",
+      "path": "/usr/bin/jq",
+      "version": "jq-1.7.1-apple",
+      "executable": {
+        "path": "/usr/bin/jq",
+        "bytes": 1492208,
+        "sha256": "ac60d44ed0051eff3dfb17702817d4020f2465572eaad97a5ebaefe2397990eb"
+      },
+      "build_features": [
+        "--with-oniguruma=builtin"
+      ]
+    },
+    {
+      "tool": "yq",
+      "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+      "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2",
+      "executable": {
+        "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "bytes": 12996258,
+        "sha256": "b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952"
+      },
+      "build_features": [
+        "# Use the '-p/--input-format' flag to specify a format type.",
+        "-p, --input-format string               [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \"auto\")",
+        "-o, --output-format string              [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \"auto\")",
+        "-c, --yaml-compact-seq-indent           Use compact sequence indentation where '- ' is considered part of the indentation.",
+        "--yaml-fix-merge-anchor-to-spec     Fix merge anchor to match YAML spec. Will default to true in late 2025"
+      ]
+    },
+    {
+      "tool": "tq",
+      "path": "$HOME/Development/commandzero/tq/target/release/tq",
+      "version": "tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)",
+      "executable": {
+        "path": "$HOME/Development/commandzero/tq/target/release/tq",
+        "bytes": 1341664,
+        "sha256": "8e18d2f85bafaed9df50f2dee1c7e7225e2c579ef66640bdf090de46bfaada40"
+      },
+      "build_features": []
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "benchmark.event-stream",
+      "adapter_id": "jq-json",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "/usr/bin/jq",
+        "--stream",
+        "select(length == 2 and (.[0] | length) == 1)",
+        "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 0,
+      "requested_samples": 1,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 4294967296,
+        "rss_bytes": 134217728
+      },
+      "samples": [
+        {
+          "wall_time_micros": 59719127,
+          "user_cpu_micros": 59480000,
+          "system_cpu_micros": 200000,
+          "peak_rss_bytes": null,
+          "first_result_micros": 59703644,
+          "output_bytes": 46
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 1,
+          "median": 59719127.0,
+          "median_absolute_deviation": 0.0,
+          "p95": 59719127.0,
+          "minimum": 59719127.0,
+          "maximum": 59719127.0
+        },
+        "first_result_micros": {
+          "samples": 1,
+          "median": 59703644.0,
+          "median_absolute_deviation": 0.0,
+          "p95": 59703644.0,
+          "minimum": 59703644.0,
+          "maximum": 59703644.0
+        },
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 59480000.0,
+        "system_cpu_micros": 200000.0,
+        "output_bytes": 46,
+        "logical_records_per_second": 66675.32162685499,
+        "physical_mib_per_second": 17.878808904701888
+      },
+      "reference_ratios": {
+        "jq-json": 1.0
+      }
+    },
+    {
+      "case_id": "benchmark.event-stream",
+      "adapter_id": "yq-json",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "json",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(length == 2 and (.[0] | length) == 1)",
+        "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.geojson"
+      ],
+      "outcome": "unsupported",
+      "warmups": 0,
+      "requested_samples": 1,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 4294967296,
+        "rss_bytes": 134217728
+      },
+      "samples": [],
+      "summary": null,
+      "reference_ratios": {}
+    },
+    {
+      "case_id": "benchmark.event-stream",
+      "adapter_id": "yq-yaml",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "native-format"
+      ],
+      "command": [
+        "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "--input-format",
+        "yaml",
+        "--output-format",
+        "json",
+        "--indent",
+        "0",
+        "select(length == 2 and (.[0] | length) == 1)",
+        "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.yaml"
+      ],
+      "outcome": "unsupported",
+      "warmups": 0,
+      "requested_samples": 1,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 4294967296,
+        "rss_bytes": 134217728
+      },
+      "samples": [],
+      "summary": null,
+      "reference_ratios": {}
+    },
+    {
+      "case_id": "benchmark.event-stream",
+      "adapter_id": "tq-json",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "input_format": "json",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--stream",
+        "--input-format",
+        "json",
+        "select(length == 2 and (.[0] | length) == 1)",
+        "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.geojson"
+      ],
+      "outcome": "timed",
+      "warmups": 0,
+      "requested_samples": 1,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 4294967296,
+        "rss_bytes": 134217728
+      },
+      "samples": [
+        {
+          "wall_time_micros": 464434046,
+          "user_cpu_micros": 185840000,
+          "system_cpu_micros": 276130000,
+          "peak_rss_bytes": null,
+          "first_result_micros": 6507,
+          "output_bytes": 42
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 1,
+          "median": 464434046.0,
+          "median_absolute_deviation": 0.0,
+          "p95": 464434046.0,
+          "minimum": 464434046.0,
+          "maximum": 464434046.0
+        },
+        "first_result_micros": {
+          "samples": 1,
+          "median": 6507.0,
+          "median_absolute_deviation": 0.0,
+          "p95": 6507.0,
+          "minimum": 6507.0,
+          "maximum": 6507.0
+        },
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 185840000.0,
+        "system_cpu_micros": 276130000.0,
+        "output_bytes": 42,
+        "logical_records_per_second": 8573.428314081866,
+        "physical_mib_per_second": 2.298941838533136
+      },
+      "reference_ratios": {
+        "jq-json": 7.7769731295636655
+      }
+    },
+    {
+      "case_id": "benchmark.event-stream",
+      "adapter_id": "tq-yaml",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "input_format": "yaml",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "same-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--input-format",
+        "yaml",
+        "select(length == 2 and (.[0] | length) == 1)",
+        "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.yaml"
+      ],
+      "outcome": "unsupported",
+      "warmups": 0,
+      "requested_samples": 1,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 4294967296,
+        "rss_bytes": 134217728
+      },
+      "samples": [],
+      "summary": null,
+      "reference_ratios": {}
+    },
+    {
+      "case_id": "benchmark.event-stream",
+      "adapter_id": "tq-toon",
+      "source_id": "microsoft-us-buildings-georgia",
+      "tier": "large",
+      "input_format": "toon",
+      "execution_class": "streaming",
+      "comparison_families": [
+        "native-format",
+        "parser-specific"
+      ],
+      "command": [
+        "$HOME/Development/commandzero/tq/target/release/tq",
+        "--stream",
+        "--input-format",
+        "toon",
+        "select(length == 2 and (.[0] | length) == 1)",
+        "target/corpus/campaigns/2026-08-01T19-24-22.664496Z/microsoft-us-buildings-georgia/source.toon"
+      ],
+      "outcome": "timed",
+      "warmups": 0,
+      "requested_samples": 1,
+      "timeout_seconds": 600,
+      "limits": {
+        "output_bytes": 4294967296,
+        "rss_bytes": 134217728
+      },
+      "samples": [
+        {
+          "wall_time_micros": 126436083,
+          "user_cpu_micros": 125230000,
+          "system_cpu_micros": 510000,
+          "peak_rss_bytes": null,
+          "first_result_micros": 16744,
+          "output_bytes": 42
+        }
+      ],
+      "summary": {
+        "wall_time_micros": {
+          "samples": 1,
+          "median": 126436083.0,
+          "median_absolute_deviation": 0.0,
+          "p95": 126436083.0,
+          "minimum": 126436083.0,
+          "maximum": 126436083.0
+        },
+        "first_result_micros": {
+          "samples": 1,
+          "median": 16744.0,
+          "median_absolute_deviation": 0.0,
+          "p95": 16744.0,
+          "minimum": 16744.0,
+          "maximum": 16744.0
+        },
+        "peak_rss_bytes": null,
+        "user_cpu_micros": 125230000.0,
+        "system_cpu_micros": 510000.0,
+        "output_bytes": 42,
+        "logical_records_per_second": 31492.528916765004,
+        "physical_mib_per_second": 12.130401262410212
+      },
+      "reference_ratios": {
+        "jq-json": 2.1171790237322123
+      }
+    }
+  ],
+  "comparability": {
+    "comparable": true,
+    "reasons": []
+  },
+  "regression_gate": {
+    "evaluated": false,
+    "thresholds": null,
+    "failures": []
+  },
+  "final_status": "passed"
+}

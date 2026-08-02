@@ -1,7 +1,13 @@
 //! Pull-based bytecode VM kernel with explicit bounded stacks and forks.
 
 use std::collections::VecDeque;
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use thiserror::Error;
 
@@ -81,6 +87,9 @@ pub enum VmError {
         /// Operation name.
         operation: Arc<str>,
     },
+    /// Execution was cancelled by the caller or an interrupt handler.
+    #[error("execution interrupted")]
+    Interrupted,
 }
 
 impl VmError {
@@ -90,6 +99,7 @@ impl VmError {
         let class = match self {
             Self::Resource { .. } => DiagnosticClass::Resource,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,
+            Self::Interrupted => DiagnosticClass::Cancelled,
             Self::Runtime { .. } | Self::InvalidProgram { .. } => DiagnosticClass::Runtime,
         };
         Diagnostic::new("TQ-VM-001", class, self.to_string())
@@ -130,6 +140,7 @@ pub struct Vm {
     done: bool,
     tree_started: bool,
     tree_results: VecDeque<Result<Value, VmError>>,
+    cancellation: Option<Arc<AtomicBool>>,
 }
 
 impl Vm {
@@ -178,6 +189,7 @@ impl Vm {
             done: false,
             tree_started: false,
             tree_results: VecDeque::new(),
+            cancellation: None,
         }
     }
 
@@ -185,6 +197,14 @@ impl Vm {
     #[must_use]
     pub fn with_trace_limit(mut self, limit: usize) -> Self {
         self.trace_limit = limit;
+        self
+    }
+
+    /// Installs a shared cooperative cancellation flag checked during managed
+    /// evaluation and before each kernel instruction.
+    #[must_use]
+    pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
+        self.cancellation = Some(cancellation);
         self
     }
 
@@ -266,6 +286,7 @@ impl Vm {
                         &self.variables,
                         self.limits,
                         &mut self.observations,
+                        self.cancellation.as_deref(),
                     )
                     .into();
                     if let Some(result) = self.tree_results.pop_front() {
@@ -311,6 +332,14 @@ impl Vm {
     )]
     fn run_kernel(&mut self) -> Result<Option<Value>, VmError> {
         loop {
+            if self
+                .cancellation
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                self.done = true;
+                return Err(VmError::Interrupted);
+            }
             if self.observations.steps >= self.limits.steps {
                 self.done = true;
                 return Err(VmError::Resource {
@@ -505,6 +534,8 @@ impl Drop for Vm {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, atomic::AtomicBool};
+
     use crate::{Number, ResolveOptions, analyze, bytecode::Operation, parse, resolve};
 
     use super::{Bytecode, Value, Vm, VmError, VmLimits};
@@ -646,5 +677,23 @@ mod tests {
             assert_eq!(vm.next_result().unwrap(), Some(expected));
             assert_eq!(vm.next_result().unwrap(), None);
         }
+    }
+
+    #[test]
+    fn cancellation_interrupts_kernel_and_tree_evaluation() {
+        let cancellation = Arc::new(AtomicBool::new(true));
+        let kernel = Bytecode::kernel(vec![Operation::LoadInput, Operation::Return], Vec::new());
+        kernel.validate().unwrap();
+        let mut vm = Vm::from_kernel(kernel, Value::Null, VmLimits::default())
+            .with_cancellation(Arc::clone(&cancellation));
+        assert!(matches!(vm.next_result(), Err(VmError::Interrupted)));
+
+        let program =
+            analyze(resolve(parse("map(.)").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap();
+        let mut vm = Vm::new(&program, Value::array([Value::Null]), VmLimits::default())
+            .with_cancellation(cancellation);
+        assert!(matches!(vm.next_result(), Err(VmError::Interrupted)));
     }
 }
