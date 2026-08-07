@@ -55,7 +55,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
     }
 
-    let catalog = load_catalog(&root.join("compatibility/cases"))?;
+    let catalog = load_catalog(&root.join("tests/compatibility/cases"))?;
     let report = run_campaign(
         &catalog,
         profile,

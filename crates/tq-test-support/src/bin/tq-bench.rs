@@ -134,6 +134,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     current_dir: Some(root.clone()),
                     timeout: Duration::from_secs(case.timeout_seconds),
                     output_limit: case.limits.output_bytes,
+                    retain_output: false,
                 };
                 let Some(identity) = tools.get(&adapter.tool) else {
                     rows.push(unsupported_row(
@@ -210,9 +211,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 )]
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut profile = "smoke".to_owned();
-    let mut output = PathBuf::from("target/benchmarks/smoke.json");
+    let mut output = PathBuf::from("benchmarks/.work/smoke.json");
     let mut manifests = Vec::new();
-    let mut cache_root = PathBuf::from("target/corpus");
+    let mut cache_root = PathBuf::from("benchmarks/.work/corpus");
     let mut origin = "frozen".to_owned();
     let mut max_samples = None;
     let mut selected_cases = Vec::new();
@@ -326,8 +327,19 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
 }
 
 fn prepare_smoke(examples: &Path) -> Result<PreparedCampaign, Box<dyn std::error::Error>> {
-    let smoke = discover_smoke_corpus(examples)?;
     let temporary = tempfile::tempdir()?;
+    let generated_examples = temporary.path().join("smoke");
+    let smoke_dir = if examples.is_dir() {
+        examples
+    } else {
+        fs::create_dir_all(&generated_examples)?;
+        fs::write(
+            generated_examples.join("generated.geojson"),
+            br#"{"type":"FeatureCollection","features":[{"id":"smoke","properties":{"mag":1,"place":"generated"}}]}"#,
+        )?;
+        &generated_examples
+    };
+    let smoke = discover_smoke_corpus(smoke_dir)?;
     let mut datasets = Vec::new();
     for snapshot in smoke.snapshots {
         datasets.push(prepare_smoke_snapshot(&snapshot, temporary.path())?);
@@ -486,6 +498,7 @@ fn invocation(
         current_dir: None,
         timeout: Duration::from_secs(case.timeout_seconds),
         output_limit: case.limits.output_bytes,
+        retain_output: false,
     })
 }
 

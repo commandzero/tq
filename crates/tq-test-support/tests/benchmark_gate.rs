@@ -86,6 +86,7 @@ fn invocation(executable: PathBuf) -> BenchmarkInvocation {
         current_dir: None,
         timeout: Duration::from_secs(2),
         output_limit: 1024,
+        retain_output: false,
     }
 }
 

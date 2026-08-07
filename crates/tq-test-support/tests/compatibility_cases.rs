@@ -10,7 +10,7 @@ const SCHEMA: &str = include_str!("../../../schemas/compatibility-case-v1.schema
 fn every_catalog_case_is_schema_valid_and_uniquely_identified() {
     let schema: Value = serde_json::from_str(SCHEMA).expect("case schema");
     let validator = jsonschema::Validator::new(&schema).expect("case validator");
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/compatibility/cases");
     let mut ids = BTreeSet::new();
     let mut count = 0;
     for entry in fs::read_dir(root).expect("case directory") {
@@ -45,7 +45,7 @@ fn every_catalog_case_is_schema_valid_and_uniquely_identified() {
 #[test]
 fn common_and_navigation_capability_groups_are_present() {
     let cases = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases/common.jsonl"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/compatibility/cases/common.jsonl"),
     )
     .expect("common cases");
     for capability in [
@@ -63,7 +63,8 @@ fn common_and_navigation_capability_groups_are_present() {
     }
 
     let navigation = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases/navigation.jsonl"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/compatibility/cases/navigation.jsonl"),
     )
     .expect("navigation cases");
     for capability in [
@@ -154,8 +155,8 @@ fn composition_construction_operator_numeric_and_variable_groups_are_complete() 
 
 #[test]
 fn every_mvp_builtin_has_a_case_and_execution_classification() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases/builtins.jsonl");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/compatibility/cases/builtins.jsonl");
     let cases = fs::read_to_string(path).expect("built-in cases");
     for builtin in [
         "empty",
@@ -282,7 +283,8 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
     );
 
     let deferred = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../compatibility/cases/deferred.jsonl"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/compatibility/cases/deferred.jsonl"),
     )
     .expect("deferred cases");
     for (index, line) in deferred.lines().enumerate() {
@@ -295,7 +297,7 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
 fn assert_capabilities(file: &str, required: &[&str]) {
     let cases = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../compatibility/cases")
+            .join("../../tests/compatibility/cases")
             .join(file),
     )
     .unwrap_or_else(|error| panic!("failed to read {file}: {error}"));

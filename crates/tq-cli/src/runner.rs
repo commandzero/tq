@@ -173,7 +173,7 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
         }
         Command::Compatibility => {
             stdout.write_all(include_bytes!(
-                "../../../compatibility/reviews/coverage-v1.json"
+                "../../../tests/compatibility/reviews/coverage-v1.json"
             ))?;
             stdout.write_all(b"\n")?;
             Ok(ExitStatus::Success)

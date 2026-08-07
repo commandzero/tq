@@ -16,20 +16,12 @@ fn every_mvp_scenario_has_a_reviewed_evidence_route() {
         (
             "cross-tool-compatibility",
             20,
-            "compatibility/reviews/coverage-v1.json",
+            "tests/compatibility/reviews/coverage-v1.json",
         ),
         ("jq-core-language", 37, "crates/tq-core/src"),
-        (
-            "performance-benchmarks",
-            26,
-            "baselines/2026-08-01/performance/standard-v2.json",
-        ),
-        ("query-runtime", 21, "fuzz/fuzz_targets/vm_program.rs"),
-        (
-            "resource-governance",
-            17,
-            "baselines/2026-08-01/fuzz/release-v1.json",
-        ),
+        ("performance-benchmarks", 26, "benchmarks/2026-08-06.md"),
+        ("query-runtime", 21, "tests/fuzz/fuzz_targets/vm_program.rs"),
+        ("resource-governance", 17, "benchmarks/2026-08-06.md"),
         ("toon-stream-io", 21, "crates/tq-toon/tests"),
         ("tq-cli", 38, "crates/tq-cli/src"),
     ];

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "profile": "full",
   "corpus": {
-    "path": "/Users/reno/Development/commandzero/tq/crates/tq-test-support/../../compatibility/cases",
+    "path": "/Users/reno/Development/commandzero/tq/tests/compatibility/cases",
     "bytes": 77733,
     "sha256": "6d3785ff89e97913f69fc6cf722da26937516e871009479429e10b066380184e"
   },
