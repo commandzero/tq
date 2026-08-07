@@ -21,7 +21,7 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
         schema_version: 1,
         profile: "full".to_owned(),
         corpus: ArtifactIdentity {
-            path: "compatibility/cases".to_owned(),
+            path: "tests/compatibility/cases".to_owned(),
             bytes: 42,
             sha256: "a".repeat(64),
         },
@@ -115,7 +115,7 @@ fn baseline_candidate_requires_exact_explicit_case_reviews() {
 #[test]
 fn published_full_report_has_only_reviewed_jq_target_divergences() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../compatibility/reviews/coverage-v1.json");
+        .join("../../tests/compatibility/reviews/coverage-v1.json");
     let report: CompatibilityReport =
         serde_json::from_slice(&fs::read(path).expect("published compatibility report"))
             .expect("valid compatibility report");

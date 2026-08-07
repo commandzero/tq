@@ -1,7 +1,8 @@
 # Rust build output
 /target/
-/fuzz/target/
-/fuzz/Cargo.lock
+/benchmarks/.work/
+**/fuzz/target/
+**/fuzz/Cargo.lock
 
 # Benchmark corpora, caches, generated representations, and local reports
 .local/

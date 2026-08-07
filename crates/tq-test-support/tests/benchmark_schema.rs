@@ -136,7 +136,8 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
 
 fn compatibility_ids(root: &Path) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
-    for entry in fs::read_dir(root.join("compatibility/cases")).expect("compatibility cases") {
+    for entry in fs::read_dir(root.join("tests/compatibility/cases")).expect("compatibility cases")
+    {
         let path = entry.expect("case entry").path();
         for line in fs::read_to_string(path).expect("case file").lines() {
             let case: Value = serde_json::from_str(line).expect("case JSON");

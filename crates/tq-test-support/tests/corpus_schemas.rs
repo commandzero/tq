@@ -182,7 +182,7 @@ fn snapshot_schema_rejects_absolute_artifact_paths_and_extra_fields() {
 #[test]
 fn registered_natural_sources_are_valid_and_uniquely_identified() {
     let validator = validator(SOURCE_SCHEMA);
-    let source_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/sources");
+    let source_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/sources");
     let mut ids = BTreeSet::new();
 
     let mut paths = fs::read_dir(source_dir)

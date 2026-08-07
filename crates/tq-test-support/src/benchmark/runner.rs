@@ -11,14 +11,18 @@ use super::{
     summarize_samples,
 };
 use crate::compatibility::{
-    Invocation, NormalizationError, NormalizedObservation, ProcessError, ProcessOutcome,
-    ProcessStatus, ToolKind, normalize_jq, normalize_raw, normalize_toon_sequence, normalize_yq,
-    run_process,
+    NormalizationError, NormalizedObservation, ProcessError, ProcessOutcome, ProcessStatus,
+    ToolKind, normalize_jq, normalize_raw, normalize_toon_sequence, normalize_yq,
 };
+
+const MAX_CORRECTNESS_OUTPUT_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Benchmark row construction failures at the harness boundary.
 #[derive(Debug, Error)]
 pub enum BenchmarkRunnerError {
+    /// Correctness output file I/O failed.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     /// Correctness subprocess failed to launch or capture.
     #[error(transparent)]
     Process(#[from] ProcessError),
@@ -28,6 +32,16 @@ pub enum BenchmarkRunnerError {
     /// Timed process could not be measured.
     #[error(transparent)]
     Measure(#[from] super::MeasureError),
+    /// Correctness output exceeded the bounded file-backed capture limit.
+    #[error("correctness output exceeded {limit} bytes; stdout: {stdout}; stderr: {stderr}")]
+    CorrectnessOutputLimit {
+        /// Maximum allowed stdout bytes.
+        limit: u64,
+        /// Retained stdout file.
+        stdout: std::path::PathBuf,
+        /// Retained stderr file.
+        stderr: std::path::PathBuf,
+    },
 }
 
 /// Runs one unmeasured correctness invocation and normalizes its contract.
@@ -40,19 +54,48 @@ pub fn normalize_correctness_run(
     tool: ToolKind,
     contract: OutputContractKind,
 ) -> Result<NormalizedObservation, BenchmarkRunnerError> {
-    let outcome = run_process(&Invocation {
-        executable: invocation.executable.clone(),
-        args: invocation.args.clone(),
-        stdin: invocation.stdin.clone(),
-        timeout: invocation.timeout,
-        current_dir: invocation.current_dir.clone(),
-    })?;
-    Ok(match contract {
+    let mut correctness = invocation.clone();
+    correctness.output_limit = correctness.output_limit.min(MAX_CORRECTNESS_OUTPUT_BYTES);
+    correctness.retain_output = true;
+    let measured = measure_process(&correctness)?;
+    let stdout_path = measured
+        .stdout_path
+        .clone()
+        .ok_or_else(|| std::io::Error::other("missing correctness stdout file"))?;
+    let stderr_path = measured
+        .stderr_path
+        .clone()
+        .ok_or_else(|| std::io::Error::other("missing correctness stderr file"))?;
+    if measured.status == MeasuredStatus::OutputLimit {
+        return Err(BenchmarkRunnerError::CorrectnessOutputLimit {
+            limit: correctness.output_limit,
+            stdout: stdout_path,
+            stderr: stderr_path,
+        });
+    }
+    let outcome = ProcessOutcome {
+        status: match measured.status {
+            MeasuredStatus::Exited => ProcessStatus::Exited,
+            MeasuredStatus::Timeout => ProcessStatus::TimedOut,
+            MeasuredStatus::Signaled => ProcessStatus::Signaled,
+            MeasuredStatus::OutputLimit => unreachable!("output-limit returns above"),
+        },
+        exit_code: measured.exit_code,
+        signal: measured.signal,
+        stdout: std::fs::read(&stdout_path)?,
+        stderr: std::fs::read(&stderr_path)?,
+        wall_time_micros: measured.wall_time_micros,
+        recorded_command: Vec::new(),
+    };
+    let normalized = match contract {
         OutputContractKind::RawBytes | OutputContractKind::ExitOnly => {
             normalize_raw(tool, &outcome)
         }
         OutputContractKind::SemanticSequence => normalize(tool, &outcome)?,
-    })
+    };
+    let _ = std::fs::remove_file(stdout_path);
+    let _ = std::fs::remove_file(stderr_path);
+    Ok(normalized)
 }
 
 /// Executes correctness, then warmups and samples only on a passing gate.
@@ -202,7 +245,7 @@ fn row(
 }
 
 fn failed_outcome(case: &BenchmarkCase, measured: &MeasuredOutcome) -> Option<BenchmarkOutcome> {
-    match measured.status {
+    let outcome = match measured.status {
         MeasuredStatus::Timeout => Some(BenchmarkOutcome::Timeout),
         MeasuredStatus::Signaled => Some(BenchmarkOutcome::OomOrSignal),
         MeasuredStatus::OutputLimit => Some(BenchmarkOutcome::ResourceLimit),
@@ -217,7 +260,16 @@ fn failed_outcome(case: &BenchmarkCase, measured: &MeasuredOutcome) -> Option<Be
             }
             None
         }
+    };
+    if outcome.is_some() {
+        if let Some(path) = &measured.stdout_path {
+            eprintln!("benchmark stdout retained at {}", path.display());
+        }
+        if let Some(path) = &measured.stderr_path {
+            eprintln!("benchmark stderr retained at {}", path.display());
+        }
     }
+    outcome
 }
 
 fn normalize(

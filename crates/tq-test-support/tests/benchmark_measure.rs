@@ -14,6 +14,7 @@ fn invocation(args: &[&str], output_limit: u64, timeout: Duration) -> BenchmarkI
         current_dir: None,
         timeout,
         output_limit,
+        retain_output: false,
     }
 }
 
@@ -39,12 +40,25 @@ fn output_limit_and_first_result_are_measured_without_reframing() {
     .expect("output measurement");
     assert_eq!(limited.status, MeasuredStatus::OutputLimit);
     assert!(limited.output_bytes > 1024);
-    assert_eq!(limited.stdout.len(), 1024);
+    let stdout_path = limited.stdout_path.as_deref().expect("saved stdout");
+    assert!(stdout_path.exists());
+    assert!(
+        std::fs::metadata(stdout_path)
+            .expect("stdout metadata")
+            .len()
+            > 1024
+    );
+    let stderr_path = limited.stderr_path.as_deref().expect("saved stderr");
+    assert!(stderr_path.exists());
+    std::fs::remove_file(stdout_path).expect("remove saved stdout");
+    std::fs::remove_file(stderr_path).expect("remove saved stderr");
 
     let first = measure_process(&invocation(&["first", "100"], 1024, Duration::from_secs(2)))
         .expect("first-result measurement");
     assert_eq!(first.status, MeasuredStatus::Exited);
-    assert_eq!(first.stdout, b"first\nlast\n");
+    assert_eq!(first.output_bytes, b"first\nlast\n".len() as u64);
+    assert!(first.stdout_path.is_none());
+    assert!(first.stderr_path.is_none());
     assert!(first.first_result_micros.expect("first result") < first.wall_time_micros);
 }
 

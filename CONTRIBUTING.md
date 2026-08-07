@@ -25,7 +25,7 @@ make fuzz
 
 ## Compatibility-case-first development
 
-Behavior changes begin as a versioned case under `compatibility/cases/`. Run
+Behavior changes begin as a versioned case under `tests/compatibility/cases/`. Run
 the case against jq and, where applicable, yq before changing tq. Promote tq
 support only when its ordered normalized result, cardinality, error class, and
 exit behavior satisfy the reviewed jq-target contract. Do not sort objects or

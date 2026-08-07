@@ -113,7 +113,7 @@ impl BenchmarkSampling {
 /// Per-process resource limits.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BenchmarkLimits {
-    /// Maximum captured stdout bytes.
+    /// Maximum stdout bytes written before the harness stops the process.
     pub output_bytes: u64,
     /// Peak RSS objective, when applicable.
     pub rss_bytes: Option<u64>,

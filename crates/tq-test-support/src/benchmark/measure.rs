@@ -1,12 +1,12 @@
 //! Per-process wall, latency, CPU, memory, and byte measurement.
 
 use std::{
-    io::{self, Read, Write},
+    io::{self, Write},
     path::PathBuf,
     process::{Command, Stdio},
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -29,8 +29,10 @@ pub struct BenchmarkInvocation {
     pub current_dir: Option<PathBuf>,
     /// Wall timeout.
     pub timeout: Duration,
-    /// Captured stdout limit.
+    /// Maximum stdout bytes written before the harness stops the process.
     pub output_limit: u64,
+    /// Retain output files after a successful invocation for semantic checks.
+    pub retain_output: bool,
 }
 
 /// First-class process measurement outcome.
@@ -54,10 +56,10 @@ pub struct MeasuredOutcome {
     pub peak_rss_bytes: Option<u64>,
     /// Total stdout bytes observed, including bytes beyond capture limit.
     pub output_bytes: u64,
-    /// Captured stdout prefix.
-    pub stdout: Vec<u8>,
-    /// Captured stderr prefix.
-    pub stderr: Vec<u8>,
+    /// Preserved stdout file for an unsuccessful invocation.
+    pub stdout_path: Option<PathBuf>,
+    /// Preserved stderr file for an unsuccessful invocation.
+    pub stderr_path: Option<PathBuf>,
 }
 
 /// Process measurement status.
@@ -88,8 +90,10 @@ pub enum MeasureError {
 /// Measures one fresh process invocation.
 ///
 /// On Unix, `/usr/bin/time` writes CPU/RSS metrics to a separate temporary
-/// file while stdout and stderr remain the tool's original streams. Fields
-/// unsupported by the local implementation remain `None`.
+/// file. Tool stdout and stderr are spooled to files, not held in memory or
+/// passed to the invoking terminal. Successful output files are deleted.
+/// Failed output files are retained for diagnosis. Fields unsupported by the
+/// local implementation remain `None`.
 ///
 /// # Errors
 ///
@@ -102,11 +106,13 @@ pub enum MeasureError {
 pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutcome, MeasureError> {
     let started = Instant::now();
     let resource_file = tempfile::NamedTempFile::new()?;
+    let stdout_file = tempfile::NamedTempFile::new()?;
+    let stderr_file = tempfile::NamedTempFile::new()?;
     let mut command = measured_command(invocation, resource_file.path());
     command
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdout(Stdio::from(stdout_file.reopen()?))
+        .stderr(Stdio::from(stderr_file.reopen()?));
     if let Some(directory) = &invocation.current_dir {
         command.current_dir(directory);
     }
@@ -119,44 +125,13 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         .stdin
         .take()
         .ok_or_else(|| io::Error::other("stdin pipe"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| io::Error::other("stdout pipe"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| io::Error::other("stderr pipe"))?;
-
     let stdin_bytes = invocation.stdin.clone();
     let stdin_worker = thread::spawn(move || {
         let result = stdin.write_all(&stdin_bytes);
         drop(stdin);
         result
     });
-    let output_exceeded = Arc::new(AtomicBool::new(false));
-    let output_bytes = Arc::new(AtomicU64::new(0));
-    let first_result = Arc::new(Mutex::new(None));
-    let stdout_worker = {
-        let exceeded = Arc::clone(&output_exceeded);
-        let byte_count = Arc::clone(&output_bytes);
-        let first = Arc::clone(&first_result);
-        let output_limit = invocation.output_limit;
-        thread::spawn(move || {
-            read_stream(
-                stdout,
-                output_limit,
-                &exceeded,
-                &byte_count,
-                Some((&first, started)),
-            )
-        })
-    };
-    let stderr_worker = thread::spawn(move || {
-        let exceeded = AtomicBool::new(false);
-        let bytes = AtomicU64::new(0);
-        read_stream(stderr, 1024 * 1024, &exceeded, &bytes, None)
-    });
+    let mut first_result_micros = None;
 
     let mut forced = None;
     let exit = loop {
@@ -165,7 +140,11 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         if let Some(status) = child.wait_timeout(interval)? {
             break status;
         }
-        if output_exceeded.load(Ordering::Relaxed) {
+        let output_bytes = stdout_file.as_file().metadata()?.len();
+        if output_bytes > 0 && first_result_micros.is_none() {
+            first_result_micros = Some(started.elapsed().as_micros());
+        }
+        if output_bytes > invocation.output_limit {
             forced = Some(MeasuredStatus::OutputLimit);
         } else if started.elapsed() >= invocation.timeout {
             forced = Some(MeasuredStatus::Timeout);
@@ -183,15 +162,13 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
     let _stdin_result = stdin_worker
         .join()
         .map_err(|_| MeasureError::CaptureWorker)?;
-    let stdout = stdout_worker
-        .join()
-        .map_err(|_| MeasureError::CaptureWorker)??;
-    let stderr = stderr_worker
-        .join()
-        .map_err(|_| MeasureError::CaptureWorker)??;
+    let output_bytes = stdout_file.as_file().metadata()?.len();
+    if output_bytes > 0 && first_result_micros.is_none() {
+        first_result_micros = Some(started.elapsed().as_micros());
+    }
     let resources = std::fs::read_to_string(resource_file.path()).unwrap_or_default();
     let inferred_signal = infer_signal(exit, &resources);
-    let status = if output_exceeded.load(Ordering::Relaxed) {
+    let status = if output_bytes > invocation.output_limit {
         MeasuredStatus::OutputLimit
     } else {
         forced.unwrap_or_else(|| {
@@ -202,9 +179,18 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
             }
         })
     };
-    let first_result_micros = *first_result
-        .lock()
-        .map_err(|_| io::Error::other("first-result mutex poisoned"))?;
+    let preserve_output =
+        invocation.retain_output || status != MeasuredStatus::Exited || exit.code() != Some(0);
+    let stdout_path = if preserve_output {
+        Some(stdout_file.keep().map_err(|error| error.error)?.1)
+    } else {
+        None
+    };
+    let stderr_path = if preserve_output {
+        Some(stderr_file.keep().map_err(|error| error.error)?.1)
+    } else {
+        None
+    };
     Ok(MeasuredOutcome {
         status,
         exit_code: exit.code(),
@@ -214,9 +200,9 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         user_cpu_micros: resource_seconds(&resources, "user"),
         system_cpu_micros: resource_seconds(&resources, "sys"),
         peak_rss_bytes: maximum_available(resource_rss(&resources), sampled_peak_rss),
-        output_bytes: output_bytes.load(Ordering::Relaxed),
-        stdout,
-        stderr,
+        output_bytes,
+        stdout_path,
+        stderr_path,
     })
 }
 
@@ -312,39 +298,6 @@ fn terminate_process_group(process_id: u32, child: &mut std::process::Child) -> 
 #[cfg(not(unix))]
 fn terminate_process_group(_process_id: u32, child: &mut std::process::Child) -> io::Result<()> {
     child.kill()
-}
-
-fn read_stream(
-    mut reader: impl Read,
-    limit: u64,
-    exceeded: &AtomicBool,
-    total: &AtomicU64,
-    first: Option<(&Mutex<Option<u128>>, Instant)>,
-) -> io::Result<Vec<u8>> {
-    let capacity = usize::try_from(limit.min(1024 * 1024)).unwrap_or(1024 * 1024);
-    let mut captured = Vec::with_capacity(capacity);
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        if total.fetch_add(read as u64, Ordering::Relaxed) == 0 {
-            if let Some((slot, started)) = first {
-                *slot
-                    .lock()
-                    .map_err(|_| io::Error::other("first-result mutex poisoned"))? =
-                    Some(started.elapsed().as_micros());
-            }
-        }
-        let remaining =
-            usize::try_from(limit.saturating_sub(captured.len() as u64)).unwrap_or(usize::MAX);
-        captured.extend_from_slice(&buffer[..read.min(remaining)]);
-        if total.load(Ordering::Relaxed) > limit {
-            exceeded.store(true, Ordering::Relaxed);
-        }
-    }
-    Ok(captured)
 }
 
 fn resource_seconds(report: &str, label: &str) -> Option<u128> {
