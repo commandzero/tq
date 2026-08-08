@@ -2,6 +2,7 @@
 
 use std::{borrow::Borrow, io::Write};
 
+use serde::Serialize;
 use thiserror::Error;
 use tq_core::Value;
 use tq_toon::{SequenceError, WriterConfig, write_sequence, write_unframed};
@@ -18,13 +19,40 @@ pub enum ToonFraming {
     Unframed,
 }
 
+/// JSON pretty-print indentation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JsonIndent {
+    /// A reviewed number of spaces per nesting level.
+    Spaces(u8),
+    /// One tab per nesting level.
+    Tabs,
+}
+
+impl Default for JsonIndent {
+    fn default() -> Self {
+        Self::Spaces(2)
+    }
+}
+
 /// Structured output controls.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent wire-format controls are assembled after CLI validation"
+)]
 pub struct OutputOptions {
     /// Selected structured syntax.
     pub format: OutputFormat,
     /// Pretty JSON rather than compact JSON.
     pub pretty_json: bool,
+    /// Pretty JSON indentation.
+    pub json_indent: JsonIndent,
+    /// Escape non-ASCII JSON codepoints.
+    pub ascii_json: bool,
+    /// Wrap JSON output in tq's deterministic ANSI color.
+    pub color_json: bool,
+    /// Prefix this YAML value with an explicit document separator.
+    pub yaml_document_start: bool,
     /// TOON framing mode.
     pub toon_framing: ToonFraming,
     /// Canonical TOON options.
@@ -36,6 +64,10 @@ impl Default for OutputOptions {
         Self {
             format: OutputFormat::Toon,
             pretty_json: false,
+            json_indent: JsonIndent::default(),
+            ascii_json: false,
+            color_json: false,
+            yaml_document_start: false,
             toon_framing: ToonFraming::Sequence,
             toon: WriterConfig::default(),
         }
@@ -95,16 +127,61 @@ where
         },
         OutputFormat::Json => {
             for value in values {
+                let mut encoded = Vec::new();
                 if options.pretty_json {
-                    serde_json::to_writer_pretty(&mut writer, value.borrow())?;
+                    let indentation = match options.json_indent {
+                        JsonIndent::Spaces(count) => vec![b' '; usize::from(count)],
+                        JsonIndent::Tabs => vec![b'\t'],
+                    };
+                    let formatter = serde_json::ser::PrettyFormatter::with_indent(&indentation);
+                    let mut serializer =
+                        serde_json::Serializer::with_formatter(&mut encoded, formatter);
+                    value.borrow().serialize(&mut serializer)?;
                 } else {
-                    serde_json::to_writer(&mut writer, value.borrow())?;
+                    serde_json::to_writer(&mut encoded, value.borrow())?;
                 }
+                if options.ascii_json {
+                    encoded = escape_non_ascii(&encoded);
+                }
+                if options.color_json {
+                    writer.write_all(b"\x1b[36m")?;
+                }
+                writer.write_all(&encoded)?;
+                if options.color_json {
+                    writer.write_all(b"\x1b[0m")?;
+                }
+                writer.write_all(b"\n")?;
+            }
+        }
+        OutputFormat::Yaml => {
+            for value in values {
+                if options.yaml_document_start {
+                    writer.write_all(b"---\n")?;
+                }
+                // JSON flow syntax is valid YAML 1.2 and preserves tq's exact
+                // arbitrary-precision numeric tokens through serde_json.
+                serde_json::to_writer(&mut writer, value.borrow())?;
                 writer.write_all(b"\n")?;
             }
         }
     }
     Ok(())
+}
+
+fn escape_non_ascii(encoded: &[u8]) -> Vec<u8> {
+    let text = std::str::from_utf8(encoded).expect("JSON serializer emits UTF-8");
+    let mut escaped = Vec::with_capacity(encoded.len());
+    for character in text.chars() {
+        if character.is_ascii() {
+            escaped.push(character as u8);
+            continue;
+        }
+        let mut units = [0_u16; 2];
+        for unit in character.encode_utf16(&mut units).iter() {
+            escaped.extend_from_slice(format!("\\u{unit:04x}").as_bytes());
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{self, BufReader, Read, Write},
+    io::{self, BufReader, IsTerminal, Read, Write},
     path::Path,
     sync::{
         Arc, OnceLock,
@@ -23,22 +23,9 @@ use tq_formats::{
 };
 
 use crate::{
-    CliError, Command, ExitStatus, ExplainFormat, ExternalArgument, ExternalArgumentKind,
-    FilterSource, RunOptions,
+    CliError, ColorMode, Command, ExitStatus, ExplainFormat, ExternalArgumentKind, FilterSource,
+    PositionalArgumentKind, RunOptions, generated_help,
 };
-
-const HELP: &str = "tq - jq-compatible queries over TOON, YAML, and JSON\n\n\
-Usage: tq [OPTIONS] FILTER [FILE...]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\n\
-Input:  --input-format auto|toon|yaml|json|toon-seq (default: auto)\n\
-Output: --output-format toon|json, --unframed, -r/--raw-output, -j/--join-output\n\
-Modes:  -n/--null-input, -R/--raw-input, -s/--slurp, --stream, --stream-errors\n\
-Args:   --arg NAME VALUE, --argjson NAME JSON, --argtoon NAME TOON\n\
-TOON:   --indent N, --delimiter comma|tab|pipe, --fold-keys, --non-strict\n\
-Other:  -e/--exit-status, --explain, --explain-json, --trace, --report-file FILE\n\
-Resources: --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
-           --max-line-bytes N, --max-lookahead-bytes N, --max-vm-steps N,\n\
-           --max-results N, --max-output-bytes N, --prepare-memory-bytes N,\n\
-           --max-spool-bytes N\n";
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
@@ -66,12 +53,31 @@ pub enum RunError {
     /// File/stdin/query I/O.
     #[error("system I/O failed: {0}")]
     Io(#[from] io::Error),
+    /// Path-bearing file I/O without file-content disclosure.
+    #[error("system I/O failed for '{path}': {source}")]
+    IoPath {
+        /// User-visible path identity.
+        path: String,
+        /// Underlying operating-system failure.
+        source: io::Error,
+    },
     /// Mode recognized but not admitted by the current plan.
     #[error("unsupported mode: {0}")]
     Unsupported(String),
+    /// Raw-output encoding failure.
+    #[error("raw output failed: {0}")]
+    RawOutput(&'static str),
     /// A CLI-level input, result, or output envelope was exceeded.
     #[error("resource limit exceeded: {0}")]
     Resource(&'static str),
+    /// A source-specific input envelope was exceeded.
+    #[error("resource limit exceeded for '{identity}': {resource}")]
+    ResourceSource {
+        /// Stable source or path identity without source contents.
+        identity: String,
+        /// Stable resource classification.
+        resource: &'static str,
+    },
     /// Execution was interrupted cooperatively.
     #[error("execution interrupted")]
     Interrupted,
@@ -83,9 +89,10 @@ impl RunError {
     pub fn status(&self) -> ExitStatus {
         match self {
             Self::Cli(CliError::Unsupported(_)) | Self::Unsupported(_) => ExitStatus::Unsupported,
-            Self::Cli(_) | Self::Io(_) => ExitStatus::Usage,
+            Self::Cli(_) | Self::Io(_) | Self::IoPath { .. } => ExitStatus::Usage,
             Self::Compile(_) => ExitStatus::Compile,
             Self::Resource(_)
+            | Self::ResourceSource { .. }
             | Self::Input(FormatError::Resource(_))
             | Self::Runtime(VmError::Resource { .. }) => ExitStatus::Resource,
             Self::Interrupted | Self::Runtime(VmError::Interrupted) => ExitStatus::Interrupted,
@@ -96,13 +103,17 @@ impl RunError {
                 ExitStatus::Resource
             }
             Self::Input(_) => ExitStatus::Input,
-            Self::Runtime(_) | Self::Output(_) | Self::Json(_) => ExitStatus::Runtime,
+            Self::Runtime(_) | Self::Output(_) | Self::Json(_) | Self::RawOutput(_) => {
+                ExitStatus::Runtime
+            }
         }
     }
 
     fn is_broken_pipe(&self) -> bool {
         match self {
-            Self::Io(error) => error.kind() == io::ErrorKind::BrokenPipe,
+            Self::Io(error) | Self::IoPath { source: error, .. } => {
+                error.kind() == io::ErrorKind::BrokenPipe
+            }
             Self::Output(error) => error.is_broken_pipe(),
             _ => false,
         }
@@ -112,7 +123,19 @@ impl RunError {
 /// Runs a parsed command against process stdio and writes diagnostics only to
 /// stderr.
 #[must_use]
-pub fn run(command: Command) -> ExitStatus {
+pub fn run(mut command: Command) -> ExitStatus {
+    if let Command::Run(options) = &mut command
+        && options.color == ColorMode::Auto
+    {
+        let terminal = options.capability_policy.terminal && io::stdout().is_terminal();
+        let no_color = options.capability_policy.environment
+            && std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
+        options.color = if terminal && !no_color {
+            ColorMode::Always
+        } else {
+            ColorMode::Never
+        };
+    }
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();
@@ -159,7 +182,7 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
 ) -> Result<ExitStatus, RunError> {
     match command {
         Command::Help => {
-            stdout.write_all(HELP.as_bytes())?;
+            stdout.write_all(generated_help().as_bytes())?;
             Ok(ExitStatus::Success)
         }
         Command::Version => {
@@ -178,6 +201,19 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
             stdout.write_all(b"\n")?;
             Ok(ExitStatus::Success)
         }
+        Command::BuildConfiguration => {
+            writeln!(
+                stdout,
+                "target={} binary-stdio={} formats=toon,yaml,json jq-target=1.8.x",
+                std::env::consts::OS,
+                if cfg!(windows) {
+                    "requested-with--binary"
+                } else {
+                    "native"
+                },
+            )?;
+            Ok(ExitStatus::Success)
+        }
         Command::Run(options) => run_filter(&options, stdin, stdout, stderr),
     }
 }
@@ -188,8 +224,9 @@ fn run_filter<R: Read, W: Write, E: Write>(
     stdout: &mut W,
     stderr: &mut E,
 ) -> Result<ExitStatus, RunError> {
-    let (query_name, query) = load_filter(&options.filter)?;
-    let variables = parse_external_arguments(&options.arguments, options.strict)?;
+    validate_capability_policy(options)?;
+    let (query_name, query) = load_filter(options)?;
+    let variables = parse_external_arguments(options)?;
     let resolve_options = ResolveOptions {
         variables: variables.keys().cloned().collect::<BTreeSet<_>>(),
     };
@@ -277,6 +314,31 @@ fn run_filter<R: Read, W: Write, E: Write>(
         return Err(RunError::Runtime(error));
     }
     Ok(exit_status(options.exit_status, last.as_ref()))
+}
+
+fn validate_capability_policy(options: &RunOptions) -> Result<(), RunError> {
+    let uses_filesystem = matches!(&options.filter, FilterSource::File(_))
+        || options.files.iter().any(|path| path != Path::new("-"))
+        || options.report_file.is_some()
+        || options.arguments.iter().any(|argument| {
+            matches!(
+                argument.kind,
+                ExternalArgumentKind::RawFile | ExternalArgumentKind::SlurpFile
+            )
+        });
+    if uses_filesystem && !options.capability_policy.filesystem {
+        return Err(CliError::Incompatible(
+            "filesystem access is disabled by capability policy".to_owned(),
+        )
+        .into());
+    }
+    if options.color == ColorMode::Always && !options.capability_policy.terminal {
+        return Err(CliError::Incompatible(
+            "--color-output is disabled by terminal capability policy".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn write_explain(
@@ -394,9 +456,10 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
             return Err(RunError::Interrupted);
         }
         if path == Path::new("-") {
-            stream_reader(options, &mut *stdin, &mut executor)?;
+            stream_reader(options, &mut *stdin, "<stdin>", &mut executor)?;
         } else {
-            stream_reader(options, File::open(path)?, &mut executor)?;
+            let identity = path.display().to_string();
+            stream_reader(options, open_path(&path)?, &identity, &mut executor)?;
         }
     }
     executor.output.finish()?;
@@ -415,13 +478,14 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
 fn stream_reader<R: Read, W: Write, E: Write>(
     options: &RunOptions,
     reader: R,
+    identity: &str,
     executor: &mut StreamExecutor<'_, W, E>,
 ) -> Result<(), RunError> {
     let stream_options = StreamOptions {
         maximum_depth: options.limits.depth,
         errors_as_values: options.stream_errors,
     };
-    let reader = LimitedReader::new(reader, options.limits.input_bytes);
+    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     match options.input_format {
         InputFormat::Json => stream_json_into(reader, stream_options, executor),
         InputFormat::Toon => stream_toon_into(reader, options, stream_options, executor),
@@ -500,14 +564,16 @@ struct LimitedReader<R> {
     reader: R,
     remaining: u64,
     exhausted: bool,
+    identity: String,
 }
 
 impl<R> LimitedReader<R> {
-    fn new(reader: R, limit: u64) -> Self {
+    fn new(reader: R, limit: u64, identity: &str) -> Self {
         Self {
             reader,
             remaining: limit,
             exhausted: false,
+            identity: identity.to_owned(),
         }
     }
 }
@@ -523,9 +589,10 @@ impl<R: Read> Read for LimitedReader<R> {
                 self.exhausted = true;
                 return Ok(0);
             }
-            return Err(io::Error::other(
-                "input resource limit exceeded: input-bytes",
-            ));
+            return Err(io::Error::other(format!(
+                "input resource limit exceeded for '{}': input-bytes",
+                self.identity
+            )));
         }
         let allowed = usize::try_from(self.remaining)
             .unwrap_or(usize::MAX)
@@ -630,17 +697,29 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             return Err(RunError::Resource("result-count"));
         }
         self.emitted = self.emitted.saturating_add(1);
+        let sorted;
+        let value = if self.options.sort_keys {
+            sorted = sort_value_keys(value);
+            &sorted
+        } else {
+            value
+        };
         if self.options.raw_output {
             let mut writer = LimitedWriter::new(
                 &mut self.writer,
                 &mut self.written,
                 self.options.limits.output_bytes,
             );
-            return write_raw(
+            write_raw(
                 &mut writer,
                 std::slice::from_ref(value),
                 self.options.join_output,
-            );
+                self.options.raw_output0,
+            )?;
+            if self.options.unbuffered {
+                writer.flush()?;
+            }
+            return Ok(());
         }
         if self.options.output_format == tq_formats::OutputFormat::Toon
             && self.options.framing == ToonFraming::Unframed
@@ -664,10 +743,17 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             OutputOptions {
                 format: self.options.output_format,
                 pretty_json: self.options.pretty_json,
+                json_indent: self.options.json_indent,
+                ascii_json: self.options.ascii_output,
+                color_json: self.options.color == ColorMode::Always,
+                yaml_document_start: self.emitted > 1,
                 toon_framing: self.options.framing,
                 toon: self.options.toon_writer,
             },
         )?;
+        if self.options.unbuffered {
+            self.writer.flush()?;
+        }
         Ok(())
     }
 
@@ -686,10 +772,17 @@ impl<'a, W: Write> ResultOutput<'a, W> {
                 OutputOptions {
                     format: self.options.output_format,
                     pretty_json: self.options.pretty_json,
+                    json_indent: self.options.json_indent,
+                    ascii_json: self.options.ascii_output,
+                    color_json: self.options.color == ColorMode::Always,
+                    yaml_document_start: false,
                     toon_framing: self.options.framing,
                     toon: self.options.toon_writer,
                 },
             )?;
+        }
+        if self.options.unbuffered {
+            self.writer.flush()?;
         }
         Ok(())
     }
@@ -733,30 +826,31 @@ impl<W: Write> Write for LimitedWriter<'_, W> {
     }
 }
 
-fn load_filter(source: &FilterSource) -> Result<(String, Vec<u8>), RunError> {
-    match source {
+fn load_filter(options: &RunOptions) -> Result<(String, Vec<u8>), RunError> {
+    match &options.filter {
         FilterSource::Inline(query) => Ok(("<command-line>".to_owned(), query.as_bytes().to_vec())),
-        FilterSource::File(path) => Ok((path.display().to_string(), fs::read(path)?)),
+        FilterSource::File(path) => {
+            let identity = path.display().to_string();
+            Ok((
+                identity.clone(),
+                read_limited(open_path(path)?, options.limits.input_bytes, &identity)?,
+            ))
+        }
     }
 }
 
-fn parse_external_arguments(
-    arguments: &[ExternalArgument],
-    strict: bool,
-) -> Result<BTreeMap<Arc<str>, Value>, RunError> {
+fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, Value>, RunError> {
     let mut values = BTreeMap::new();
-    for argument in arguments {
+    let mut named = tq_core::Object::new();
+    for argument in &options.arguments {
         let value = match argument.kind {
             ExternalArgumentKind::String => Value::string(argument.value.as_str()),
             ExternalArgumentKind::Json => {
-                decode_json(argument.value.as_bytes(), "--argjson")?
-                    .pop()
-                    .ok_or_else(|| RunError::Unsupported("--argjson produced no value".to_owned()))?
-                    .value
+                decode_single_json(argument.value.as_bytes(), "--argjson")?
             }
             ExternalArgumentKind::Toon => {
                 let config = tq_toon::DecoderConfig {
-                    strict,
+                    strict: options.strict,
                     ..tq_toon::DecoderConfig::default()
                 };
                 decode_toon(argument.value.as_bytes(), "--argtoon", config)?
@@ -764,10 +858,70 @@ fn parse_external_arguments(
                     .ok_or_else(|| RunError::Unsupported("--argtoon produced no value".to_owned()))?
                     .value
             }
+            ExternalArgumentKind::RawFile => {
+                let bytes = read_limited(
+                    open_path(Path::new(&argument.value))?,
+                    options.limits.input_bytes,
+                    &argument.value,
+                )?;
+                let text = String::from_utf8(bytes).map_err(|error| {
+                    RunError::Input(FormatError::Parse {
+                        format: InputFormat::Auto,
+                        message: format!(
+                            "--rawfile '{}' input is not UTF-8: {error}",
+                            argument.value
+                        ),
+                    })
+                })?;
+                Value::string(text)
+            }
+            ExternalArgumentKind::SlurpFile => {
+                let bytes = read_limited(
+                    open_path(Path::new(&argument.value))?,
+                    options.limits.input_bytes,
+                    &argument.value,
+                )?;
+                let documents = decode_json(&bytes, &argument.value)?;
+                Value::array(
+                    documents
+                        .into_iter()
+                        .map(|document| document.value)
+                        .collect::<Vec<_>>(),
+                )
+            }
         };
+        named.insert(Arc::from(argument.name.as_str()), value.clone());
         values.insert(Arc::from(argument.name.as_str()), value);
     }
+    let positional = match options.positional_argument_kind {
+        None | Some(PositionalArgumentKind::String) => options
+            .positional_arguments
+            .iter()
+            .map(|value| Ok(Value::string(value.as_str())))
+            .collect::<Result<Vec<_>, RunError>>()?,
+        Some(PositionalArgumentKind::Json) => options
+            .positional_arguments
+            .iter()
+            .map(|value| decode_single_json(value.as_bytes(), "--jsonargs"))
+            .collect::<Result<Vec<_>, RunError>>()?,
+    };
+    let arguments = tq_core::Object::from_iter([
+        (Arc::from("named"), Value::object(named)),
+        (Arc::from("positional"), Value::array(positional)),
+    ]);
+    values.insert(Arc::from("ARGS"), Value::object(arguments));
     Ok(values)
+}
+
+fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
+    let mut documents = decode_json(bytes, identity)?;
+    if documents.len() != 1 {
+        return Err(RunError::Input(FormatError::Parse {
+            format: InputFormat::Json,
+            message: format!("{identity} requires exactly one JSON value"),
+        }));
+    }
+    Ok(documents.pop().expect("one document").value)
 }
 
 fn load_inputs<R: Read>(
@@ -792,13 +946,12 @@ fn load_inputs<R: Read>(
         let (identity, bytes) = if path == Path::new("-") {
             (
                 "<stdin>".to_owned(),
-                read_limited(&mut *stdin, options.limits.input_bytes)?,
+                read_limited(&mut *stdin, options.limits.input_bytes, "<stdin>")?,
             )
         } else {
-            (
-                path.display().to_string(),
-                read_limited(File::open(&path)?, options.limits.input_bytes)?,
-            )
+            let identity = path.display().to_string();
+            let bytes = read_limited(open_path(&path)?, options.limits.input_bytes, &identity)?;
+            (identity, bytes)
         };
         if options.raw_input {
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
@@ -822,16 +975,26 @@ fn load_inputs<R: Read>(
     Ok(documents)
 }
 
-fn read_limited(mut reader: impl Read, limit: u64) -> Result<Vec<u8>, RunError> {
+fn read_limited(mut reader: impl Read, limit: u64, identity: &str) -> Result<Vec<u8>, RunError> {
     let mut bytes = Vec::new();
     reader
         .by_ref()
         .take(limit.saturating_add(1))
         .read_to_end(&mut bytes)?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > limit {
-        return Err(RunError::Resource("input-bytes"));
+        return Err(RunError::ResourceSource {
+            identity: identity.to_owned(),
+            resource: "input-bytes",
+        });
     }
     Ok(bytes)
+}
+
+fn open_path(path: &Path) -> Result<File, RunError> {
+    File::open(path).map_err(|source| RunError::IoPath {
+        path: path.display().to_string(),
+        source,
+    })
 }
 
 fn raw_documents(
@@ -866,17 +1029,50 @@ fn raw_documents(
     Ok(())
 }
 
-fn write_raw(mut output: impl Write, values: &[Value], join: bool) -> Result<(), RunError> {
+fn write_raw(
+    mut output: impl Write,
+    values: &[Value],
+    join: bool,
+    nul_separator: bool,
+) -> Result<(), RunError> {
     for value in values {
         match value {
-            Value::String(value) => output.write_all(value.as_bytes())?,
+            Value::String(value) => {
+                if nul_separator && value.contains('\0') {
+                    return Err(RunError::RawOutput(
+                        "cannot emit a string containing NUL with --raw-output0",
+                    ));
+                }
+                output.write_all(value.as_bytes())?;
+            }
             _ => serde_json::to_writer(&mut output, value)?,
         }
-        if !join {
+        if nul_separator {
+            output.write_all(b"\0")?;
+        } else if !join {
             output.write_all(b"\n")?;
         }
     }
     Ok(())
+}
+
+fn sort_value_keys(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => {
+            Value::array(values.iter().map(sort_value_keys).collect::<Vec<_>>())
+        }
+        Value::Object(values) => {
+            let mut entries = values.iter().collect::<Vec<_>>();
+            entries.sort_unstable_by_key(|(key, _)| *key);
+            Value::object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (Arc::clone(key), sort_value_keys(value)))
+                    .collect::<tq_core::Object>(),
+            )
+        }
+        _ => value.clone(),
+    }
 }
 
 fn write_report(
@@ -930,6 +1126,8 @@ fn exit_status(enabled: bool, last: Option<&Value>) -> ExitStatus {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Write};
+
     use super::run_with_io;
     use crate::{Command, ExitStatus, parse_args};
 
@@ -943,6 +1141,24 @@ mod tests {
         let mut stderr = Vec::new();
         let status = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
         (status, stdout, stderr)
+    }
+
+    #[derive(Default)]
+    struct FlushWriter {
+        bytes: Vec<u8>,
+        flush_points: Vec<usize>,
+    }
+
+    impl Write for FlushWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flush_points.push(self.bytes.len());
+            Ok(())
+        }
     }
 
     #[test]
@@ -986,6 +1202,22 @@ mod tests {
         let (status, stdout, _) = execute(&["-n", "--argjson", "n", "42", "$n"], b"");
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"\x1e42\n");
+    }
+
+    #[test]
+    fn unbuffered_flushes_after_each_complete_result() {
+        let command =
+            parse_args(["--output-format", "json", "-nc", "--unbuffered", "1, 2"]).unwrap();
+        let mut input = &b""[..];
+        let mut output = FlushWriter::default();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output.bytes, b"1\n2\n");
+        assert_eq!(output.flush_points, [2, 4, 4]);
+        assert!(error.is_empty());
     }
 
     #[test]

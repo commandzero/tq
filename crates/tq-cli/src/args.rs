@@ -1,9 +1,9 @@
 //! Dependency-light jq-shaped command parser with pre-input validation.
 
-use std::{collections::BTreeSet, ffi::OsString, path::PathBuf};
+use std::{collections::BTreeSet, ffi::OsString, fmt::Write as _, path::PathBuf};
 
 use thiserror::Error;
-use tq_formats::{InputFormat, OutputFormat, ToonFraming};
+use tq_formats::{InputFormat, JsonIndent, OutputFormat, ToonFraming};
 use tq_toon::{Delimiter, KeyFolding, WriterConfig};
 
 /// Top-level CLI action.
@@ -17,6 +17,8 @@ pub enum Command {
     Help,
     /// Print version targets and revision.
     Version,
+    /// Print stable build and capability information.
+    BuildConfiguration,
 }
 
 /// Query source selection.
@@ -46,6 +48,52 @@ pub enum ExternalArgumentKind {
     Json,
     /// TOON value.
     Toon,
+    /// Entire UTF-8 file contents.
+    RawFile,
+    /// Ordered JSON texts collected into an array.
+    SlurpFile,
+}
+
+/// Parser for argv values consumed after `--args` or `--jsonargs`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PositionalArgumentKind {
+    /// Preserve each argv value as a string.
+    String,
+    /// Decode each argv value as one JSON text.
+    Json,
+}
+
+/// JSON color selection.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ColorMode {
+    /// Use terminal/environment policy at the process boundary.
+    #[default]
+    Auto,
+    /// Emit tq's stable ANSI palette.
+    Always,
+    /// Never emit ANSI escapes.
+    Never,
+}
+
+/// Ambient capability policy for library callers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CapabilityPolicy {
+    /// Permit filter, input, argument, and report file access.
+    pub filesystem: bool,
+    /// Permit ambient environment inspection.
+    pub environment: bool,
+    /// Permit ambient terminal inspection and explicit color.
+    pub terminal: bool,
+}
+
+impl Default for CapabilityPolicy {
+    fn default() -> Self {
+        Self {
+            filesystem: true,
+            environment: true,
+            terminal: true,
+        }
+    }
 }
 
 /// One CLI variable declaration.
@@ -122,6 +170,8 @@ pub struct RunOptions {
     pub raw_output: bool,
     /// Suppress raw-output separators.
     pub join_output: bool,
+    /// Separate raw outputs with NUL and reject NUL-containing strings.
+    pub raw_output0: bool,
     /// Run once with null and do not consume structured input.
     pub null_input: bool,
     /// Supply physical input lines as strings.
@@ -138,10 +188,26 @@ pub struct RunOptions {
     pub strict: bool,
     /// JSON pretty-print mode.
     pub pretty_json: bool,
+    /// JSON indentation style.
+    pub json_indent: JsonIndent,
+    /// Escape all non-ASCII JSON output.
+    pub ascii_output: bool,
+    /// Recursively sort object keys before encoding.
+    pub sort_keys: bool,
+    /// JSON ANSI color policy.
+    pub color: ColorMode,
+    /// Flush after every complete emitted result.
+    pub unbuffered: bool,
+    /// Platform binary-output request.
+    pub binary: bool,
     /// Canonical TOON writer controls.
     pub toon_writer: WriterConfig,
     /// External variables in declaration order.
     pub arguments: Vec<ExternalArgument>,
+    /// Positional `$ARGS` parser, when selected.
+    pub positional_argument_kind: Option<PositionalArgumentKind>,
+    /// Ordered argv values exposed through `$ARGS.positional`.
+    pub positional_arguments: Vec<String>,
     /// Optional analysis report.
     pub explain: Option<ExplainFormat>,
     /// Optional trace entry cap.
@@ -150,6 +216,8 @@ pub struct RunOptions {
     pub report_file: Option<PathBuf>,
     /// Invocation resource envelope.
     pub limits: ResourceLimits,
+    /// Library-controlled ambient integration policy.
+    pub capability_policy: CapabilityPolicy,
 }
 
 /// Stable CLI parse/validation failure.
@@ -177,6 +245,227 @@ pub enum CliError {
     Incompatible(String),
 }
 
+#[derive(Clone, Copy)]
+struct OptionSpec {
+    short: Option<char>,
+    syntax: &'static str,
+    value: bool,
+    description: &'static str,
+}
+
+const OPTION_REGISTRY: &[OptionSpec] = &[
+    OptionSpec {
+        short: Some('n'),
+        syntax: "-n, --null-input",
+        value: false,
+        description: "run once with null input",
+    },
+    OptionSpec {
+        short: Some('R'),
+        syntax: "-R, --raw-input",
+        value: false,
+        description: "read physical lines as strings",
+    },
+    OptionSpec {
+        short: Some('s'),
+        syntax: "-s, --slurp",
+        value: false,
+        description: "collect ordered inputs and run once",
+    },
+    OptionSpec {
+        short: Some('c'),
+        syntax: "-c, --compact-output",
+        value: false,
+        description: "emit compact JSON",
+    },
+    OptionSpec {
+        short: Some('r'),
+        syntax: "-r, --raw-output",
+        value: false,
+        description: "emit strings without JSON quotes",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--raw-output0",
+        value: false,
+        description: "emit NUL-separated raw outputs",
+    },
+    OptionSpec {
+        short: Some('j'),
+        syntax: "-j, --join-output",
+        value: false,
+        description: "emit raw output without separators",
+    },
+    OptionSpec {
+        short: Some('a'),
+        syntax: "-a, --ascii-output",
+        value: false,
+        description: "escape non-ASCII JSON output",
+    },
+    OptionSpec {
+        short: Some('S'),
+        syntax: "-S, --sort-keys",
+        value: false,
+        description: "sort object keys recursively",
+    },
+    OptionSpec {
+        short: Some('C'),
+        syntax: "-C, --color-output",
+        value: false,
+        description: "force stable ANSI JSON color",
+    },
+    OptionSpec {
+        short: Some('M'),
+        syntax: "-M, --monochrome-output",
+        value: false,
+        description: "disable ANSI color",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--tab",
+        value: false,
+        description: "indent JSON with tabs",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--indent N",
+        value: true,
+        description: "indent structured output",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--unbuffered",
+        value: false,
+        description: "flush after every output",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--stream",
+        value: false,
+        description: "read path/value events",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--stream-errors",
+        value: false,
+        description: "report stream parse errors as values",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--seq",
+        value: false,
+        description: "emit TOON Text Sequence frames",
+    },
+    OptionSpec {
+        short: Some('f'),
+        syntax: "-f, --from-file FILE",
+        value: true,
+        description: "load filter from a file",
+    },
+    OptionSpec {
+        short: Some('L'),
+        syntax: "-L, --library-path DIR",
+        value: true,
+        description: "reserved module search path",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--arg NAME VALUE",
+        value: true,
+        description: "bind a string variable",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--argjson NAME JSON",
+        value: true,
+        description: "bind a JSON variable",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--argtoon NAME TOON",
+        value: true,
+        description: "bind a TOON variable",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--slurpfile NAME FILE",
+        value: true,
+        description: "bind JSON texts as an array",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--rawfile NAME FILE",
+        value: true,
+        description: "bind complete UTF-8 file text",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--args",
+        value: false,
+        description: "bind remaining argv strings",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--jsonargs",
+        value: false,
+        description: "bind remaining argv JSON texts",
+    },
+    OptionSpec {
+        short: Some('e'),
+        syntax: "-e, --exit-status",
+        value: false,
+        description: "derive status from the last result",
+    },
+    OptionSpec {
+        short: Some('b'),
+        syntax: "-b, --binary",
+        value: false,
+        description: "request binary-safe platform output",
+    },
+    OptionSpec {
+        short: Some('V'),
+        syntax: "-V, --version",
+        value: false,
+        description: "print version targets",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--build-configuration",
+        value: false,
+        description: "print stable build capabilities",
+    },
+    OptionSpec {
+        short: Some('h'),
+        syntax: "-h, --help",
+        value: false,
+        description: "print this generated help",
+    },
+];
+
+/// Produces stable help from the same admitted option registry used for short
+/// cluster validation.
+#[must_use]
+pub fn generated_help() -> String {
+    let mut help = String::from(
+        "tq - jq-compatible queries over TOON, YAML, and JSON\n\n\
+Usage: tq [OPTIONS] FILTER [FILE...]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\nOptions:\n",
+    );
+    for option in OPTION_REGISTRY {
+        let _ = writeln!(help, "  {:<31} {}", option.syntax, option.description);
+    }
+    help.push_str(
+        "\nFormats: --input-format auto|toon|yaml|json|toon-seq\n\
+         --output-format toon|yaml|json, --toon-sequence-input, --unframed\n\
+TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict\n\
+Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE\n\
+Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
+         --max-line-bytes N, --max-lookahead-bytes N, --max-vm-steps N,\n\
+         --max-results N, --max-output-bytes N, --prepare-memory-bytes N,\n\
+         --max-spool-bytes N\n",
+    );
+    help
+}
+
 /// Parses a jq-shaped argument vector excluding `argv[0]`.
 ///
 /// # Errors
@@ -191,7 +480,28 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let mut tokens = arguments
+    parse_args_with_policy(arguments, CapabilityPolicy::default())
+}
+
+/// Parses arguments under an explicit ambient integration policy.
+///
+/// # Errors
+///
+/// Returns stable unsupported, usage, value, incompatibility, and policy
+/// failures before any input is consumed.
+#[allow(
+    clippy::too_many_lines,
+    reason = "single-pass CLI parsing keeps positional and option ordering deterministic"
+)]
+pub fn parse_args_with_policy<I, S>(
+    arguments: I,
+    capability_policy: CapabilityPolicy,
+) -> Result<Command, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let tokens = arguments
         .into_iter()
         .map(|value| {
             value
@@ -199,8 +509,8 @@ where
                 .into_string()
                 .map_err(|_| CliError::Usage("arguments must be valid UTF-8".to_owned()))
         })
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter();
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut tokens = expand_short_options(tokens)?.into_iter();
     let mut inline_filter = None;
     let mut filter_file = None;
     let mut files = Vec::new();
@@ -209,6 +519,7 @@ where
     let mut framing = ToonFraming::Sequence;
     let mut raw_output = false;
     let mut join_output = false;
+    let mut raw_output0 = false;
     let mut null_input = false;
     let mut raw_input = false;
     let mut slurp = false;
@@ -217,9 +528,18 @@ where
     let mut exit_status = false;
     let mut strict = true;
     let mut pretty_json = true;
+    let mut json_indent = JsonIndent::default();
+    let mut indent_explicit = false;
+    let mut ascii_output = false;
+    let mut sort_keys = false;
+    let mut color = ColorMode::Auto;
+    let mut unbuffered = false;
+    let mut binary = false;
     let mut toon_writer = WriterConfig::default();
     let mut external = Vec::new();
     let mut external_names = BTreeSet::new();
+    let mut positional_argument_kind = None;
+    let mut positional_arguments = Vec::new();
     let mut explain = None;
     let mut trace_limit = 0;
     let mut report_file = None;
@@ -227,14 +547,27 @@ where
     let mut positional_only = false;
 
     while let Some(token) = tokens.next() {
+        if positional_argument_kind.is_some() && (inline_filter.is_some() || filter_file.is_some())
+        {
+            positional_arguments.push(token);
+            continue;
+        }
         if positional_only {
-            positional(&mut inline_filter, &mut files, token, filter_file.is_some());
+            positional(
+                &mut inline_filter,
+                &mut files,
+                &mut positional_arguments,
+                positional_argument_kind,
+                token,
+                filter_file.is_some(),
+            );
             continue;
         }
         match token.as_str() {
             "--" => positional_only = true,
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
+            "--build-configuration" => return Ok(Command::BuildConfiguration),
             "compatibility" if inline_filter.is_none() && filter_file.is_none() => {
                 return Ok(Command::Compatibility);
             }
@@ -256,10 +589,23 @@ where
             "--toon-sequence-input" => input_format = InputFormat::ToonSequence,
             "--unframed" => framing = ToonFraming::Unframed,
             "-r" | "--raw-output" => raw_output = true,
+            "--raw-output0" => {
+                raw_output = true;
+                raw_output0 = true;
+                join_output = false;
+            }
             "-j" | "--join-output" => {
                 raw_output = true;
                 join_output = true;
+                raw_output0 = false;
             }
+            "-a" | "--ascii-output" => ascii_output = true,
+            "-S" | "--sort-keys" => sort_keys = true,
+            "-C" | "--color-output" => color = ColorMode::Always,
+            "-M" | "--monochrome-output" => color = ColorMode::Never,
+            "--tab" => json_indent = JsonIndent::Tabs,
+            "--unbuffered" => unbuffered = true,
+            "-b" | "--binary" => binary = true,
             "-n" | "--null-input" => null_input = true,
             "-R" | "--raw-input" => raw_input = true,
             "-s" | "--slurp" => slurp = true,
@@ -274,10 +620,19 @@ where
             "--pretty-output" => pretty_json = true,
             "--indent" => {
                 let value = next_value(&mut tokens, &token)?;
-                toon_writer.indent_size = value.parse().map_err(|_| CliError::InvalidValue {
+                let indent: u8 = value.parse().map_err(|_| CliError::InvalidValue {
                     option: token.clone(),
-                    value,
+                    value: value.clone(),
                 })?;
+                if indent > 7 {
+                    return Err(CliError::InvalidValue {
+                        option: token,
+                        value,
+                    });
+                }
+                toon_writer.indent_size = usize::from(indent);
+                json_indent = JsonIndent::Spaces(indent);
+                indent_explicit = true;
             }
             "--delimiter" => {
                 let value = next_value(&mut tokens, &token)?;
@@ -322,6 +677,29 @@ where
                 ExternalArgumentKind::Toon,
                 &token,
             )?,
+            "--slurpfile" => parse_external(
+                &mut tokens,
+                &mut external,
+                &mut external_names,
+                ExternalArgumentKind::SlurpFile,
+                &token,
+            )?,
+            "--rawfile" => parse_external(
+                &mut tokens,
+                &mut external,
+                &mut external_names,
+                ExternalArgumentKind::RawFile,
+                &token,
+            )?,
+            "--args" => positional_argument_kind = Some(PositionalArgumentKind::String),
+            "--jsonargs" => positional_argument_kind = Some(PositionalArgumentKind::Json),
+            "-L" | "--library-path" => {
+                let _ = next_value(&mut tokens, &token)?;
+                return Err(CliError::Unsupported(
+                    "module paths are reserved for the jq-user-functions-modules change".to_owned(),
+                ));
+            }
+            "--argfile" | "--run-tests" => return Err(CliError::Unsupported(token)),
             "--explain" => explain = Some(ExplainFormat::Human),
             "--explain-json" => explain = Some(ExplainFormat::Json),
             "--trace" => trace_limit = 256,
@@ -349,9 +727,23 @@ where
                 limits.preparation_memory_bytes = parse_limit(&mut tokens, &token)?;
             }
             "--max-spool-bytes" => limits.spool_bytes = parse_limit(&mut tokens, &token)?,
-            "-" => positional(&mut inline_filter, &mut files, token, filter_file.is_some()),
+            "-" => positional(
+                &mut inline_filter,
+                &mut files,
+                &mut positional_arguments,
+                positional_argument_kind,
+                token,
+                filter_file.is_some(),
+            ),
             value if value.starts_with('-') => return Err(CliError::Unsupported(token)),
-            _ => positional(&mut inline_filter, &mut files, token, filter_file.is_some()),
+            _ => positional(
+                &mut inline_filter,
+                &mut files,
+                &mut positional_arguments,
+                positional_argument_kind,
+                token,
+                filter_file.is_some(),
+            ),
         }
     }
 
@@ -376,21 +768,64 @@ where
             "--stream requires TOON/JSON event input; YAML is document-at-a-time".to_owned(),
         ));
     }
+    let mut json_compatible_writer = WriterConfig::default();
+    if let JsonIndent::Spaces(indent) = json_indent {
+        json_compatible_writer.indent_size = usize::from(indent);
+    }
     if output_format == OutputFormat::Json
-        && (toon_writer != WriterConfig::default() || framing == ToonFraming::Unframed)
+        && (toon_writer != json_compatible_writer || framing == ToonFraming::Unframed)
     {
         return Err(CliError::Incompatible(
             "TOON output options cannot be applied to JSON output".to_owned(),
         ));
     }
-    if output_format == OutputFormat::Toon && !pretty_json {
+    if output_format != OutputFormat::Json && !pretty_json {
         return Err(CliError::Incompatible(
             "--compact-output applies only to JSON output".to_owned(),
+        ));
+    }
+    if output_format != OutputFormat::Json && ascii_output {
+        return Err(CliError::Incompatible(
+            "--ascii-output applies only to JSON output".to_owned(),
+        ));
+    }
+    if output_format != OutputFormat::Json && color == ColorMode::Always {
+        return Err(CliError::Incompatible(
+            "color controls apply only to JSON output".to_owned(),
+        ));
+    }
+    if output_format != OutputFormat::Json && json_indent == JsonIndent::Tabs {
+        return Err(CliError::Incompatible(
+            "--tab applies only to JSON output".to_owned(),
+        ));
+    }
+    if output_format == OutputFormat::Yaml && indent_explicit {
+        return Err(CliError::Incompatible(
+            "--indent is fixed for YAML flow output".to_owned(),
+        ));
+    }
+    if color == ColorMode::Always && !capability_policy.terminal {
+        return Err(CliError::Incompatible(
+            "--color-output is disabled by terminal capability policy".to_owned(),
         ));
     }
     if (raw_output || join_output) && framing == ToonFraming::Unframed {
         return Err(CliError::Incompatible(
             "raw output has its own separators and cannot be --unframed".to_owned(),
+        ));
+    }
+    let uses_filesystem = matches!(&filter, FilterSource::File(_))
+        || files.iter().any(|path| path != std::path::Path::new("-"))
+        || report_file.is_some()
+        || external.iter().any(|argument| {
+            matches!(
+                argument.kind,
+                ExternalArgumentKind::RawFile | ExternalArgumentKind::SlurpFile
+            )
+        });
+    if uses_filesystem && !capability_policy.filesystem {
+        return Err(CliError::Incompatible(
+            "filesystem access is disabled by capability policy".to_owned(),
         ));
     }
 
@@ -402,6 +837,7 @@ where
         framing,
         raw_output,
         join_output,
+        raw_output0,
         null_input,
         raw_input,
         slurp,
@@ -410,13 +846,54 @@ where
         exit_status,
         strict,
         pretty_json,
+        json_indent,
+        ascii_output,
+        sort_keys,
+        color,
+        unbuffered,
+        binary,
         toon_writer,
         arguments: external,
+        positional_argument_kind,
+        positional_arguments,
         explain,
         trace_limit,
         report_file,
         limits,
+        capability_policy,
     })))
+}
+
+fn expand_short_options(tokens: Vec<String>) -> Result<Vec<String>, CliError> {
+    let mut expanded = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        if token == "-" || token == "--" || !token.starts_with('-') || token.starts_with("--") {
+            expanded.push(token);
+            continue;
+        }
+        let mut characters = token[1..].char_indices().peekable();
+        if characters.peek().is_none() {
+            expanded.push(token);
+            continue;
+        }
+        for (offset, short) in characters {
+            let Some(spec) = OPTION_REGISTRY
+                .iter()
+                .find(|option| option.short == Some(short))
+            else {
+                return Err(CliError::Unsupported(format!("-{short}")));
+            };
+            expanded.push(format!("-{short}"));
+            if spec.value {
+                let value_start = offset + short.len_utf8();
+                if value_start < token.len() - 1 {
+                    expanded.push(token[1 + value_start..].to_owned());
+                }
+                break;
+            }
+        }
+    }
+    Ok(expanded)
 }
 
 fn parse_limit<T: std::str::FromStr>(
@@ -433,11 +910,15 @@ fn parse_limit<T: std::str::FromStr>(
 fn positional(
     filter: &mut Option<String>,
     files: &mut Vec<PathBuf>,
+    positional_arguments: &mut Vec<String>,
+    positional_argument_kind: Option<PositionalArgumentKind>,
     token: String,
     has_filter_file: bool,
 ) {
     if filter.is_none() && !has_filter_file {
         *filter = Some(token);
+    } else if positional_argument_kind.is_some() {
+        positional_arguments.push(token);
     } else {
         files.push(PathBuf::from(token));
     }
@@ -467,9 +948,7 @@ fn parse_output(option: &str, value: String) -> Result<OutputFormat, CliError> {
     match value.as_str() {
         "toon" => Ok(OutputFormat::Toon),
         "json" => Ok(OutputFormat::Json),
-        "yaml" | "yml" => Err(CliError::Unsupported(
-            "YAML output is deferred; select toon or json".to_owned(),
-        )),
+        "yaml" | "yml" => Ok(OutputFormat::Yaml),
         _ => Err(CliError::InvalidValue {
             option: option.to_owned(),
             value,
@@ -513,7 +992,10 @@ fn valid_variable(name: &str) -> bool {
 mod tests {
     use tq_formats::{InputFormat, OutputFormat, ToonFraming};
 
-    use super::{CliError, Command, FilterSource, parse_args};
+    use super::{
+        CapabilityPolicy, CliError, ColorMode, Command, FilterSource, generated_help, parse_args,
+        parse_args_with_policy,
+    };
 
     #[test]
     fn parses_jq_shape_files_stdin_and_filter_file() {
@@ -577,5 +1059,42 @@ mod tests {
             parse_args(["compatibility"]).unwrap(),
             Command::Compatibility
         );
+    }
+
+    #[test]
+    fn registry_expands_short_clusters_and_generates_admitted_help() {
+        let Command::Run(run) = parse_args(["--output-format", "json", "-nacSM", "."]).unwrap()
+        else {
+            panic!("run command")
+        };
+        assert!(run.null_input && run.ascii_output && run.sort_keys);
+        assert!(!run.pretty_json);
+        assert_eq!(run.color, ColorMode::Never);
+
+        let help = generated_help();
+        for option in ["--raw-output0", "--slurpfile", "--jsonargs", "--unbuffered"] {
+            assert!(help.contains(option));
+        }
+    }
+
+    #[test]
+    fn ambient_integrations_obey_library_capability_policy() {
+        let denied_files = CapabilityPolicy {
+            filesystem: false,
+            ..CapabilityPolicy::default()
+        };
+        assert!(matches!(
+            parse_args_with_policy([".", "input.json"], denied_files),
+            Err(CliError::Incompatible(message)) if message.contains("filesystem")
+        ));
+
+        let denied_terminal = CapabilityPolicy {
+            terminal: false,
+            ..CapabilityPolicy::default()
+        };
+        assert!(matches!(
+            parse_args_with_policy(["--output-format", "json", "-C", "."], denied_terminal),
+            Err(CliError::Incompatible(message)) if message.contains("terminal")
+        ));
     }
 }

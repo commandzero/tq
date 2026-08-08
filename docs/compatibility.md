@@ -17,9 +17,18 @@ this option is the only way to require JSON parsing.
 Structured output is a TOON Text Sequence: each result is `RS`, canonical TOON,
 and `LF`. This deliberately differs from jq's newline-delimited JSON and keeps
 multiple results and a late error unambiguous. Select `--output-format json`
-for JSON output, `-r` for raw strings, `-j` to join raw outputs, or
+for JSON output, `--output-format yaml` for exact-number-preserving YAML 1.2
+flow output, `-r` for raw strings, `-j` to join raw outputs, or
 `--unframed` for exactly one TOON value. `--unframed` rejects zero or multiple
 results instead of choosing one silently.
+
+The extended jq-shaped CLI supports short clusters plus `--raw-output0`,
+`-a/--ascii-output`, `-S/--sort-keys`, explicit color/monochrome output,
+`--tab`, reviewed `--indent`, and `--unbuffered`. JSON-specific switches require
+explicit JSON output. `--arg`, `--argjson`, and `--argtoon` populate both direct
+variables and `$ARGS.named`; `--args`/`--jsonargs` populate `$ARGS.positional`;
+and `--rawfile`/`--slurpfile` use the configured per-source byte limit. See
+`docs/jq-1.8-cli-options.md` for the complete classification.
 
 ## Memory and limits
 
@@ -50,5 +59,5 @@ intentionally small:
 Features outside the MVP have stable unsupported or deferred status. These
 features include user functions and modules, `reduce` and `foreach`, labels and
 breaks, recursive descent, interpolation, regex, date, platform, and
-environment operations, automatic stream planning, and extended jq CLI
-switches. Each feature has a separate OpenSpec change under `openspec/changes/`.
+environment built-ins, automatic stream planning, and module loading. Each
+feature has a separate OpenSpec change under `openspec/changes/`.

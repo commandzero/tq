@@ -11,7 +11,8 @@ examples below before you move a filter with advanced jq language features.
 | Update | `.items[] \|= .count += 1` | Supported |
 | JSON, YAML, TOON input | `tq --input-format yaml '.items[]' file.yaml` | Supported |
 | Common CLI modes | `-n`, `-R`, `-s`, `-r`, `-j`, `--stream`, `-e` | Supported |
-| CLI values | `--arg name Ada '$name'` | Partial |
+| Output controls | `-a`, `-S`, `-C`, `-M`, `--raw-output0`, `--unbuffered` | Supported/adapted |
+| CLI values | `--arg`, `--argjson`, `--rawfile`, `--slurpfile`, `--args`, `--jsonargs` | Supported |
 | User filters and modules | `def f: .x; f`, `include "lib"` | Deferred |
 | Folds | `reduce .items[] as $x (0; . + $x)` | Deferred |
 | Recursive descent | `.. \| scalars` | Deferred |
@@ -23,13 +24,15 @@ Important migration differences:
 
 - tq structured output defaults to TOON Text Sequence. Use `--output-format json` for JSON consumers.
 - tq has documented digit, exponent, and index limits for large numbers.
-- `--arg`, `--argjson`, and `--argtoon` need more compatibility coverage.
+- jq JSON formatting switches require `--output-format json` because tq's
+  structured default is TOON Text Sequence.
+- YAML output uses exact-number-preserving YAML 1.2 flow syntax.
+- `-L` remains explicitly unsupported until user functions/modules land.
 
-The current matrix records 146 supported capabilities, 5 partial capabilities,
-7 documented differences, 2 unsupported capabilities, 14 deferred
-capabilities, and no untested capabilities. Its next priorities are user
-functions/modules, `reduce`/`foreach`, recursive descent, interpolation,
-regex, and CLI-value coverage.
+The generated report records current capability counts and all raw-byte
+adaptations. Its next priorities are user functions/modules,
+`reduce`/`foreach`, recursive descent, interpolation, and regex/date/platform
+built-ins.
 
 The complete evidence is in [coverage-v1.json](reviews/coverage-v1.json). The
 older [reference candidate](baselines/jq-yq-mvp-v1.json) compares jq and yq
