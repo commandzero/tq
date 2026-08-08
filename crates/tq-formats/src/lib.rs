@@ -13,7 +13,7 @@ pub use adapters::{
     DecodeOptions, ProbeReport, ReplayReader, VecDocumentSource, decode_bytes, decode_json,
     decode_toon, decode_toon_sequence, decode_yaml, probe_format, probe_reader,
 };
-pub use output::{OutputError, OutputOptions, ToonFraming, write_results};
+pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
 pub use stream::{StreamOptions, stream_json, stream_toon};
 
 /// Supported structured input syntax.
@@ -38,6 +38,8 @@ pub enum OutputFormat {
     Toon,
     /// Compact or pretty JSON result text.
     Json,
+    /// One YAML document per result.
+    Yaml,
 }
 
 /// One decoded document and its source identity.
