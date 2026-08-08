@@ -5,7 +5,7 @@ use std::{marker::PhantomData, sync::Arc};
 use serde::Serialize;
 
 use crate::{
-    Bytecode, Diagnostic, DiagnosticClass, SourceFile, Span, Value,
+    Bytecode, Diagnostic, DiagnosticClass, SourceFile, Span,
     ast::{self, Expr},
 };
 
@@ -400,14 +400,6 @@ impl<M> Plan<Compiled, M> {
     pub fn program(&self) -> &Program<Compiled> {
         &self.program
     }
-}
-
-/// Temporary document executor proving phase/mode constraints. The bytecode VM
-/// replaces identity behavior in the compiler slice.
-#[must_use]
-pub fn execute_document(plan: &Plan<Compiled, Document>, input: Value) -> Vec<Value> {
-    let _ = &plan.program;
-    vec![input]
 }
 
 #[cfg(test)]

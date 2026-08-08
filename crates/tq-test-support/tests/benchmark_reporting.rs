@@ -6,35 +6,34 @@ use serde_json::json;
 use tq_test_support::{
     benchmark::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
-        BenchmarkRow, BenchmarkSample, Comparability, CorrectnessDecision, ExecutionClass,
-        InputFormat, OutputContractKind, RegressionGate, RegressionThresholds, collect_environment,
-        compare_reports, correctness_gate, evaluate_regression, populate_reference_ratios,
-        summarize_samples,
+        BenchmarkRow, BenchmarkSample, Comparability, CorrectnessDecision, CorrectnessObservation,
+        CorrectnessPayload, ExecutionClass, InputFormat, OutputContractKind, RegressionGate,
+        RegressionThresholds, collect_environment, compare_reports, correctness_gate,
+        evaluate_regression, populate_reference_ratios, semantic_digest, summarize_samples,
     },
-    compatibility::{NormalizedObservation, ProcessStatus},
+    compatibility::ProcessStatus,
     corpus::ArtifactIdentity,
 };
 
-fn observation(results: Vec<serde_json::Value>) -> NormalizedObservation {
-    NormalizedObservation {
-        results,
-        raw_bytes: None,
-        stderr: Vec::new(),
+fn observation(results: &[serde_json::Value]) -> CorrectnessObservation {
+    CorrectnessObservation {
+        payload: CorrectnessPayload::SemanticSequence(
+            semantic_digest(results).expect("semantic digest"),
+        ),
         process_status: ProcessStatus::Exited,
         exit_code: Some(0),
         error_class: None,
-        notes: Vec::new(),
     }
 }
 
 #[test]
 fn correctness_gate_rejects_semantic_and_normalization_failures() {
-    let reference = observation(vec![json!(1), json!(2)]);
+    let reference = observation(&[json!(1), json!(2)]);
     assert_eq!(
         correctness_gate(
             OutputContractKind::SemanticSequence,
             &reference,
-            Ok(&observation(vec![json!(1), json!(2)]))
+            Ok(&observation(&[json!(1), json!(2)]))
         ),
         CorrectnessDecision::Passed
     );
@@ -42,7 +41,7 @@ fn correctness_gate_rejects_semantic_and_normalization_failures() {
         correctness_gate(
             OutputContractKind::SemanticSequence,
             &reference,
-            Ok(&observation(vec![json!(2), json!(1)]))
+            Ok(&observation(&[json!(2), json!(1)]))
         ),
         CorrectnessDecision::Incorrect(_)
     ));

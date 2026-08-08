@@ -3,11 +3,13 @@
 use std::{
     env,
     error::Error,
+    fs,
     path::{Path, PathBuf},
 };
 
 use tq_test_support::corpus::{
-    CorpusOrigin, generate_representations, inventory_snapshots, refresh_campaign,
+    CorpusOrigin, SnapshotManifest, SnapshotState, finalize_generated_representations,
+    generate_representations, inventory_snapshots, refresh_campaign, write_snapshot_manifest,
 };
 
 fn main() {
@@ -24,10 +26,51 @@ fn run() -> Result<(), Box<dyn Error>> {
     };
     match command.as_str() {
         "generate" => generate(arguments),
+        "finalize" => finalize(arguments),
         "inventory" => inventory(arguments),
         "refresh" => refresh(arguments),
         _ => Err(format!("unsupported corpus command: {command}\n{}", usage()).into()),
     }
+}
+
+fn finalize(arguments: &[String]) -> Result<(), Box<dyn Error>> {
+    let [cache, manifest_path] = arguments else {
+        return Err(usage().into());
+    };
+    let cache = Path::new(cache);
+    let manifest_path = Path::new(manifest_path);
+    let mut manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(manifest_path)?)?;
+    if manifest.state == SnapshotState::CrossFormatValidated {
+        println!("{}", serde_json::to_string_pretty(&manifest)?);
+        return Ok(());
+    }
+    if manifest.artifacts.generated.is_some() {
+        return Err("source-validated manifest unexpectedly contains generated artifacts".into());
+    }
+
+    let source_relative = safe_relative(&manifest.artifacts.source_json.path)?;
+    let artifact_root = source_relative
+        .parent()
+        .ok_or("source artifact path has no parent")?;
+    let yaml_relative = artifact_root.join("source.yaml");
+    let toon_relative = artifact_root.join("source.toon");
+    let yaml_manifest_path = relative_string(&yaml_relative)?;
+    let toon_manifest_path = relative_string(&toon_relative)?;
+    let generated = finalize_generated_representations(
+        &cache.join(source_relative),
+        &cache.join(&yaml_relative),
+        &cache.join(&toon_relative),
+        &yaml_manifest_path,
+        &toon_manifest_path,
+    )?;
+
+    manifest.artifacts.generated = Some(generated);
+    manifest.validation.yaml_equivalent = Some(true);
+    manifest.validation.toon_equivalent = Some(true);
+    manifest.state = SnapshotState::CrossFormatValidated;
+    write_snapshot_manifest(manifest_path, &manifest)?;
+    println!("{}", serde_json::to_string_pretty(&manifest)?);
+    Ok(())
 }
 
 fn refresh(arguments: &[String]) -> Result<(), Box<dyn Error>> {
@@ -82,7 +125,25 @@ fn inventory(arguments: &[String]) -> Result<(), Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT standard|large\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
+    "usage:\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT standard|large\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus finalize CACHE_ROOT MANIFEST.json\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
+}
+
+fn safe_relative(path: &str) -> Result<&Path, Box<dyn Error>> {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty()
+        || !path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(format!("unsafe cache-relative artifact path: {}", path.display()).into());
+    }
+    Ok(path)
+}
+
+fn relative_string(path: &Path) -> Result<String, Box<dyn Error>> {
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("artifact path is not UTF-8: {}", path.display()).into())
 }
 
 fn file_name(path: &Path) -> Result<&str, Box<dyn Error>> {

@@ -22,9 +22,11 @@ mod smoke;
 
 pub use campaign::{CampaignError, CampaignMode, FrozenSnapshot, load_frozen_snapshot};
 pub use conversion::{
-    ConversionError, DifferenceKind, SemanticDifference, compare_ordered, generate_representations,
+    ConversionError, DifferenceKind, SemanticDifference, compare_ordered,
+    finalize_generated_representations, generate_representations,
     validate_generated_representations,
 };
+pub(crate) use conversion::{encode_toon_exact, json_to_yaml};
 pub use geojson::{GeoJsonError, GeoJsonMetadata, validate_geojson};
 pub use inventory::{CorpusInventory, InventoryError, SnapshotInventory, inventory_snapshots};
 pub use manifest::{

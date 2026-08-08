@@ -6,7 +6,7 @@ use std::{
     process::{Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -31,6 +31,8 @@ pub struct BenchmarkInvocation {
     pub timeout: Duration,
     /// Maximum stdout bytes written before the harness stops the process.
     pub output_limit: u64,
+    /// Optional peak resident-memory limit enforced when the host exposes RSS.
+    pub rss_limit: Option<u64>,
     /// Retain output files after a successful invocation for semantic checks.
     pub retain_output: bool,
 }
@@ -74,6 +76,8 @@ pub enum MeasuredStatus {
     Signaled,
     /// Captured output crossed its configured limit.
     OutputLimit,
+    /// The process group crossed its configured resident-memory limit.
+    RssLimit,
 }
 
 /// Benchmark process lifecycle failure.
@@ -120,7 +124,12 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
     let mut child = command.spawn()?;
     let process_id = child.id();
     let rss_sampler_stop = Arc::new(AtomicBool::new(false));
-    let rss_sampler = spawn_rss_sampler(process_id, Arc::clone(&rss_sampler_stop));
+    let sampled_peak = Arc::new(AtomicU64::new(0));
+    let rss_sampler = spawn_rss_sampler(
+        process_id,
+        Arc::clone(&rss_sampler_stop),
+        Arc::clone(&sampled_peak),
+    );
     let mut stdin = child
         .stdin
         .take()
@@ -146,6 +155,11 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         }
         if output_bytes > invocation.output_limit {
             forced = Some(MeasuredStatus::OutputLimit);
+        } else if invocation
+            .rss_limit
+            .is_some_and(|limit| sampled_peak.load(Ordering::Relaxed) > limit)
+        {
+            forced = Some(MeasuredStatus::RssLimit);
         } else if started.elapsed() >= invocation.timeout {
             forced = Some(MeasuredStatus::Timeout);
         }
@@ -155,9 +169,13 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
         }
     };
     rss_sampler_stop.store(true, Ordering::Relaxed);
-    let sampled_peak_rss = rss_sampler
+    rss_sampler
         .join()
         .map_err(|_| MeasureError::CaptureWorker)?;
+    let sampled_peak_rss = match sampled_peak.load(Ordering::Relaxed) {
+        0 => None,
+        value => Some(value),
+    };
 
     let _stdin_result = stdin_worker
         .join()
@@ -214,23 +232,46 @@ fn maximum_available(left: Option<u64>, right: Option<u64>) -> Option<u64> {
     }
 }
 
-fn spawn_rss_sampler(process_group: u32, stop: Arc<AtomicBool>) -> thread::JoinHandle<Option<u64>> {
+fn spawn_rss_sampler(
+    process_group: u32,
+    stop: Arc<AtomicBool>,
+    maximum: Arc<AtomicU64>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        let mut maximum = None;
         while !stop.load(Ordering::Relaxed) {
             if let Some(bytes) = process_group_rss(process_group) {
-                maximum = Some(maximum.unwrap_or(0).max(bytes));
+                maximum.fetch_max(bytes, Ordering::Relaxed);
             }
             thread::sleep(Duration::from_millis(25));
         }
         if let Some(bytes) = process_group_rss(process_group) {
-            maximum = Some(maximum.unwrap_or(0).max(bytes));
+            maximum.fetch_max(bytes, Ordering::Relaxed);
         }
-        maximum
     })
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
+fn process_group_rss(process_group: u32) -> Option<u64> {
+    let output = Command::new("ps")
+        .args(["-axo", "pgid=,rss="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let kibibytes = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let group = fields.next()?.parse::<u32>().ok()?;
+            let rss = fields.next()?.parse::<u64>().ok()?;
+            (group == process_group).then_some(rss)
+        })
+        .sum::<u64>();
+    (kibibytes > 0).then(|| kibibytes.saturating_mul(1024))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn process_group_rss(process_group: u32) -> Option<u64> {
     let output = Command::new("ps")
         .args(["-o", "rss=", "-g", &process_group.to_string()])
@@ -256,8 +297,6 @@ fn measured_command(invocation: &BenchmarkInvocation, resource_path: &std::path:
     {
         let mut command = Command::new("/usr/bin/time");
         command.arg("-p");
-        #[cfg(target_os = "macos")]
-        command.arg("-l");
         #[cfg(all(unix, not(target_os = "macos")))]
         command.arg("-v");
         command
@@ -303,13 +342,11 @@ fn terminate_process_group(_process_id: u32, child: &mut std::process::Child) ->
 fn resource_seconds(report: &str, label: &str) -> Option<u128> {
     report.lines().find_map(|line| {
         let line = line.trim();
-        let seconds = if let Some(value) = line.strip_prefix(&format!("{label} ")) {
-            value.trim()
-        } else if let Some(value) = line.strip_suffix(label) {
-            value.split_whitespace().last()?
-        } else {
-            return None;
-        };
+        let prefix = format!("{label} ");
+        let seconds = line.strip_prefix(&prefix).map(str::trim).or_else(|| {
+            line.strip_suffix(label)
+                .and_then(|value| value.split_whitespace().last())
+        })?;
         parse_seconds_micros(seconds)
     })
 }

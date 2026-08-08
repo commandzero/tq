@@ -16,8 +16,9 @@ use tq_test_support::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus,
         BenchmarkInvocation, BenchmarkOutcome, BenchmarkSampling, BenchmarkTool, Comparability,
         DatasetTier, InputFormat, RegressionGate, RegressionThresholds, collect_environment,
-        compare_reports, evaluate_regression, load_benchmark_catalog, normalize_correctness_run,
-        populate_reference_ratios, run_gated_row, unsupported_row,
+        compare_reports, evaluate_regression, is_correctness_output_limit, load_benchmark_catalog,
+        normalize_correctness_run, populate_reference_ratios, run_correctness_limit_probe,
+        run_gated_row, unsupported_row,
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
     corpus::{
@@ -43,6 +44,8 @@ struct Options {
     cache_root: PathBuf,
     origin: String,
     max_samples: Option<usize>,
+    timeout_seconds: Option<u64>,
+    rss_limit_bytes: Option<u64>,
     selected_cases: Vec<String>,
     baseline: Option<PathBuf>,
     regression_thresholds: RegressionThresholds,
@@ -98,6 +101,16 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 large: samples,
             };
         }
+        if let Some(timeout_seconds) = options.timeout_seconds {
+            case.timeout_seconds = timeout_seconds;
+        }
+        if let Some(rss_limit_bytes) = options.rss_limit_bytes {
+            case.limits.rss_bytes = Some(
+                case.limits
+                    .rss_bytes
+                    .map_or(rss_limit_bytes, |limit| limit.min(rss_limit_bytes)),
+            );
+        }
         for dataset in prepared.datasets.iter().filter(|dataset| {
             case.dataset_selector.tiers.contains(&dataset.tier)
                 && family_matches(case.dataset_selector.family, dataset)
@@ -112,11 +125,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 .ok_or("reference jq executable is unavailable")?;
             let reference_invocation =
                 invocation(&case, reference_adapter, dataset, reference_identity)?;
-            let reference = normalize_correctness_run(
+            let reference = match normalize_correctness_run(
                 &reference_invocation,
                 ToolKind::Jq,
                 case.output_contract.kind,
-            )?;
+            ) {
+                Ok(reference) => Some(reference),
+                Err(error) if is_correctness_output_limit(&error) => None,
+                Err(error) => return Err(error.into()),
+            };
             for adapter in &case.adapters {
                 let corpus_identity = corpus_identity(
                     dataset,
@@ -134,6 +151,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     current_dir: Some(root.clone()),
                     timeout: Duration::from_secs(case.timeout_seconds),
                     output_limit: case.limits.output_bytes,
+                    rss_limit: case.limits.rss_bytes,
                     retain_output: false,
                 };
                 let Some(identity) = tools.get(&adapter.tool) else {
@@ -157,14 +175,24 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     ));
                     continue;
                 }
-                rows.push(run_gated_row(
-                    &case,
-                    adapter,
-                    &corpus_identity,
-                    dataset.tier,
-                    &invocation,
-                    &reference,
-                )?);
+                rows.push(if let Some(reference) = &reference {
+                    run_gated_row(
+                        &case,
+                        adapter,
+                        &corpus_identity,
+                        dataset.tier,
+                        &invocation,
+                        reference,
+                    )?
+                } else {
+                    run_correctness_limit_probe(
+                        &case,
+                        adapter,
+                        &corpus_identity,
+                        dataset.tier,
+                        &invocation,
+                    )?
+                });
             }
         }
     }
@@ -216,6 +244,8 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut cache_root = PathBuf::from("benchmarks/.work/corpus");
     let mut origin = "frozen".to_owned();
     let mut max_samples = None;
+    let mut timeout_seconds = None;
+    let mut rss_limit_bytes = None;
     let mut selected_cases = Vec::new();
     let mut baseline = None;
     let mut wall_time_percent: f64 = 50.0;
@@ -239,6 +269,22 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
                     arguments
                         .next()
                         .ok_or("--max-samples needs a value")?
+                        .parse()?,
+                );
+            }
+            "--timeout-seconds" => {
+                timeout_seconds = Some(
+                    arguments
+                        .next()
+                        .ok_or("--timeout-seconds needs a value")?
+                        .parse()?,
+                );
+            }
+            "--rss-limit-bytes" => {
+                rss_limit_bytes = Some(
+                    arguments
+                        .next()
+                        .ok_or("--rss-limit-bytes needs a value")?
                         .parse()?,
                 );
             }
@@ -268,7 +314,7 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench run --profile smoke|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
+                    "Usage: tq-bench run --profile smoke|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
                 );
                 std::process::exit(0);
             }
@@ -309,6 +355,12 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if minimum_samples == 0 {
         return Err("--minimum-regression-samples must be at least 1".into());
     }
+    if timeout_seconds == Some(0) {
+        return Err("--timeout-seconds must be at least 1".into());
+    }
+    if rss_limit_bytes == Some(0) {
+        return Err("--rss-limit-bytes must be at least 1".into());
+    }
     Ok(Options {
         profile,
         output,
@@ -316,6 +368,8 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
         cache_root,
         origin,
         max_samples,
+        timeout_seconds,
+        rss_limit_bytes,
         selected_cases,
         baseline,
         regression_thresholds: RegressionThresholds {
@@ -498,6 +552,7 @@ fn invocation(
         current_dir: None,
         timeout: Duration::from_secs(case.timeout_seconds),
         output_limit: case.limits.output_bytes,
+        rss_limit: case.limits.rss_bytes,
         retain_output: false,
     })
 }

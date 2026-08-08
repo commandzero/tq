@@ -7,7 +7,8 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 use super::{
-    CompatibilityReport, ObservationState, ProcessStatus, ToolIdentity, ToolKind, ToolObservation,
+    CompatibilityReport, FixtureFormat, ObservationState, ProcessStatus, ToolIdentity, ToolKind,
+    ToolObservation,
 };
 use crate::corpus::ArtifactIdentity;
 
@@ -30,6 +31,9 @@ pub struct CompatibilityBaseline {
 /// Stable observation fields; wall-clock duration is deliberately excluded.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BaselineObservation {
+    /// Physical input representation used for the observation.
+    #[serde(default)]
+    pub input_format: Option<FixtureFormat>,
     /// Execution disposition.
     pub state: ObservationState,
     /// Ordered structured values.
@@ -53,6 +57,7 @@ pub struct BaselineObservation {
 impl From<&ToolObservation> for BaselineObservation {
     fn from(value: &ToolObservation) -> Self {
         Self {
+            input_format: value.input_format,
             state: value.state,
             results: value.results.clone(),
             stdout_hex: value.stdout_hex.clone(),
@@ -77,7 +82,7 @@ impl From<&CompatibilityReport> for CompatibilityBaseline {
                     .iter()
                     .map(|observation| {
                         (
-                            tool_name(observation.tool).to_owned(),
+                            observation_key(observation),
                             BaselineObservation::from(observation),
                         )
                     })
@@ -92,6 +97,18 @@ impl From<&CompatibilityReport> for CompatibilityBaseline {
             observations,
         }
     }
+}
+
+fn observation_key(observation: &ToolObservation) -> String {
+    let format = match observation.input_format {
+        Some(FixtureFormat::Json) => "json",
+        Some(FixtureFormat::Yaml) => "yaml",
+        Some(FixtureFormat::Toon) => "toon",
+        Some(FixtureFormat::Raw) => "raw",
+        Some(FixtureFormat::None) => "none",
+        None => "unspecified",
+    };
+    format!("{}/{}", tool_name(observation.tool), format)
 }
 
 /// One added, removed, or changed tool observation.

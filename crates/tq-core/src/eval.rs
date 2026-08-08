@@ -1,6 +1,7 @@
 //! Bounded evaluator for source-mapped expression bytecode.
 
 use std::{
+    cell::Cell,
     collections::BTreeMap,
     sync::{
         Arc,
@@ -19,57 +20,795 @@ use crate::{
 type Environment = BTreeMap<Arc<str>, Value>;
 type Outcomes = Vec<Result<Value, VmError>>;
 
-pub(crate) fn evaluate(
+pub(crate) fn evaluate_stream(
     bytecode: &Bytecode,
     input: &Value,
     variables: &Environment,
     limits: VmLimits,
-    observations: &mut VmObservations,
     cancellation: Option<&AtomicBool>,
-) -> Outcomes {
-    let mut evaluator = Evaluator {
+    stop: &AtomicBool,
+    mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
+) -> VmObservations {
+    if generator_subset(bytecode) {
+        return evaluate_generator_stream(
+            bytecode,
+            input,
+            variables,
+            limits,
+            cancellation,
+            stop,
+            emit,
+        );
+    }
+    let evaluator = Evaluator {
         bytecode,
         limits,
-        observations,
+        observations: Cell::new(VmObservations::default()),
         cancellation,
+        stop,
     };
-    evaluator.node(bytecode.root(), input, variables, 0)
+    evaluator.emit_node(bytecode.root(), input, variables, 0, &mut |result| {
+        let mut observations = evaluator.observations.get();
+        if result.is_ok() {
+            observations.results += 1;
+            evaluator.observations.set(observations);
+        }
+        emit(result, observations)
+    });
+    evaluator.observations.get()
+}
+
+#[derive(Clone)]
+enum GeneratorContinuation {
+    AccessField(Arc<str>),
+    Iterate,
+    Pipe {
+        node: u32,
+        environment: Arc<Environment>,
+    },
+    AccessIndex {
+        node: u32,
+        environment: Arc<Environment>,
+    },
+    ApplyIndex(Value),
+    OptionalBoundary,
+    Catch {
+        node: Option<u32>,
+        environment: Arc<Environment>,
+    },
+    Raise,
+}
+
+#[derive(Clone)]
+struct GeneratorWork {
+    node: u32,
+    input: Value,
+    environment: Arc<Environment>,
+    continuations: Vec<GeneratorContinuation>,
+}
+
+enum GeneratorTask {
+    Eval(GeneratorWork),
+    Deliver {
+        result: Result<Value, VmError>,
+        environment: Arc<Environment>,
+        continuations: Vec<GeneratorContinuation>,
+    },
+}
+
+fn generator_subset(bytecode: &Bytecode) -> bool {
+    let mut pending = vec![bytecode.root()];
+    let mut seen = vec![false; bytecode.instructions().len()];
+    while let Some(node) = pending.pop() {
+        let Some(instruction) = bytecode.instructions().get(node as usize) else {
+            return false;
+        };
+        if std::mem::replace(&mut seen[node as usize], true) {
+            continue;
+        }
+        match &instruction.operation {
+            Operation::Identity
+            | Operation::Literal(_)
+            | Operation::Variable(_)
+            | Operation::Empty => {}
+            Operation::AccessField { base, .. }
+            | Operation::Iterate(base)
+            | Operation::Optional(base) => pending.push(*base),
+            Operation::AccessIndex { base, index } => {
+                pending.push(*index);
+                pending.push(*base);
+            }
+            Operation::Pipe { left, right } | Operation::Comma { left, right } => {
+                pending.push(*right);
+                pending.push(*left);
+            }
+            Operation::TryCatch { expression, catch } => {
+                if let Some(catch) = catch {
+                    pending.push(*catch);
+                }
+                pending.push(*expression);
+            }
+            Operation::Call { name, arguments }
+                if bytecode.string(*name).is_some_and(|name| {
+                    (name.as_ref() == "empty" && arguments.is_empty())
+                        || (name.as_ref() == "error" && arguments.len() <= 1)
+                }) =>
+            {
+                pending.extend(arguments.iter().copied());
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the explicit generator loop keeps fork and continuation state in one auditable place"
+)]
+fn evaluate_generator_stream(
+    bytecode: &Bytecode,
+    input: &Value,
+    variables: &Environment,
+    limits: VmLimits,
+    cancellation: Option<&AtomicBool>,
+    stop: &AtomicBool,
+    mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
+) -> VmObservations {
+    let environment = Arc::new(variables.clone());
+    let mut pending = vec![GeneratorTask::Eval(GeneratorWork {
+        node: bytecode.root(),
+        input: input.clone(),
+        environment,
+        continuations: Vec::new(),
+    })];
+    let mut observations = VmObservations::default();
+
+    while let Some(task) = pending.pop() {
+        let (mut work, delivered) = match task {
+            GeneratorTask::Eval(work) => (work, None),
+            GeneratorTask::Deliver {
+                result,
+                environment,
+                continuations,
+            } => (
+                GeneratorWork {
+                    node: bytecode.root(),
+                    input: Value::Null,
+                    environment,
+                    continuations,
+                },
+                Some(result),
+            ),
+        };
+        if stop.load(Ordering::Relaxed)
+            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            let _ = emit(Err(VmError::Interrupted), observations);
+            break;
+        }
+        if observations.steps >= limits.steps {
+            let _ = emit(Err(resource("vm-steps")), observations);
+            break;
+        }
+        observations.steps += 1;
+        observations.value_stack_high_water = observations.value_stack_high_water.max(1);
+        observations.fork_stack_high_water = observations.fork_stack_high_water.max(pending.len());
+        observations.call_stack_high_water = observations
+            .call_stack_high_water
+            .max(work.continuations.len().saturating_add(1));
+        if work.continuations.len() >= limits.call_stack {
+            let _ = emit(Err(resource("call-stack")), observations);
+            break;
+        }
+        if pending.len() >= limits.fork_stack {
+            let _ = emit(Err(resource("fork-stack")), observations);
+            break;
+        }
+
+        let value = if let Some(result) = delivered {
+            Some(result)
+        } else {
+            let Some(instruction) = bytecode.instructions().get(work.node as usize) else {
+                let _ = emit(
+                    Err(invalid("tree instruction missing after validation")),
+                    observations,
+                );
+                break;
+            };
+            match &instruction.operation {
+                Operation::Identity => Some(Ok(work.input)),
+                Operation::Literal(index) => Some(
+                    bytecode
+                        .constants()
+                        .get(*index as usize)
+                        .cloned()
+                        .ok_or_else(|| invalid("literal missing after validation")),
+                ),
+                Operation::Variable(index) => Some(
+                    bytecode
+                        .string(*index)
+                        .ok_or_else(|| invalid("string missing after validation"))
+                        .and_then(|name| {
+                            work.environment
+                                .get(name)
+                                .cloned()
+                                .ok_or_else(|| runtime(format!("variable ${name} has no value")))
+                        }),
+                ),
+                Operation::Empty => None,
+                Operation::AccessField { base, key } => match bytecode.string(*key) {
+                    Some(key) => {
+                        work.continuations
+                            .push(GeneratorContinuation::AccessField(Arc::clone(key)));
+                        work.node = *base;
+                        pending.push(GeneratorTask::Eval(work.clone()));
+                        None
+                    }
+                    None => Some(Err(invalid("string missing after validation"))),
+                },
+                Operation::AccessIndex { base, index } => {
+                    work.continuations.push(GeneratorContinuation::AccessIndex {
+                        node: *index,
+                        environment: Arc::clone(&work.environment),
+                    });
+                    work.node = *base;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Iterate(base) => {
+                    work.continuations.push(GeneratorContinuation::Iterate);
+                    work.node = *base;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Optional(child) => {
+                    work.continuations
+                        .push(GeneratorContinuation::OptionalBoundary);
+                    work.node = *child;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Pipe { left, right } => {
+                    work.continuations.push(GeneratorContinuation::Pipe {
+                        node: *right,
+                        environment: Arc::clone(&work.environment),
+                    });
+                    work.node = *left;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Comma { left, right } => {
+                    if pending.len().saturating_add(2) > limits.fork_stack {
+                        Some(Err(resource("fork-stack")))
+                    } else {
+                        let right_work = GeneratorWork {
+                            node: *right,
+                            input: work.input.clone(),
+                            environment: Arc::clone(&work.environment),
+                            continuations: work.continuations.clone(),
+                        };
+                        work.node = *left;
+                        pending.push(GeneratorTask::Eval(right_work));
+                        pending.push(GeneratorTask::Eval(work.clone()));
+                        observations.fork_stack_high_water =
+                            observations.fork_stack_high_water.max(pending.len());
+                        None
+                    }
+                }
+                Operation::TryCatch { expression, catch } => {
+                    work.continuations.push(GeneratorContinuation::Catch {
+                        node: *catch,
+                        environment: Arc::clone(&work.environment),
+                    });
+                    work.node = *expression;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Call { name, arguments }
+                    if arguments.is_empty()
+                        && bytecode
+                            .string(*name)
+                            .is_some_and(|name| name.as_ref() == "empty") =>
+                {
+                    None
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "error") =>
+                {
+                    if let Some(argument) = arguments.first() {
+                        work.continuations.push(GeneratorContinuation::Raise);
+                        work.node = *argument;
+                        pending.push(GeneratorTask::Eval(work.clone()));
+                        None
+                    } else {
+                        Some(Err(VmError::Runtime {
+                            message: work.input.to_string().into(),
+                        }))
+                    }
+                }
+                operation => Some(Err(VmError::Unsupported {
+                    operation: format!("{operation:?}").into(),
+                })),
+            }
+        };
+
+        let Some(mut result) = value else {
+            continue;
+        };
+        loop {
+            if let Err(error) = result {
+                let mut handled = false;
+                while let Some(continuation) = work.continuations.pop() {
+                    match continuation {
+                        GeneratorContinuation::OptionalBoundary => {
+                            handled = true;
+                            break;
+                        }
+                        GeneratorContinuation::Catch { node, environment } => {
+                            if let Some(node) = node {
+                                pending.push(GeneratorTask::Eval(GeneratorWork {
+                                    node,
+                                    input: Value::string(catch_value(&error)),
+                                    environment,
+                                    continuations: work.continuations,
+                                }));
+                            }
+                            handled = true;
+                            break;
+                        }
+                        GeneratorContinuation::AccessField(_)
+                        | GeneratorContinuation::Iterate
+                        | GeneratorContinuation::Pipe { .. }
+                        | GeneratorContinuation::AccessIndex { .. }
+                        | GeneratorContinuation::ApplyIndex(_)
+                        | GeneratorContinuation::Raise => {}
+                    }
+                }
+                if !handled {
+                    let _ = emit(Err(error), observations);
+                    return observations;
+                }
+                break;
+            }
+            let Some(continuation) = work.continuations.pop() else {
+                observations.results += 1;
+                if !emit(result, observations) {
+                    return observations;
+                }
+                break;
+            };
+            let Ok(value) = result else {
+                unreachable!("error handled before continuation dispatch")
+            };
+            match continuation {
+                GeneratorContinuation::AccessField(key) => {
+                    result = access_field(&value, &key);
+                }
+                GeneratorContinuation::ApplyIndex(base) => {
+                    result = access_index(&base, &value);
+                }
+                GeneratorContinuation::AccessIndex { node, environment } => {
+                    work.continuations
+                        .push(GeneratorContinuation::ApplyIndex(value.clone()));
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node,
+                        input: value,
+                        environment,
+                        continuations: work.continuations,
+                    }));
+                    break;
+                }
+                GeneratorContinuation::Pipe { node, environment } => {
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node,
+                        input: value,
+                        environment,
+                        continuations: work.continuations,
+                    }));
+                    break;
+                }
+                GeneratorContinuation::Iterate => {
+                    let values = match value {
+                        Value::Array(values) => values.to_vec(),
+                        Value::Object(values) => values.values().cloned().collect(),
+                        value => {
+                            result = Err(type_error("iterate", &value));
+                            continue;
+                        }
+                    };
+                    if pending.len().saturating_add(values.len()) > limits.fork_stack {
+                        if !emit(Err(resource("fork-stack")), observations) {
+                            return observations;
+                        }
+                        return observations;
+                    }
+                    for value in values.into_iter().rev() {
+                        pending.push(GeneratorTask::Deliver {
+                            result: Ok(value),
+                            environment: Arc::clone(&work.environment),
+                            continuations: work.continuations.clone(),
+                        });
+                    }
+                    observations.fork_stack_high_water =
+                        observations.fork_stack_high_water.max(pending.len());
+                    break;
+                }
+                GeneratorContinuation::OptionalBoundary | GeneratorContinuation::Catch { .. } => {
+                    result = Ok(value);
+                }
+                GeneratorContinuation::Raise => {
+                    let message = match value {
+                        Value::String(value) => value,
+                        value => value.to_string().into(),
+                    };
+                    result = Err(VmError::Runtime { message });
+                }
+            }
+        }
+    }
+    observations
 }
 
 struct Evaluator<'a> {
     bytecode: &'a Bytecode,
     limits: VmLimits,
-    observations: &'a mut VmObservations,
+    observations: Cell<VmObservations>,
     cancellation: Option<&'a AtomicBool>,
+    stop: &'a AtomicBool,
 }
 
 impl Evaluator<'_> {
+    fn cancelled(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+            || self
+                .cancellation
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    }
+
+    fn enter(&self, depth: usize) -> Result<(), VmError> {
+        if self.cancelled() {
+            return Err(VmError::Interrupted);
+        }
+        if depth >= self.limits.call_stack {
+            return Err(resource("call-stack"));
+        }
+        let mut observations = self.observations.get();
+        if observations.steps >= self.limits.steps {
+            return Err(resource("vm-steps"));
+        }
+        observations.steps += 1;
+        observations.call_stack_high_water = observations.call_stack_high_water.max(depth + 1);
+        self.observations.set(observations);
+        Ok(())
+    }
+
     #[allow(
         clippy::too_many_lines,
-        reason = "the bytecode operation dispatch is intentionally exhaustive"
+        reason = "streaming operation dispatch mirrors the exhaustive evaluator"
     )]
-    fn node(
-        &mut self,
+    fn emit_node(
+        &self,
         node: u32,
         input: &Value,
         environment: &Environment,
         depth: usize,
-    ) -> Outcomes {
-        if self
-            .cancellation
-            .is_some_and(|flag| flag.load(Ordering::Relaxed))
-        {
-            return one_error(VmError::Interrupted);
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        let Some(instruction) = self.bytecode.instructions().get(node as usize) else {
+            return emit(Err(invalid("tree instruction missing after validation")));
+        };
+        let operation = instruction.operation.clone();
+        match operation {
+            Operation::AccessField { base, key } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                let key = match self.string(key) {
+                    Ok(key) => Arc::clone(key),
+                    Err(error) => return emit(Err(error)),
+                };
+                self.emit_node(base, input, environment, depth + 1, &mut |result| {
+                    emit(result.and_then(|value| access_field(&value, &key)))
+                })
+            }
+            Operation::AccessIndex { base, index } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                self.emit_node(base, input, environment, depth + 1, &mut |base| {
+                    let Ok(base) = base else {
+                        return emit(base);
+                    };
+                    self.emit_node(index, &base, environment, depth + 1, &mut |index| {
+                        emit(index.and_then(|index| access_index(&base, &index)))
+                    })
+                })
+            }
+            Operation::Iterate(base) => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                self.emit_node(
+                    base,
+                    input,
+                    environment,
+                    depth + 1,
+                    &mut |base| match base {
+                        Ok(Value::Array(values)) => {
+                            for value in values.iter().cloned() {
+                                if !emit(Ok(value)) {
+                                    return false;
+                                }
+                            }
+                            true
+                        }
+                        Ok(Value::Object(values)) => {
+                            for value in values.values().cloned() {
+                                if !emit(Ok(value)) {
+                                    return false;
+                                }
+                            }
+                            true
+                        }
+                        Ok(value) => emit(Err(type_error("iterate", &value))),
+                        Err(error) => emit(Err(error)),
+                    },
+                )
+            }
+            Operation::Optional(child) => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                self.emit_node(child, input, environment, depth + 1, &mut |result| {
+                    result.is_err() || emit(result)
+                })
+            }
+            Operation::Pipe { left, right } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                self.emit_node(left, input, environment, depth + 1, &mut |left| {
+                    let Ok(left) = left else {
+                        return emit(left);
+                    };
+                    self.emit_node(right, &left, environment, depth + 1, emit)
+                })
+            }
+            Operation::Comma { left, right } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                let mut failed = false;
+                let keep_going =
+                    self.emit_node(left, input, environment, depth + 1, &mut |result| {
+                        failed |= result.is_err();
+                        emit(result)
+                    });
+                keep_going && !failed && self.emit_node(right, input, environment, depth + 1, emit)
+            }
+            Operation::Unary { operator, child } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                self.emit_node(child, input, environment, depth + 1, &mut |result| {
+                    emit(result.and_then(|value| unary(operator, &value)))
+                })
+            }
+            Operation::Binary {
+                operator,
+                left,
+                right,
+            } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                if operator == BinaryOperator::Alternative {
+                    let mut accepted = false;
+                    let keep_going =
+                        self.emit_node(left, input, environment, depth + 1, &mut |result| {
+                            match result {
+                                Ok(value) if value.is_truthy() => {
+                                    accepted = true;
+                                    emit(Ok(value))
+                                }
+                                Ok(_) | Err(_) => true,
+                            }
+                        });
+                    return keep_going
+                        && (accepted
+                            || self.emit_node(right, input, environment, depth + 1, emit));
+                }
+                self.emit_node(left, input, environment, depth + 1, &mut |left| {
+                    let Ok(left) = left else {
+                        return emit(left);
+                    };
+                    if matches!(operator, BinaryOperator::And | BinaryOperator::Or) {
+                        let left_truthy = left.is_truthy();
+                        if (operator == BinaryOperator::And && !left_truthy)
+                            || (operator == BinaryOperator::Or && left_truthy)
+                        {
+                            return emit(Ok(Value::Bool(operator == BinaryOperator::Or)));
+                        }
+                        return self.emit_node(
+                            right,
+                            input,
+                            environment,
+                            depth + 1,
+                            &mut |right| emit(right.map(|value| Value::Bool(value.is_truthy()))),
+                        );
+                    }
+                    self.emit_node(
+                        right,
+                        input,
+                        environment,
+                        depth + 1,
+                        &mut |right| match right {
+                            Ok(right) => emit(binary_value(operator, &left, &right)),
+                            Err(error) => emit(Err(error)),
+                        },
+                    )
+                })
+            }
+            Operation::Conditional {
+                branches,
+                alternative,
+            } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                for (condition, body) in branches {
+                    let conditions = self.node(condition, input, environment, depth + 1);
+                    if let Some(error) = first_error(&conditions) {
+                        return emit(Err(error));
+                    }
+                    if conditions
+                        .iter()
+                        .any(|value| value.as_ref().is_ok_and(Value::is_truthy))
+                    {
+                        return self.emit_node(body, input, environment, depth + 1, emit);
+                    }
+                }
+                self.emit_node(alternative, input, environment, depth + 1, emit)
+            }
+            Operation::Bind { value, name, body } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                let name = match self.string(name) {
+                    Ok(name) => Arc::clone(name),
+                    Err(error) => return emit(Err(error)),
+                };
+                self.emit_node(value, input, environment, depth + 1, &mut |value| {
+                    let Ok(value) = value else {
+                        return emit(value);
+                    };
+                    let mut nested = environment.clone();
+                    nested.insert(Arc::clone(&name), value);
+                    self.emit_node(body, input, &nested, depth + 1, emit)
+                })
+            }
+            Operation::TryCatch { expression, catch } => {
+                if let Err(error) = self.enter(depth) {
+                    return emit(Err(error));
+                }
+                self.emit_node(
+                    expression,
+                    input,
+                    environment,
+                    depth + 1,
+                    &mut |result| match result {
+                        Ok(value) => emit(Ok(value)),
+                        Err(error) => catch.is_none_or(|catch| {
+                            self.emit_node(
+                                catch,
+                                &Value::string(catch_value(&error)),
+                                environment,
+                                depth + 1,
+                                emit,
+                            )
+                        }),
+                    },
+                )
+            }
+            Operation::Call { name, arguments } => {
+                let name = match self.string(name) {
+                    Ok(name) => Arc::clone(name),
+                    Err(error) => return emit(Err(error)),
+                };
+                match name.as_ref() {
+                    "empty" => self
+                        .enter(depth)
+                        .map_or_else(|error| emit(Err(error)), |()| true),
+                    "select" => {
+                        if let Err(error) = self.enter(depth) {
+                            return emit(Err(error));
+                        }
+                        let Some(argument) = arguments.first() else {
+                            return emit(Err(invalid("select argument missing")));
+                        };
+                        self.emit_node(*argument, input, environment, depth + 1, &mut |selected| {
+                            match selected {
+                                Ok(value) if value.is_truthy() => emit(Ok(input.clone())),
+                                Ok(_) => true,
+                                Err(error) => emit(Err(error)),
+                            }
+                        })
+                    }
+                    "range" => {
+                        if let Err(error) = self.enter(depth) {
+                            return emit(Err(error));
+                        }
+                        self.emit_range(&arguments, input, environment, depth + 1, emit)
+                    }
+                    _ => self
+                        .node(node, input, environment, depth)
+                        .into_iter()
+                        .all(emit),
+                }
+            }
+            _ => self
+                .node(node, input, environment, depth)
+                .into_iter()
+                .all(emit),
         }
-        if depth >= self.limits.call_stack {
-            return one_error(resource("call-stack"));
+    }
+
+    fn emit_range(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        let mut numbers = Vec::new();
+        for argument in arguments {
+            match first_value(self.node(*argument, input, environment, depth)) {
+                Ok(Value::Number(number)) => numbers.push(number.as_f64()),
+                Ok(value) => return emit(Err(type_error("range", &value))),
+                Err(error) => return emit(Err(error)),
+            }
         }
-        if self.observations.steps >= self.limits.steps {
-            return one_error(resource("vm-steps"));
+        let (mut current, end, step) = match numbers.as_slice() {
+            [end] => (0.0, *end, 1.0),
+            [start, end] => (*start, *end, 1.0),
+            [start, end, step] => (*start, *end, *step),
+            _ => return emit(Err(invalid("range arity"))),
+        };
+        if step == 0.0 {
+            return emit(Err(runtime("range step cannot be zero".to_owned())));
         }
-        self.observations.steps += 1;
-        self.observations.call_stack_high_water =
-            self.observations.call_stack_high_water.max(depth + 1);
+        while (step > 0.0 && current < end) || (step < 0.0 && current > end) {
+            if let Err(error) = self.enter(depth) {
+                return emit(Err(error));
+            }
+            let Some(value) = number_value(current).pop() else {
+                return emit(Err(invalid("range produced no numeric value")));
+            };
+            if !emit(value) {
+                return false;
+            }
+            let next = current + step;
+            if next.to_bits() == current.to_bits() {
+                return emit(Err(resource("vm-steps")));
+            }
+            current = next;
+        }
+        true
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the bytecode operation dispatch is intentionally exhaustive"
+    )]
+    fn node(&self, node: u32, input: &Value, environment: &Environment, depth: usize) -> Outcomes {
+        if let Err(error) = self.enter(depth) {
+            return one_error(error);
+        }
         let Some(instruction) = self.bytecode.instructions().get(node as usize) else {
             return one_error(invalid("tree instruction missing after validation"));
         };
@@ -306,7 +1045,7 @@ impl Evaluator<'_> {
     }
 
     fn bound(
-        &mut self,
+        &self,
         node: Option<u32>,
         input: &Value,
         environment: &Environment,
@@ -331,7 +1070,7 @@ impl Evaluator<'_> {
     }
 
     fn binary(
-        &mut self,
+        &self,
         operator: BinaryOperator,
         left: u32,
         right: u32,
@@ -393,7 +1132,7 @@ impl Evaluator<'_> {
         reason = "the versioned built-in registry is executed in one exhaustive dispatch"
     )]
     fn call(
-        &mut self,
+        &self,
         name: &str,
         arguments: &[u32],
         input: &Value,
@@ -497,7 +1236,7 @@ impl Evaluator<'_> {
     }
 
     fn argument_values(
-        &mut self,
+        &self,
         arguments: &[u32],
         input: &Value,
         environment: &Environment,
@@ -515,7 +1254,7 @@ impl Evaluator<'_> {
     }
 
     fn map(
-        &mut self,
+        &self,
         arguments: &[u32],
         input: &Value,
         environment: &Environment,
@@ -553,7 +1292,7 @@ impl Evaluator<'_> {
     }
 
     fn range(
-        &mut self,
+        &self,
         arguments: &[u32],
         input: &Value,
         environment: &Environment,
@@ -588,7 +1327,7 @@ impl Evaluator<'_> {
     }
 
     fn sort_by(
-        &mut self,
+        &self,
         arguments: &[u32],
         input: &Value,
         environment: &Environment,
@@ -621,7 +1360,7 @@ impl Evaluator<'_> {
     }
 
     fn assignment(
-        &mut self,
+        &self,
         operator: AssignmentOperator,
         path_node: u32,
         value_node: u32,
@@ -665,81 +1404,150 @@ impl Evaluator<'_> {
         documents.into_iter().map(Ok).collect()
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the explicit path work stack keeps traversal and bounds in one auditable loop"
+    )]
     fn paths(
-        &mut self,
+        &self,
         node: u32,
         input: &Value,
         environment: &Environment,
         depth: usize,
     ) -> Result<Vec<Path>, VmError> {
-        let operation = self
-            .bytecode
-            .instructions()
-            .get(node as usize)
-            .ok_or_else(|| invalid("path instruction missing"))?
-            .operation
-            .clone();
-        match operation {
-            Operation::Identity => Ok(vec![Path::root()]),
-            Operation::AccessField { base, key } => {
-                let key = Arc::clone(self.string(key)?);
-                let mut paths = self.paths(base, input, environment, depth + 1)?;
-                for path in &mut paths {
-                    let mut components = path.components().to_vec();
-                    components.push(PathComponent::Key(Arc::clone(&key)));
-                    *path = Path::new(components);
-                }
-                Ok(paths)
-            }
-            Operation::AccessIndex { base, index } => {
-                let bases = self.paths(base, input, environment, depth + 1)?;
-                let mut output = Vec::new();
-                for base_path in bases {
-                    let base_value = base_path.get(input).unwrap_or(&Value::Null);
-                    for index in self.node(index, base_value, environment, depth + 1) {
-                        let component = path_component(&index?)?;
-                        let mut components = base_path.components().to_vec();
-                        components.push(component);
-                        output.push(Path::new(components));
-                    }
-                }
-                Ok(output)
-            }
-            Operation::Iterate(base) => {
-                let bases = self.paths(base, input, environment, depth + 1)?;
-                let mut output = Vec::new();
-                for base in bases {
-                    match base.get(input) {
-                        Some(Value::Array(values)) => {
-                            for index in 0..values.len() {
-                                let mut components = base.components().to_vec();
-                                components.push(PathComponent::Index(index));
-                                output.push(Path::new(components));
-                            }
-                        }
-                        Some(Value::Object(values)) => {
-                            for key in values.keys() {
-                                let mut components = base.components().to_vec();
-                                components.push(PathComponent::Key(Arc::clone(key)));
-                                output.push(Path::new(components));
-                            }
-                        }
-                        Some(value) => return Err(type_error("update iteration", value)),
-                        None => {}
-                    }
-                }
-                Ok(output)
-            }
-            Operation::Comma { left, right } => {
-                let mut paths = self.paths(left, input, environment, depth + 1)?;
-                paths.extend(self.paths(right, input, environment, depth + 1)?);
-                Ok(paths)
-            }
-            Operation::Optional(child) => Ok(self
-                .paths(child, input, environment, depth + 1)
-                .unwrap_or_default()),
-            _ => Err(runtime("assignment left side is not a path".to_owned())),
+        #[derive(Clone)]
+        enum Segment {
+            Field(Arc<str>),
+            Index(u32),
+            Iterate,
         }
+        struct Work {
+            node: u32,
+            segments: Vec<Segment>,
+            optional: bool,
+        }
+
+        let mut pending = vec![Work {
+            node,
+            segments: Vec::new(),
+            optional: false,
+        }];
+        let mut output = Vec::new();
+        'work: while let Some(mut work) = pending.pop() {
+            self.enter(depth)?;
+            if work.segments.len() >= self.limits.path_stack {
+                return Err(resource("path-stack"));
+            }
+            let mut observations = self.observations.get();
+            observations.path_stack_high_water =
+                observations.path_stack_high_water.max(work.segments.len());
+            observations.fork_stack_high_water =
+                observations.fork_stack_high_water.max(pending.len());
+            self.observations.set(observations);
+
+            let operation = self
+                .bytecode
+                .instructions()
+                .get(work.node as usize)
+                .ok_or_else(|| invalid("path instruction missing"))?
+                .operation
+                .clone();
+            match operation {
+                Operation::Identity => {
+                    let mut candidates = vec![Path::root()];
+                    for segment in work.segments.into_iter().rev() {
+                        let mut next = Vec::new();
+                        for path in candidates {
+                            match segment {
+                                Segment::Field(ref key) => {
+                                    let mut components = path.components().to_vec();
+                                    components.push(PathComponent::Key(Arc::clone(key)));
+                                    next.push(Path::new(components));
+                                }
+                                Segment::Index(index_node) => {
+                                    let base = path.get(input).unwrap_or(&Value::Null);
+                                    for index in self.node(
+                                        index_node,
+                                        base,
+                                        environment,
+                                        depth.saturating_add(1),
+                                    ) {
+                                        let component =
+                                            match index.and_then(|value| path_component(&value)) {
+                                                Ok(component) => component,
+                                                Err(_) if work.optional => continue 'work,
+                                                Err(error) => return Err(error),
+                                            };
+                                        let mut components = path.components().to_vec();
+                                        components.push(component);
+                                        next.push(Path::new(components));
+                                    }
+                                }
+                                Segment::Iterate => match path.get(input) {
+                                    Some(Value::Array(values)) => {
+                                        for index in 0..values.len() {
+                                            let mut components = path.components().to_vec();
+                                            components.push(PathComponent::Index(index));
+                                            next.push(Path::new(components));
+                                        }
+                                    }
+                                    Some(Value::Object(values)) => {
+                                        for key in values.keys() {
+                                            let mut components = path.components().to_vec();
+                                            components.push(PathComponent::Key(Arc::clone(key)));
+                                            next.push(Path::new(components));
+                                        }
+                                    }
+                                    Some(_) if work.optional => continue 'work,
+                                    Some(value) => {
+                                        return Err(type_error("update iteration", value));
+                                    }
+                                    None => {}
+                                },
+                            }
+                        }
+                        candidates = next;
+                    }
+                    output.extend(candidates);
+                }
+                Operation::AccessField { base, key } => {
+                    work.segments
+                        .push(Segment::Field(Arc::clone(self.string(key)?)));
+                    work.node = base;
+                    pending.push(work);
+                }
+                Operation::AccessIndex { base, index } => {
+                    work.segments.push(Segment::Index(index));
+                    work.node = base;
+                    pending.push(work);
+                }
+                Operation::Iterate(base) => {
+                    work.segments.push(Segment::Iterate);
+                    work.node = base;
+                    pending.push(work);
+                }
+                Operation::Comma { left, right } => {
+                    if pending.len().saturating_add(2) > self.limits.fork_stack {
+                        return Err(resource("fork-stack"));
+                    }
+                    pending.push(Work {
+                        node: right,
+                        segments: work.segments.clone(),
+                        optional: work.optional,
+                    });
+                    work.node = left;
+                    pending.push(work);
+                }
+                Operation::Optional(child) => {
+                    work.optional = true;
+                    work.node = child;
+                    pending.push(work);
+                }
+                _ if work.optional => {}
+                _ => return Err(runtime("assignment left side is not a path".to_owned())),
+            }
+        }
+        Ok(output)
     }
 }
 
@@ -1203,35 +2011,49 @@ fn replace_or_create(
     components: &[PathComponent],
     replacement: Value,
 ) -> Result<Value, VmError> {
-    let Some((component, tail)) = components.split_first() else {
-        return Ok(replacement);
-    };
-    match component {
-        PathComponent::Key(key) => {
-            let mut object = match root {
-                Value::Object(object) => object.as_ref().clone(),
-                Value::Null => IndexMap::new(),
-                value => return Err(type_error("object assignment", value)),
-            };
-            let child = object.get(key).unwrap_or(&Value::Null);
-            let value = replace_or_create(child, tail, replacement)?;
-            object.insert(Arc::clone(key), value);
-            Ok(Value::object(object))
-        }
-        PathComponent::Index(index) => {
-            let mut values = match root {
-                Value::Array(values) => values.to_vec(),
-                Value::Null => Vec::new(),
-                value => return Err(type_error("array assignment", value)),
-            };
-            while values.len() <= *index {
-                values.push(Value::Null);
+    let mut current = root.clone();
+    let mut ancestors = Vec::with_capacity(components.len());
+    for component in components {
+        let child = match (component, &current) {
+            (PathComponent::Key(key), Value::Object(object)) => {
+                object.get(key).cloned().unwrap_or(Value::Null)
             }
-            let value = replace_or_create(&values[*index], tail, replacement)?;
-            values[*index] = value;
-            Ok(Value::array(values))
-        }
+            (PathComponent::Key(_) | PathComponent::Index(_), Value::Null) => Value::Null,
+            (PathComponent::Key(_), value) => return Err(type_error("object assignment", value)),
+            (PathComponent::Index(index), Value::Array(values)) => {
+                values.get(*index).cloned().unwrap_or(Value::Null)
+            }
+            (PathComponent::Index(_), value) => return Err(type_error("array assignment", value)),
+        };
+        ancestors.push((current, component.clone()));
+        current = child;
     }
+
+    let mut rebuilt = replacement;
+    while let Some((parent, component)) = ancestors.pop() {
+        rebuilt = match component {
+            PathComponent::Key(key) => {
+                let mut object = match parent {
+                    Value::Object(object) => object.as_ref().clone(),
+                    Value::Null => IndexMap::new(),
+                    value => return Err(type_error("object assignment", &value)),
+                };
+                object.insert(key, rebuilt);
+                Value::object(object)
+            }
+            PathComponent::Index(index) => {
+                let mut values = match parent {
+                    Value::Array(values) => values.to_vec(),
+                    Value::Null => Vec::new(),
+                    value => return Err(type_error("array assignment", &value)),
+                };
+                values.resize(index.saturating_add(1), Value::Null);
+                values[index] = rebuilt;
+                Value::array(values)
+            }
+        };
+    }
+    Ok(rebuilt)
 }
 
 #[cfg(test)]
@@ -1261,9 +2083,9 @@ mod tests {
             },
         )
         .unwrap();
-        let program = analyze(query).compile().unwrap();
+        let plan = analyze(query).compile().unwrap().document_plan();
         let input: Value = serde_json::from_str(input).unwrap();
-        let mut vm = Vm::new_with_variables(&program, input, VmLimits::default(), variables);
+        let mut vm = Vm::new_with_variables(&plan, input, VmLimits::default(), variables);
         let mut values = Vec::new();
         loop {
             match vm.next_result() {

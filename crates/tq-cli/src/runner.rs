@@ -13,8 +13,8 @@ use std::{
 
 use thiserror::Error;
 use tq_core::{
-    AnalysisContext, Analyzed, Compiled, Diagnostic, Program, Query, ResolveOptions, Value, Vm,
-    VmError, VmLimits, VmObservations, analyze_with_context, parse_bytes, resolve,
+    AnalysisContext, Analyzed, Compiled, Diagnostic, Events, Plan, Query, ResolveOptions, Value,
+    Vm, VmError, VmLimits, VmObservations, analyze_with_context, parse_bytes, resolve,
 };
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, OutputError, OutputOptions, StreamOptions,
@@ -209,8 +209,9 @@ fn run_filter<R: Read, W: Write, E: Write>(
 
     if options.stream {
         let plan = program.event_plan().map_err(RunError::Compile)?;
-        return run_event_filter(options, plan.program(), &variables, stdin, stdout, stderr);
+        return run_event_filter(options, &plan, &variables, stdin, stdout, stderr);
     }
+    let plan = program.document_plan();
 
     let inputs = load_inputs(options, stdin)?;
 
@@ -230,7 +231,7 @@ fn run_filter<R: Read, W: Write, E: Write>(
     let mut observations = Vec::new();
     let mut runtime_error = None;
     'documents: for input in values {
-        let mut vm = Vm::new_with_variables(&program, input, vm_limits(options), variables.clone())
+        let mut vm = Vm::new_with_variables(&plan, input, vm_limits(options), variables.clone())
             .with_trace_limit(options.trace_limit);
         if let Some(flag) = cancellation() {
             vm = vm.with_cancellation(flag);
@@ -367,14 +368,14 @@ const fn input_format_name(format: InputFormat) -> &'static str {
 
 fn run_event_filter<R: Read, W: Write, E: Write>(
     options: &RunOptions,
-    program: &Program<Compiled>,
+    plan: &Plan<Compiled, Events>,
     variables: &BTreeMap<Arc<str>, Value>,
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
 ) -> Result<ExitStatus, RunError> {
     let mut executor = StreamExecutor {
-        program,
+        plan,
         variables,
         output: ResultOutput::new(stdout, options),
         stderr,
@@ -538,7 +539,7 @@ impl<R: Read> Read for LimitedReader<R> {
 }
 
 struct StreamExecutor<'a, W, E> {
-    program: &'a Program<Compiled>,
+    plan: &'a Plan<Compiled, Events>,
     variables: &'a BTreeMap<Arc<str>, Value>,
     output: ResultOutput<'a, W>,
     stderr: &'a mut E,
@@ -550,8 +551,8 @@ struct StreamExecutor<'a, W, E> {
 
 impl<W: Write, E: Write> StreamExecutor<'_, W, E> {
     fn accept(&mut self, input: Value) -> Result<(), RunError> {
-        let mut vm = Vm::new_with_variables(
-            self.program,
+        let mut vm = Vm::new_events_with_variables(
+            self.plan,
             input,
             vm_limits(self.output.options),
             self.variables.clone(),
@@ -560,17 +561,20 @@ impl<W: Write, E: Write> StreamExecutor<'_, W, E> {
         if let Some(flag) = cancellation() {
             vm = vm.with_cancellation(flag);
         }
-        loop {
-            match vm.next_result() {
-                Ok(Some(value)) => {
-                    self.last = Some(value.clone());
-                    self.output.emit(&value)?;
-                    self.results = self.results.saturating_add(1);
-                }
-                Ok(None) => break,
-                Err(error) => return Err(RunError::Runtime(error)),
+        let mut output_error = None;
+        let evaluated = vm.for_each_result(|value| {
+            if let Err(error) = self.output.emit(&value) {
+                output_error = Some(error);
+                return false;
             }
+            self.last = Some(value);
+            self.results = self.results.saturating_add(1);
+            true
+        });
+        if let Some(error) = output_error {
+            return Err(error);
         }
+        evaluated.map_err(RunError::Runtime)?;
         if self.trace_remaining != 0 {
             for entry in vm.trace() {
                 writeln!(self.stderr, "trace: {entry}")?;

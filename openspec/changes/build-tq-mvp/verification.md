@@ -4,27 +4,48 @@
 
 | Dimension | Status |
 | --- | --- |
-| Completeness | 198/198 tasks complete |
-| Correctness | 8 capability specs and 196 scenarios mapped to automated evidence, reports, or release checks |
-| Coherence | Rust typestate, TOON/JSON/YAML adapters, bounded plans, resource controls, and benchmark contracts agree with the design |
+| Completeness | 198/198 task boxes are checked, but task 15.7 remains substantively incomplete |
+| Correctness | Build, compatibility, and benchmark gates pass; two mandatory diagnostic contracts remain unresolved |
+| Coherence | Typestate plans, streaming I/O, compatibility publication, and bounded benchmark correctness agree with the design; diagnostic metadata does not yet agree with the specs |
+| Archive readiness | Blocked until the two critical diagnostic findings are fixed and reverified |
 
-## Release evidence
+## Verified evidence
 
-- Rust 1.85 and stable `cargo test --workspace --offline`: 163 tests passed on each toolchain.
-- `cargo fmt --all --check`, strict Clippy (`-D warnings`), `cargo doc --workspace --no-deps --offline`, and strict OpenSpec validation pass.
-- `make fuzz` completed the parser, TOON decoder, bytecode validator, VM, and CLI argument targets at ten seconds each without crash artifacts; the release summary is `baselines/2026-08-01/fuzz/release-v1.json`.
-- `compatibility/reviews/coverage-v1.json` records jq 1.8.2, yq 4.53.2, and tq. Its executable allowlist test permits only TOON sequence framing and the three numeric-envelope jq/tq differences; capability counts are 146 supported, 5 partial, 7 divergent, 2 unsupported, 14 deferred, and 0 untested.
-- `tq-standard-mvp-v1.json` records 276 timed and 12 explicitly unsupported JSON/YAML/TOON standard rows. `tq-large-parse-discard-mvp-v1.json` records all six applicable jq/yq/tq rows over the natural 1 GB-class corpus; `large-event-stream-v1.json` and `large-event-stream-rss.json` preserve the bounded explicit-stream latency/RSS evidence.
-- `tq-standard-parse-discard-stable-v1.json` and `tq-standard-parse-discard-regression-v1.json` prove the manifest-aware 50% wall / 20% RSS / five-sample tq-only regression gate.
-- `docs/requirements-traceability.md` plus `requirements_traceability.rs` enforce the eight-spec scenario mapping. User and contributor guidance is in `README.md`, `docs/compatibility.md`, `docs/performance-baseline.md`, `benchmarks/README.md`, and `CONTRIBUTING.md`.
-- Six apply-ready follow-up changes cover user functions/modules, reduce/foreach, recursive descent/interpolation, regex/date/platform built-ins, automatic stream planning, and extended jq CLI parity.
+- Formatting, strict workspace Clippy, workspace documentation, stable workspace tests, Rust 1.87.0 workspace tests, and strict OpenSpec validation pass.
+- The release fuzz evidence covers `query_parser`, `toon_decoder`, `bytecode_decode`, `vm_program`, and `cli_args` without a crash artifact.
+- `tests/compatibility/reviews/coverage-v1.json` contains 154 cases and 831 observations for jq 1.8.2, yq 4.53.2, and tq over JSON, YAML, and TOON. Its jq/tq difference allowlist remains executable.
+- `docs/requirements-traceability.tsv` has one row per scenario. Every route now declares a test, report assertion, or manual finding and names a source symbol/heading checked by `requirements_traceability.rs`.
+- Benchmark semantic correctness uses an incremental, format-independent digest. It consumes JSON result texts and TOON Text Sequence records individually instead of retaining the complete normalized result sequence.
+- `benchmarks/2026-08-07.md` retains the refreshed standard and natural-large campaigns, including unfavorable resource and timeout outcomes. The final large event rows remain below the 128 MiB objective.
 
-## Issues
+## Critical issues
 
-No critical or warning issues remain for the MVP archive gate. The deliberately
-deferred jq families and reviewed framing/numeric differences are published in
-the capability matrix rather than treated as untracked gaps.
+### Critical: runtime diagnostic context
+
+The runtime type-error contract requires the query operator span plus input document/path context. `VmError::Runtime` currently retains only a message, and its conversion to the shared diagnostic adds no query or input labels. The manual probe `printf '"x"\n' | tq --input-format json --output-format json '. + 1'` reports only `runtime error: cannot add string and number`.
+
+### Critical: resource diagnostic details
+
+The resource contract requires the limit name, configured threshold, observed or attempted value, execution phase, and relevant span. VM and CLI resource errors currently retain only a static resource name. The manual probe using `--max-vm-steps 1 '. | .'` reports only `VM resource limit exceeded: vm-steps`.
+
+## Manual release checks
+
+### Manual: spool interruption cleanup
+
+The spool owns its securely created temporary file through RAII, and dropping the active preparation state removes the artifact. The spool cleanup unit test exercises the same ownership path after transitioning to disk.
+
+### Manual: downstream pipe closure
+
+The CLI entry point classifies `BrokenPipe` from both direct I/O and structured-output errors and returns success without emitting a diagnostic or panic.
+
+### Manual: user interrupt
+
+The CLI installs a `SIGINT` flag, the VM polls the shared cancellation flag, and VM/spool drops release worker and temporary state before interrupted status is returned.
+
+## Warnings
+
+None. The prior traceability, benchmark-normalization, and stale-verification warnings were remediated without reclassifying the two critical findings.
 
 ## Assessment
 
-All checks passed. The change is ready for archive.
+`build-tq-mvp` is **not ready for archive**. Resolve both critical diagnostic contracts, change task 15.7 back to incomplete while that work is pending or complete it in the same change, and rerun verification.

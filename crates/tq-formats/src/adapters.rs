@@ -296,6 +296,16 @@ pub fn decode_yaml(
     identity: impl Into<String>,
 ) -> Result<Vec<Document>, FormatError> {
     let identity = identity.into();
+    // JSON is a YAML 1.2 subset. Prefer the exact-literal JSON decoder when
+    // the complete source satisfies that subset so yaml_serde cannot round a
+    // large decimal through its binary64 visitor before tq sees it.
+    if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
+        let mut documents = decode_json(bytes, identity.clone())?;
+        for document in &mut documents {
+            document.format = InputFormat::Yaml;
+        }
+        return Ok(documents);
+    }
     let mut documents = Vec::new();
     for (index, document) in yaml_serde::Deserializer::from_slice(bytes).enumerate() {
         let value = YamlRuntime::deserialize(document)
@@ -404,6 +414,12 @@ impl<'de> Visitor<'de> for YamlVisitor {
     where
         E: de::Error,
     {
+        const MAX_EXACT_INTEGER: f64 = 9_007_199_254_740_992.0;
+        if value.fract() == 0.0 && value.abs() > MAX_EXACT_INTEGER {
+            return Err(E::custom(
+                "YAML integer is outside binary64's exact envelope; use a JSON-subset scalar to preserve it",
+            ));
+        }
         Number::from_f64(value)
             .map(Value::Number)
             .map(YamlRuntime)
@@ -497,6 +513,22 @@ mod tests {
         assert!(decode_yaml(b"a: 1\na: 2", "duplicate").is_err());
         assert!(decode_yaml(b"a: .nan", "non-finite").is_err());
         assert!(decode_yaml(b"a: !custom value", "tag").is_err());
+    }
+
+    #[test]
+    fn yaml_never_silently_rounds_large_json_subset_integers() {
+        let exact = b"1111111111111111111111111111111111111111";
+        let documents = decode_yaml(exact, "exact-json-subset").unwrap();
+        assert_eq!(
+            documents[0].value.to_string(),
+            String::from_utf8_lossy(exact)
+        );
+
+        let block = b"value: 1111111111111111111111111111111111111111";
+        assert!(decode_yaml(block, "inexact-block-scalar").is_err());
+
+        let over_limit = "1".repeat(4097);
+        assert!(decode_yaml(over_limit.as_bytes(), "over-limit-json-subset").is_err());
     }
 
     #[test]

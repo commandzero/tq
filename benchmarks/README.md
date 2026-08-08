@@ -14,6 +14,18 @@ USGS feeds for standard small/medium coverage, and the Microsoft US building
 footprint archive for the ~1 GB-class large profile. Representation generation,
 archive extraction, and JSON/YAML/TOON equivalence checks happen before timing.
 
+If a refresh is interrupted after generated files are installed but before the
+manifest is admitted, resume validation without regeneration:
+
+```console
+cargo run -p tq-test-support --bin tq-corpus -- \
+  finalize CACHE_ROOT CACHE_ROOT/campaigns/ID/SOURCE/manifest.json
+```
+
+`finalize` is idempotent for an already cross-format-validated manifest. It
+validates existing representations first, then atomically records their
+streamed byte counts and SHA-256 identities.
+
 The Make targets refresh or replay the selected corpus and write local reports:
 
 ```console
@@ -40,9 +52,23 @@ silently represented as that checkout.
 
 Frozen investigations add `--origin frozen --manifest PATH`. `--max-samples 1`
 is useful for validation, and `--case benchmark.event-stream` selects one
-workload. The working JSON retains host, compiler, tool, corpus, command,
-limit, and environment data. It is for local review only; the versioned final
-artifact is the concise `YYYY-MM-DD.md` Markdown summary.
+workload. A reviewed long-running campaign may also use `--timeout-seconds N`
+and `--rss-limit-bytes N`; these overrides are copied into every report row,
+and an existing stricter per-case RSS limit still wins. The working JSON
+retains host, compiler, tool, corpus, command, limit, and environment data. It
+is for local review only; the versioned final artifact is the concise
+`YYYY-MM-DD.md` Markdown summary.
+
+Correctness normalization is file-backed and bounded at 32 MiB. If the
+reference result itself exceeds that boundary, the campaign runs one bounded
+probe per applicable adapter and records `resource-limit`, timeout, or signal
+outcomes. It does not time unverified output or load a multi-gigabyte result
+into the harness.
+
+On macOS, RSS enforcement samples the complete child process group with
+`ps -axo pgid=,rss=`. Run resource-gated campaigns in an environment that
+permits that command. If process inspection is sandbox-blocked, RSS remains
+explicitly unavailable and an RSS limit cannot be treated as enforced.
 
 Pass `--baseline PATH` to evaluate a manifest-aware tq self-regression. The
 accepted local defaults are 50% median wall time, 20% peak RSS, and at least

@@ -9,10 +9,11 @@ use tq_test_support::{
     benchmark::{
         BenchmarkAdapter, BenchmarkCase, BenchmarkCorpusIdentity, BenchmarkInvocation,
         BenchmarkLimits, BenchmarkOutcome, BenchmarkSampling, BenchmarkTool, ComparisonFamily,
-        DatasetFamily, DatasetSelector, DatasetTier, ExecutionClass, InputFormat, OutputContract,
-        OutputContractKind, run_gated_row,
+        CorrectnessObservation, CorrectnessPayload, DatasetFamily, DatasetSelector, DatasetTier,
+        ExecutionClass, InputFormat, OutputContract, OutputContractKind, normalize_correctness_run,
+        run_correctness_limit_probe, run_gated_row, semantic_digest,
     },
-    compatibility::{NormalizedObservation, ProcessStatus},
+    compatibility::{ProcessStatus, ToolKind},
     corpus::ArtifactIdentity,
 };
 
@@ -66,7 +67,62 @@ fn signaled_correctness_candidate_is_not_misclassified_as_incorrect() {
     )
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::OomOrSignal);
-    assert!(row.samples.is_empty());
+    assert_eq!(row.samples.len(), 1);
+    assert!(row.summary.is_some());
+}
+
+#[test]
+fn oversized_correctness_output_becomes_a_bounded_resource_row() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "oversized", "head -c 40000000 /dev/zero");
+    let mut invocation = invocation(executable);
+    invocation.output_limit = 64 * 1024 * 1024;
+    let row = run_correctness_limit_probe(
+        &case(),
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+    )
+    .expect("bounded probe row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert_eq!(row.limits.output_bytes, 32 * 1024 * 1024);
+    assert_eq!(row.samples.len(), 1);
+    assert!(row.summary.is_some());
+}
+
+#[test]
+fn semantic_digest_matches_json_and_toon_without_retaining_result_sequences() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let json = script(
+        directory.path(),
+        "json-sequence",
+        "printf '1\\n{\"a\":2}\\n'",
+    );
+    let toon = script(
+        directory.path(),
+        "toon-sequence",
+        "printf '\\0361\\n\\036a: 2\\n'",
+    );
+    let reference = normalize_correctness_run(
+        &invocation(json),
+        ToolKind::Jq,
+        OutputContractKind::SemanticSequence,
+    )
+    .expect("JSON semantic digest");
+    let candidate = normalize_correctness_run(
+        &invocation(toon),
+        ToolKind::Tq,
+        OutputContractKind::SemanticSequence,
+    )
+    .expect("TOON semantic digest");
+
+    assert_eq!(reference.payload, candidate.payload);
+    assert!(matches!(
+        reference.payload,
+        CorrectnessPayload::SemanticSequence(ref digest) if digest.result_count == 2
+    ));
 }
 
 fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {
@@ -86,6 +142,7 @@ fn invocation(executable: PathBuf) -> BenchmarkInvocation {
         current_dir: None,
         timeout: Duration::from_secs(2),
         output_limit: 1024,
+        rss_limit: None,
         retain_output: false,
     }
 }
@@ -149,14 +206,14 @@ fn corpus() -> BenchmarkCorpusIdentity {
     }
 }
 
-fn reference() -> NormalizedObservation {
-    NormalizedObservation {
-        results: vec![json!(1)],
-        raw_bytes: None,
-        stderr: Vec::new(),
+fn reference() -> CorrectnessObservation {
+    let values = [json!(1)];
+    CorrectnessObservation {
+        payload: CorrectnessPayload::SemanticSequence(
+            semantic_digest(&values).expect("semantic digest"),
+        ),
         process_status: ProcessStatus::Exited,
         exit_code: Some(0),
         error_class: None,
-        notes: Vec::new(),
     }
 }

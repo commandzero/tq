@@ -151,10 +151,34 @@ pub fn validate_generated_representations(
     })
 }
 
+/// Validates already-generated representations and calculates their identities.
+///
+/// This is the resumable counterpart to [`generate_representations`]. It never
+/// rewrites either representation, so an interrupted refresh can finish
+/// validation without repeating a potentially expensive generation step.
+///
+/// # Errors
+///
+/// Returns a parse, semantic, path, or filesystem error. Identities are only
+/// returned after both representations pass ordered semantic validation.
+pub fn finalize_generated_representations(
+    source_json: &Path,
+    yaml_input: &Path,
+    toon_input: &Path,
+    yaml_manifest_path: &str,
+    toon_manifest_path: &str,
+) -> Result<GeneratedArtifacts, ConversionError> {
+    validate_generated_representations(source_json, yaml_input, toon_input)?;
+    Ok(GeneratedArtifacts {
+        yaml: identify_existing(yaml_input, yaml_manifest_path)?,
+        toon: identify_existing(toon_input, toon_manifest_path)?,
+    })
+}
+
 const NUMBER_MARKER_PREFIX: &str = "tqnumf4c6a91b7e2d";
 const NUMBER_MARKER_SUFFIX: char = 'z';
 
-fn encode_toon_exact(source: &Value) -> Result<String, ConversionError> {
+pub(crate) fn encode_toon_exact(source: &Value) -> Result<String, ConversionError> {
     let mut numbers = Vec::new();
     let marked = mark_numbers(source, &mut numbers)?;
     let template = toon_format::encode(&marked, &toon_format::EncodeOptions::default())
@@ -270,7 +294,7 @@ fn binary64_number_model(value: &Value) -> Result<Value, ConversionError> {
     })
 }
 
-fn json_to_yaml(value: &Value) -> Result<yaml_serde::Value, ConversionError> {
+pub(crate) fn json_to_yaml(value: &Value) -> Result<yaml_serde::Value, ConversionError> {
     use yaml_serde::Value as Yaml;
 
     Ok(match value {
@@ -490,5 +514,33 @@ fn write_generated(
         bytes: u64::try_from(bytes.len())
             .map_err(|_| io::Error::other("generated length does not fit in u64"))?,
         sha256: encode_hex(&Sha256::digest(bytes)),
+    })
+}
+
+fn identify_existing(
+    source: &Path,
+    manifest_path: &str,
+) -> Result<ArtifactIdentity, ConversionError> {
+    let mut source = fs::File::open(source)?;
+    let mut hasher = Sha256::new();
+    let mut bytes = 0_u64;
+    let mut buffer = vec![0_u8; 64 * 1024].into_boxed_slice();
+    loop {
+        let read = io::Read::read(&mut source, &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        bytes = bytes
+            .checked_add(
+                u64::try_from(read)
+                    .map_err(|_| io::Error::other("artifact read length does not fit in u64"))?,
+            )
+            .ok_or_else(|| io::Error::other("artifact byte count overflow"))?;
+    }
+    Ok(ArtifactIdentity {
+        path: manifest_path.to_owned(),
+        bytes,
+        sha256: encode_hex(&hasher.finalize()),
     })
 }
