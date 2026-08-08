@@ -10,8 +10,8 @@ use serde_json::json;
 use tq_test_support::{
     compatibility::{
         CapabilityCounts, CapabilityDisposition, CompatibilityBaseline, CompatibilityReport,
-        CoverageCount, FinalStatus, ObservationState, ProcessStatus, ToolKind, ToolObservation,
-        accept_reviewed_candidate, diff_baselines,
+        CoverageCount, FinalStatus, FixtureFormat, ObservationState, ProcessStatus, ToolKind,
+        ToolObservation, accept_reviewed_candidate, diff_baselines,
     },
     corpus::ArtifactIdentity,
 };
@@ -31,6 +31,7 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
             capabilities: vec!["value.identity".to_owned()],
             observations: vec![ToolObservation {
                 tool: ToolKind::Jq,
+                input_format: Some(FixtureFormat::Json),
                 state: ObservationState::Executed,
                 results: vec![json!(value)],
                 stdout_hex: Some(format!("{value:02x}")),
@@ -95,7 +96,7 @@ fn baseline_diffs_ignore_timing_but_expose_every_observation_change() {
     let differences = diff_baselines(Some(&old), &candidate);
     assert_eq!(differences.len(), 1);
     assert_eq!(differences[0].case_id, "common.identity");
-    assert_eq!(differences[0].tool, "jq");
+    assert_eq!(differences[0].tool, "jq/json");
 }
 
 #[test]

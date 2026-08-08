@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn jq_type_order_is_total() {
-        let mut values = vec![
+        let mut values = [
             Value::object(IndexMap::new()),
             Value::array(Vec::new()),
             Value::string("a"),

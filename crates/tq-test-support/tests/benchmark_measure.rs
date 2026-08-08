@@ -14,6 +14,7 @@ fn invocation(args: &[&str], output_limit: u64, timeout: Duration) -> BenchmarkI
         current_dir: None,
         timeout,
         output_limit,
+        rss_limit: None,
         retain_output: false,
     }
 }
@@ -75,6 +76,16 @@ fn cpu_and_memory_metrics_are_values_or_explicitly_unavailable() {
     assert!(outcome.system_cpu_micros.is_some());
     if let Some(rss) = outcome.peak_rss_bytes {
         assert!(rss >= 8 * 1024 * 1024);
+    }
+}
+
+#[test]
+fn rss_limit_stops_the_process_when_host_sampling_is_available() {
+    let mut request = invocation(&["memory", "8388608"], 1024, Duration::from_secs(2));
+    request.rss_limit = Some(1);
+    let outcome = measure_process(&request).expect("RSS-limited measurement");
+    if outcome.peak_rss_bytes.is_some() {
+        assert_eq!(outcome.status, MeasuredStatus::RssLimit);
     }
 }
 

@@ -495,7 +495,7 @@ fn optional_median(values: impl Iterator<Item = u128>) -> Option<f64> {
 
 fn median(sorted: &[f64]) -> f64 {
     let middle = sorted.len() / 2;
-    if sorted.len() % 2 == 0 {
+    if sorted.len().is_multiple_of(2) {
         sorted[middle - 1].mul_add(0.5, sorted[middle] * 0.5)
     } else {
         sorted[middle]

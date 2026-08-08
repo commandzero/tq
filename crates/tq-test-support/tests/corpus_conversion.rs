@@ -2,8 +2,8 @@
 
 use serde_json::{Map, Value, json};
 use tq_test_support::corpus::{
-    ConversionError, DifferenceKind, compare_ordered, generate_representations,
-    validate_generated_representations,
+    ConversionError, DifferenceKind, compare_ordered, finalize_generated_representations,
+    generate_representations, validate_generated_representations,
 };
 
 #[test]
@@ -33,6 +33,38 @@ fn json_is_generated_as_yaml_and_toon_outside_benchmark_execution() {
     assert!(generated.toon.bytes > 0);
     validate_generated_representations(&source, &yaml, &toon)
         .expect("ordered representations agree");
+}
+
+#[test]
+fn existing_representations_can_be_finalized_without_regeneration() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let source = temp.path().join("source.json");
+    let yaml = temp.path().join("source.yaml");
+    let toon = temp.path().join("source.toon");
+    std::fs::write(&source, br#"{"value":[1,2,3]}"#).expect("source JSON");
+    let generated = generate_representations(
+        &source,
+        &yaml,
+        &toon,
+        "campaign/source.yaml",
+        "campaign/source.toon",
+    )
+    .expect("cross-format generation");
+    let yaml_before = std::fs::read(&yaml).expect("YAML bytes");
+    let toon_before = std::fs::read(&toon).expect("TOON bytes");
+
+    let finalized = finalize_generated_representations(
+        &source,
+        &yaml,
+        &toon,
+        "campaign/source.yaml",
+        "campaign/source.toon",
+    )
+    .expect("cross-format finalization");
+
+    assert_eq!(finalized, generated);
+    assert_eq!(std::fs::read(yaml).expect("YAML bytes"), yaml_before);
+    assert_eq!(std::fs::read(toon).expect("TOON bytes"), toon_before);
 }
 
 #[test]

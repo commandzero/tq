@@ -1,18 +1,19 @@
 //! Pull-based bytecode VM kernel with explicit bounded stacks and forks.
 
-use std::collections::VecDeque;
 use std::{
     collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, SyncSender, sync_channel},
     },
+    thread::{self, JoinHandle},
 };
 
 use thiserror::Error;
 
 use crate::{
-    Bytecode, Compiled, Diagnostic, DiagnosticClass, PathComponent, Program, Value,
+    Bytecode, Compiled, Diagnostic, DiagnosticClass, Document, Events, PathComponent, Plan, Value,
     bytecode::Operation,
 };
 
@@ -121,6 +122,12 @@ struct CatchFrame {
     fork_height: usize,
 }
 
+#[derive(Debug)]
+enum TreeMessage {
+    Result(Result<Value, VmError>, VmObservations),
+    Done(VmObservations),
+}
+
 /// Pull-based VM. Dropping it releases all pending forks and shallow value
 /// handles without evaluating remaining branches.
 #[derive(Debug)]
@@ -139,26 +146,46 @@ pub struct Vm {
     trace_limit: usize,
     done: bool,
     tree_started: bool,
-    tree_results: VecDeque<Result<Value, VmError>>,
+    tree_receiver: Option<Receiver<TreeMessage>>,
+    tree_demand: Option<SyncSender<()>>,
+    tree_worker: Option<JoinHandle<()>>,
+    tree_stop: Arc<AtomicBool>,
     cancellation: Option<Arc<AtomicBool>>,
 }
 
 impl Vm {
-    /// Creates a VM for a validated compiled program and one document value.
+    /// Creates a VM for a mode-checked document plan and one document value.
     #[must_use]
-    pub fn new(program: &Program<Compiled>, input: Value, limits: VmLimits) -> Self {
-        Self::new_with_variables(program, input, limits, BTreeMap::new())
+    pub fn new(plan: &Plan<Compiled, Document>, input: Value, limits: VmLimits) -> Self {
+        Self::new_with_variables(plan, input, limits, BTreeMap::new())
     }
 
-    /// Creates a VM with immutable CLI/external variable values.
+    /// Creates a document VM with immutable CLI/external variable values.
     #[must_use]
     pub fn new_with_variables(
-        program: &Program<Compiled>,
+        plan: &Plan<Compiled, Document>,
         input: Value,
         limits: VmLimits,
         variables: BTreeMap<Arc<str>, Value>,
     ) -> Self {
-        Self::from_bytecode(program.bytecode_arc(), input, limits, variables)
+        Self::from_bytecode(plan.program().bytecode_arc(), input, limits, variables)
+    }
+
+    /// Creates a VM for one value produced by a mode-checked event plan.
+    #[must_use]
+    pub fn new_events(plan: &Plan<Compiled, Events>, input: Value, limits: VmLimits) -> Self {
+        Self::new_events_with_variables(plan, input, limits, BTreeMap::new())
+    }
+
+    /// Creates an event VM with immutable CLI/external variable values.
+    #[must_use]
+    pub fn new_events_with_variables(
+        plan: &Plan<Compiled, Events>,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
+        Self::from_bytecode(plan.program().bytecode_arc(), input, limits, variables)
     }
 
     /// Creates a VM from an independently decoded and validated bytecode value.
@@ -188,7 +215,10 @@ impl Vm {
             trace_limit: 0,
             done: false,
             tree_started: false,
-            tree_results: VecDeque::new(),
+            tree_receiver: None,
+            tree_demand: None,
+            tree_worker: None,
+            tree_stop: Arc::new(AtomicBool::new(false)),
             cancellation: None,
         }
     }
@@ -218,21 +248,8 @@ impl Vm {
         if self.done {
             return Ok(None);
         }
-        if let Some(result) = self.tree_results.pop_front() {
-            match result {
-                Ok(value) => {
-                    self.observations.results += 1;
-                    if self.tree_results.is_empty() {
-                        self.done = true;
-                    }
-                    return Ok(Some(value));
-                }
-                Err(error) => {
-                    self.tree_results.clear();
-                    self.done = true;
-                    return Err(error);
-                }
-            }
+        if self.tree_receiver.is_some() {
+            return self.pull_tree();
         }
         if !self.tree_started {
             self.tree_started = true;
@@ -280,38 +297,162 @@ impl Vm {
                     return Ok(None);
                 }
                 operation if !super::bytecode::kernel(operation) => {
-                    self.tree_results = crate::eval::evaluate(
-                        &self.bytecode,
-                        &self.input,
-                        &self.variables,
-                        self.limits,
-                        &mut self.observations,
-                        self.cancellation.as_deref(),
-                    )
-                    .into();
-                    if let Some(result) = self.tree_results.pop_front() {
-                        return match result {
-                            Ok(value) => {
-                                self.observations.results += 1;
-                                if self.tree_results.is_empty() {
-                                    self.done = true;
-                                }
-                                Ok(Some(value))
-                            }
-                            Err(error) => {
-                                self.tree_results.clear();
-                                self.done = true;
-                                Err(error)
-                            }
-                        };
-                    }
-                    self.done = true;
-                    return Ok(None);
+                    self.start_tree()?;
+                    return self.pull_tree();
                 }
                 _ => {}
             }
         }
         self.run_kernel()
+    }
+
+    /// Exhausts this VM synchronously, passing each result to `emit`.
+    ///
+    /// This avoids the demand-channel worker used by [`Self::next_result`] when
+    /// a caller already knows it will consume every result. It is especially
+    /// useful for event streams, where starting one worker thread per input
+    /// record would dominate decoding and query execution. Returning `false`
+    /// from `emit` stops the VM cleanly after the current result.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same deterministic runtime or resource error as
+    /// [`Self::next_result`].
+    pub fn for_each_result(&mut self, mut emit: impl FnMut(Value) -> bool) -> Result<(), VmError> {
+        let uses_tree = !self.tree_started
+            && self.tree_receiver.is_none()
+            && self
+                .bytecode
+                .instructions()
+                .get(self.bytecode.root() as usize)
+                .is_some_and(|instruction| !super::bytecode::kernel(&instruction.operation));
+        if uses_tree {
+            self.tree_started = true;
+            self.done = true;
+            let mut failure = None;
+            let observations = crate::eval::evaluate_stream(
+                &self.bytecode,
+                &self.input,
+                &self.variables,
+                self.limits,
+                self.cancellation.as_deref(),
+                &self.tree_stop,
+                |result, _| match result {
+                    Ok(value) => emit(value),
+                    Err(error) => {
+                        failure = Some(error);
+                        false
+                    }
+                },
+            );
+            self.observations = observations;
+            return failure.map_or(Ok(()), Err);
+        }
+
+        while let Some(value) = self.next_result()? {
+            if !emit(value) {
+                self.done = true;
+                self.forks.clear();
+                self.stop_tree_worker();
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn start_tree(&mut self) -> Result<(), VmError> {
+        let bytecode = Arc::clone(&self.bytecode);
+        let input = self.input.clone();
+        let variables = self.variables.clone();
+        let limits = self.limits;
+        let cancellation = self.cancellation.clone();
+        let stop = Arc::clone(&self.tree_stop);
+        let (result_sender, result_receiver) = sync_channel(0);
+        let (demand_sender, demand_receiver) = sync_channel(0);
+        let worker = thread::Builder::new()
+            .name("tq-pull-evaluator".to_owned())
+            .spawn(move || {
+                if demand_receiver.recv().is_err() {
+                    return;
+                }
+                let observations = crate::eval::evaluate_stream(
+                    &bytecode,
+                    &input,
+                    &variables,
+                    limits,
+                    cancellation.as_deref(),
+                    &stop,
+                    |result, observations| {
+                        result_sender
+                            .send(TreeMessage::Result(result, observations))
+                            .is_ok()
+                            && demand_receiver.recv().is_ok()
+                    },
+                );
+                let _ = result_sender.send(TreeMessage::Done(observations));
+            })
+            .map_err(|error| VmError::Runtime {
+                message: format!("could not start pull evaluator: {error}").into(),
+            })?;
+        self.tree_receiver = Some(result_receiver);
+        self.tree_demand = Some(demand_sender);
+        self.tree_worker = Some(worker);
+        Ok(())
+    }
+
+    fn pull_tree(&mut self) -> Result<Option<Value>, VmError> {
+        let demand = self.tree_demand.as_ref().ok_or(VmError::InvalidProgram {
+            message: "tree demand channel missing while evaluator is active",
+        })?;
+        if demand.send(()).is_err() {
+            self.stop_tree_worker();
+            self.done = true;
+            return Err(VmError::InvalidProgram {
+                message: "pull evaluator stopped before accepting demand",
+            });
+        }
+        let message = self
+            .tree_receiver
+            .as_ref()
+            .ok_or(VmError::InvalidProgram {
+                message: "tree result channel missing while evaluator is active",
+            })?
+            .recv();
+        match message {
+            Ok(TreeMessage::Result(result, observations)) => {
+                self.observations = observations;
+                match result {
+                    Ok(value) => Ok(Some(value)),
+                    Err(error) => {
+                        self.stop_tree_worker();
+                        self.done = true;
+                        Err(error)
+                    }
+                }
+            }
+            Ok(TreeMessage::Done(observations)) => {
+                self.observations = observations;
+                self.stop_tree_worker();
+                self.done = true;
+                Ok(None)
+            }
+            Err(_) => {
+                self.stop_tree_worker();
+                self.done = true;
+                Err(VmError::InvalidProgram {
+                    message: "pull evaluator terminated without completion",
+                })
+            }
+        }
+    }
+
+    fn stop_tree_worker(&mut self) {
+        self.tree_stop.store(true, Ordering::Relaxed);
+        self.tree_demand.take();
+        self.tree_receiver.take();
+        if let Some(worker) = self.tree_worker.take() {
+            let _ = worker.join();
+        }
     }
 
     /// Current high-water/work observations.
@@ -525,6 +666,7 @@ impl Vm {
 
 impl Drop for Vm {
     fn drop(&mut self) {
+        self.stop_tree_worker();
         self.values.clear();
         self.calls.clear();
         self.paths.clear();
@@ -534,9 +676,15 @@ impl Drop for Vm {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, atomic::AtomicBool};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
 
-    use crate::{Number, ResolveOptions, analyze, bytecode::Operation, parse, resolve};
+    use crate::{
+        AnalysisContext, Number, ResolveOptions, analyze, analyze_with_context,
+        bytecode::Operation, parse, resolve,
+    };
 
     use super::{Bytecode, Value, Vm, VmError, VmLimits};
 
@@ -664,16 +812,136 @@ mod tests {
     }
 
     #[test]
+    fn tree_evaluation_waits_for_demand_before_entering_the_next_branch() {
+        let plan = analyze(resolve(parse("1, 2").unwrap(), &ResolveOptions::default()).unwrap())
+            .compile()
+            .unwrap()
+            .document_plan();
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut vm = Vm::new(&plan, Value::Null, VmLimits::default())
+            .with_cancellation(Arc::clone(&cancellation));
+
+        assert_eq!(vm.next_result().unwrap(), Some(number("1")));
+        cancellation.store(true, Ordering::Relaxed);
+        assert!(matches!(vm.next_result(), Err(VmError::Interrupted)));
+    }
+
+    #[test]
+    fn exhaustive_consumers_evaluate_tree_without_a_worker_thread() {
+        let plan = analyze_with_context(
+            resolve(
+                parse("select(length == 2)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+            AnalysisContext {
+                event_input: true,
+                whole_input: false,
+            },
+        )
+        .compile()
+        .unwrap()
+        .event_plan()
+        .unwrap();
+        let mut vm = Vm::new_events(
+            &plan,
+            Value::array([number("1"), number("2")]),
+            VmLimits::default(),
+        );
+        let mut results = Vec::new();
+
+        vm.for_each_result(|value| {
+            results.push(value);
+            true
+        })
+        .unwrap();
+
+        assert_eq!(results, [Value::array([number("1"), number("2")])]);
+        assert!(vm.tree_worker.is_none());
+        assert!(vm.done);
+    }
+
+    #[test]
+    fn generator_language_uses_bounded_explicit_forks_and_continuations() {
+        let plan =
+            analyze(resolve(parse(".[], empty").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .document_plan();
+        let mut vm = Vm::new(
+            &plan,
+            Value::array([number("1"), number("2"), number("3")]),
+            VmLimits::default(),
+        );
+
+        assert_eq!(vm.next_result().unwrap(), Some(number("1")));
+        assert_eq!(vm.next_result().unwrap(), Some(number("2")));
+        assert_eq!(vm.next_result().unwrap(), Some(number("3")));
+        assert_eq!(vm.next_result().unwrap(), None);
+        assert!(vm.observations().fork_stack_high_water >= 3);
+        assert!(vm.observations().call_stack_high_water >= 2);
+
+        let limited = analyze(resolve(parse(".[]").unwrap(), &ResolveOptions::default()).unwrap())
+            .compile()
+            .unwrap()
+            .document_plan();
+        let mut vm = Vm::new(
+            &limited,
+            Value::array([number("1"), number("2")]),
+            VmLimits {
+                fork_stack: 1,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(vm.next_result(), Err(VmError::Resource { .. })));
+
+        let update =
+            analyze(resolve(parse(".a.b = 2").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .document_plan();
+        let mut vm = Vm::new(
+            &update,
+            Value::object(crate::Object::new()),
+            VmLimits::default(),
+        );
+        assert!(vm.next_result().unwrap().is_some());
+        assert!(vm.observations().path_stack_high_water >= 2);
+
+        let caught = analyze(
+            resolve(
+                parse("try error(\"managed\") catch .").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut vm = Vm::new(&caught, Value::Null, VmLimits::default());
+        assert_eq!(vm.next_result().unwrap(), Some(Value::string("managed")));
+        assert!(vm.observations().call_stack_high_water >= 2);
+
+        let optional =
+            analyze(resolve(parse(".[]?").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .document_plan();
+        let mut vm = Vm::new(&optional, Value::Bool(false), VmLimits::default());
+        assert_eq!(vm.next_result().unwrap(), None);
+    }
+
+    #[test]
     fn compiled_identity_and_literals_execute_through_pull_api() {
         for (query, input, expected) in [
             (".", Value::string("input"), Value::string("input")),
             ("42", Value::Null, number("42")),
         ] {
-            let program =
-                analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap())
-                    .compile()
-                    .unwrap();
-            let mut vm = Vm::new(&program, input, VmLimits::default());
+            let plan = analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .document_plan();
+            let mut vm = Vm::new(&plan, input, VmLimits::default());
             assert_eq!(vm.next_result().unwrap(), Some(expected));
             assert_eq!(vm.next_result().unwrap(), None);
         }
@@ -688,11 +956,11 @@ mod tests {
             .with_cancellation(Arc::clone(&cancellation));
         assert!(matches!(vm.next_result(), Err(VmError::Interrupted)));
 
-        let program =
-            analyze(resolve(parse("map(.)").unwrap(), &ResolveOptions::default()).unwrap())
-                .compile()
-                .unwrap();
-        let mut vm = Vm::new(&program, Value::array([Value::Null]), VmLimits::default())
+        let plan = analyze(resolve(parse("map(.)").unwrap(), &ResolveOptions::default()).unwrap())
+            .compile()
+            .unwrap()
+            .document_plan();
+        let mut vm = Vm::new(&plan, Value::array([Value::Null]), VmLimits::default())
             .with_cancellation(cancellation);
         assert!(matches!(vm.next_result(), Err(VmError::Interrupted)));
     }

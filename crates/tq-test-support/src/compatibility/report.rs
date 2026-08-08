@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt::Write as _};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{ErrorClass, ProcessStatus, ToolIdentity, ToolKind};
+use super::{ErrorClass, FixtureFormat, ProcessStatus, ToolIdentity, ToolKind};
 use crate::corpus::ArtifactIdentity;
 
 /// Report schema version.
@@ -102,6 +102,9 @@ pub struct CaseReport {
 pub struct ToolObservation {
     /// Tool role.
     pub tool: ToolKind,
+    /// Physical input representation used for this observation.
+    #[serde(default)]
+    pub input_format: Option<FixtureFormat>,
     /// Observation state.
     pub state: ObservationState,
     /// Ordered structured values.
@@ -143,8 +146,14 @@ pub enum ObservationState {
 pub struct SemanticDiff {
     /// Left tool.
     pub left: ToolKind,
+    /// Left input representation.
+    #[serde(default)]
+    pub left_format: Option<FixtureFormat>,
     /// Right tool.
     pub right: ToolKind,
+    /// Right input representation.
+    #[serde(default)]
+    pub right_format: Option<FixtureFormat>,
     /// Compact mismatch explanation.
     pub summary: String,
 }
@@ -208,8 +217,12 @@ impl CompatibilityReport {
             for difference in &case.semantic_diffs {
                 writeln!(
                     output,
-                    "  {:?} vs {:?}: {}",
-                    difference.left, difference.right, difference.summary
+                    "  {:?}/{} vs {:?}/{}: {}",
+                    difference.left,
+                    format_name(difference.left_format),
+                    difference.right,
+                    format_name(difference.right_format),
+                    difference.summary
                 )
                 .expect("write report to string");
             }
@@ -220,14 +233,26 @@ impl CompatibilityReport {
             {
                 writeln!(
                     output,
-                    "  {:?}: {}",
+                    "  {:?}/{}: {}",
                     observation.tool,
+                    format_name(observation.input_format),
                     observation.note.as_deref().unwrap_or("harness error")
                 )
                 .expect("write report to string");
             }
         }
         output
+    }
+}
+
+fn format_name(format: Option<FixtureFormat>) -> &'static str {
+    match format {
+        Some(FixtureFormat::Json) => "json",
+        Some(FixtureFormat::Yaml) => "yaml",
+        Some(FixtureFormat::Toon) => "toon",
+        Some(FixtureFormat::Raw) => "raw",
+        Some(FixtureFormat::None) => "none",
+        None => "unspecified",
     }
 }
 

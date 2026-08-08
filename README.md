@@ -13,7 +13,7 @@ updates.
 
 ## Build and use
 
-Rust 1.85 or newer is required.
+Rust 1.87 or newer is required.
 
 ```console
 cargo build --release

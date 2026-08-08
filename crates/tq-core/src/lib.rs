@@ -5,17 +5,17 @@
 //! executor:
 //!
 //! ```compile_fail
-//! use tq_core::{Parsed, Query, execute_document, parse};
+//! use tq_core::{Parsed, Query, Value, Vm, VmLimits, parse};
 //!
 //! let parsed: Query<Parsed> = parse(".").unwrap();
-//! execute_document(&parsed, tq_core::Value::Null);
+//! Vm::new(&parsed, Value::Null, VmLimits::default());
 //! ```
 //!
 //! ```compile_fail
-//! use tq_core::{Compiled, Events, Plan, execute_document};
+//! use tq_core::{Compiled, Events, Plan, Value, Vm, VmLimits};
 //!
 //! let event_plan: Plan<Compiled, Events> = todo!();
-//! execute_document(&event_plan, tq_core::Value::Null);
+//! Vm::new(&event_plan, Value::Null, VmLimits::default());
 //! ```
 
 mod ast;
@@ -40,7 +40,7 @@ pub use parser::{parse, parse_bytes};
 pub use path::{Path, PathComponent, PathError};
 pub use phase::{
     Analysis, Analyzed, Blocking, Capabilities, CapabilityCause, Compiled, Document, Effect,
-    Events, Parsed, Plan, Program, Query, Resolved, Subtree, WholeInput, execute_document,
+    Events, Parsed, Plan, Program, Query, Resolved, Subtree, WholeInput,
 };
 pub use resolve::{
     AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,
