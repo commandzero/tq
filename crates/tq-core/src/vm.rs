@@ -188,6 +188,50 @@ impl Vm {
         Self::from_bytecode(plan.program().bytecode_arc(), input, limits, variables)
     }
 
+    /// Creates a VM for one independently captured value in an automatic
+    /// event or subtree plan.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `plan` was not constructed by automatic plan selection.
+    #[must_use]
+    pub fn new_automatic_item<M>(
+        plan: &Plan<Compiled, M>,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
+        Self::from_bytecode(
+            plan.automatic_item_bytecode()
+                .expect("automatic item VM requires an automatic plan"),
+            input,
+            limits,
+            variables,
+        )
+    }
+
+    /// Creates a VM that preserves iteration errors when the proven prefix
+    /// resolves to a scalar rather than an array or object.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `plan` was not constructed by automatic plan selection.
+    #[must_use]
+    pub fn new_automatic_base<M>(
+        plan: &Plan<Compiled, M>,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
+        Self::from_bytecode(
+            plan.automatic_base_bytecode()
+                .expect("automatic base VM requires an automatic plan"),
+            input,
+            limits,
+            variables,
+        )
+    }
+
     /// Creates a VM from an independently decoded and validated bytecode value.
     #[must_use]
     pub fn from_validated_bytecode(bytecode: Bytecode, input: Value, limits: VmLimits) -> Self {
@@ -837,6 +881,7 @@ mod tests {
             AnalysisContext {
                 event_input: true,
                 whole_input: false,
+                automatic_streaming: false,
             },
         )
         .compile()

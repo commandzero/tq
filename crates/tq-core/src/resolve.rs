@@ -3,9 +3,10 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use crate::{
-    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, Parsed, Query,
-    Resolved, Span,
+    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, Parsed, PlanKind,
+    Query, Resolved, Span,
     ast::{Access, Expr, ExprKind, ObjectKey},
+    phase::automatic_stream_proof,
 };
 
 /// One versioned built-in signature.
@@ -109,6 +110,8 @@ pub struct AnalysisContext {
     pub event_input: bool,
     /// Slurp or another mode requires every input document.
     pub whole_input: bool,
+    /// Permit ordinary jq-shaped queries to use decoder-backed plans.
+    pub automatic_streaming: bool,
 }
 
 /// Resolves variables and built-ins, yielding no resolved value on error.
@@ -129,7 +132,13 @@ pub fn resolve(
 /// Analyzes execution effects before input consumption.
 #[must_use]
 pub fn analyze(query: Query<Resolved>) -> Query<Analyzed> {
-    analyze_with_context(query, AnalysisContext::default())
+    analyze_with_context(
+        query,
+        AnalysisContext {
+            automatic_streaming: true,
+            ..AnalysisContext::default()
+        },
+    )
 }
 
 /// Analyzes execution effects with input-mode context.
@@ -139,16 +148,60 @@ pub fn analyze_with_context(query: Query<Resolved>, context: AnalysisContext) ->
     analyze_expr(query.ast(), &mut analysis);
     if context.whole_input {
         add_effect(&mut analysis, Effect::WholeInput, query.ast().span);
-    }
-    if context.event_input
+        add_effect(&mut analysis, Effect::Document, query.ast().span);
+        analysis.selected_plan = PlanKind::WholeInput;
+        analysis.stream_rejection = Some("whole-input mode requires all documents".to_owned());
+    } else if context.event_input
         && !analysis.capabilities.subtree
         && !analysis.capabilities.blocking
         && !analysis.capabilities.mutation
-        && !analysis.capabilities.whole_input
     {
         add_effect(&mut analysis, Effect::EventStream, query.ast().span);
+        analysis.selected_plan = PlanKind::Events;
+    } else if context.event_input {
+        add_effect(&mut analysis, Effect::Document, query.ast().span);
+        analysis.selected_plan = if analysis.capabilities.blocking {
+            PlanKind::Blocking
+        } else {
+            PlanKind::Document
+        };
+        analysis.stream_rejection = Some(
+            "explicit event input was rejected by document, mutation, or blocking effects"
+                .to_owned(),
+        );
+    } else if analysis.capabilities.blocking {
+        add_effect(&mut analysis, Effect::Document, query.ast().span);
+        analysis.selected_plan = PlanKind::Blocking;
+        analysis.stream_rejection =
+            Some("blocking operator requires complete input state".to_owned());
+    } else if analysis.capabilities.mutation {
+        add_effect(&mut analysis, Effect::Document, query.ast().span);
+        analysis.selected_plan = PlanKind::Document;
+        analysis.stream_rejection = Some("mutation requires a complete document".to_owned());
+    } else if context.automatic_streaming {
+        if let Some((proof, plan)) = automatic_stream_proof(query.ast()) {
+            add_effect(&mut analysis, Effect::PathPrefix, proof.cause);
+            if proof.subtree_complete {
+                add_effect(&mut analysis, Effect::SubtreeComplete, proof.cause);
+                add_effect(&mut analysis, Effect::Subtree, proof.cause);
+            } else {
+                add_effect(&mut analysis, Effect::EventStream, proof.cause);
+            }
+            if proof.value_escapes {
+                add_effect(&mut analysis, Effect::Escape, proof.cause);
+            }
+            analysis.selected_plan = plan;
+            analysis.stream_proof = Some(proof);
+        } else {
+            add_effect(&mut analysis, Effect::Document, query.ast().span);
+            analysis.stream_rejection =
+                Some("query lacks a sound static-prefix iteration proof".to_owned());
+        }
     } else {
         add_effect(&mut analysis, Effect::Document, query.ast().span);
+        analysis.stream_rejection = Some(
+            "the selected input or CLI mode does not expose automatic decoder events".to_owned(),
+        );
     }
     query.with_analysis(analysis)
 }
@@ -404,6 +457,7 @@ fn add_effect(analysis: &mut Analysis, effect: Effect, span: Span) {
         Effect::Mutation => analysis.capabilities.mutation = true,
         Effect::Generator => analysis.capabilities.generator = true,
         Effect::PossibleFailure => analysis.capabilities.possible_failure = true,
+        Effect::PathPrefix | Effect::SubtreeComplete | Effect::Escape => {}
     }
     if !analysis
         .causes
@@ -527,6 +581,7 @@ mod tests {
             AnalysisContext {
                 event_input: true,
                 whole_input: false,
+                automatic_streaming: false,
             },
         );
         assert!(event.capabilities().event_stream);
@@ -537,6 +592,7 @@ mod tests {
             AnalysisContext {
                 event_input: false,
                 whole_input: true,
+                automatic_streaming: false,
             },
         );
         assert!(slurped.capabilities().whole_input);

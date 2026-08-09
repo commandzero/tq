@@ -100,7 +100,7 @@ performance-benchmarks.tq-beats-or-trails-a-reference	performance-benchmarks	tq 
 performance-benchmarks.stream-compatible-large-query	performance-benchmarks	Large streaming memory objective	Stream-compatible large query	test:crates/tq-test-support/tests/benchmark_schema.rs#workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix
 query-runtime.compile-valid-query	query-runtime	Typed compilation lifecycle	Compile valid query	test:crates/tq-core/src/bytecode.rs#compiler_validates_all_mvp_node_families_and_disassembles_spans
 query-runtime.unknown-variable-during-resolution	query-runtime	Typed compilation lifecycle	Unknown variable during resolution	test:crates/tq-core/src/resolve.rs#resolves_scope_shadowing_cli_variables_and_unknowns
-query-runtime.runtime-type-error	query-runtime	Source-spanned diagnostics	Runtime type error	manual:openspec/changes/build-tq-mvp/verification.md#Critical: runtime diagnostic context
+query-runtime.runtime-type-error	query-runtime	Source-spanned diagnostics	Runtime type error	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Critical: runtime diagnostic context
 query-runtime.compile-branch	query-runtime	Validated bytecode	Compile branch	test:crates/tq-core/src/bytecode.rs#compiler_validates_all_mvp_node_families_and_disassembles_spans
 query-runtime.corrupt-bytecode	query-runtime	Validated bytecode	Corrupt bytecode	test:crates/tq-core/src/bytecode.rs#decoder_rejects_unknown_truncated_targets_and_stack_underflow
 query-runtime.pull-comma-results	query-runtime	Pull-based multi-result VM	Pull comma results	test:crates/tq-core/src/vm.rs#forks_backtrack_in_order_and_can_emit_zero_results
@@ -129,11 +129,11 @@ resource-governance.general-jq-filter	resource-governance	Honest memory classifi
 resource-governance.event-mode	resource-governance	Honest memory classification	Event mode	test:crates/tq-cli/src/runner.rs#explain_json_publishes_plan_detection_and_limits
 resource-governance.huge-declared-array	resource-governance	Safe declared-length handling	Huge declared array	test:crates/tq-toon/src/decoder.rs#hostile_limits_and_syntax_fail_without_proportional_allocation
 resource-governance.spool-limit	resource-governance	Secure bounded spooling	Spool limit	test:crates/tq-toon/src/spool.rs#disabled_and_limited_spools_fail_before_output
-resource-governance.process-interruption	resource-governance	Secure bounded spooling	Process interruption	manual:openspec/changes/build-tq-mvp/verification.md#Manual: spool interruption cleanup
-resource-governance.downstream-closes	resource-governance	Cancellation and pipe behavior	Downstream closes	manual:openspec/changes/build-tq-mvp/verification.md#Manual: downstream pipe closure
-resource-governance.user-interrupts	resource-governance	Cancellation and pipe behavior	User interrupts	manual:openspec/changes/build-tq-mvp/verification.md#Manual: user interrupt
+resource-governance.process-interruption	resource-governance	Secure bounded spooling	Process interruption	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Manual: spool interruption cleanup
+resource-governance.downstream-closes	resource-governance	Cancellation and pipe behavior	Downstream closes	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Manual: downstream pipe closure
+resource-governance.user-interrupts	resource-governance	Cancellation and pipe behavior	User interrupts	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Manual: user interrupt
 resource-governance.error-after-first-result	resource-governance	Partial output transparency	Error after first result	test:crates/tq-cli/src/runner.rs#prior_framed_results_survive_a_later_runtime_error
-resource-governance.step-limit	resource-governance	Resource diagnostics	Step limit	manual:openspec/changes/build-tq-mvp/verification.md#Critical: resource diagnostic details
+resource-governance.step-limit	resource-governance	Resource diagnostics	Step limit	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Critical: resource diagnostic details
 resource-governance.fuzz-regression	resource-governance	Panic-free hostile-input boundary	Fuzz regression	test:tests/fuzz/fuzz_targets/cli_args.rs#fuzz_target
 resource-governance.compare-memory-behavior	resource-governance	Resource observations in reports	Compare memory behavior	manual:benchmarks/2026-08-07.md#Natural-large event-stream gate
 toon-stream-io.decode-large-input	toon-stream-io	Incremental byte-oriented TOON decoding	Decode large input	test:crates/tq-toon/src/decoder.rs#event_stream_is_invariant_across_reader_chunk_boundaries
