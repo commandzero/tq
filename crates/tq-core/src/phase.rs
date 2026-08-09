@@ -5,8 +5,8 @@ use std::{marker::PhantomData, sync::Arc};
 use serde::Serialize;
 
 use crate::{
-    Bytecode, Diagnostic, DiagnosticClass, SourceFile, Span,
-    ast::{self, Expr},
+    Bytecode, Diagnostic, DiagnosticClass, PathComponent, SourceFile, Span, Value,
+    ast::{self, Access, Expr, ExprKind},
 };
 
 mod sealed {
@@ -103,6 +103,58 @@ pub enum Effect {
     Generator,
     /// May fail at runtime.
     PossibleFailure,
+    /// Proves a static decoder path prefix.
+    PathPrefix,
+    /// Proves that one complete bounded subtree is sufficient.
+    SubtreeComplete,
+    /// Describes whether a retained value can escape as output.
+    Escape,
+}
+
+/// Stable pre-input execution classification.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanKind {
+    /// Decoder-event execution without retaining a complete value.
+    Events,
+    /// One independently bounded subtree at a time.
+    Subtree,
+    /// One complete input document.
+    #[default]
+    Document,
+    /// Every input document.
+    WholeInput,
+    /// A complete document plus blocking operator state.
+    Blocking,
+}
+
+impl std::fmt::Display for PlanKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Events => "events",
+            Self::Subtree => "subtree",
+            Self::Document => "document",
+            Self::WholeInput => "whole-input",
+            Self::Blocking => "blocking-document",
+        })
+    }
+}
+
+/// Proof attached to an automatic bounded-retention plan.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct StreamProof {
+    /// Static path whose direct children are independently processed.
+    pub required_path_prefix: Vec<PathComponent>,
+    /// Static path projected from each selected child, when proven.
+    pub projected_path: Option<Vec<PathComponent>>,
+    /// Whether each selected child must be complete before evaluation.
+    pub subtree_complete: bool,
+    /// Whether the selected value may escape as a result.
+    pub value_escapes: bool,
+    /// Syntax admitting the bounded plan.
+    pub cause: Span,
+    /// Stable HIR evaluated for each selected child.
+    pub item_hir: String,
 }
 
 /// Complete pre-input analysis report.
@@ -112,6 +164,12 @@ pub struct Analysis {
     pub capabilities: Capabilities,
     /// First-class syntax causes in source order.
     pub causes: Vec<CapabilityCause>,
+    /// Selected execution class before input consumption.
+    pub selected_plan: PlanKind,
+    /// Automatic streaming proof, when one was established.
+    pub stream_proof: Option<StreamProof>,
+    /// Stable reason decoder-backed automatic planning was not selected.
+    pub stream_rejection: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -280,11 +338,59 @@ impl Program<Compiled> {
         )
     }
 
+    /// Selects the analyzed execution plan before input consumption.
+    ///
+    /// # Errors
+    ///
+    /// Returns a compile diagnostic if an analyzed automatic lowering cannot
+    /// be reconstructed or validated.
+    pub fn automatic_plan(self) -> Result<AutomaticPlan, Box<Diagnostic>> {
+        match self.inner.analysis.selected_plan {
+            PlanKind::Events | PlanKind::Subtree => {
+                let lowering = automatic_lowering(&self.inner.ast).ok_or_else(|| {
+                    plan_error(
+                        "TQ-CAP-AUTO-001",
+                        "automatic stream proof could not be lowered",
+                    )
+                })?;
+                let item_bytecode = Arc::new(Bytecode::compile(&lowering.item)?);
+                let base_bytecode = Arc::new(Bytecode::compile(&lowering.base)?);
+                let execution = Some(AutomaticExecution {
+                    prefix: lowering.prefix,
+                    projection: lowering.projection,
+                    item_bytecode,
+                    base_bytecode,
+                    scalar_events_only: self.inner.analysis.selected_plan == PlanKind::Events,
+                });
+                let plan = Plan {
+                    program: self,
+                    automatic: execution,
+                    mode: PhantomData,
+                };
+                Ok(
+                    if plan.program.inner.analysis.selected_plan == PlanKind::Events {
+                        AutomaticPlan::Events(plan)
+                    } else {
+                        AutomaticPlan::Subtree(Plan {
+                            program: plan.program,
+                            automatic: plan.automatic,
+                            mode: PhantomData,
+                        })
+                    },
+                )
+            }
+            PlanKind::WholeInput => self.whole_input_plan().map(AutomaticPlan::WholeInput),
+            PlanKind::Blocking => self.blocking_plan().map(AutomaticPlan::Blocking),
+            PlanKind::Document => Ok(AutomaticPlan::Document(self.document_plan())),
+        }
+    }
+
     /// Converts a compatible program to a document plan.
     #[must_use]
     pub fn document_plan(self) -> Plan<Compiled, Document> {
         Plan {
             program: self,
+            automatic: None,
             mode: PhantomData,
         }
     }
@@ -305,6 +411,7 @@ impl Program<Compiled> {
         }
         Ok(Plan {
             program: self,
+            automatic: None,
             mode: PhantomData,
         })
     }
@@ -325,6 +432,7 @@ impl Program<Compiled> {
         }
         Ok(Plan {
             program: self,
+            automatic: None,
             mode: PhantomData,
         })
     }
@@ -343,6 +451,7 @@ impl Program<Compiled> {
         }
         Ok(Plan {
             program: self,
+            automatic: None,
             mode: PhantomData,
         })
     }
@@ -362,6 +471,7 @@ impl Program<Compiled> {
         }
         Ok(Plan {
             program: self,
+            automatic: None,
             mode: PhantomData,
         })
     }
@@ -391,7 +501,32 @@ pub struct Blocking<M>(PhantomData<M>);
 #[derive(Clone, Debug)]
 pub struct Plan<P: QueryPhase, M> {
     program: Program<P>,
+    automatic: Option<AutomaticExecution>,
     mode: PhantomData<M>,
+}
+
+#[derive(Clone, Debug)]
+struct AutomaticExecution {
+    prefix: Vec<PathComponent>,
+    projection: Option<Vec<PathComponent>>,
+    item_bytecode: Arc<Bytecode>,
+    base_bytecode: Arc<Bytecode>,
+    scalar_events_only: bool,
+}
+
+/// One of the typed plans selected by automatic analysis.
+#[derive(Clone, Debug)]
+pub enum AutomaticPlan {
+    /// Decoder-event plan.
+    Events(Plan<Compiled, Events>),
+    /// Independently bounded subtree plan.
+    Subtree(Plan<Compiled, Subtree>),
+    /// Eager document plan.
+    Document(Plan<Compiled, Document>),
+    /// All-input plan.
+    WholeInput(Plan<Compiled, WholeInput>),
+    /// Blocking document plan.
+    Blocking(Plan<Compiled, Blocking<Document>>),
 }
 
 impl<M> Plan<Compiled, M> {
@@ -400,13 +535,205 @@ impl<M> Plan<Compiled, M> {
     pub fn program(&self) -> &Program<Compiled> {
         &self.program
     }
+
+    /// Static decoder path prefix used by an automatic bounded plan.
+    #[must_use]
+    pub fn automatic_prefix(&self) -> Option<&[PathComponent]> {
+        self.automatic.as_ref().map(|plan| plan.prefix.as_slice())
+    }
+
+    /// Static path projected from each selected value without running the VM.
+    #[must_use]
+    pub fn automatic_projection(&self) -> Option<&[PathComponent]> {
+        self.automatic
+            .as_ref()
+            .and_then(|plan| plan.projection.as_deref())
+    }
+
+    pub(crate) fn automatic_item_bytecode(&self) -> Option<Arc<Bytecode>> {
+        self.automatic
+            .as_ref()
+            .map(|plan| Arc::clone(&plan.item_bytecode))
+    }
+
+    pub(crate) fn automatic_base_bytecode(&self) -> Option<Arc<Bytecode>> {
+        self.automatic
+            .as_ref()
+            .map(|plan| Arc::clone(&plan.base_bytecode))
+    }
+
+    /// Whether this automatic event plan only admits scalar child values.
+    #[must_use]
+    pub fn scalar_events_only(&self) -> bool {
+        self.automatic
+            .as_ref()
+            .is_some_and(|plan| plan.scalar_events_only)
+    }
+}
+
+#[derive(Clone)]
+struct AutomaticLowering {
+    prefix: Vec<PathComponent>,
+    projection: Option<Vec<PathComponent>>,
+    item: Expr,
+    base: Expr,
+    scalar_events_only: bool,
+}
+
+pub(crate) fn automatic_stream_proof(expr: &Expr) -> Option<(StreamProof, PlanKind)> {
+    let lowering = automatic_lowering(expr)?;
+    let kind = if lowering.scalar_events_only {
+        PlanKind::Events
+    } else {
+        PlanKind::Subtree
+    };
+    Some((
+        StreamProof {
+            required_path_prefix: lowering.prefix,
+            projected_path: lowering.projection,
+            subtree_complete: kind == PlanKind::Subtree,
+            value_escapes: kind == PlanKind::Subtree,
+            cause: expr.span,
+            item_hir: ast::display(&lowering.item),
+        },
+        kind,
+    ))
+}
+
+fn automatic_lowering(expr: &Expr) -> Option<AutomaticLowering> {
+    let mut stages = Vec::new();
+    flatten_pipe(expr, &mut stages);
+    let first = stages.first()?;
+    let mut accesses = Vec::new();
+    navigation(first, &mut accesses)?;
+    let iterate = accesses
+        .iter()
+        .position(|(access, _)| matches!(access, Access::Iterate))?;
+    if accesses[iterate + 1..]
+        .iter()
+        .any(|(access, _)| matches!(access, Access::Iterate))
+    {
+        return None;
+    }
+    let prefix = accesses[..iterate]
+        .iter()
+        .map(|(access, _)| static_component(access))
+        .collect::<Option<Vec<_>>>()?;
+    let projection = projection_path(&accesses[iterate + 1..], &stages[1..]);
+    let identity_span = accesses[iterate].1;
+    let mut item = Expr::new(ExprKind::Identity, identity_span);
+    for (access, span) in &accesses[iterate + 1..] {
+        item = Expr::new(
+            ExprKind::Access {
+                base: Box::new(item),
+                access: access.clone(),
+            },
+            *span,
+        );
+    }
+    for stage in &stages[1..] {
+        let span = Span::new(item.span.source, item.span.start, stage.span.end);
+        item = Expr::new(
+            ExprKind::Pipe(Box::new(item), Box::new((*stage).clone())),
+            span,
+        );
+    }
+    let iterate_expr = Expr::new(
+        ExprKind::Access {
+            base: Box::new(Expr::new(ExprKind::Identity, identity_span)),
+            access: Access::Iterate,
+        },
+        identity_span,
+    );
+    let base = Expr::new(
+        ExprKind::Pipe(Box::new(iterate_expr), Box::new(item.clone())),
+        expr.span,
+    );
+    Some(AutomaticLowering {
+        prefix,
+        projection,
+        scalar_events_only: scalar_event_filter(&item),
+        item,
+        base,
+    })
+}
+
+fn projection_path(
+    first_tail: &[(Access, Span)],
+    remaining_stages: &[&Expr],
+) -> Option<Vec<PathComponent>> {
+    let mut projection = first_tail
+        .iter()
+        .map(|(access, _)| static_component(access))
+        .collect::<Option<Vec<_>>>()?;
+    for stage in remaining_stages {
+        let mut accesses = Vec::new();
+        navigation(stage, &mut accesses)?;
+        projection.extend(
+            accesses
+                .iter()
+                .map(|(access, _)| static_component(access))
+                .collect::<Option<Vec<_>>>()?,
+        );
+    }
+    (!projection.is_empty()).then_some(projection)
+}
+
+fn flatten_pipe<'a>(expr: &'a Expr, stages: &mut Vec<&'a Expr>) {
+    if let ExprKind::Pipe(left, right) = &expr.kind {
+        flatten_pipe(left, stages);
+        flatten_pipe(right, stages);
+    } else {
+        stages.push(expr);
+    }
+}
+
+fn navigation(expr: &Expr, accesses: &mut Vec<(Access, Span)>) -> Option<()> {
+    match &expr.kind {
+        ExprKind::Identity => Some(()),
+        ExprKind::Access { base, access } => {
+            navigation(base, accesses)?;
+            accesses.push((access.clone(), expr.span));
+            Some(())
+        }
+        _ => None,
+    }
+}
+
+fn static_component(access: &Access) -> Option<PathComponent> {
+    match access {
+        Access::Field(key) => Some(PathComponent::Key(Arc::clone(key))),
+        Access::Index(index) => match &index.kind {
+            ExprKind::Literal(Value::Number(number)) => number
+                .to_string()
+                .parse::<usize>()
+                .ok()
+                .map(PathComponent::Index),
+            ExprKind::Literal(Value::String(key)) => Some(PathComponent::Key(Arc::clone(key))),
+            _ => None,
+        },
+        Access::Iterate | Access::Slice { .. } => None,
+    }
+}
+
+fn scalar_event_filter(expr: &Expr) -> bool {
+    let filter = match &expr.kind {
+        ExprKind::Pipe(left, right) if matches!(left.kind, ExprKind::Identity) => right.as_ref(),
+        _ => expr,
+    };
+    matches!(
+        &filter.kind,
+        ExprKind::Call { name, arguments }
+            if arguments.is_empty()
+                && matches!(&**name, "scalars" | "booleans" | "numbers" | "strings" | "nulls")
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{AnalysisContext, ResolveOptions, analyze_with_context, parse, resolve};
 
-    use super::{Analysis, Capabilities};
+    use super::{Analysis, AutomaticPlan, Capabilities, PlanKind};
 
     #[test]
     fn document_requirement_rejects_event_plan_before_input() {
@@ -419,6 +746,7 @@ mod tests {
                     ..Capabilities::default()
                 },
                 causes: Vec::new(),
+                ..Analysis::default()
             })
             .compile()
             .unwrap();
@@ -432,6 +760,7 @@ mod tests {
             AnalysisContext {
                 event_input: true,
                 whole_input: false,
+                automatic_streaming: false,
             },
         )
         .compile()
@@ -443,6 +772,7 @@ mod tests {
             AnalysisContext {
                 event_input: false,
                 whole_input: true,
+                automatic_streaming: false,
             },
         )
         .compile()
@@ -456,5 +786,39 @@ mod tests {
         .compile()
         .unwrap();
         assert!(blocking.blocking_plan().is_ok());
+    }
+
+    #[test]
+    fn automatic_analysis_selects_every_typed_retention_class() {
+        let automatic = |source| {
+            crate::analyze(resolve(parse(source).unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .automatic_plan()
+                .unwrap()
+        };
+        assert!(matches!(
+            automatic(".items[] | numbers"),
+            AutomaticPlan::Events(_)
+        ));
+        assert!(matches!(
+            automatic(".items[] | select(.active) | .id"),
+            AutomaticPlan::Subtree(_)
+        ));
+        assert!(matches!(automatic("."), AutomaticPlan::Document(_)));
+        assert!(matches!(automatic("sort"), AutomaticPlan::Blocking(_)));
+
+        let whole = analyze_with_context(
+            resolve(parse(".").unwrap(), &ResolveOptions::default()).unwrap(),
+            AnalysisContext {
+                whole_input: true,
+                ..AnalysisContext::default()
+            },
+        );
+        assert_eq!(whole.analysis().selected_plan, PlanKind::WholeInput);
+        assert!(matches!(
+            whole.compile().unwrap().automatic_plan().unwrap(),
+            AutomaticPlan::WholeInput(_)
+        ));
     }
 }

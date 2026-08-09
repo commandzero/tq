@@ -3,12 +3,14 @@
 use std::{fmt, sync::Arc};
 
 use indexmap::IndexMap;
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::Value;
 
 /// One jq path component.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "kebab-case")]
 pub enum PathComponent {
     /// Object key.
     Key(Arc<str>),

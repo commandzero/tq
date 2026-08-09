@@ -13,8 +13,9 @@ use std::{
 
 use thiserror::Error;
 use tq_core::{
-    AnalysisContext, Analyzed, Compiled, Diagnostic, Events, Plan, Query, ResolveOptions, Value,
-    Vm, VmError, VmLimits, VmObservations, analyze_with_context, parse_bytes, resolve,
+    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
+    PathComponent, Plan, PlanKind, Query, ResolveOptions, Value, Vm, VmError, VmLimits,
+    VmObservations, analyze_with_context, parse_bytes, resolve,
 };
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, OutputError, OutputOptions, StreamOptions,
@@ -137,13 +138,22 @@ pub fn run(mut command: Command) -> ExitStatus {
         };
     }
     let mut stdin = io::stdin().lock();
-    let mut stdout = io::stdout().lock();
+    let stdout = io::stdout().lock();
+    let mut stdout = io::BufWriter::with_capacity(64 * 1024, stdout);
     let mut stderr = io::stderr().lock();
     if let Err(error) = install_interrupt_handler() {
         let _ = writeln!(stderr, "tq: could not install interrupt handler: {error}");
         return ExitStatus::Usage;
     }
-    match run_with_io(command, &mut stdin, &mut stdout, &mut stderr) {
+    let result = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
+    if let Err(error) = stdout.flush() {
+        if error.kind() == io::ErrorKind::BrokenPipe {
+            return ExitStatus::Success;
+        }
+        let _ = writeln!(stderr, "tq: system I/O failed: {error}");
+        return ExitStatus::Runtime;
+    }
+    match result {
         Ok(status) => status,
         Err(error) => {
             if error.is_broken_pipe() {
@@ -218,6 +228,10 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the command lifecycle keeps pre-input planning visibly ahead of all source reads"
+)]
 fn run_filter<R: Read, W: Write, E: Write>(
     options: &RunOptions,
     stdin: &mut R,
@@ -237,16 +251,33 @@ fn run_filter<R: Read, W: Write, E: Write>(
         AnalysisContext {
             event_input: options.stream,
             whole_input: options.slurp,
+            automatic_streaming: !options.stream
+                && !options.slurp
+                && !options.raw_input
+                && !options.null_input
+                && matches!(options.input_format, InputFormat::Json | InputFormat::Toon),
         },
     );
     if let Some(explain) = options.explain {
         write_explain(explain, options, &analyzed, stderr)?;
     }
+    let analysis = analyzed.analysis().clone();
     let program = analyzed.compile().map_err(RunError::Compile)?;
 
     if options.stream {
         let plan = program.event_plan().map_err(RunError::Compile)?;
-        return run_event_filter(options, &plan, &variables, stdin, stdout, stderr);
+        return run_event_filter(options, &plan, &variables, &analysis, stdin, stdout, stderr);
+    }
+    if matches!(analysis.selected_plan, PlanKind::Events | PlanKind::Subtree) {
+        return match program.automatic_plan().map_err(RunError::Compile)? {
+            AutomaticPlan::Events(plan) => {
+                run_automatic_filter(options, &plan, &variables, &analysis, stdin, stdout, stderr)
+            }
+            AutomaticPlan::Subtree(plan) => {
+                run_automatic_filter(options, &plan, &variables, &analysis, stdin, stdout, stderr)
+            }
+            _ => unreachable!("bounded selection returns a bounded typed plan"),
+        };
     }
     let plan = program.document_plan();
 
@@ -308,6 +339,11 @@ fn run_filter<R: Read, W: Write, E: Write>(
             result_count,
             result_output.written(),
             options,
+            analysis.selected_plan,
+            ReportExecution {
+                analysis: &analysis,
+                retention: RetentionObservations::default(),
+            },
         )?;
     }
     if let Some(error) = runtime_error {
@@ -348,23 +384,13 @@ fn write_explain(
     stderr: &mut impl Write,
 ) -> Result<(), RunError> {
     let capabilities = analyzed.capabilities();
-    let plan = if capabilities.event_stream {
-        "events"
-    } else if capabilities.whole_input {
-        "whole-input"
-    } else if capabilities.blocking {
-        "blocking-document"
-    } else if capabilities.subtree {
-        "subtree"
-    } else {
-        "document"
-    };
+    let plan = analyzed.analysis().selected_plan;
     let retained = match plan {
-        "events" => "decoder frames, current path, and one event value",
-        "whole-input" => "all input documents",
-        "blocking-document" => "one document plus blocking operator state",
-        "subtree" => "the selected complete subtree",
-        _ => "one complete document",
+        PlanKind::Events => "decoder frames, current path, and one scalar event value",
+        PlanKind::WholeInput => "all input documents",
+        PlanKind::Blocking => "one document plus blocking operator state",
+        PlanKind::Subtree => "one selected complete subtree",
+        PlanKind::Document => "one complete document",
     };
     let detection = input_format_name(options.input_format);
     match format {
@@ -375,6 +401,19 @@ fn write_explain(
             writeln!(stderr, "retained-working-set: {retained}")?;
             writeln!(stderr, "blocking: {}", capabilities.blocking)?;
             writeln!(stderr, "spool-required: false")?;
+            if let Some(proof) = &analyzed.analysis().stream_proof {
+                writeln!(
+                    stderr,
+                    "required-path-prefix: {:?}",
+                    proof.required_path_prefix
+                )?;
+                writeln!(stderr, "subtree-complete: {}", proof.subtree_complete)?;
+                writeln!(stderr, "value-escapes: {}", proof.value_escapes)?;
+                writeln!(stderr, "retention-high-water: available in --report-file")?;
+            }
+            if let Some(rejection) = &analyzed.analysis().stream_rejection {
+                writeln!(stderr, "stream-rejection: {rejection}")?;
+            }
             writeln!(
                 stderr,
                 "limits: input={} depth={} token={} line={} lookahead={} vm-steps={} results={} output={} prepare-memory={} spool={}",
@@ -393,11 +432,16 @@ fn write_explain(
         ExplainFormat::Json => {
             let mut report = analyzed.explain_json();
             report["execution"] = serde_json::json!({
-                "plan": plan,
+                "plan": plan.to_string(),
                 "input_detection": detection,
                 "retained_working_set": retained,
                 "blocking": capabilities.blocking,
                 "spool_required": false,
+                "proof": analyzed.analysis().stream_proof,
+                "stream_rejection": analyzed.analysis().stream_rejection,
+                "high_water": {
+                    "available_in_report": true
+                },
                 "limits": {
                     "input_bytes": options.limits.input_bytes,
                     "depth": options.limits.depth,
@@ -432,6 +476,7 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
     options: &RunOptions,
     plan: &Plan<Compiled, Events>,
     variables: &BTreeMap<Arc<str>, Value>,
+    analysis: &Analysis,
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
@@ -470,9 +515,580 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
             executor.results,
             executor.output.written(),
             options,
+            PlanKind::Events,
+            ReportExecution {
+                analysis,
+                retention: RetentionObservations::default(),
+            },
         )?;
     }
     Ok(exit_status(options.exit_status, executor.last.as_ref()))
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RetentionObservations {
+    bytes_high_water: usize,
+    depth_high_water: usize,
+    completed_subtrees: u64,
+}
+
+fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
+    options: &RunOptions,
+    plan: &Plan<Compiled, M>,
+    variables: &BTreeMap<Arc<str>, Value>,
+    analysis: &Analysis,
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<ExitStatus, RunError> {
+    let mut executor = AutomaticExecutor {
+        plan,
+        prefix: plan
+            .automatic_prefix()
+            .expect("automatic plan has a proven prefix")
+            .to_vec(),
+        projection: plan.automatic_projection().map(<[PathComponent]>::to_vec),
+        variables,
+        output: ResultOutput::new(stdout, options),
+        stderr,
+        trace_remaining: options.trace_limit,
+        observations: VmObservations::default(),
+        retention: RetentionObservations::default(),
+        current: None,
+        current_item: None,
+        deferred_item: None,
+        last: None,
+        results: 0,
+    };
+    let files = if options.files.is_empty() {
+        vec![Path::new("-").to_owned()]
+    } else {
+        options.files.clone()
+    };
+    for path in files {
+        if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(RunError::Interrupted);
+        }
+        if path == Path::new("-") {
+            automatic_reader(options, &mut *stdin, "<stdin>", &mut executor)?;
+        } else {
+            let identity = path.display().to_string();
+            automatic_reader(options, open_path(&path)?, &identity, &mut executor)?;
+        }
+        executor.finish_source()?;
+    }
+    executor.output.finish()?;
+    if let Some(path) = &options.report_file {
+        write_report(
+            path,
+            &[executor.observations],
+            executor.results,
+            executor.output.written(),
+            options,
+            analysis.selected_plan,
+            ReportExecution {
+                analysis,
+                retention: executor.retention,
+            },
+        )?;
+    }
+    Ok(exit_status(options.exit_status, executor.last.as_ref()))
+}
+
+fn automatic_reader<R: Read, W: Write, E: Write, M>(
+    options: &RunOptions,
+    reader: R,
+    identity: &str,
+    executor: &mut AutomaticExecutor<'_, W, E, M>,
+) -> Result<(), RunError> {
+    let stream_options = StreamOptions {
+        maximum_depth: options.limits.depth,
+        errors_as_values: false,
+    };
+    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+    match options.input_format {
+        InputFormat::Json => automatic_json_into(reader, stream_options, executor),
+        InputFormat::Toon => automatic_toon_into(reader, options, stream_options, executor),
+        _ => Err(RunError::Unsupported(
+            "automatic bounded plans require an explicit JSON or TOON input format".to_owned(),
+        )),
+    }
+}
+
+fn automatic_json_into<R: Read, W: Write, E: Write, M>(
+    reader: R,
+    options: StreamOptions,
+    executor: &mut AutomaticExecutor<'_, W, E, M>,
+) -> Result<(), RunError> {
+    let mut execution_error = None;
+    let decoded = stream_json(reader, options, |record| match executor.accept(record) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            execution_error = Some(error);
+            Err("automatic stream consumer stopped".to_owned())
+        }
+    });
+    if let Some(error) = execution_error {
+        return Err(error);
+    }
+    decoded.map_err(RunError::Input)
+}
+
+fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
+    reader: R,
+    options: &RunOptions,
+    stream_options: StreamOptions,
+    executor: &mut AutomaticExecutor<'_, W, E, M>,
+) -> Result<(), RunError> {
+    let mut execution_error = None;
+    let decoded = stream_toon(
+        BufReader::new(reader),
+        tq_toon::DecoderConfig {
+            strict: options.strict,
+            maximum_depth: options.limits.depth,
+            maximum_token_bytes: options.limits.token_bytes,
+            maximum_line_bytes: options.limits.line_bytes,
+            maximum_lookahead_bytes: options.limits.lookahead_bytes,
+            ..tq_toon::DecoderConfig::default()
+        },
+        stream_options,
+        |record| match executor.accept(record) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                execution_error = Some(error);
+                Err("automatic stream consumer stopped".to_owned())
+            }
+        },
+    );
+    if let Some(error) = execution_error {
+        return Err(error);
+    }
+    decoded.map_err(RunError::Input)
+}
+
+struct AutomaticExecutor<'a, W, E, M> {
+    plan: &'a Plan<Compiled, M>,
+    prefix: Vec<PathComponent>,
+    projection: Option<Vec<PathComponent>>,
+    variables: &'a BTreeMap<Arc<str>, Value>,
+    output: ResultOutput<'a, W>,
+    stderr: &'a mut E,
+    trace_remaining: usize,
+    observations: VmObservations,
+    retention: RetentionObservations,
+    current: Option<Capture>,
+    current_item: Option<Vec<PathComponent>>,
+    deferred_item: Option<Value>,
+    last: Option<Value>,
+    results: usize,
+}
+
+impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
+    fn accept(&mut self, record: Value) -> Result<(), RunError> {
+        if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(RunError::Interrupted);
+        }
+        let (path, value) = decode_event_record(record)?;
+        let record_bytes = estimate_event_bytes(&path, value.as_ref());
+        if path == self.prefix {
+            if let Some(value) = value
+                && !matches!(&value, Value::Array(values) if values.is_empty())
+                && !matches!(&value, Value::Object(values) if values.is_empty())
+            {
+                self.observe_complete_value(record_bytes, 0)?;
+                self.evaluate(value, true)?;
+            }
+            return Ok(());
+        }
+        if path.len() <= self.prefix.len() || !path.starts_with(&self.prefix) {
+            return Ok(());
+        }
+        if self.projection.is_some() {
+            return self.accept_projection(&path, value, record_bytes);
+        }
+        let target_length = self.prefix.len().saturating_add(1);
+        let target = path[..target_length].to_vec();
+        let relative = &path[target_length..];
+
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|capture| capture.path != target)
+        {
+            self.complete_capture()?;
+        }
+
+        if self.plan.scalar_events_only() {
+            if relative.is_empty()
+                && let Some(value) = value
+            {
+                self.evaluate(value, false)?;
+            }
+            return Ok(());
+        }
+
+        if relative.is_empty() {
+            if let Some(value) = value {
+                self.observe_complete_value(record_bytes, 0)?;
+                self.retention.completed_subtrees =
+                    self.retention.completed_subtrees.saturating_add(1);
+                self.evaluate(value, false)?;
+            } else if self
+                .current
+                .as_ref()
+                .is_some_and(|capture| capture.path == target)
+            {
+                let capture = self.current.take().expect("capture was checked");
+                self.retention.completed_subtrees =
+                    self.retention.completed_subtrees.saturating_add(1);
+                self.evaluate(capture.root.into_value()?, false)?;
+            }
+            return Ok(());
+        }
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let capture = self.current.get_or_insert_with(|| Capture {
+            path: target,
+            root: BuildNode::empty_for(&relative[0]),
+            bytes: 0,
+        });
+        capture.bytes = capture
+            .bytes
+            .saturating_add(record_bytes.saturating_add(64));
+        if capture.bytes > self.output.options.limits.preparation_memory_bytes {
+            return Err(RunError::Resource("subtree-bytes"));
+        }
+        let relative_depth = relative.len();
+        if relative_depth > self.output.options.limits.depth {
+            return Err(RunError::Resource("subtree-depth"));
+        }
+        capture.root.insert(relative, value)?;
+        self.retention.bytes_high_water = self.retention.bytes_high_water.max(capture.bytes);
+        self.retention.depth_high_water = self.retention.depth_high_water.max(relative_depth);
+        Ok(())
+    }
+
+    fn finish_source(&mut self) -> Result<(), RunError> {
+        if self.projection.is_some() {
+            return self.complete_projection_item();
+        }
+        self.complete_capture()
+    }
+
+    fn accept_projection(
+        &mut self,
+        path: &[PathComponent],
+        value: Option<Value>,
+        record_bytes: usize,
+    ) -> Result<(), RunError> {
+        let item_length = self.prefix.len().saturating_add(1);
+        let item = path[..item_length].to_vec();
+        if self
+            .current_item
+            .as_ref()
+            .is_some_and(|current| *current != item)
+        {
+            self.complete_projection_item()?;
+        }
+        if self.current_item.is_none() {
+            self.current_item = Some(item);
+        }
+        let relative = &path[item_length..];
+        if relative.is_empty() {
+            if let Some(value) = value {
+                self.observe_complete_value(record_bytes, 0)?;
+                self.deferred_item = Some(value);
+            }
+            return Ok(());
+        }
+        let projection = self
+            .projection
+            .as_deref()
+            .expect("projection branch requires a projected path");
+        if path_kind_mismatch(relative, projection) {
+            if let Some(value) = value {
+                self.deferred_item = Some(synthetic_item(relative, value)?);
+            }
+            return Ok(());
+        }
+        if relative == projection {
+            if let Some(value) = value {
+                self.observe_complete_value(record_bytes, 0)?;
+                self.current = Some(Capture {
+                    path: path.to_vec(),
+                    root: BuildNode::Value(value),
+                    bytes: record_bytes,
+                });
+            }
+            return Ok(());
+        }
+        if projection.starts_with(relative) {
+            if let Some(value) = value {
+                self.deferred_item = Some(synthetic_item(relative, value)?);
+            }
+            return Ok(());
+        }
+        if !relative.starts_with(projection) {
+            return Ok(());
+        }
+        let captured_path = &relative[projection.len()..];
+        let Some(value) = value else {
+            return Ok(());
+        };
+        let capture = self.current.get_or_insert_with(|| Capture {
+            path: path[..item_length + projection.len()].to_vec(),
+            root: BuildNode::empty_for(&captured_path[0]),
+            bytes: 0,
+        });
+        capture.bytes = capture
+            .bytes
+            .saturating_add(record_bytes.saturating_add(64));
+        if capture.bytes > self.output.options.limits.preparation_memory_bytes {
+            return Err(RunError::Resource("subtree-bytes"));
+        }
+        capture.root.insert(captured_path, value)?;
+        self.retention.bytes_high_water = self.retention.bytes_high_water.max(capture.bytes);
+        self.retention.depth_high_water = self.retention.depth_high_water.max(captured_path.len());
+        Ok(())
+    }
+
+    fn complete_projection_item(&mut self) -> Result<(), RunError> {
+        if self.current_item.take().is_none() {
+            return Ok(());
+        }
+        self.retention.completed_subtrees = self.retention.completed_subtrees.saturating_add(1);
+        if let Some(capture) = self.current.take() {
+            self.emit_direct(capture.root.into_value()?)?;
+        } else if let Some(item) = self.deferred_item.take() {
+            self.evaluate(item, false)?;
+        } else {
+            self.emit_direct(Value::Null)?;
+        }
+        Ok(())
+    }
+
+    fn emit_direct(&mut self, value: Value) -> Result<(), RunError> {
+        self.output.emit(&value)?;
+        self.last = Some(value);
+        self.results = self.results.saturating_add(1);
+        Ok(())
+    }
+
+    fn complete_capture(&mut self) -> Result<(), RunError> {
+        let Some(capture) = self.current.take() else {
+            return Ok(());
+        };
+        self.retention.completed_subtrees = self.retention.completed_subtrees.saturating_add(1);
+        self.evaluate(capture.root.into_value()?, false)
+    }
+
+    fn observe_complete_value(&mut self, bytes: usize, depth: usize) -> Result<(), RunError> {
+        if !self.plan.scalar_events_only()
+            && bytes > self.output.options.limits.preparation_memory_bytes
+        {
+            return Err(RunError::Resource("subtree-bytes"));
+        }
+        self.retention.bytes_high_water = self.retention.bytes_high_water.max(bytes);
+        self.retention.depth_high_water = self.retention.depth_high_water.max(depth);
+        Ok(())
+    }
+
+    fn evaluate(&mut self, input: Value, base: bool) -> Result<(), RunError> {
+        let mut vm = if base {
+            Vm::new_automatic_base(
+                self.plan,
+                input,
+                vm_limits(self.output.options),
+                self.variables.clone(),
+            )
+        } else {
+            Vm::new_automatic_item(
+                self.plan,
+                input,
+                vm_limits(self.output.options),
+                self.variables.clone(),
+            )
+        }
+        .with_trace_limit(self.trace_remaining);
+        if let Some(flag) = cancellation() {
+            vm = vm.with_cancellation(flag);
+        }
+        let mut output_error = None;
+        let evaluated = vm.for_each_result(|value| {
+            if let Err(error) = self.output.emit(&value) {
+                output_error = Some(error);
+                return false;
+            }
+            self.last = Some(value);
+            self.results = self.results.saturating_add(1);
+            true
+        });
+        if let Some(error) = output_error {
+            return Err(error);
+        }
+        evaluated.map_err(RunError::Runtime)?;
+        if self.trace_remaining != 0 {
+            for entry in vm.trace() {
+                writeln!(self.stderr, "trace: {entry}")?;
+            }
+            self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
+        }
+        merge_observations(&mut self.observations, vm.observations());
+        Ok(())
+    }
+}
+
+struct Capture {
+    path: Vec<PathComponent>,
+    root: BuildNode,
+    bytes: usize,
+}
+
+enum BuildNode {
+    Missing,
+    Value(Value),
+    Array(Vec<BuildNode>),
+    Object(Vec<(Arc<str>, BuildNode)>),
+}
+
+impl BuildNode {
+    fn empty_for(component: &PathComponent) -> Self {
+        match component {
+            PathComponent::Index(_) => Self::Array(Vec::new()),
+            PathComponent::Key(_) => Self::Object(Vec::new()),
+        }
+    }
+
+    fn insert(&mut self, path: &[PathComponent], value: Value) -> Result<(), RunError> {
+        let Some((component, tail)) = path.split_first() else {
+            *self = Self::Value(value);
+            return Ok(());
+        };
+        match component {
+            PathComponent::Index(index) => {
+                let Self::Array(values) = self else {
+                    return Err(invalid_automatic_event());
+                };
+                if values.len() <= *index {
+                    values.resize_with(index.saturating_add(1), || Self::Missing);
+                }
+                if !tail.is_empty() && matches!(values[*index], Self::Missing) {
+                    values[*index] = Self::empty_for(&tail[0]);
+                }
+                values[*index].insert(tail, value)
+            }
+            PathComponent::Key(key) => {
+                let Self::Object(values) = self else {
+                    return Err(invalid_automatic_event());
+                };
+                let index = values.iter().position(|(candidate, _)| candidate == key);
+                let child = if let Some(index) = index {
+                    &mut values[index].1
+                } else {
+                    values.push((Arc::clone(key), Self::Missing));
+                    &mut values.last_mut().expect("entry was pushed").1
+                };
+                if !tail.is_empty() && matches!(child, Self::Missing) {
+                    *child = Self::empty_for(&tail[0]);
+                }
+                child.insert(tail, value)
+            }
+        }
+    }
+
+    fn into_value(self) -> Result<Value, RunError> {
+        match self {
+            Self::Missing => Err(invalid_automatic_event()),
+            Self::Value(value) => Ok(value),
+            Self::Array(values) => values
+                .into_iter()
+                .map(Self::into_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::array),
+            Self::Object(values) => values
+                .into_iter()
+                .map(|(key, value)| Ok((key, value.into_value()?)))
+                .collect::<Result<tq_core::Object, RunError>>()
+                .map(Value::object),
+        }
+    }
+}
+
+fn decode_event_record(record: Value) -> Result<(Vec<PathComponent>, Option<Value>), RunError> {
+    let Value::Array(parts) = record else {
+        return Err(invalid_automatic_event());
+    };
+    if !(1..=2).contains(&parts.len()) {
+        return Err(invalid_automatic_event());
+    }
+    let Value::Array(path) = &parts[0] else {
+        return Err(invalid_automatic_event());
+    };
+    let path = path
+        .iter()
+        .map(|component| match component {
+            Value::String(key) => Ok(PathComponent::Key(Arc::clone(key))),
+            Value::Number(index) => index
+                .to_string()
+                .parse::<usize>()
+                .map(PathComponent::Index)
+                .map_err(|_| invalid_automatic_event()),
+            _ => Err(invalid_automatic_event()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((path, parts.get(1).cloned()))
+}
+
+fn path_kind_mismatch(actual: &[PathComponent], expected: &[PathComponent]) -> bool {
+    for (actual, expected) in actual.iter().zip(expected) {
+        if actual == expected {
+            continue;
+        }
+        return matches!(actual, PathComponent::Key(_))
+            != matches!(expected, PathComponent::Key(_));
+    }
+    false
+}
+
+fn synthetic_item(relative: &[PathComponent], value: Value) -> Result<Value, RunError> {
+    let Some(first) = relative.first() else {
+        return Ok(value);
+    };
+    let mut root = BuildNode::empty_for(first);
+    root.insert(relative, value)?;
+    root.into_value()
+}
+
+fn estimate_event_bytes(path: &[PathComponent], value: Option<&Value>) -> usize {
+    let path_bytes = path.iter().fold(16_usize, |total, component| {
+        total.saturating_add(match component {
+            PathComponent::Key(key) => key.len().saturating_add(16),
+            PathComponent::Index(_) => 16,
+        })
+    });
+    path_bytes.saturating_add(value.map_or(0, estimate_value_bytes))
+}
+
+fn estimate_value_bytes(value: &Value) -> usize {
+    match value {
+        Value::Null => 4,
+        Value::Bool(_) => 5,
+        Value::Number(number) => number.to_string().len(),
+        Value::String(value) => value.len().saturating_add(16),
+        Value::Array(values) => values.iter().fold(24_usize, |total, value| {
+            total.saturating_add(estimate_value_bytes(value))
+        }),
+        Value::Object(values) => values.iter().fold(32_usize, |total, (key, value)| {
+            total
+                .saturating_add(key.len())
+                .saturating_add(estimate_value_bytes(value))
+        }),
+    }
+}
+
+fn invalid_automatic_event() -> RunError {
+    RunError::Unsupported("automatic decoder produced an invalid path/value event".to_owned())
 }
 
 fn stream_reader<R: Read, W: Write, E: Write>(
@@ -737,6 +1353,18 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             &mut self.written,
             self.options.limits.output_bytes,
         );
+        if self.options.output_format == tq_formats::OutputFormat::Json
+            && !self.options.pretty_json
+            && !self.options.ascii_output
+            && self.options.color != ColorMode::Always
+        {
+            serde_json::to_writer(&mut writer, value)?;
+            writer.write_all(b"\n")?;
+            if self.options.unbuffered {
+                writer.flush()?;
+            }
+            return Ok(());
+        }
         write_results(
             &mut writer,
             [value],
@@ -1081,12 +1709,35 @@ fn write_report(
     results: usize,
     output_bytes: u64,
     options: &RunOptions,
+    plan: PlanKind,
+    execution: ReportExecution<'_>,
 ) -> Result<(), RunError> {
+    let ReportExecution {
+        analysis,
+        retention,
+    } = execution;
     let report = serde_json::json!({
         "schema_version": 1,
         "documents": observations.len(),
         "results": results,
         "output_bytes": output_bytes,
+        "execution": {
+            "plan": plan.to_string(),
+            "proof": analysis.stream_proof,
+            "stream_rejection": analysis.stream_rejection,
+            "retained_working_set": match plan {
+                PlanKind::Events => "decoder-events",
+                PlanKind::Subtree => "selected-subtree",
+                PlanKind::Document => "document",
+                PlanKind::WholeInput => "whole-input",
+                PlanKind::Blocking => "document-and-blocking-state",
+            },
+            "retention_high_water": {
+                "bytes": retention.bytes_high_water,
+                "depth": retention.depth_high_water,
+                "completed_subtrees": retention.completed_subtrees,
+            },
+        },
         "limits": {
             "input_bytes": options.limits.input_bytes,
             "depth": options.limits.depth,
@@ -1110,6 +1761,12 @@ fn write_report(
     });
     fs::write(path, serde_json::to_vec_pretty(&report)?)?;
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct ReportExecution<'a> {
+    analysis: &'a Analysis,
+    retention: RetentionObservations,
 }
 
 fn exit_status(enabled: bool, last: Option<&Value>) -> ExitStatus {
@@ -1279,5 +1936,214 @@ mod tests {
         assert_eq!(report["execution"]["plan"], "events");
         assert_eq!(report["execution"]["input_detection"], "override:json");
         assert!(report["execution"]["limits"]["input_bytes"].is_u64());
+    }
+
+    #[test]
+    fn automatic_subtree_projection_and_selection_preserve_order_and_missing_values() {
+        let input = br#"{"features":[{"id":"a","properties":{"mag":1}},{"id":"b","properties":{"mag":3}},{"id":"c","properties":{}}]}"#;
+        let (status, stdout, stderr) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "-c",
+                ".features[].properties.mag",
+            ],
+            input,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"1\n3\nnull\n");
+        assert!(stderr.is_empty());
+
+        let (status, stdout, stderr) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "-c",
+                ".features[] | select(.properties.mag >= 2) | .id",
+            ],
+            input,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"\"b\"\n");
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn automatic_event_plan_filters_scalars_without_retaining_containers() {
+        let (status, stdout, stderr) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "-c",
+                ".items[] | numbers",
+            ],
+            br#"{"items":[1,{"x":2},null,3]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"1\n3\n");
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn automatic_projection_uses_toon_decoder_events() {
+        let (status, stdout, stderr) = execute(
+            &[
+                "--input-format",
+                "toon",
+                "--output-format",
+                "json",
+                "-c",
+                ".items[].x",
+            ],
+            b"items[2]:\n  - x: 1\n  - x: 2\n",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"1\n2\n");
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn automatic_plans_preserve_prior_frames_before_hostile_type_errors() {
+        let (status, stdout, stderr) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "-c",
+                ".items[] | .x",
+            ],
+            br#"{"items":[{"x":1},2,{"x":3}]}"#,
+        );
+        assert!(matches!(status, Err(super::RunError::Runtime(_))));
+        assert_eq!(stdout, b"1\n");
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn automatic_subtree_limit_fails_before_the_first_partial_result() {
+        let (status, stdout, stderr) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "-c",
+                "--prepare-memory-bytes",
+                "32",
+                ".items[] | .x",
+            ],
+            br#"{"items":[{"x":"a value deliberately larger than the capture limit"}]}"#,
+        );
+        assert!(matches!(
+            status,
+            Err(super::RunError::Resource("subtree-bytes"))
+        ));
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn automatic_explain_and_report_publish_proof_and_retention_high_water() {
+        let directory = tempfile::tempdir().unwrap();
+        let report_path = directory.path().join("automatic.json");
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            "--explain-json",
+            "--report-file",
+            report_path.to_str().unwrap(),
+            ".items[] | .x",
+        ])
+        .unwrap();
+        let mut input = br#"{"items":[{"x":1},{"x":2}]}"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        let explain: serde_json::Value = serde_json::from_slice(&error).unwrap();
+        assert_eq!(explain["execution"]["plan"], "subtree");
+        assert_eq!(
+            explain["execution"]["proof"]["required_path_prefix"][0]["value"],
+            "items"
+        );
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(report_path).unwrap()).unwrap();
+        assert_eq!(report["execution"]["plan"], "subtree");
+        assert!(
+            report["execution"]["retention_high_water"]["bytes"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(
+            report["execution"]["retention_high_water"]["completed_subtrees"],
+            2
+        );
+    }
+
+    #[test]
+    fn automatic_and_document_plans_agree_across_nested_boundary_shapes() {
+        let inputs = [
+            br#"{"items":[]}"#.as_slice(),
+            br#"{"items":[null,false,0,"",[],{}]}"#.as_slice(),
+            br#"{"items":[{"x":1},{"x":[2,3]},{"nested":{"x":4}}]}"#.as_slice(),
+            br#"{"items":{"first":{"x":1},"second":{"x":2}}}"#.as_slice(),
+        ];
+        for input in inputs {
+            let automatic = execute(
+                &[
+                    "--input-format",
+                    "json",
+                    "--output-format",
+                    "json",
+                    "-c",
+                    ".items[] | .x?",
+                ],
+                input,
+            );
+            let document = execute(
+                &[
+                    "--input-format",
+                    "yaml",
+                    "--output-format",
+                    "json",
+                    "-c",
+                    ".items[] | .x?",
+                ],
+                input,
+            );
+            assert_eq!(automatic.0.unwrap(), document.0.unwrap());
+            assert_eq!(automatic.1, document.1);
+            assert!(automatic.2.is_empty());
+            assert!(document.2.is_empty());
+        }
+    }
+
+    #[test]
+    fn non_event_input_reports_deterministic_pre_input_fallback() {
+        let (status, stdout, stderr) = execute(
+            &["--input-format", "yaml", "--explain-json", ".items[] | .x"],
+            br#"{"items":[{"x":1}]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert!(!stdout.is_empty());
+        let explain: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
+        assert_eq!(explain["execution"]["plan"], "document");
+        assert_eq!(
+            explain["execution"]["stream_rejection"],
+            "the selected input or CLI mode does not expose automatic decoder events"
+        );
     }
 }

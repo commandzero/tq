@@ -82,7 +82,7 @@ fn every_mvp_scenario_has_one_explicit_existing_evidence_route() {
         );
     }
 
-    let specs = root.join("openspec/changes/build-tq-mvp/specs");
+    let specs = root.join("openspec/changes/archive/2026-08-07-build-tq-mvp/specs");
     let mut discovered = BTreeMap::new();
     let mut spec_names = BTreeSet::new();
     for entry in fs::read_dir(&specs).expect("MVP specs") {

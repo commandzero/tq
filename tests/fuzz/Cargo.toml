@@ -48,5 +48,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "automatic_plan"
+path = "fuzz_targets/automatic_plan.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]
