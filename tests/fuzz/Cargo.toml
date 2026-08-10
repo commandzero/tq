@@ -62,5 +62,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "user_functions"
+path = "fuzz_targets/user_functions.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]

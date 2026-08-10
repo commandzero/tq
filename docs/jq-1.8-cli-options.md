@@ -23,7 +23,7 @@ adaptation is called out below.
 | `--stream`, `--stream-errors` | supported | Use bounded JSON/TOON event input; YAML remains document-at-a-time. |
 | `--seq` | divergent | tq emits TOON Text Sequence; JSON-seq input is not inferred. |
 | `-f`, `--from-file` | supported | Load the filter from one bounded file. |
-| `-L`, `--library-path` | unsupported | Reserved for the `jq-user-functions-modules` change. |
+| `-L`, `--library-path` | supported | Add a repeatable explicit module root. Paths are canonicalized and imports are confined to those roots. |
 | `--arg`, `--argjson` | supported | Bind named values and populate `$ARGS.named`. |
 | `--slurpfile`, `--rawfile` | supported | Read one policy-approved, bounded argument file. |
 | `--args`, `--jsonargs` | supported | Bind remaining argv values in `$ARGS.positional`. |
@@ -56,7 +56,7 @@ file contents or argument values.
 ## Evidence scope
 
 Executable shell cases cover argv parsing, stdin, ordered files, output bytes,
-stderr, and exit classes. The local macOS reference executable is
-`jq-1.7.1-apple`, so 1.8-only behavior (`--raw-output0` in particular) is tied
-to the jq 1.8 manual/release contract and is marked separately from local
-platform evidence.
+stderr, and exit classes. The published full campaign records the exact
+reference executable identity and currently exercises these cases against a jq
+1.8.2 reference build, including 1.8-only behavior such as `--raw-output0`.
+Platform-dependent behavior remains explicitly classified in the inventory.

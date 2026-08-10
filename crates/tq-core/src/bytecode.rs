@@ -6,10 +6,10 @@ use std::{fmt, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    BuiltinRegistry, Diagnostic, DiagnosticClass, Span, Value,
+    BuiltinRegistry, Diagnostic, DiagnosticClass, ModuleInfo, Span, Value,
     ast::{
-        Access, AssignmentOperator, BinaryOperator, Expr, ExprKind, InterpolationSegment,
-        ObjectKey, UnaryOperator,
+        Access, AssignmentOperator, BinaryOperator, CallTarget, Expr, ExprKind,
+        InterpolationSegment, ObjectKey, ParameterKind, UnaryOperator,
     },
 };
 
@@ -19,6 +19,8 @@ pub struct Bytecode {
     instructions: Arc<[Instruction]>,
     constants: Arc<[Value]>,
     strings: Arc<[Arc<str>]>,
+    functions: Arc<[UserFunction]>,
+    modules: Arc<[ModuleInfo]>,
     root: u32,
 }
 
@@ -96,6 +98,14 @@ pub enum BytecodeError {
         name: Arc<str>,
         /// Encoded argument count.
         arity: usize,
+    },
+    /// User-filter symbol is outside the function table.
+    #[error("invalid user filter symbol {symbol} at instruction {instruction}")]
+    Function {
+        /// Instruction index.
+        instruction: usize,
+        /// Invalid symbol.
+        symbol: u32,
     },
 }
 
@@ -192,6 +202,14 @@ pub(crate) enum Operation {
         name: u32,
         arguments: Vec<u32>,
     },
+    UserCall {
+        symbol: u32,
+        arguments: Vec<u32>,
+    },
+    ParameterCall {
+        function: u32,
+        parameter: u32,
+    },
     TryCatch {
         expression: u32,
         catch: Option<u32>,
@@ -201,6 +219,20 @@ pub(crate) enum Operation {
         path: u32,
         value: u32,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct UserFunction {
+    pub(crate) name: u32,
+    pub(crate) parameters: Vec<UserParameter>,
+    pub(crate) body: u32,
+    pub(crate) span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct UserParameter {
+    pub(crate) kind: ParameterKind,
+    pub(crate) runtime_name: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -256,6 +288,8 @@ impl Bytecode {
             instructions: instructions.into(),
             constants: Arc::from([]),
             strings: Arc::from([]),
+            functions: Arc::from([]),
+            modules: Arc::from([]),
         };
         bytecode.validate()?;
         Ok(bytecode)
@@ -290,6 +324,30 @@ impl Bytecode {
         for (index, instruction) in self.instructions.iter().enumerate() {
             validate_instruction(self, index, &instruction.operation)?;
         }
+        for (symbol, function) in self.functions.iter().enumerate() {
+            if function.name as usize >= self.strings.len() {
+                return Err(BytecodeError::String {
+                    instruction: symbol,
+                    string: function.name,
+                });
+            }
+            if function.body as usize >= self.instructions.len() {
+                return Err(BytecodeError::Target {
+                    instruction: symbol,
+                    target: function.body,
+                });
+            }
+            for parameter in &function.parameters {
+                if let Some(name) = parameter.runtime_name
+                    && name as usize >= self.strings.len()
+                {
+                    return Err(BytecodeError::String {
+                        instruction: symbol,
+                        string: name,
+                    });
+                }
+            }
+        }
         validate_kernel_stack(self)?;
         Ok(())
     }
@@ -298,12 +356,26 @@ impl Bytecode {
     #[must_use]
     pub fn disassemble(&self) -> String {
         let mut output = format!(
-            "root={} instructions={} constants={} strings={}\n",
+            "root={} instructions={} constants={} strings={} functions={} modules={}\n",
             self.root,
             self.instructions.len(),
             self.constants.len(),
-            self.strings.len()
+            self.strings.len(),
+            self.functions.len(),
+            self.modules.len(),
         );
+        for (symbol, function) in self.functions.iter().enumerate() {
+            use std::fmt::Write as _;
+            writeln!(
+                output,
+                "function[{symbol}] body={} params={} span={}..{}",
+                function.body,
+                function.parameters.len(),
+                function.span.start,
+                function.span.end
+            )
+            .expect("writing to String cannot fail");
+        }
         for (offset, instruction) in self.instructions.iter().enumerate() {
             use std::fmt::Write as _;
             writeln!(
@@ -319,13 +391,29 @@ impl Bytecode {
         output
     }
 
-    pub(crate) fn compile(ast: &Expr) -> Result<Self, Box<Diagnostic>> {
+    pub(crate) fn compile(ast: &Expr, modules: &[ModuleInfo]) -> Result<Self, Box<Diagnostic>> {
         let mut compiler = Compiler::default();
         let root = compiler.expression(ast)?;
+        let functions = compiler
+            .functions
+            .into_iter()
+            .enumerate()
+            .map(|(symbol, function)| {
+                function.ok_or_else(|| {
+                    Box::new(Diagnostic::new(
+                        "TQ-BYTECODE-FUNCTION-001",
+                        DiagnosticClass::Compile,
+                        format!("user filter symbol {symbol} was not compiled"),
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let bytecode = Self {
             instructions: compiler.instructions.into(),
             constants: compiler.constants.into(),
             strings: compiler.strings.into(),
+            functions: functions.into(),
+            modules: modules.to_vec().into(),
             root,
         };
         bytecode.validate().map_err(|error| {
@@ -347,6 +435,14 @@ impl Bytecode {
 
     pub(crate) fn constants(&self) -> &[Value] {
         &self.constants
+    }
+
+    pub(crate) fn functions(&self) -> &[UserFunction] {
+        &self.functions
+    }
+
+    pub(crate) fn modules(&self) -> &[ModuleInfo] {
+        &self.modules
     }
 
     pub(crate) const fn root(&self) -> u32 {
@@ -375,6 +471,8 @@ impl Bytecode {
             } else {
                 Arc::from([])
             },
+            functions: Arc::from([]),
+            modules: Arc::from([]),
             root: 0,
         }
     }
@@ -385,6 +483,7 @@ struct Compiler {
     instructions: Vec<Instruction>,
     constants: Vec<Value>,
     strings: Vec<Arc<str>>,
+    functions: Vec<Option<UserFunction>>,
 }
 
 impl Compiler {
@@ -521,13 +620,95 @@ impl Compiler {
                 update: self.expression(update)?,
                 extract: self.expression(extract)?,
             },
-            ExprKind::Call { name, arguments } => Operation::Call {
-                name: self.string(name),
-                arguments: arguments
+            ExprKind::Define { definition, body } => {
+                let symbol = definition.symbol.ok_or_else(|| {
+                    Box::new(
+                        Diagnostic::new(
+                            "TQ-BYTECODE-FUNCTION-001",
+                            DiagnosticClass::Compile,
+                            "definition has no resolved symbol",
+                        )
+                        .at(definition.span, "resolve definitions before compilation"),
+                    )
+                })?;
+                let symbol_index = usize::try_from(symbol).unwrap_or(usize::MAX);
+                self.functions.resize(symbol_index.saturating_add(1), None);
+                let function_body = self.expression(&definition.body)?;
+                let parameters = definition
+                    .parameters
+                    .iter()
+                    .map(|parameter| UserParameter {
+                        kind: parameter.kind,
+                        runtime_name: parameter
+                            .runtime_name
+                            .as_ref()
+                            .map(|name| self.string(name)),
+                    })
+                    .collect();
+                self.functions[symbol_index] = Some(UserFunction {
+                    name: self.string(&definition.name),
+                    parameters,
+                    body: function_body,
+                    span: definition.span,
+                });
+                return self.expression(body);
+            }
+            ExprKind::Call {
+                name,
+                arguments,
+                target,
+            } => {
+                let arguments = arguments
                     .iter()
                     .map(|argument| self.expression(argument))
-                    .collect::<Result<_, _>>()?,
-            },
+                    .collect::<Result<Vec<_>, _>>()?;
+                match target {
+                    Some(CallTarget::Builtin) => Operation::Call {
+                        name: self.string(name),
+                        arguments,
+                    },
+                    Some(CallTarget::User(symbol)) => Operation::UserCall {
+                        symbol: *symbol,
+                        arguments,
+                    },
+                    Some(CallTarget::Parameter { function, index }) => {
+                        if !arguments.is_empty() {
+                            return Err(Box::new(
+                                Diagnostic::new(
+                                    "TQ-BYTECODE-PARAMETER-001",
+                                    DiagnosticClass::Compile,
+                                    "filter parameter calls cannot carry arguments",
+                                )
+                                .at(expr.span, "invalid resolved filter parameter call"),
+                            ));
+                        }
+                        Operation::ParameterCall {
+                            function: *function,
+                            parameter: *index,
+                        }
+                    }
+                    None => {
+                        return Err(Box::new(
+                            Diagnostic::new(
+                                "TQ-BYTECODE-CALL-001",
+                                DiagnosticClass::Compile,
+                                "call has no resolved target",
+                            )
+                            .at(expr.span, "resolve calls before compilation"),
+                        ));
+                    }
+                }
+            }
+            ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
+                return Err(Box::new(
+                    Diagnostic::new(
+                        "TQ-BYTECODE-MODULE-001",
+                        DiagnosticClass::Compile,
+                        "module directive remained after resolution",
+                    )
+                    .at(expr.span, "expand modules before compilation"),
+                ));
+            }
             ExprKind::TryCatch { expression, catch } => Operation::TryCatch {
                 expression: self.expression(expression)?,
                 catch: catch
@@ -735,6 +916,49 @@ fn validate_instruction(
             }
             for argument in arguments {
                 target(*argument)?;
+            }
+        }
+        Operation::UserCall { symbol, arguments } => {
+            let Some(function) = bytecode.functions.get(*symbol as usize) else {
+                return Err(BytecodeError::Function {
+                    instruction: index,
+                    symbol: *symbol,
+                });
+            };
+            if function.parameters.len() != arguments.len() {
+                return Err(BytecodeError::CallArity {
+                    instruction: index,
+                    name: Arc::clone(&bytecode.strings[function.name as usize]),
+                    arity: arguments.len(),
+                });
+            }
+            for argument in arguments {
+                target(*argument)?;
+            }
+        }
+        Operation::ParameterCall {
+            function,
+            parameter,
+        } => {
+            let Some(function_value) = bytecode.functions.get(*function as usize) else {
+                return Err(BytecodeError::Function {
+                    instruction: index,
+                    symbol: *function,
+                });
+            };
+            let Some(parameter_value) = function_value.parameters.get(*parameter as usize) else {
+                return Err(BytecodeError::CallArity {
+                    instruction: index,
+                    name: Arc::clone(&bytecode.strings[function_value.name as usize]),
+                    arity: *parameter as usize,
+                });
+            };
+            if parameter_value.kind != ParameterKind::Filter {
+                return Err(BytecodeError::CallArity {
+                    instruction: index,
+                    name: Arc::clone(&bytecode.strings[function_value.name as usize]),
+                    arity: *parameter as usize,
+                });
             }
         }
         Operation::TryCatch { expression, catch } => {
@@ -1019,6 +1243,8 @@ mod tests {
             }]),
             constants: Arc::from([]),
             strings: Arc::from([Arc::from("range")]),
+            functions: Arc::from([]),
+            modules: Arc::from([]),
             root: 0,
         };
         assert!(matches!(

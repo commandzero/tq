@@ -952,7 +952,7 @@ mod tests {
         assert_eq!(vm.next_result().unwrap(), Some(number("2")));
         assert_eq!(vm.next_result().unwrap(), Some(number("3")));
         assert_eq!(vm.next_result().unwrap(), None);
-        assert!(vm.observations().fork_stack_high_water >= 3);
+        assert!(vm.observations().fork_stack_high_water <= 2);
         assert!(vm.observations().call_stack_high_water >= 2);
 
         let limited = analyze(resolve(parse(".[]").unwrap(), &ResolveOptions::default()).unwrap())
@@ -963,7 +963,7 @@ mod tests {
             &limited,
             Value::array([number("1"), number("2")]),
             VmLimits {
-                fork_stack: 1,
+                fork_stack: 0,
                 ..VmLimits::default()
             },
         );

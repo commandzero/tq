@@ -176,11 +176,25 @@ pub struct Analysis {
     pub stream_rejection: Option<String>,
 }
 
+/// One canonical module admitted during pre-input resolution.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ModuleInfo {
+    /// Import path used by the query or another module.
+    pub name: String,
+    /// Canonical filesystem path.
+    pub canonical_path: String,
+    /// Lowercase SHA-256 content digest.
+    pub sha256: String,
+    /// Constant module metadata.
+    pub metadata: Value,
+}
+
 #[derive(Clone, Debug)]
 struct QueryInner {
     source: SourceFile,
     ast: Arc<Expr>,
     analysis: Analysis,
+    modules: Vec<ModuleInfo>,
 }
 
 /// Query in one sealed compilation phase.
@@ -197,6 +211,7 @@ impl Query<Parsed> {
                 source,
                 ast: Arc::new(ast),
                 analysis: Analysis::default(),
+                modules: Vec::new(),
             }),
             phase: PhantomData,
         }
@@ -204,6 +219,15 @@ impl Query<Parsed> {
 
     pub(crate) fn into_resolved(self) -> Query<Resolved> {
         self.change_phase()
+    }
+
+    pub(crate) fn ast_mut(&mut self) -> &mut Expr {
+        let inner = Arc::make_mut(&mut self.inner);
+        Arc::make_mut(&mut inner.ast)
+    }
+
+    pub(crate) fn set_modules(&mut self, modules: Vec<ModuleInfo>) {
+        Arc::make_mut(&mut self.inner).modules = modules;
     }
 }
 
@@ -239,6 +263,12 @@ impl<P: QueryPhase> Query<P> {
         &self.inner.analysis
     }
 
+    /// Canonical modules loaded before input consumption.
+    #[must_use]
+    pub fn modules(&self) -> &[ModuleInfo] {
+        &self.inner.modules
+    }
+
     /// Human-readable HIR and capability explanation.
     #[must_use]
     pub fn explain(&self) -> String {
@@ -263,6 +293,18 @@ impl<P: QueryPhase> Query<P> {
                 .expect("writing to String cannot fail");
             }
         }
+        if !self.inner.modules.is_empty() {
+            output.push_str("modules:\n");
+            for module in &self.inner.modules {
+                use std::fmt::Write as _;
+                writeln!(
+                    output,
+                    "- {} {} sha256={}",
+                    module.name, module.canonical_path, module.sha256
+                )
+                .expect("writing to String cannot fail");
+            }
+        }
         output
     }
 
@@ -275,6 +317,7 @@ impl<P: QueryPhase> Query<P> {
             "span": self.inner.ast.span,
             "hir": self.hir(),
             "analysis": self.analysis(),
+            "modules": self.modules(),
         })
     }
 
@@ -306,7 +349,7 @@ impl Query<Analyzed> {
     /// Returns a source-spanned compile/resource diagnostic when lowering or
     /// mandatory validation fails.
     pub fn compile(self) -> Result<Program<Compiled>, Box<Diagnostic>> {
-        let bytecode = Bytecode::compile(&self.inner.ast)?;
+        let bytecode = Bytecode::compile(&self.inner.ast, &self.inner.modules)?;
         Ok(Program {
             inner: self.inner,
             bytecode: Arc::new(bytecode),
@@ -357,8 +400,8 @@ impl Program<Compiled> {
                         "automatic stream proof could not be lowered",
                     )
                 })?;
-                let item_bytecode = Arc::new(Bytecode::compile(&lowering.item)?);
-                let base_bytecode = Arc::new(Bytecode::compile(&lowering.base)?);
+                let item_bytecode = Arc::new(Bytecode::compile(&lowering.item, &[])?);
+                let base_bytecode = Arc::new(Bytecode::compile(&lowering.base, &[])?);
                 let execution = Some(AutomaticExecution {
                     prefix: lowering.prefix,
                     projection: lowering.projection,
@@ -727,7 +770,9 @@ fn scalar_event_filter(expr: &Expr) -> bool {
     };
     matches!(
         &filter.kind,
-        ExprKind::Call { name, arguments }
+        ExprKind::Call {
+            name, arguments, ..
+        }
             if arguments.is_empty()
                 && matches!(&**name, "scalars" | "booleans" | "numbers" | "strings" | "nulls")
     )

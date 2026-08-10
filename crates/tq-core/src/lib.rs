@@ -40,8 +40,8 @@ pub use parser::{parse, parse_bytes};
 pub use path::{Path, PathComponent, PathError};
 pub use phase::{
     Analysis, Analyzed, AutomaticPlan, Blocking, Capabilities, CapabilityCause, Compiled, Document,
-    Effect, Events, Parsed, Plan, PlanKind, Program, Query, Resolved, StreamProof, Subtree,
-    WholeInput,
+    Effect, Events, ModuleInfo, Parsed, Plan, PlanKind, Program, Query, Resolved, StreamProof,
+    Subtree, WholeInput,
 };
 pub use resolve::{
     AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,

@@ -4,7 +4,8 @@
 the ordinary jq command shape: identity/literals, `.field`, `.[expr]`, indexes
 and slices, `[]`, pipes and comma generators, arrays and ordered objects,
 variables, conditionals, operators, core collection/selection/conversion/range/
-ordering/aggregation built-ins, optional access, `try/catch`, and path updates.
+ordering/aggregation built-ins, optional access, `try/catch`, path updates,
+parameterized user filters, and explicit-root modules.
 Stateful `reduce` and `foreach` folds preserve jq generator order, accumulator
 scope, update multiplicity, intermediate extraction, and partial output before
 a later error.
@@ -34,6 +35,15 @@ variables and `$ARGS.named`; `--args`/`--jsonargs` populate `$ARGS.positional`;
 and `--rawfile`/`--slurpfile` use the configured per-source byte limit. See
 `docs/jq-1.8-cli-options.md` for the complete classification.
 
+`def` uses jq lexical scope and supports both lazy filter parameters (`f`) and
+eager value parameters (`$value`), including recursive references. Calls are
+resolved by name and arity before input is read and execute through bounded VM
+frames. `-L DIR` adds an explicit module root; repeat it to establish lookup
+order. `include "name"` imports definitions in place, while `import "name" as
+alias` exposes `alias::filter`. Canonical paths must remain within a configured
+root. Module count, bytes, cycles, paths, metadata, and SHA-256 identities are
+bounded or reported during compilation.
+
 ## Memory and limits
 
 Ordinary document filters retain one decoded document. `--slurp` retains every
@@ -62,7 +72,6 @@ intentionally small:
 | `numeric.policy-index-over` | result/exit/error | bounded index envelope |
 
 Features outside the MVP have stable unsupported or deferred status. These
-features include user functions and modules, labels and breaks, recursive
-descent, interpolation, regex, date, platform, and environment built-ins, and
-module loading. Each
+features include labels and breaks, regex, date, platform, and environment
+built-ins. Each
 feature has a separate OpenSpec change under `openspec/changes/`.

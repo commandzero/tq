@@ -57,6 +57,10 @@ pub(crate) enum TokenKind {
     Catch,
     Reduce,
     Foreach,
+    Def,
+    Include,
+    Import,
+    Module,
     True,
     False,
     Null,
@@ -156,7 +160,7 @@ impl Lexer<'_> {
             b'$' => self.variable()?,
             b'@' => self.format_string()?,
             byte if byte.is_ascii_digit() => self.number()?,
-            byte if identifier_start(byte) => self.identifier(),
+            byte if identifier_start(byte) => self.identifier()?,
             _ => return Err(self.error("TQ-LEX-TOKEN-001", "unexpected query character")),
         }
         Ok(())
@@ -352,6 +356,7 @@ impl Lexer<'_> {
         {
             self.index += 1;
         }
+        self.qualified_tail(start)?;
         let name: Arc<str> = self.source.text()[name_start..self.index].into();
         self.push(start, TokenKind::Variable(name));
         Ok(())
@@ -429,7 +434,7 @@ impl Lexer<'_> {
         Ok(())
     }
 
-    fn identifier(&mut self) {
+    fn identifier(&mut self) -> Result<(), Box<Diagnostic>> {
         let start = self.index;
         self.index += 1;
         while self
@@ -439,6 +444,7 @@ impl Lexer<'_> {
         {
             self.index += 1;
         }
+        self.qualified_tail(start)?;
         let text = &self.source.text()[start..self.index];
         let kind = match text {
             "if" => TokenKind::If,
@@ -454,16 +460,46 @@ impl Lexer<'_> {
             "catch" => TokenKind::Catch,
             "reduce" => TokenKind::Reduce,
             "foreach" => TokenKind::Foreach,
+            "def" => TokenKind::Def,
+            "include" => TokenKind::Include,
+            "import" => TokenKind::Import,
+            "module" => TokenKind::Module,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "null" => TokenKind::Null,
-            "def" => TokenKind::Deferred("function".into()),
-            "module" => TokenKind::Deferred("modules".into()),
             "label" => TokenKind::Deferred("labels".into()),
-            "import" | "include" | "break" => TokenKind::Deferred(text.into()),
+            "break" => TokenKind::Deferred(text.into()),
             _ => TokenKind::Identifier(text.into()),
         };
         self.push(start, kind);
+        Ok(())
+    }
+
+    fn qualified_tail(&mut self, start: usize) -> Result<(), Box<Diagnostic>> {
+        while self.bytes.get(self.index..self.index.saturating_add(2)) == Some(b"::") {
+            self.index += 2;
+            if !self
+                .bytes
+                .get(self.index)
+                .is_some_and(|byte| identifier_start(*byte))
+            {
+                return Err(self.error_at(
+                    "TQ-LEX-QUALIFIED-001",
+                    "expected identifier after '::'",
+                    start,
+                    self.index,
+                ));
+            }
+            self.index += 1;
+            while self
+                .bytes
+                .get(self.index)
+                .is_some_and(|byte| identifier_continue(*byte))
+            {
+                self.index += 1;
+            }
+        }
+        Ok(())
     }
 
     fn take(&mut self, byte: u8) -> bool {
@@ -528,6 +564,32 @@ mod tests {
     }
 
     #[test]
+    fn tokenizes_function_module_and_qualified_names() {
+        let source = SourceFile::new(
+            SourceId::new(3),
+            "module-query",
+            "def f($x): $x; import \"lib\" as m; m::f($m::data)",
+        );
+        let tokens = lex(&source).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Def));
+        assert!(
+            tokens
+                .iter()
+                .any(|token| matches!(&token.kind, TokenKind::Import))
+        );
+        assert!(
+            tokens.iter().any(
+                |token| matches!(&token.kind, TokenKind::Identifier(name) if &**name == "m::f")
+            )
+        );
+        assert!(
+            tokens.iter().any(
+                |token| matches!(&token.kind, TokenKind::Variable(name) if &**name == "m::data")
+            )
+        );
+    }
+
+    #[test]
     fn rejects_invalid_utf8_and_recognizes_fold_tokens() {
         assert!(validate_utf8(&[0xff], "query").is_err());
         let source = SourceFile::new(
@@ -587,7 +649,7 @@ mod tests {
         assert!(matches!(&tokens[47].kind, TokenKind::Variable(name) if &**name == "v"));
         assert!(matches!(&tokens[48].kind, TokenKind::String(value) if &**value == "s"));
         assert!(matches!(&tokens[49].kind, TokenKind::Number(value) if &**value == "12"));
-        assert!(matches!(&tokens[50].kind, TokenKind::Deferred(name) if &**name == "function"));
+        assert!(matches!(tokens[50].kind, TokenKind::Def));
         assert!(matches!(tokens[51].kind, TokenKind::EndOfInput));
         assert!(
             tokens
