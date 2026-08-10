@@ -23,13 +23,13 @@ The CLI SHALL support `tq [OPTIONS] FILTER [FILE...]` and a filter file option. 
 - **THEN** the query is loaded from that file and a positional filter is not required
 
 ### Requirement: Best-effort input detection with strict override
-When `--input-format` is absent, tq SHALL probe each structured input source independently in the fixed order TOON, YAML, then JSON. A parser rejection before commitment SHALL fail down to the next parser using bounded lookahead and replay. Once a parser commits, later syntax errors SHALL be reported for that format without restarting detection. If every parser rejects, tq SHALL emit a combined input diagnostic containing bounded, useful failure context from each candidate.
+When `--input-format` is absent, tq SHALL probe each structured input source independently with bounded lookahead and replay. Canonical TOON syntax SHALL remain preferred, JSON object and non-TOON array openers SHALL commit to JSON before YAML, and YAML document, directive, or root-sequence markers SHALL commit to YAML. Once a parser commits, later syntax errors SHALL be reported for that format without restarting detection. If every parser rejects, tq SHALL emit a combined input diagnostic containing bounded, useful failure context from each candidate.
 
 `--input-format toon|yaml|json` SHALL select exactly one parser and disable detection/faildown. TOON SHALL remain the default structured output format, while JSON output is available through `--output-format json`.
 
 #### Scenario: Default format
 - **WHEN** no format option is provided
-- **THEN** input is probed as TOON, then YAML, then JSON until a parser commits, and structured output uses TOON Text Sequence framing
+- **THEN** bounded syntax probing selects TOON, JSON, or YAML and structured output uses TOON Text Sequence framing
 
 #### Scenario: JSON interoperability
 - **WHEN** both input and output formats are explicitly set to JSON
@@ -44,12 +44,12 @@ When `--input-format` is absent, tq SHALL probe each structured input source ind
 - **THEN** the CLI reports an unsupported-output-format usage error rather than implying source-preserving YAML support
 
 #### Scenario: Ambiguous content
-- **WHEN** input bytes would be valid under more than one supported grammar
-- **THEN** automatic mode selects the first accepting parser in TOON, YAML, JSON order, while an explicit override selects only the requested parser
+- **WHEN** input bytes would be valid as both a JSON container and YAML
+- **THEN** automatic mode commits an object or non-TOON array opener to JSON, while an explicit override selects only the requested parser
 
-#### Scenario: JSON is accepted as YAML
-- **WHEN** JSON-compatible bytes fail TOON probing and are accepted by the YAML parser in automatic mode
-- **THEN** tq commits to YAML without continuing to JSON and reports YAML as the selected parser
+#### Scenario: JSON container enables automatic events
+- **WHEN** an eligible query receives a JSON object or array without an input-format override
+- **THEN** bounded detection commits to JSON before planning and execution uses JSON decoder events
 
 #### Scenario: Strict input override
 - **WHEN** `--input-format json` is supplied for bytes that YAML could also parse
@@ -65,11 +65,11 @@ When `--input-format` is absent, tq SHALL probe each structured input source ind
 
 #### Scenario: All probes reject
 - **WHEN** TOON, YAML, and JSON all reject before commitment
-- **THEN** tq exits with an input error that identifies the probe order and bounded failure information for all three formats
+- **THEN** tq exits with an input error that identifies bounded failure information for all three formats
 
 #### Scenario: Late selected-format failure
 - **WHEN** automatic detection commits to a parser and that parser encounters a later syntax error
-- **THEN** tq reports that format's parse error and does not reinterpret the source with a later parser
+- **THEN** tq reports that format's parse error and does not reinterpret the source with another parser
 
 ### Requirement: Structured and raw output modes
 Structured TOON output SHALL use TOON Text Sequence framing by default. `--unframed` SHALL require exactly one result. `-r/--raw-output` SHALL write strings without structured quoting, and `-j/--join-output` SHALL suppress raw-output separators as defined by jq-compatible cases.
