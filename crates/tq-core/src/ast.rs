@@ -49,6 +49,19 @@ pub(crate) enum ExprKind {
         name: Arc<str>,
         body: Box<Expr>,
     },
+    Reduce {
+        generator: Box<Expr>,
+        name: Arc<str>,
+        initial: Box<Expr>,
+        update: Box<Expr>,
+    },
+    Foreach {
+        generator: Box<Expr>,
+        name: Arc<str>,
+        initial: Box<Expr>,
+        update: Box<Expr>,
+        extract: Box<Expr>,
+    },
     Call {
         name: Arc<str>,
         arguments: Vec<Expr>,
@@ -240,6 +253,41 @@ fn render(expr: &Expr, output: &mut String) {
             output.push_str(name);
             output.push_str(" => ");
             render(body, output);
+            output.push(')');
+        }
+        ExprKind::Reduce {
+            generator,
+            name,
+            initial,
+            update,
+        } => {
+            output.push_str("reduce(");
+            render(generator, output);
+            output.push_str(" as $");
+            output.push_str(name);
+            output.push_str("; init: ");
+            render(initial, output);
+            output.push_str("; update: ");
+            render(update, output);
+            output.push(')');
+        }
+        ExprKind::Foreach {
+            generator,
+            name,
+            initial,
+            update,
+            extract,
+        } => {
+            output.push_str("foreach(");
+            render(generator, output);
+            output.push_str(" as $");
+            output.push_str(name);
+            output.push_str("; init: ");
+            render(initial, output);
+            output.push_str("; update: ");
+            render(update, output);
+            output.push_str("; extract: ");
+            render(extract, output);
             output.push(')');
         }
         ExprKind::Call { name, arguments } => {

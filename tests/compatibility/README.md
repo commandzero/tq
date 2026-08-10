@@ -14,7 +14,7 @@ examples below before you move a filter with advanced jq language features.
 | Output controls | `-a`, `-S`, `-C`, `-M`, `--raw-output0`, `--unbuffered` | Supported/adapted |
 | CLI values | `--arg`, `--argjson`, `--rawfile`, `--slurpfile`, `--args`, `--jsonargs` | Supported |
 | User filters and modules | `def f: .x; f`, `include "lib"` | Deferred |
-| Folds | `reduce .items[] as $x (0; . + $x)` | Deferred |
+| Folds | `reduce .items[] as $x (0; . + $x)` | Supported |
 | Recursive descent | `.. \| scalars` | Deferred |
 | Interpolation | `"name=\(.name)"` | Deferred |
 | Regular expressions | `test("^prod-")` | Deferred |
@@ -31,7 +31,7 @@ Important migration differences:
 
 The generated report records current capability counts and all raw-byte
 adaptations. Its next priorities are user functions/modules,
-`reduce`/`foreach`, recursive descent, interpolation, and regex/date/platform
+recursive descent, interpolation, and regex/date/platform
 built-ins.
 
 The complete evidence is in [coverage-v1.json](reviews/coverage-v1.json). The

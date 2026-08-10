@@ -19,7 +19,7 @@ pub use stream::{StreamOptions, stream_json, stream_toon};
 /// Supported structured input syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputFormat {
-    /// Best-effort TOON, then YAML, then JSON probing.
+    /// Bounded TOON, JSON-container, then YAML syntax probing.
     Auto,
     /// TOON document.
     Toon,

@@ -14,7 +14,7 @@ use std::{
 use thiserror::Error;
 use tq_core::{
     Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
-    PathComponent, Plan, PlanKind, Query, ResolveOptions, Value, Vm, VmError, VmLimits,
+    PathComponent, Plan, PlanKind, Query, ResolveOptions, Resolved, Value, Vm, VmError, VmLimits,
     VmObservations, analyze_with_context, parse_bytes, resolve,
 };
 use tq_formats::{
@@ -230,7 +230,7 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
 
 #[allow(
     clippy::too_many_lines,
-    reason = "the command lifecycle keeps pre-input planning visibly ahead of all source reads"
+    reason = "bounded format detection and planning stay visibly ahead of decoder execution"
 )]
 fn run_filter<R: Read, W: Write, E: Write>(
     options: &RunOptions,
@@ -246,16 +246,79 @@ fn run_filter<R: Read, W: Write, E: Write>(
     };
     let parsed = parse_bytes(&query_name, &query).map_err(RunError::Compile)?;
     let resolved = resolve(parsed, &resolve_options).map_err(RunError::Compile)?;
+    let automatic_mode =
+        !options.stream && !options.slurp && !options.raw_input && !options.null_input;
+    if automatic_mode && options.input_format == InputFormat::Auto {
+        let file_events = auto_file_events_available(options)?;
+        if options.files.is_empty() || options.files.iter().any(|path| path == Path::new("-")) {
+            let reader = LimitedReader::new(&mut *stdin, options.limits.input_bytes, "<stdin>");
+            let (probe, mut replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            return run_resolved_filter(
+                options,
+                resolved,
+                &variables,
+                file_events && decoder_events_available(probe.selected),
+                &mut replay,
+                stdout,
+                stderr,
+            );
+        }
+        return run_resolved_filter(
+            options,
+            resolved,
+            &variables,
+            file_events,
+            stdin,
+            stdout,
+            stderr,
+        );
+    }
+    run_resolved_filter(
+        options,
+        resolved,
+        &variables,
+        automatic_mode && matches!(options.input_format, InputFormat::Json | InputFormat::Toon),
+        stdin,
+        stdout,
+        stderr,
+    )
+}
+
+const fn decoder_events_available(format: InputFormat) -> bool {
+    matches!(format, InputFormat::Json | InputFormat::Toon)
+}
+
+fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
+    let mut available = true;
+    for path in options.files.iter().filter(|path| *path != Path::new("-")) {
+        let identity = path.display().to_string();
+        let reader = LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
+        let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
+        available &= decoder_events_available(probe.selected);
+    }
+    Ok(available)
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    reason = "the command lifecycle keeps pre-input planning visibly ahead of decoder execution"
+)]
+fn run_resolved_filter<R: Read, W: Write, E: Write>(
+    options: &RunOptions,
+    resolved: Query<Resolved>,
+    variables: &BTreeMap<Arc<str>, Value>,
+    automatic_streaming: bool,
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<ExitStatus, RunError> {
     let analyzed = analyze_with_context(
         resolved,
         AnalysisContext {
             event_input: options.stream,
             whole_input: options.slurp,
-            automatic_streaming: !options.stream
-                && !options.slurp
-                && !options.raw_input
-                && !options.null_input
-                && matches!(options.input_format, InputFormat::Json | InputFormat::Toon),
+            automatic_streaming,
         },
     );
     if let Some(explain) = options.explain {
@@ -266,15 +329,15 @@ fn run_filter<R: Read, W: Write, E: Write>(
 
     if options.stream {
         let plan = program.event_plan().map_err(RunError::Compile)?;
-        return run_event_filter(options, &plan, &variables, &analysis, stdin, stdout, stderr);
+        return run_event_filter(options, &plan, variables, &analysis, stdin, stdout, stderr);
     }
     if matches!(analysis.selected_plan, PlanKind::Events | PlanKind::Subtree) {
         return match program.automatic_plan().map_err(RunError::Compile)? {
             AutomaticPlan::Events(plan) => {
-                run_automatic_filter(options, &plan, &variables, &analysis, stdin, stdout, stderr)
+                run_automatic_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
             }
             AutomaticPlan::Subtree(plan) => {
-                run_automatic_filter(options, &plan, &variables, &analysis, stdin, stdout, stderr)
+                run_automatic_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
             }
             _ => unreachable!("bounded selection returns a bounded typed plan"),
         };
@@ -386,6 +449,9 @@ fn write_explain(
     let capabilities = analyzed.capabilities();
     let plan = analyzed.analysis().selected_plan;
     let retained = match plan {
+        PlanKind::Events if capabilities.fold_state => {
+            "decoder frames, current path, one event value, and one fold accumulator"
+        }
         PlanKind::Events => "decoder frames, current path, and one scalar event value",
         PlanKind::WholeInput => "all input documents",
         PlanKind::Blocking => "one document plus blocking operator state",
@@ -464,7 +530,7 @@ fn write_explain(
 
 const fn input_format_name(format: InputFormat) -> &'static str {
     match format {
-        InputFormat::Auto => "auto:toon->yaml->json",
+        InputFormat::Auto => "auto:toon/json/yaml-bounded-probe",
         InputFormat::Toon => "override:toon",
         InputFormat::Yaml => "override:yaml",
         InputFormat::Json => "override:json",
@@ -609,8 +675,19 @@ fn automatic_reader<R: Read, W: Write, E: Write, M>(
     match options.input_format {
         InputFormat::Json => automatic_json_into(reader, stream_options, executor),
         InputFormat::Toon => automatic_toon_into(reader, options, stream_options, executor),
-        _ => Err(RunError::Unsupported(
-            "automatic bounded plans require an explicit JSON or TOON input format".to_owned(),
+        InputFormat::Auto => {
+            let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            match report.selected {
+                InputFormat::Json => automatic_json_into(replay, stream_options, executor),
+                InputFormat::Toon => automatic_toon_into(replay, options, stream_options, executor),
+                InputFormat::Yaml => Err(RunError::Unsupported(
+                    "auto-detected YAML cannot execute a decoder-event plan".to_owned(),
+                )),
+                InputFormat::Auto | InputFormat::ToonSequence => unreachable!("probe candidate"),
+            }
+        }
+        InputFormat::Yaml | InputFormat::ToonSequence => Err(RunError::Unsupported(
+            "automatic bounded plans require JSON or TOON decoder events".to_owned(),
         )),
     }
 }
@@ -1912,6 +1989,33 @@ mod tests {
         let (status, stdout, _) = execute(&["-n", "--max-output-bytes", "3", "1, 2"], b"");
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
         assert_eq!(stdout, b"\x1e1\n");
+
+        let (status, stdout, _) = execute(
+            &[
+                "-n",
+                "--max-results",
+                "1",
+                "foreach (1,2) as $x (0; . + $x; .)",
+            ],
+            b"",
+        );
+        assert!(matches!(
+            status,
+            Err(super::RunError::Resource("result-count"))
+        ));
+        assert_eq!(stdout, b"\x1e1\n");
+
+        let (status, stdout, _) = execute(
+            &[
+                "-n",
+                "--max-output-bytes",
+                "3",
+                "foreach (1,2) as $x (0; . + $x; .)",
+            ],
+            b"",
+        );
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
+        assert_eq!(stdout, b"\x1e1\n");
     }
 
     #[test]
@@ -1991,16 +2095,75 @@ mod tests {
     }
 
     #[test]
-    fn automatic_projection_uses_toon_decoder_events() {
+    fn automatic_event_plan_uses_auto_detected_json() {
         let (status, stdout, stderr) = execute(
             &[
-                "--input-format",
-                "toon",
                 "--output-format",
                 "json",
                 "-c",
-                ".items[].x",
+                "--explain-json",
+                ".items[] | numbers",
             ],
+            br#"{"items":[1,{"x":2},null,3]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"1\n3\n");
+        let explain: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
+        assert_eq!(explain["execution"]["plan"], "events");
+        assert_eq!(
+            explain["execution"]["retained_working_set"],
+            "decoder frames, current path, and one scalar event value"
+        );
+    }
+
+    #[test]
+    fn automatic_event_plan_uses_auto_detected_json_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.json");
+        std::fs::write(&source, br#"{"items":[1,{"x":2},null,3]}"#).unwrap();
+        let command = parse_args([
+            "--output-format",
+            "json",
+            "-c",
+            "--explain-json",
+            ".items[] | numbers",
+            source.to_str().unwrap(),
+        ])
+        .unwrap();
+        let mut input = &[][..];
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output, b"1\n3\n");
+        let explain: serde_json::Value = serde_json::from_slice(&error).unwrap();
+        assert_eq!(explain["execution"]["plan"], "events");
+    }
+
+    #[test]
+    fn auto_detected_yaml_keeps_document_fallback() {
+        let (status, stdout, stderr) = execute(
+            &[
+                "--output-format",
+                "json",
+                "-c",
+                "--explain-json",
+                ".[] | numbers",
+            ],
+            b"- 1\n- value: 2\n- 3\n",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"1\n3\n");
+        let explain: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
+        assert_eq!(explain["execution"]["plan"], "document");
+    }
+
+    #[test]
+    fn automatic_projection_uses_auto_detected_toon_decoder_events() {
+        let (status, stdout, stderr) = execute(
+            &["--output-format", "json", "-c", ".items[].x"],
             b"items[2]:\n  - x: 1\n  - x: 2\n",
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);

@@ -170,6 +170,19 @@ pub(crate) enum Operation {
         name: u32,
         body: u32,
     },
+    Reduce {
+        generator: u32,
+        name: u32,
+        initial: u32,
+        update: u32,
+    },
+    Foreach {
+        generator: u32,
+        name: u32,
+        initial: u32,
+        update: u32,
+        extract: u32,
+    },
     Call {
         name: u32,
         arguments: Vec<u32>,
@@ -459,6 +472,30 @@ impl Compiler {
                 name: self.string(name),
                 body: self.expression(body)?,
             },
+            ExprKind::Reduce {
+                generator,
+                name,
+                initial,
+                update,
+            } => Operation::Reduce {
+                generator: self.expression(generator)?,
+                name: self.string(name),
+                initial: self.expression(initial)?,
+                update: self.expression(update)?,
+            },
+            ExprKind::Foreach {
+                generator,
+                name,
+                initial,
+                update,
+                extract,
+            } => Operation::Foreach {
+                generator: self.expression(generator)?,
+                name: self.string(name),
+                initial: self.expression(initial)?,
+                update: self.expression(update)?,
+                extract: self.expression(extract)?,
+            },
             ExprKind::Call { name, arguments } => Operation::Call {
                 name: self.string(name),
                 arguments: arguments
@@ -626,6 +663,30 @@ fn validate_instruction(
             target(*value)?;
             string(*name)?;
             target(*body)?;
+        }
+        Operation::Reduce {
+            generator,
+            name,
+            initial,
+            update,
+        } => {
+            target(*generator)?;
+            string(*name)?;
+            target(*initial)?;
+            target(*update)?;
+        }
+        Operation::Foreach {
+            generator,
+            name,
+            initial,
+            update,
+            extract,
+        } => {
+            target(*generator)?;
+            string(*name)?;
+            target(*initial)?;
+            target(*update)?;
+            target(*extract)?;
         }
         Operation::Call { name, arguments } => {
             string(*name)?;
@@ -865,6 +926,20 @@ mod tests {
         assert!(disassembly.contains("instructions="));
         assert!(disassembly.contains("span="));
         assert!(disassembly.contains("Conditional"));
+
+        let folds = analyze(
+            resolve(
+                parse("reduce (1,2) as $x (0; . + $x), foreach (1,2) as $x (0; . + $x; .)")
+                    .unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .disassemble();
+        assert!(folds.contains("Reduce"));
+        assert!(folds.contains("Foreach"));
     }
 
     #[test]

@@ -151,11 +151,7 @@ pub fn analyze_with_context(query: Query<Resolved>, context: AnalysisContext) ->
         add_effect(&mut analysis, Effect::Document, query.ast().span);
         analysis.selected_plan = PlanKind::WholeInput;
         analysis.stream_rejection = Some("whole-input mode requires all documents".to_owned());
-    } else if context.event_input
-        && !analysis.capabilities.subtree
-        && !analysis.capabilities.blocking
-        && !analysis.capabilities.mutation
-    {
+    } else if context.event_input && event_effects_compatible(&analysis) {
         add_effect(&mut analysis, Effect::EventStream, query.ast().span);
         analysis.selected_plan = PlanKind::Events;
     } else if context.event_input {
@@ -283,6 +279,34 @@ fn resolve_expr(
             scopes.pop();
             result?;
         }
+        ExprKind::Reduce {
+            generator,
+            name,
+            initial,
+            update,
+        } => {
+            resolve_expr(generator, scopes, registry)?;
+            resolve_expr(initial, scopes, registry)?;
+            scopes.push(BTreeSet::from([name.clone()]));
+            let result = resolve_expr(update, scopes, registry);
+            scopes.pop();
+            result?;
+        }
+        ExprKind::Foreach {
+            generator,
+            name,
+            initial,
+            update,
+            extract,
+        } => {
+            resolve_expr(generator, scopes, registry)?;
+            resolve_expr(initial, scopes, registry)?;
+            scopes.push(BTreeSet::from([name.clone()]));
+            let result = resolve_expr(update, scopes, registry)
+                .and_then(|()| resolve_expr(extract, scopes, registry));
+            scopes.pop();
+            result?;
+        }
         ExprKind::Call { name, arguments } => {
             if let Some(capability) = deferred_builtin(name) {
                 return Err(error(
@@ -401,6 +425,34 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             analyze_expr(body, analysis);
             add_effect(analysis, Effect::Generator, expr.span);
         }
+        ExprKind::Reduce {
+            generator,
+            initial,
+            update,
+            ..
+        } => {
+            analyze_expr(generator, analysis);
+            analyze_expr(initial, analysis);
+            analyze_expr(update, analysis);
+            add_effect(analysis, Effect::FoldState, expr.span);
+            add_effect(analysis, Effect::Subtree, expr.span);
+            add_effect(analysis, Effect::Blocking, expr.span);
+        }
+        ExprKind::Foreach {
+            generator,
+            initial,
+            update,
+            extract,
+            ..
+        } => {
+            analyze_expr(generator, analysis);
+            analyze_expr(initial, analysis);
+            analyze_expr(update, analysis);
+            analyze_expr(extract, analysis);
+            add_effect(analysis, Effect::FoldState, expr.span);
+            add_effect(analysis, Effect::Subtree, expr.span);
+            add_effect(analysis, Effect::Generator, expr.span);
+        }
         ExprKind::Call { name, arguments } => {
             for argument in arguments {
                 analyze_expr(argument, analysis);
@@ -457,6 +509,7 @@ fn add_effect(analysis: &mut Analysis, effect: Effect, span: Span) {
         Effect::Mutation => analysis.capabilities.mutation = true,
         Effect::Generator => analysis.capabilities.generator = true,
         Effect::PossibleFailure => analysis.capabilities.possible_failure = true,
+        Effect::FoldState => analysis.capabilities.fold_state = true,
         Effect::PathPrefix | Effect::SubtreeComplete | Effect::Escape => {}
     }
     if !analysis
@@ -466,6 +519,22 @@ fn add_effect(analysis: &mut Analysis, effect: Effect, span: Span) {
     {
         analysis.causes.push(CapabilityCause { effect, span });
     }
+}
+
+fn event_effects_compatible(analysis: &Analysis) -> bool {
+    if analysis.capabilities.document
+        || analysis.capabilities.whole_input
+        || analysis.capabilities.mutation
+    {
+        return false;
+    }
+    analysis.causes.iter().all(|cause| {
+        !matches!(cause.effect, Effect::Subtree | Effect::Blocking)
+            || analysis
+                .causes
+                .iter()
+                .any(|fold| fold.effect == Effect::FoldState && fold.span == cause.span)
+    })
 }
 
 fn error(code: &str, message: String, span: Span) -> Box<Diagnostic> {
@@ -521,8 +590,6 @@ mod tests {
             ("module {}; .", "TQ-CAP-MODULES"),
             ("import \"x\" as x; .", "TQ-CAP-IMPORT"),
             ("include \"x\"; .", "TQ-CAP-INCLUDE"),
-            ("reduce .[] as $x (0; .)", "TQ-CAP-REDUCE"),
-            ("foreach .[] as $x (0; .; .)", "TQ-CAP-FOREACH"),
             ("label $x | .", "TQ-CAP-LABELS"),
             ("break $x", "TQ-CAP-BREAK"),
             ("..", "TQ-CAP-RECURSIVE-DESCENT"),
@@ -558,6 +625,83 @@ mod tests {
         assert!(capabilities.mutation);
         assert!(capabilities.generator);
         assert!(capabilities.possible_failure);
+    }
+
+    #[test]
+    fn fold_resolution_and_analysis_cover_scope_cardinality_failure_and_retention() {
+        let reduce = analyze(
+            resolve(
+                parse("reduce .[] as $x (0; . + $x)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert!(reduce.capabilities().blocking);
+        assert!(reduce.capabilities().subtree);
+        assert!(reduce.capabilities().generator);
+        assert!(reduce.capabilities().possible_failure);
+        assert!(reduce.capabilities().fold_state);
+        assert_eq!(reduce.analysis().selected_plan, crate::PlanKind::Blocking);
+
+        let foreach = analyze(
+            resolve(
+                parse("foreach .[] as $x (0; . + $x; error(\"late\"))").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert!(!foreach.capabilities().blocking);
+        assert!(foreach.capabilities().subtree);
+        assert!(foreach.capabilities().generator);
+        assert!(foreach.capabilities().possible_failure);
+        assert!(foreach.capabilities().fold_state);
+        assert_eq!(foreach.analysis().selected_plan, crate::PlanKind::Document);
+
+        assert_eq!(
+            resolve(
+                parse("reduce .[] as $x ($x; .)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap_err()
+            .code,
+            "TQ-RESOLVE-VARIABLE-001"
+        );
+    }
+
+    #[test]
+    fn explicit_events_admit_only_folds_with_event_compatible_bodies() {
+        let compatible = analyze_with_context(
+            resolve(
+                parse("reduce .[] as $x (0; . + $x)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+            AnalysisContext {
+                event_input: true,
+                whole_input: false,
+                automatic_streaming: false,
+            },
+        );
+        assert_eq!(compatible.analysis().selected_plan, crate::PlanKind::Events);
+        assert!(!compatible.capabilities().document);
+
+        let incompatible = analyze_with_context(
+            resolve(
+                parse("reduce .[] as $x ([0]; . + [$x])").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+            AnalysisContext {
+                event_input: true,
+                whole_input: false,
+                automatic_streaming: false,
+            },
+        );
+        assert_eq!(
+            incompatible.analysis().selected_plan,
+            crate::PlanKind::Blocking
+        );
+        assert!(incompatible.capabilities().document);
     }
 
     #[test]
