@@ -55,6 +55,8 @@ pub(crate) enum TokenKind {
     As,
     Try,
     Catch,
+    Reduce,
+    Foreach,
     True,
     False,
     Null,
@@ -361,15 +363,15 @@ impl Lexer<'_> {
             "as" => TokenKind::As,
             "try" => TokenKind::Try,
             "catch" => TokenKind::Catch,
+            "reduce" => TokenKind::Reduce,
+            "foreach" => TokenKind::Foreach,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "null" => TokenKind::Null,
             "def" => TokenKind::Deferred("function".into()),
             "module" => TokenKind::Deferred("modules".into()),
             "label" => TokenKind::Deferred("labels".into()),
-            "import" | "include" | "reduce" | "foreach" | "break" => {
-                TokenKind::Deferred(text.into())
-            }
+            "import" | "include" | "break" => TokenKind::Deferred(text.into()),
             _ => TokenKind::Identifier(text.into()),
         };
         self.push(start, kind);
@@ -433,11 +435,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_utf8_and_marks_deferred_tokens() {
+    fn rejects_invalid_utf8_and_recognizes_fold_tokens() {
         assert!(validate_utf8(&[0xff], "query").is_err());
-        let source = SourceFile::new(SourceId::new(0), "query", "reduce . as $x (0; .)");
+        let source = SourceFile::new(
+            SourceId::new(0),
+            "query",
+            "reduce . as $x (0; .) foreach . as $x (0; .; .)",
+        );
         let tokens = lex(&source).unwrap();
-        assert!(matches!(&tokens[0].kind, TokenKind::Deferred(name) if &**name == "reduce"));
+        assert!(matches!(tokens[0].kind, TokenKind::Reduce));
+        assert!(
+            tokens
+                .iter()
+                .any(|token| matches!(token.kind, TokenKind::Foreach))
+        );
     }
 
     #[test]

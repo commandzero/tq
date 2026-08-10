@@ -8,8 +8,9 @@ The MVP implements identity and literals; field, computed, index, slice, and
 iteration navigation; pipes and generators; array and ordered-object
 construction; conditionals and operators; lexical and CLI variables; the core
 type, collection, selection, conversion, range, ordering, and aggregation
-built-ins; `empty`, `error`, optional access, and `try/catch`; and jq-style path
-updates.
+built-ins; `empty`, `error`, optional access, and `try/catch`; jq-style path
+updates; and stateful `reduce` and `foreach` folds with bounded managed
+accumulator frames.
 
 ## Build and use
 
@@ -21,7 +22,8 @@ target/release/tq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
 Input is read from stdin when no file is supplied. Multiple files and `-` are
-processed in argument order. Input detection tries TOON, then YAML, then JSON.
+processed in argument order. Bounded input detection recognizes canonical TOON,
+commits JSON object/array openers to JSON, and recognizes explicit YAML markers.
 Use `--input-format toon|yaml|json` when the syntax is ambiguous or when you
 need one parser.
 
@@ -53,9 +55,9 @@ tq --stream --input-format json \
 Use `--explain` or `--explain-json` to see the query plan and its memory
 limits. The plan can be event, subtree, document, whole-input, or blocking.
 Document plans retain one decoded input document. Slurp retains all input
-documents. Sorting, uniqueness, and aggregate operators also retain blocking
-state. tq does not convert ordinary document queries to stream plans in the
-MVP.
+documents. Sorting, uniqueness, and final reductions also retain blocking
+state; a fold additionally retains one immutable accumulator and bounded
+managed evaluation state.
 
 Resource controls include `--max-input-bytes`, `--max-depth`,
 `--max-token-bytes`, `--max-line-bytes`, `--max-lookahead-bytes`,
@@ -94,9 +96,9 @@ syntax, framing, limits, and known-difference guidance lives in
 
 ## Intentional MVP boundaries
 
-User-defined functions and modules, `reduce`/`foreach`, labels and breaks,
+User-defined functions and modules, labels and breaks,
 recursive descent and interpolation, regex and date functions, environment or
-platform I/O, automatic stream planning, and the long tail of jq CLI switches
+platform I/O, and the long tail of jq CLI switches
 are deferred with stable unsupported-capability diagnostics.
 
 The numeric model is a hybrid: accepted input literals preserve arbitrary

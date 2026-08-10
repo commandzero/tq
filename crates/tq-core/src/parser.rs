@@ -363,6 +363,8 @@ impl Parser<'_> {
             TokenKind::LeftBrace => self.object(token.span),
             TokenKind::If => self.conditional(token.span),
             TokenKind::Try => self.try_catch(token.span),
+            TokenKind::Reduce => self.fold(token.span, false),
+            TokenKind::Foreach => self.fold(token.span, true),
             TokenKind::Deferred(capability) => Err(self.deferred(&capability, token.span)),
             _ => Err(self.error_at(
                 "TQ-PARSE-EXPRESSION-001",
@@ -516,6 +518,62 @@ impl Parser<'_> {
         ))
     }
 
+    fn fold(&mut self, open: Span, foreach: bool) -> Result<Expr, Box<Diagnostic>> {
+        let generator = self.pipe()?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::As),
+            "'as' after fold generator",
+        )?;
+        let variable = self.advance().clone();
+        let TokenKind::Variable(name) = variable.kind else {
+            return Err(self.error_at(
+                "TQ-PARSE-FOLD-VARIABLE-001",
+                "expected variable after 'as'",
+                variable.span,
+            ));
+        };
+        self.expect(
+            |kind| matches!(kind, TokenKind::LeftParen),
+            "'(' before fold initializer",
+        )?;
+        let initial = self.comma()?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "';' after fold initializer",
+        )?;
+        let update = self.comma()?;
+        let extract = if foreach {
+            self.expect(
+                |kind| matches!(kind, TokenKind::Semicolon),
+                "';' after foreach update",
+            )?;
+            Some(self.comma()?)
+        } else {
+            None
+        };
+        let close = self.expect(
+            |kind| matches!(kind, TokenKind::RightParen),
+            "')' after fold body",
+        )?;
+        let kind = if let Some(extract) = extract {
+            ExprKind::Foreach {
+                generator: Box::new(generator),
+                name,
+                initial: Box::new(initial),
+                update: Box::new(update),
+                extract: Box::new(extract),
+            }
+        } else {
+            ExprKind::Reduce {
+                generator: Box::new(generator),
+                name,
+                initial: Box::new(initial),
+                update: Box::new(update),
+            }
+        };
+        Ok(Expr::new(kind, joined(open, close.span)))
+    }
+
     fn current(&self) -> &Token {
         &self.tokens[self.index.min(self.tokens.len() - 1)]
     }
@@ -629,10 +687,6 @@ mod tests {
 
     #[test]
     fn deferred_and_invalid_inputs_have_stable_classes() {
-        assert_eq!(
-            parse("reduce . as $x (0; .)").unwrap_err().code,
-            "TQ-CAP-REDUCE"
-        );
         assert_eq!(parse("..").unwrap_err().code, "TQ-CAP-RECURSIVE-DESCENT");
         assert_eq!(
             parse("\"x=\\(.)\"").unwrap_err().code,
@@ -642,6 +696,40 @@ mod tests {
             parse_bytes("query", &[0xff]).unwrap_err().code,
             "TQ-LEX-UTF8-001"
         );
+    }
+
+    #[test]
+    fn parses_source_spanned_reduce_and_foreach_forms() {
+        let reduce = parse("reduce (1,2) as $x (0; . + $x)").unwrap();
+        assert_eq!(
+            reduce.hir(),
+            "reduce(comma(1, 2) as $x; init: 0; update: add(., $x))"
+        );
+        assert_eq!(reduce.source().text().len() as u64, 30);
+
+        let foreach = parse("foreach .[] as $x (0; . + $x; .)").unwrap();
+        assert_eq!(
+            foreach.hir(),
+            "foreach(access(., iterate) as $x; init: 0; update: add(., $x); extract: .)"
+        );
+    }
+
+    #[test]
+    fn malformed_fold_fuzz_regressions_return_diagnostics_without_panicking() {
+        for query in [
+            "reduce",
+            "reduce .",
+            "reduce . as",
+            "reduce . as $x",
+            "reduce . as $x (",
+            "reduce . as $x (0)",
+            "reduce . as $x (0;)",
+            "foreach . as $x (0; .)",
+            "foreach . as $x (0; .;)",
+            "foreach . as $x (0; .; .",
+        ] {
+            assert!(parse(query).is_err(), "{query}");
+        }
     }
 
     #[test]

@@ -266,12 +266,20 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
         ],
     );
     assert_capabilities(
+        "folds.jsonl",
+        &[
+            "fold.reduce",
+            "fold.foreach",
+            "fold.update-multiplicity",
+            "fold.extract-multiplicity",
+            "result.partial",
+        ],
+    );
+    assert_capabilities(
         "deferred.jsonl",
         &[
             "deferred.function",
             "deferred.modules",
-            "deferred.reduce",
-            "deferred.foreach",
             "deferred.labels",
             "deferred.recursive-descent",
             "deferred.interpolation",

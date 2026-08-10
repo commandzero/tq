@@ -72,6 +72,8 @@ pub struct Capabilities {
     pub generator: bool,
     /// May fail at runtime.
     pub possible_failure: bool,
+    /// Retains one managed fold accumulator.
+    pub fold_state: bool,
 }
 
 /// One analyzed capability and the syntax that caused it.
@@ -103,6 +105,8 @@ pub enum Effect {
     Generator,
     /// May fail at runtime.
     PossibleFailure,
+    /// Retains one managed fold accumulator frame.
+    FoldState,
     /// Proves a static decoder path prefix.
     PathPrefix,
     /// Proves that one complete bounded subtree is sufficient.

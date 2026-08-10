@@ -691,6 +691,39 @@ impl Evaluator<'_> {
                     self.emit_node(body, input, &nested, depth + 1, emit)
                 })
             }
+            Operation::Reduce {
+                generator,
+                name,
+                initial,
+                update,
+            } => self.emit_fold(
+                generator,
+                name,
+                initial,
+                update,
+                None,
+                input,
+                environment,
+                depth,
+                emit,
+            ),
+            Operation::Foreach {
+                generator,
+                name,
+                initial,
+                update,
+                extract,
+            } => self.emit_fold(
+                generator,
+                name,
+                initial,
+                update,
+                Some(extract),
+                input,
+                environment,
+                depth,
+                emit,
+            ),
             Operation::TryCatch { expression, catch } => {
                 if let Err(error) = self.enter(depth) {
                     return emit(Err(error));
@@ -755,6 +788,124 @@ impl Evaluator<'_> {
                 .into_iter()
                 .all(emit),
         }
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "fold bytecode carries four bodies plus the shared evaluator context"
+    )]
+    fn emit_fold(
+        &self,
+        generator: u32,
+        name: u32,
+        initial: u32,
+        update: u32,
+        extract: Option<u32>,
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        if let Err(error) = self.enter_fold_frame(depth) {
+            return emit(Err(error));
+        }
+        let name = match self.string(name) {
+            Ok(name) => Arc::clone(name),
+            Err(error) => return emit(Err(error)),
+        };
+        self.emit_node(
+            initial,
+            input,
+            environment,
+            depth + 1,
+            &mut |initial_result| {
+                let mut accumulator = match initial_result {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = emit(Err(error));
+                        return false;
+                    }
+                };
+                let mut fold_failed = false;
+                let keep_going =
+                    self.emit_node(generator, input, environment, depth + 1, &mut |generated| {
+                        let item = match generated {
+                            Ok(value) => value,
+                            Err(error) => {
+                                fold_failed = true;
+                                let _ = emit(Err(error));
+                                return false;
+                            }
+                        };
+                        if let Err(error) = self.enter(depth + 1) {
+                            fold_failed = true;
+                            let _ = emit(Err(error));
+                            return false;
+                        }
+                        let mut nested = environment.clone();
+                        nested.insert(Arc::clone(&name), item);
+                        let mut next_accumulator = Value::Null;
+                        let mut update_failed = false;
+                        let update_kept_going = self.emit_node(
+                            update,
+                            &accumulator,
+                            &nested,
+                            depth + 1,
+                            &mut |updated| {
+                                let updated = match updated {
+                                    Ok(value) => value,
+                                    Err(error) => {
+                                        update_failed = true;
+                                        let _ = emit(Err(error));
+                                        return false;
+                                    }
+                                };
+                                next_accumulator = updated.clone();
+                                let Some(extract) = extract else {
+                                    return true;
+                                };
+                                let mut extract_failed = false;
+                                let extracted = self.emit_node(
+                                    extract,
+                                    &updated,
+                                    &nested,
+                                    depth + 1,
+                                    &mut |result| {
+                                        extract_failed |= result.is_err();
+                                        let accepted = emit(result);
+                                        accepted && !extract_failed
+                                    },
+                                );
+                                if extract_failed {
+                                    update_failed = true;
+                                }
+                                extracted && !extract_failed
+                            },
+                        );
+                        accumulator = next_accumulator;
+                        if update_failed {
+                            fold_failed = true;
+                        }
+                        update_kept_going && !update_failed
+                    });
+                if !keep_going || fold_failed {
+                    return false;
+                }
+                extract.is_some() || emit(Ok(accumulator))
+            },
+        )
+    }
+
+    fn enter_fold_frame(&self, depth: usize) -> Result<(), VmError> {
+        self.enter(depth)?;
+        let frames = depth.saturating_add(1);
+        if frames > self.limits.value_stack {
+            return Err(resource("value-stack"));
+        }
+        let mut observations = self.observations.get();
+        observations.value_stack_high_water = observations.value_stack_high_water.max(frames);
+        self.observations.set(observations);
+        Ok(())
     }
 
     fn emit_range(
@@ -1001,6 +1152,53 @@ impl Evaluator<'_> {
                         Err(error) => output.push(Err(error)),
                     }
                 }
+                output
+            }
+            Operation::Reduce {
+                generator,
+                name,
+                initial,
+                update,
+            } => {
+                let mut output = Vec::new();
+                self.emit_fold(
+                    *generator,
+                    *name,
+                    *initial,
+                    *update,
+                    None,
+                    input,
+                    environment,
+                    depth,
+                    &mut |result| {
+                        output.push(result);
+                        true
+                    },
+                );
+                output
+            }
+            Operation::Foreach {
+                generator,
+                name,
+                initial,
+                update,
+                extract,
+            } => {
+                let mut output = Vec::new();
+                self.emit_fold(
+                    *generator,
+                    *name,
+                    *initial,
+                    *update,
+                    Some(*extract),
+                    input,
+                    environment,
+                    depth,
+                    &mut |result| {
+                        output.push(result);
+                        true
+                    },
+                );
                 output
             }
             Operation::Call { name, arguments } => match self.string(*name).cloned() {

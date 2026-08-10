@@ -90,7 +90,7 @@ impl DocumentSource for VecDocumentSource {
     }
 }
 
-/// Decodes one byte source using an override or TOON→YAML→JSON faildown.
+/// Decodes one byte source using an override or bounded syntax detection.
 ///
 /// Each call probes independently using a bounded prefix. Once probing commits,
 /// later syntax failures belong to the selected format and do not restart
@@ -156,21 +156,33 @@ pub fn probe_format(
     let trimmed = text.trim_start();
     let first_line = trimmed.lines().next().unwrap_or("");
     let toon_header = root_toon_array_header(first_line);
-    let rejection = if trimmed.starts_with('{') {
-        Some("JSON/YAML object opener is not canonical TOON".to_owned())
+    let (selected, rejection) = if trimmed.starts_with('{') {
+        (
+            InputFormat::Json,
+            Some("JSON object opener is not canonical TOON".to_owned()),
+        )
     } else if trimmed.starts_with('[') && !toon_header {
-        Some("bracketed value is not a TOON counted-array header".to_owned())
+        (
+            InputFormat::Json,
+            Some("JSON array opener is not a TOON counted-array header".to_owned()),
+        )
     } else if trimmed.starts_with("---") || trimmed.starts_with('%') {
-        Some("YAML document/directive marker".to_owned())
+        (
+            InputFormat::Yaml,
+            Some("YAML document or directive marker".to_owned()),
+        )
     } else if trimmed.starts_with("- ") {
-        Some("root sequence marker requires YAML".to_owned())
+        (
+            InputFormat::Yaml,
+            Some("YAML root-sequence marker".to_owned()),
+        )
     } else {
-        None
+        (InputFormat::Toon, None)
     };
     let commitment = first_line.len().min(inspected);
     Ok(if let Some(rejection) = rejection {
         ProbeReport {
-            selected: InputFormat::Yaml,
+            selected,
             lookahead_bytes: inspected,
             commitment_bytes: commitment,
             rejections: vec![(InputFormat::Toon, rejection)],
@@ -548,7 +560,7 @@ mod tests {
     #[test]
     fn bounded_probe_is_observable_and_late_failures_do_not_fail_down() {
         let json = super::probe_format(br#"{"a":1}"#, 4).unwrap();
-        assert_eq!(json.selected, InputFormat::Yaml);
+        assert_eq!(json.selected, InputFormat::Json);
         assert_eq!(json.lookahead_bytes, 4);
         assert_eq!(json.rejections[0].0, InputFormat::Toon);
 
@@ -556,7 +568,7 @@ mod tests {
         assert!(matches!(
             error,
             crate::FormatError::Parse {
-                format: InputFormat::Yaml,
+                format: InputFormat::Json,
                 ..
             }
         ));

@@ -907,6 +907,32 @@ mod tests {
     }
 
     #[test]
+    fn explicit_event_plan_executes_an_event_compatible_fold_end_to_end() {
+        let plan = analyze_with_context(
+            resolve(
+                parse("reduce .[] as $part (null; $part)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+            AnalysisContext {
+                event_input: true,
+                whole_input: false,
+                automatic_streaming: false,
+            },
+        )
+        .compile()
+        .unwrap()
+        .event_plan()
+        .unwrap();
+        let event = Value::array([Value::array([Value::string("magnitude")]), number("7")]);
+        let mut vm = Vm::new_events(&plan, event, VmLimits::default());
+
+        assert_eq!(vm.next_result().unwrap(), Some(number("7")));
+        assert_eq!(vm.next_result().unwrap(), None);
+        assert_eq!(vm.observations().value_stack_high_water, 1);
+    }
+
+    #[test]
     fn generator_language_uses_bounded_explicit_forks_and_continuations() {
         let plan =
             analyze(resolve(parse(".[], empty").unwrap(), &ResolveOptions::default()).unwrap())
@@ -974,6 +1000,192 @@ mod tests {
                 .document_plan();
         let mut vm = Vm::new(&optional, Value::Bool(false), VmLimits::default());
         assert_eq!(vm.next_result().unwrap(), None);
+    }
+
+    #[test]
+    fn reduce_preserves_jq_order_last_update_and_initializer_multiplicity() {
+        let plan = analyze(
+            resolve(
+                parse("reduce (1,2) as $x ((0,10); . + $x, 100)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut vm = Vm::new(&plan, Value::Null, VmLimits::default());
+        assert_eq!(vm.next_result().unwrap(), Some(number("100")));
+        assert_eq!(vm.next_result().unwrap(), Some(number("100")));
+        assert_eq!(vm.next_result().unwrap(), None);
+        assert!(vm.observations().value_stack_high_water > 0);
+
+        let empty_update = analyze(
+            resolve(
+                parse("reduce (1,2) as $x (0; if $x == 1 then empty else . + $x end)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut vm = Vm::new(&empty_update, Value::Null, VmLimits::default());
+        assert_eq!(vm.next_result().unwrap(), Some(number("2")));
+        assert_eq!(vm.next_result().unwrap(), None);
+    }
+
+    #[test]
+    fn foreach_emits_update_and_extraction_multiplicity_in_jq_order() {
+        let plan = analyze(
+            resolve(
+                parse("foreach (1,2) as $x (0; 100, . + $x; [$x,.], . * 10)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut vm = Vm::new(&plan, Value::Null, VmLimits::default());
+        let mut output = Vec::new();
+        while let Some(value) = vm.next_result().unwrap() {
+            output.push(value);
+        }
+        assert_eq!(
+            output,
+            [
+                Value::array([number("1"), number("100")]),
+                number("1000"),
+                Value::array([number("1"), number("1")]),
+                number("10"),
+                Value::array([number("2"), number("100")]),
+                number("1000"),
+                Value::array([number("2"), number("3")]),
+                number("30"),
+            ]
+        );
+    }
+
+    #[test]
+    fn foreach_retains_partial_output_then_unwinds_on_a_later_error() {
+        let plan = analyze(
+            resolve(
+                parse("foreach (1,2,error(\"boom\")) as $x (0; . + $x; .)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut vm = Vm::new(&plan, Value::Null, VmLimits::default());
+        assert_eq!(vm.next_result().unwrap(), Some(number("1")));
+        assert_eq!(vm.next_result().unwrap(), Some(number("3")));
+        assert!(matches!(vm.next_result(), Err(VmError::Runtime { .. })));
+        assert_eq!(vm.next_result().unwrap(), None);
+    }
+
+    #[test]
+    fn fold_frames_are_bounded_and_preserve_structural_sharing() {
+        let plan = analyze(
+            resolve(
+                parse("reduce empty as $x (.; .)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let input = Value::array([Value::string("shared")]);
+        let mut vm = Vm::new(&plan, input.clone(), VmLimits::default());
+        let result = vm.next_result().unwrap().unwrap();
+        assert!(result.shares_node_with(&input));
+
+        let mut limited = Vm::new(
+            &plan,
+            input,
+            VmLimits {
+                value_stack: 0,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            limited.next_result(),
+            Err(VmError::Resource {
+                resource: "value-stack"
+            })
+        ));
+    }
+
+    #[test]
+    fn folds_obey_work_cancellation_and_hostile_depth_limits() {
+        let work_plan = analyze(
+            resolve(
+                parse("reduce range(0;1000) as $x (0; . + $x)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut limited = Vm::new(
+            &work_plan,
+            Value::Null,
+            VmLimits {
+                steps: 10,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            limited.next_result(),
+            Err(VmError::Resource {
+                resource: "vm-steps"
+            })
+        ));
+
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let foreach_plan = analyze(
+            resolve(
+                parse("foreach range(0;1000) as $x (0; . + $x; .)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut cancelled = Vm::new(&foreach_plan, Value::Null, VmLimits::default())
+            .with_cancellation(Arc::clone(&cancellation));
+        assert_eq!(cancelled.next_result().unwrap(), Some(number("0")));
+        cancellation.store(true, Ordering::Relaxed);
+        assert!(matches!(cancelled.next_result(), Err(VmError::Interrupted)));
+
+        let mut hostile = ".".to_owned();
+        for _ in 0..64 {
+            hostile = format!("reduce empty as $x ({hostile}; .)");
+        }
+        let hostile_plan =
+            analyze(resolve(parse(&hostile).unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .document_plan();
+        let mut depth_limited = Vm::new(
+            &hostile_plan,
+            Value::Null,
+            VmLimits {
+                call_stack: 16,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            depth_limited.next_result(),
+            Err(VmError::Resource {
+                resource: "call-stack"
+            })
+        ));
     }
 
     #[test]
