@@ -23,5 +23,5 @@ None.
 
 ## Impact
 
-The parser, resolver, capability analysis, compiler, VM continuation state,
+The parser, resolver, capability analysis, compiler, managed fold evaluation,
 resource observations, compatibility cases, and reduction benchmarks are affected.

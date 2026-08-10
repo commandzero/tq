@@ -2,11 +2,17 @@
 
 ### Requirement: Sound automatic plan selection
 The system SHALL select event, subtree, document, whole-input, or blocking plans
-before input consumption and SHALL preserve jq result, ordering, and error semantics.
+before semantic decoder consumption and SHALL preserve jq result, ordering, and
+error semantics. A bounded format probe MAY precede selection when every probed
+byte is replayed unchanged to the selected decoder.
 
 #### Scenario: Eligible projection
 - **WHEN** analysis proves a query depends only on bounded event-local paths
 - **THEN** the compiler produces an event plan without retaining the complete document
+
+#### Scenario: Auto-detected decoder input
+- **WHEN** an eligible query receives JSON or TOON through the default automatic input format
+- **THEN** bounded probing and replay select the corresponding decoder-event plan without requiring an input-format override
 
 #### Scenario: Ineligible query
 - **WHEN** a query requires whole-document, whole-input, mutation, or blocking state

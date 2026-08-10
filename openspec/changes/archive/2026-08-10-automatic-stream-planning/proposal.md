@@ -20,7 +20,7 @@ path/value stream programs.
 
 ### Modified Capabilities
 
-None.
+- `tq-cli`: Auto-detected JSON container inputs commit to decoder events while YAML markers retain document fallback.
 
 ## Impact
 

@@ -20,8 +20,12 @@ making jq/yq ratios universal release gates.
 - Use event execution for scalar/path-local pipelines and bounded subtree capture
   when complete values are required. Speculative runtime fallback was rejected
   because it can duplicate output after commitment.
-- Decide the plan before consuming input and record syntax causes, retained
-  state, limits, and any rejection in explain/report output.
+- Decide the plan before semantic decoder consumption and record syntax causes,
+  retained state, limits, and any rejection in explain/report output. A bounded
+  replayable format probe may precede selection.
+- Run the bounded, replayable format probe before plan selection in automatic
+  input mode. JSON/TOON decoder formats admit bounded plans; detected YAML
+  conservatively selects the document plan.
 
 ## Risks / Trade-offs
 

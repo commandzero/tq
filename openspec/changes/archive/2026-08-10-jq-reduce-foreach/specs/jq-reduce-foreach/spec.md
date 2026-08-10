@@ -17,8 +17,11 @@ and extraction filters in the same order and scope as jq.
 - **THEN** all results are emitted in jq order and retain valid earlier frames on a later error
 
 ### Requirement: Managed fold resources
-Fold execution MUST use bounded managed continuations and report retained state.
+Fold execution MUST bound its accumulator and evaluation state, report retained
+state, and preserve jq-observable ordering, cardinality, errors, and cleanup.
+The internal evaluator strategy MAY vary provided those behaviors and resource
+contracts remain stable.
 
 #### Scenario: Fold limit
 - **WHEN** a fold crosses its configured call, work, result, or output limit
-- **THEN** it terminates with the stable resource class and cleans up all continuations
+- **THEN** it terminates with the stable resource class and cleans up all fold state
