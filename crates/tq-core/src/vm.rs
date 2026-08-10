@@ -30,6 +30,8 @@ pub struct VmLimits {
     pub fork_stack: usize,
     /// Maximum instructions across all pulled results.
     pub steps: u64,
+    /// Maximum bytes in one materialized interpolation result.
+    pub output_bytes: usize,
 }
 
 impl Default for VmLimits {
@@ -40,6 +42,7 @@ impl Default for VmLimits {
             path_stack: 1024,
             fork_stack: 4096,
             steps: 10_000_000,
+            output_bytes: 8 * 1024 * 1024 * 1024,
         }
     }
 }

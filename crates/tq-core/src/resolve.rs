@@ -5,7 +5,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use crate::{
     Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, Parsed, PlanKind,
     Query, Resolved, Span,
-    ast::{Access, Expr, ExprKind, ObjectKey},
+    ast::{Access, Expr, ExprKind, InterpolationSegment, ObjectKey},
     phase::automatic_stream_proof,
 };
 
@@ -221,6 +221,13 @@ fn resolve_expr(
                 ));
             }
         }
+        ExprKind::Interpolation(segments) => {
+            for segment in segments {
+                if let InterpolationSegment::Expression(expression) = segment {
+                    resolve_expr(expression, scopes, registry)?;
+                }
+            }
+        }
         ExprKind::Access { base, access } => {
             resolve_expr(base, scopes, registry)?;
             match access {
@@ -340,7 +347,10 @@ fn resolve_expr(
             resolve_expr(expression, scopes, registry)?;
             resolve_expr(catch, scopes, registry)?;
         }
-        ExprKind::Identity | ExprKind::Literal(_) | ExprKind::Empty => {}
+        ExprKind::Identity
+        | ExprKind::Literal(_)
+        | ExprKind::Empty
+        | ExprKind::RecursiveDescent => {}
     }
     Ok(())
 }
@@ -352,6 +362,7 @@ fn deferred_builtin(name: &str) -> Option<&'static str> {
         "input_filename" => Some("platform-io"),
         "test" => Some("regex"),
         "nan" => Some("nonfinite-result"),
+        "recurse" | "walk" => Some("recursive-builtins"),
         _ => None,
     }
 }
@@ -364,6 +375,18 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
     match &expr.kind {
         ExprKind::Identity | ExprKind::Literal(_) | ExprKind::Variable(_) => {}
         ExprKind::Empty => add_effect(analysis, Effect::Generator, expr.span),
+        ExprKind::RecursiveDescent => {
+            add_effect(analysis, Effect::Generator, expr.span);
+            add_effect(analysis, Effect::Subtree, expr.span);
+        }
+        ExprKind::Interpolation(segments) => {
+            for segment in segments {
+                if let InterpolationSegment::Expression(expression) = segment {
+                    analyze_expr(expression, analysis);
+                }
+            }
+            add_effect(analysis, Effect::Generator, expr.span);
+        }
         ExprKind::Access { base, access } => {
             analyze_expr(base, analysis);
             match access {
@@ -592,8 +615,7 @@ mod tests {
             ("include \"x\"; .", "TQ-CAP-INCLUDE"),
             ("label $x | .", "TQ-CAP-LABELS"),
             ("break $x", "TQ-CAP-BREAK"),
-            ("..", "TQ-CAP-RECURSIVE-DESCENT"),
-            ("\"x=\\(.)\"", "TQ-CAP-INTERPOLATION"),
+            ("@text \"x\"", "TQ-CAP-FORMAT-STRINGS"),
         ];
         for (query, code) in parse_cases {
             assert_eq!(parse(query).unwrap_err().code, code, "{query}");
@@ -604,6 +626,7 @@ mod tests {
             ("env", "TQ-CAP-ENVIRONMENT"),
             ("input_filename", "TQ-CAP-PLATFORM-IO"),
             ("nan", "TQ-CAP-NONFINITE-RESULT"),
+            ("recurse", "TQ-CAP-RECURSIVE-BUILTINS"),
         ];
         for (query, code) in resolve_cases {
             let error = resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap_err();
@@ -660,6 +683,43 @@ mod tests {
         assert_eq!(
             resolve(
                 parse("reduce .[] as $x ($x; .)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap_err()
+            .code,
+            "TQ-RESOLVE-VARIABLE-001"
+        );
+    }
+
+    #[test]
+    fn recursive_and_interpolation_analysis_cover_cardinality_scope_and_retention() {
+        let recursive =
+            analyze(resolve(parse(".. | scalars").unwrap(), &ResolveOptions::default()).unwrap());
+        assert!(recursive.capabilities().generator);
+        assert!(recursive.capabilities().subtree);
+        assert_eq!(
+            recursive.analysis().selected_plan,
+            crate::PlanKind::Document
+        );
+
+        let interpolation = analyze(
+            resolve(
+                parse("\"x=\\(.a, .b)\"").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert!(interpolation.capabilities().generator);
+        assert!(interpolation.capabilities().possible_failure);
+        assert!(!interpolation.capabilities().blocking);
+        assert_eq!(
+            interpolation.analysis().selected_plan,
+            crate::PlanKind::Document
+        );
+
+        assert_eq!(
+            resolve(
+                parse("\"x=\\($missing)\"").unwrap(),
                 &ResolveOptions::default(),
             )
             .unwrap_err()

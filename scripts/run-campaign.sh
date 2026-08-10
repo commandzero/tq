@@ -57,7 +57,7 @@ case "$campaign:$profile" in
             echo "cargo-fuzz is required (install with: cargo install cargo-fuzz)" >&2
             exit 69
         fi
-        for target in query_parser toon_decoder bytecode_decode vm_program cli_args automatic_plan; do
+        for target in query_parser toon_decoder bytecode_decode vm_program cli_args automatic_plan recursive_interpolation; do
             RUSTUP_TOOLCHAIN="${TQ_FUZZ_TOOLCHAIN:-nightly}" \
                 "$cargo_fuzz" run --fuzz-dir "$root/tests/fuzz" "$target" -- \
                 -max_total_time="$seconds" \

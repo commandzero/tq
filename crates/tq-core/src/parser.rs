@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::{
     Diagnostic, DiagnosticClass, Number, Parsed, Query, SourceFile, SourceId, Span, Value,
     ast::{
-        Access, AssignmentOperator, BinaryOperator, Expr, ExprKind, ObjectEntry, ObjectKey,
-        UnaryOperator,
+        Access, AssignmentOperator, BinaryOperator, Expr, ExprKind, InterpolationSegment,
+        ObjectEntry, ObjectKey, UnaryOperator,
     },
     lexer::{Token, TokenKind, lex, validate_utf8},
 };
@@ -332,7 +332,7 @@ impl Parser<'_> {
                     Ok(identity)
                 }
             }
-            TokenKind::DotDot => Err(self.deferred("recursive-descent", token.span)),
+            TokenKind::DotDot => Ok(Expr::new(ExprKind::RecursiveDescent, token.span)),
             TokenKind::True => Ok(Expr::new(ExprKind::Literal(Value::Bool(true)), token.span)),
             TokenKind::False => Ok(Expr::new(ExprKind::Literal(Value::Bool(false)), token.span)),
             TokenKind::Null => Ok(Expr::new(ExprKind::Literal(Value::Null), token.span)),
@@ -340,6 +340,7 @@ impl Parser<'_> {
                 ExprKind::Literal(Value::string(value)),
                 token.span,
             )),
+            TokenKind::StringStart => self.interpolation(token.span),
             TokenKind::Number(value) => {
                 let number = Number::parse(&value).map_err(|error| {
                     self.error_at("TQ-NUMBER-RANGE-001", &error.to_string(), token.span)
@@ -371,6 +372,49 @@ impl Parser<'_> {
                 "expected filter expression",
                 token.span,
             )),
+        }
+    }
+
+    fn interpolation(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let mut segments = Vec::new();
+        loop {
+            let token = self.advance().clone();
+            match token.kind {
+                TokenKind::StringFragment(value) => {
+                    segments.push(InterpolationSegment::Literal {
+                        value,
+                        span: token.span,
+                    });
+                }
+                TokenKind::InterpolationStart => {
+                    if matches!(self.current().kind, TokenKind::InterpolationEnd) {
+                        return Err(self.error_at(
+                            "TQ-PARSE-INTERPOLATION-001",
+                            "expected filter expression in string interpolation",
+                            self.current().span,
+                        ));
+                    }
+                    let expression = self.comma()?;
+                    self.expect(
+                        |kind| matches!(kind, TokenKind::InterpolationEnd),
+                        "')' after string interpolation",
+                    )?;
+                    segments.push(InterpolationSegment::Expression(expression));
+                }
+                TokenKind::StringEnd => {
+                    return Ok(Expr::new(
+                        ExprKind::Interpolation(segments),
+                        joined(open, token.span),
+                    ));
+                }
+                _ => {
+                    return Err(self.error_at(
+                        "TQ-PARSE-INTERPOLATION-001",
+                        "expected interpolation segment or closing quote",
+                        token.span,
+                    ));
+                }
+            }
         }
     }
 
@@ -648,6 +692,7 @@ const fn filter_terminator(kind: &TokenKind) -> bool {
             | TokenKind::Else
             | TokenKind::End
             | TokenKind::Catch
+            | TokenKind::InterpolationEnd
             | TokenKind::EndOfInput
     )
 }
@@ -687,15 +732,29 @@ mod tests {
 
     #[test]
     fn deferred_and_invalid_inputs_have_stable_classes() {
-        assert_eq!(parse("..").unwrap_err().code, "TQ-CAP-RECURSIVE-DESCENT");
-        assert_eq!(
-            parse("\"x=\\(.)\"").unwrap_err().code,
-            "TQ-CAP-INTERPOLATION"
-        );
         assert_eq!(
             parse_bytes("query", &[0xff]).unwrap_err().code,
             "TQ-LEX-UTF8-001"
         );
+    }
+
+    #[test]
+    fn parses_recursive_descent_and_source_spanned_nested_interpolation() {
+        assert_eq!(parse("..").unwrap().hir(), "recursive-descent");
+        assert_eq!(
+            parse("\"x=\\(1,2); y=\\(\"z=\\(.)\")\"").unwrap().hir(),
+            "interpolate(\"x=\", comma(1, 2), \"; y=\", interpolate(\"z=\", ., \"\"), \"\")"
+        );
+        assert_eq!(parse("..[0]").unwrap().source().text(), "..[0]");
+    }
+
+    #[test]
+    fn malformed_interpolation_has_stable_source_diagnostics() {
+        assert_eq!(
+            parse("\"x=\\()\"").unwrap_err().code,
+            "TQ-PARSE-INTERPOLATION-001"
+        );
+        assert_eq!(parse("\"x=\\(1\"").unwrap_err().code, "TQ-LEX-STRING-001");
     }
 
     #[test]
@@ -806,6 +865,8 @@ mod tests {
             "reverse",
             "flatten",
             "range(0;5;2)",
+            ".. | scalars",
+            "\"name=\\(.name)\"",
         ];
         for query in queries {
             parse(query).unwrap_or_else(|error| panic!("{query}: {error}"));

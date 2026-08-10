@@ -18,6 +18,7 @@ fuzz_target!(|data: &[u8]| {
                 call_stack: 64,
                 path_stack: 64,
                 fork_stack: 64,
+                output_bytes: 4096,
             },
         );
         for _ in 0..64 {

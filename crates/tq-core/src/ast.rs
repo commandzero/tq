@@ -22,6 +22,8 @@ pub(crate) enum ExprKind {
     Literal(Value),
     Variable(Arc<str>),
     Empty,
+    RecursiveDescent,
+    Interpolation(Vec<InterpolationSegment>),
     Access {
         base: Box<Expr>,
         access: Access,
@@ -75,6 +77,19 @@ pub(crate) enum ExprKind {
         path: Box<Expr>,
         value: Box<Expr>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum InterpolationSegment {
+    Literal {
+        value: Arc<str>,
+        #[allow(
+            dead_code,
+            reason = "retained for source-local interpolation diagnostics"
+        )]
+        span: Span,
+    },
+    Expression(Expr),
 }
 
 #[derive(Clone, Debug)]
@@ -159,6 +174,22 @@ fn render(expr: &Expr, output: &mut String) {
             output.push_str(name);
         }
         ExprKind::Empty => output.push_str("empty"),
+        ExprKind::RecursiveDescent => output.push_str("recursive-descent"),
+        ExprKind::Interpolation(segments) => {
+            output.push_str("interpolate(");
+            for (index, segment) in segments.iter().enumerate() {
+                if index > 0 {
+                    output.push_str(", ");
+                }
+                match segment {
+                    InterpolationSegment::Literal { value, .. } => {
+                        output.push_str(&Value::string(Arc::clone(value)).to_string());
+                    }
+                    InterpolationSegment::Expression(expression) => render(expression, output),
+                }
+            }
+            output.push(')');
+        }
         ExprKind::Access { base, access } => {
             output.push_str("access(");
             render(base, output);

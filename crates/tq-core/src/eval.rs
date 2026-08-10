@@ -3,6 +3,7 @@
 use std::{
     cell::Cell,
     collections::BTreeMap,
+    io,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -14,7 +15,7 @@ use indexmap::IndexMap;
 use crate::{
     Bytecode, Number, Object, Path, PathComponent, Value, VmError, VmLimits, VmObservations,
     ast::{AssignmentOperator, BinaryOperator, UnaryOperator},
-    bytecode::{KeyOperand, Operation},
+    bytecode::{InterpolationOperand, KeyOperand, Operation},
 };
 
 type Environment = BTreeMap<Arc<str>, Value>;
@@ -76,6 +77,14 @@ enum GeneratorContinuation {
         node: Option<u32>,
         environment: Arc<Environment>,
     },
+    Interpolate {
+        segments: Arc<[InterpolationOperand]>,
+        next: usize,
+        slot: usize,
+        pieces: Vec<Option<Arc<str>>>,
+        input: Value,
+        environment: Arc<Environment>,
+    },
     Raise,
 }
 
@@ -89,11 +98,84 @@ struct GeneratorWork {
 
 enum GeneratorTask {
     Eval(GeneratorWork),
+    Traverse {
+        cursor: TraversalCursor,
+        environment: Arc<Environment>,
+        continuations: Vec<GeneratorContinuation>,
+    },
     Deliver {
         result: Result<Value, VmError>,
         environment: Arc<Environment>,
         continuations: Vec<GeneratorContinuation>,
     },
+}
+
+enum InterpolationWork {
+    Expand {
+        next: usize,
+        pieces: Vec<Option<Arc<str>>>,
+    },
+    Error(VmError),
+}
+
+#[derive(Clone)]
+struct TraversalCursor {
+    frames: Vec<TraversalFrame>,
+}
+
+#[derive(Clone)]
+struct TraversalFrame {
+    value: Value,
+    emitted: bool,
+    next_child: usize,
+}
+
+impl TraversalCursor {
+    fn new(value: Value) -> Self {
+        Self {
+            frames: vec![TraversalFrame {
+                value,
+                emitted: false,
+                next_child: 0,
+            }],
+        }
+    }
+
+    fn next(&mut self, depth_limit: usize) -> Result<Option<Value>, VmError> {
+        loop {
+            let Some(frame) = self.frames.last_mut() else {
+                return Ok(None);
+            };
+            if !frame.emitted {
+                frame.emitted = true;
+                return Ok(Some(frame.value.clone()));
+            }
+            let child = match &frame.value {
+                Value::Array(values) => values.get(frame.next_child).cloned(),
+                Value::Object(values) => values
+                    .get_index(frame.next_child)
+                    .map(|(_, value)| value.clone()),
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+            };
+            if let Some(child) = child {
+                frame.next_child = frame.next_child.saturating_add(1);
+                if self.frames.len() >= depth_limit {
+                    return Err(resource("path-stack"));
+                }
+                self.frames.push(TraversalFrame {
+                    value: child,
+                    emitted: false,
+                    next_child: 0,
+                });
+            } else {
+                self.frames.pop();
+            }
+        }
+    }
+
+    fn depth(&self) -> usize {
+        self.frames.len()
+    }
 }
 
 fn generator_subset(bytecode: &Bytecode) -> bool {
@@ -110,7 +192,8 @@ fn generator_subset(bytecode: &Bytecode) -> bool {
             Operation::Identity
             | Operation::Literal(_)
             | Operation::Variable(_)
-            | Operation::Empty => {}
+            | Operation::Empty
+            | Operation::RecursiveDescent => {}
             Operation::AccessField { base, .. }
             | Operation::Iterate(base)
             | Operation::Optional(base) => pending.push(*base),
@@ -128,10 +211,31 @@ fn generator_subset(bytecode: &Bytecode) -> bool {
                 }
                 pending.push(*expression);
             }
+            Operation::Interpolation(segments) => {
+                pending.extend(segments.iter().filter_map(|segment| match segment {
+                    InterpolationOperand::Literal(_) => None,
+                    InterpolationOperand::Expression(expression) => Some(*expression),
+                }));
+            }
             Operation::Call { name, arguments }
                 if bytecode.string(*name).is_some_and(|name| {
                     (name.as_ref() == "empty" && arguments.is_empty())
                         || (name.as_ref() == "error" && arguments.len() <= 1)
+                        || (arguments.is_empty()
+                            && matches!(
+                                name.as_ref(),
+                                "arrays"
+                                    | "booleans"
+                                    | "iterables"
+                                    | "nulls"
+                                    | "numbers"
+                                    | "objects"
+                                    | "scalars"
+                                    | "strings"
+                                    | "values"
+                                    | "tostring"
+                                    | "type"
+                            ))
                 }) =>
             {
                 pending.extend(arguments.iter().copied());
@@ -166,8 +270,58 @@ fn evaluate_generator_stream(
     let mut observations = VmObservations::default();
 
     while let Some(task) = pending.pop() {
+        if stop.load(Ordering::Relaxed)
+            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            let _ = emit(Err(VmError::Interrupted), observations);
+            break;
+        }
+        if observations.steps >= limits.steps {
+            let _ = emit(Err(resource("vm-steps")), observations);
+            break;
+        }
+        observations.steps += 1;
         let (mut work, delivered) = match task {
             GeneratorTask::Eval(work) => (work, None),
+            GeneratorTask::Traverse {
+                mut cursor,
+                environment,
+                continuations,
+            } => {
+                if cursor.depth() > limits.path_stack {
+                    let _ = emit(Err(resource("path-stack")), observations);
+                    break;
+                }
+                observations.path_stack_high_water =
+                    observations.path_stack_high_water.max(cursor.depth());
+                match cursor.next(limits.path_stack) {
+                    Ok(Some(value)) => {
+                        if pending.len() >= limits.fork_stack {
+                            let _ = emit(Err(resource("fork-stack")), observations);
+                            break;
+                        }
+                        pending.push(GeneratorTask::Traverse {
+                            cursor,
+                            environment: Arc::clone(&environment),
+                            continuations: continuations.clone(),
+                        });
+                        (
+                            GeneratorWork {
+                                node: bytecode.root(),
+                                input: Value::Null,
+                                environment,
+                                continuations,
+                            },
+                            Some(Ok(value)),
+                        )
+                    }
+                    Ok(None) => continue,
+                    Err(error) => {
+                        let _ = emit(Err(error), observations);
+                        break;
+                    }
+                }
+            }
             GeneratorTask::Deliver {
                 result,
                 environment,
@@ -182,17 +336,6 @@ fn evaluate_generator_stream(
                 Some(result),
             ),
         };
-        if stop.load(Ordering::Relaxed)
-            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-        {
-            let _ = emit(Err(VmError::Interrupted), observations);
-            break;
-        }
-        if observations.steps >= limits.steps {
-            let _ = emit(Err(resource("vm-steps")), observations);
-            break;
-        }
-        observations.steps += 1;
         observations.value_stack_high_water = observations.value_stack_high_water.max(1);
         observations.fork_stack_high_water = observations.fork_stack_high_water.max(pending.len());
         observations.call_stack_high_water = observations
@@ -238,6 +381,39 @@ fn evaluate_generator_stream(
                         }),
                 ),
                 Operation::Empty => None,
+                Operation::RecursiveDescent => {
+                    pending.push(GeneratorTask::Traverse {
+                        cursor: TraversalCursor::new(work.input.clone()),
+                        environment: Arc::clone(&work.environment),
+                        continuations: work.continuations.clone(),
+                    });
+                    None
+                }
+                Operation::Interpolation(segments) => {
+                    let expression_count = segments
+                        .iter()
+                        .filter(|segment| matches!(segment, InterpolationOperand::Expression(_)))
+                        .count();
+                    if expression_count >= limits.call_stack {
+                        Some(Err(resource("call-stack")))
+                    } else {
+                        let segments = Arc::from(segments.clone());
+                        match interpolation_pieces(&segments, bytecode, limits.output_bytes) {
+                            Ok(pieces) => schedule_interpolation(
+                                &segments,
+                                segments.len(),
+                                pieces,
+                                work.input.clone(),
+                                Arc::clone(&work.environment),
+                                work.continuations.clone(),
+                                bytecode,
+                                limits.output_bytes,
+                                &mut pending,
+                            ),
+                            Err(error) => Some(Err(error)),
+                        }
+                    }
+                }
                 Operation::AccessField { base, key } => match bytecode.string(*key) {
                     Some(key) => {
                         work.continuations
@@ -330,6 +506,11 @@ fn evaluate_generator_stream(
                         }))
                     }
                 }
+                Operation::Call { name, arguments } if arguments.is_empty() => bytecode
+                    .string(*name)
+                    .ok_or_else(|| invalid("string missing after validation"))
+                    .and_then(|name| generator_builtin(name, &work.input, limits.output_bytes))
+                    .transpose(),
                 operation => Some(Err(VmError::Unsupported {
                     operation: format!("{operation:?}").into(),
                 })),
@@ -365,6 +546,7 @@ fn evaluate_generator_stream(
                         | GeneratorContinuation::Pipe { .. }
                         | GeneratorContinuation::AccessIndex { .. }
                         | GeneratorContinuation::ApplyIndex(_)
+                        | GeneratorContinuation::Interpolate { .. }
                         | GeneratorContinuation::Raise => {}
                     }
                 }
@@ -440,6 +622,40 @@ fn evaluate_generator_stream(
                 GeneratorContinuation::OptionalBoundary | GeneratorContinuation::Catch { .. } => {
                     result = Ok(value);
                 }
+                GeneratorContinuation::Interpolate {
+                    segments,
+                    next,
+                    slot,
+                    mut pieces,
+                    input,
+                    environment,
+                } => {
+                    let piece = interpolation_remaining(&pieces, limits.output_bytes)
+                        .and_then(|remaining| interpolation_value(&value, remaining));
+                    let piece = match piece {
+                        Ok(piece) => piece,
+                        Err(error) => {
+                            result = Err(error);
+                            continue;
+                        }
+                    };
+                    pieces[slot] = Some(piece);
+                    if let Some(next_result) = schedule_interpolation(
+                        &segments,
+                        next,
+                        pieces,
+                        input,
+                        environment,
+                        work.continuations.clone(),
+                        bytecode,
+                        limits.output_bytes,
+                        &mut pending,
+                    ) {
+                        result = next_result;
+                        continue;
+                    }
+                    break;
+                }
                 GeneratorContinuation::Raise => {
                     let message = match value {
                         Value::String(value) => value,
@@ -451,6 +667,257 @@ fn evaluate_generator_stream(
         }
     }
     observations
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "interpolation continuation state is explicit and independently bounded"
+)]
+fn schedule_interpolation(
+    segments: &Arc<[InterpolationOperand]>,
+    mut next: usize,
+    mut pieces: Vec<Option<Arc<str>>>,
+    input: Value,
+    environment: Arc<Environment>,
+    mut continuations: Vec<GeneratorContinuation>,
+    bytecode: &Bytecode,
+    output_limit: usize,
+    pending: &mut Vec<GeneratorTask>,
+) -> Option<Result<Value, VmError>> {
+    while next > 0 {
+        next -= 1;
+        match &segments[next] {
+            InterpolationOperand::Literal(index) => {
+                let Some(value) = bytecode.string(*index) else {
+                    return Some(Err(invalid("string missing after validation")));
+                };
+                pieces[next] = Some(Arc::clone(value));
+            }
+            InterpolationOperand::Expression(node) => {
+                let node = *node;
+                continuations.push(GeneratorContinuation::Interpolate {
+                    segments: Arc::clone(segments),
+                    next,
+                    slot: next,
+                    pieces,
+                    input: input.clone(),
+                    environment: Arc::clone(&environment),
+                });
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node,
+                    input,
+                    environment,
+                    continuations,
+                }));
+                return None;
+            }
+        }
+    }
+    let capacity = match interpolation_capacity(&pieces, output_limit) {
+        Ok(capacity) => capacity,
+        Err(error) => return Some(Err(error)),
+    };
+    let mut output = String::with_capacity(capacity);
+    for piece in pieces {
+        let Some(piece) = piece else {
+            return Some(Err(invalid(
+                "interpolation segment missing after evaluation",
+            )));
+        };
+        output.push_str(&piece);
+    }
+    Some(Ok(Value::string(output)))
+}
+
+fn interpolation_pieces(
+    segments: &[InterpolationOperand],
+    bytecode: &Bytecode,
+    output_limit: usize,
+) -> Result<Vec<Option<Arc<str>>>, VmError> {
+    let mut pieces = vec![None; segments.len()];
+    let mut literal_bytes = 0_usize;
+    for (slot, segment) in segments.iter().enumerate() {
+        let InterpolationOperand::Literal(index) = segment else {
+            continue;
+        };
+        let value = bytecode
+            .string(*index)
+            .ok_or_else(|| invalid("string missing after validation"))?;
+        literal_bytes = literal_bytes
+            .checked_add(value.len())
+            .filter(|bytes| *bytes <= output_limit)
+            .ok_or_else(|| resource("output-bytes"))?;
+        pieces[slot] = Some(Arc::clone(value));
+    }
+    Ok(pieces)
+}
+
+fn interpolation_capacity(
+    pieces: &[Option<Arc<str>>],
+    output_limit: usize,
+) -> Result<usize, VmError> {
+    let capacity = pieces.iter().flatten().try_fold(0_usize, |total, piece| {
+        total
+            .checked_add(piece.len())
+            .ok_or_else(|| resource("output-bytes"))
+    })?;
+    if capacity > output_limit {
+        return Err(resource("output-bytes"));
+    }
+    Ok(capacity)
+}
+
+fn interpolation_remaining(
+    pieces: &[Option<Arc<str>>],
+    output_limit: usize,
+) -> Result<usize, VmError> {
+    interpolation_capacity(pieces, output_limit).map(|used| output_limit - used)
+}
+
+fn generator_builtin(
+    name: &str,
+    input: &Value,
+    output_limit: usize,
+) -> Result<Option<Value>, VmError> {
+    let selected = match name {
+        "arrays" => matches!(input, Value::Array(_)),
+        "booleans" => matches!(input, Value::Bool(_)),
+        "iterables" => matches!(input, Value::Array(_) | Value::Object(_)),
+        "nulls" => matches!(input, Value::Null),
+        "numbers" => matches!(input, Value::Number(_)),
+        "objects" => matches!(input, Value::Object(_)),
+        "scalars" => !matches!(input, Value::Array(_) | Value::Object(_)),
+        "strings" => matches!(input, Value::String(_)),
+        "values" => !matches!(input, Value::Null),
+        "tostring" => {
+            return interpolation_value(input, output_limit)
+                .map(Value::String)
+                .map(Some);
+        }
+        "type" => return Ok(Some(Value::string(type_name(input)))),
+        _ => return Err(invalid("generator built-in left admitted subset")),
+    };
+    Ok(selected.then(|| input.clone()))
+}
+
+fn interpolation_value(value: &Value, output_limit: usize) -> Result<Arc<str>, VmError> {
+    match value {
+        Value::String(value) if value.len() <= output_limit => Ok(Arc::clone(value)),
+        Value::String(_) => Err(resource("output-bytes")),
+        value => bounded_json(value, output_limit).map(Arc::from),
+    }
+}
+
+struct BoundedJsonWriter {
+    output: String,
+    limit: usize,
+}
+
+impl BoundedJsonWriter {
+    fn new(limit: usize) -> Self {
+        Self {
+            output: String::new(),
+            limit,
+        }
+    }
+
+    fn push(&mut self, value: &str) -> Result<(), VmError> {
+        let length = self
+            .output
+            .len()
+            .checked_add(value.len())
+            .filter(|length| *length <= self.limit)
+            .ok_or_else(|| resource("output-bytes"))?;
+        self.output
+            .try_reserve_exact(length - self.output.len())
+            .map_err(|_| resource("output-bytes"))?;
+        self.output.push_str(value);
+        Ok(())
+    }
+}
+
+impl std::fmt::Write for BoundedJsonWriter {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        self.push(value).map_err(|_| std::fmt::Error)
+    }
+}
+
+impl io::Write for BoundedJsonWriter {
+    fn write(&mut self, value: &[u8]) -> io::Result<usize> {
+        let value = std::str::from_utf8(value)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        self.push(value)
+            .map_err(|_| io::Error::other("output byte limit exceeded"))?;
+        Ok(value.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+enum JsonFrame<'a> {
+    Value(&'a Value),
+    Array(&'a [Value], usize),
+    Object(&'a Object, usize),
+}
+
+fn bounded_json(value: &Value, output_limit: usize) -> Result<String, VmError> {
+    let mut writer = BoundedJsonWriter::new(output_limit);
+    let mut frames = vec![JsonFrame::Value(value)];
+    while let Some(frame) = frames.pop() {
+        match frame {
+            JsonFrame::Value(Value::Null) => writer.push("null")?,
+            JsonFrame::Value(Value::Bool(value)) => {
+                writer.push(if *value { "true" } else { "false" })?;
+            }
+            JsonFrame::Value(Value::Number(value)) => {
+                std::fmt::write(&mut writer, format_args!("{value}"))
+                    .map_err(|_| resource("output-bytes"))?;
+            }
+            JsonFrame::Value(Value::String(value)) => {
+                serde_json::to_writer(&mut writer, value.as_ref())
+                    .map_err(|_| resource("output-bytes"))?;
+            }
+            JsonFrame::Value(Value::Array(values)) => {
+                writer.push("[")?;
+                frames.push(JsonFrame::Array(values, 0));
+            }
+            JsonFrame::Value(Value::Object(values)) => {
+                writer.push("{")?;
+                frames.push(JsonFrame::Object(values, 0));
+            }
+            JsonFrame::Array(values, next) => {
+                if next == values.len() {
+                    writer.push("]")?;
+                } else {
+                    if next > 0 {
+                        writer.push(",")?;
+                    }
+                    frames.push(JsonFrame::Array(values, next + 1));
+                    frames.push(JsonFrame::Value(&values[next]));
+                }
+            }
+            JsonFrame::Object(values, next) => {
+                if next == values.len() {
+                    writer.push("}")?;
+                } else {
+                    if next > 0 {
+                        writer.push(",")?;
+                    }
+                    let Some((key, value)) = values.get_index(next) else {
+                        return Err(invalid("object entry missing during interpolation"));
+                    };
+                    serde_json::to_writer(&mut writer, key.as_ref())
+                        .map_err(|_| resource("output-bytes"))?;
+                    writer.push(":")?;
+                    frames.push(JsonFrame::Object(values, next + 1));
+                    frames.push(JsonFrame::Value(value));
+                }
+            }
+        }
+    }
+    Ok(writer.output)
 }
 
 struct Evaluator<'a> {
@@ -503,6 +970,10 @@ impl Evaluator<'_> {
         };
         let operation = instruction.operation.clone();
         match operation {
+            Operation::RecursiveDescent => self.emit_recursive(input, depth, emit),
+            Operation::Interpolation(segments) => {
+                self.emit_interpolation(&Arc::from(segments), input, environment, depth, emit)
+            }
             Operation::AccessField { base, key } => {
                 if let Err(error) = self.enter(depth) {
                     return emit(Err(error));
@@ -790,6 +1261,138 @@ impl Evaluator<'_> {
         }
     }
 
+    fn emit_recursive(
+        &self,
+        input: &Value,
+        depth: usize,
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        let mut cursor = TraversalCursor::new(input.clone());
+        loop {
+            if cursor.depth() > self.limits.path_stack {
+                return emit(Err(resource("path-stack")));
+            }
+            let mut observations = self.observations.get();
+            observations.path_stack_high_water =
+                observations.path_stack_high_water.max(cursor.depth());
+            self.observations.set(observations);
+            let value = match cursor.next(self.limits.path_stack) {
+                Ok(Some(value)) => value,
+                Ok(None) => return true,
+                Err(error) => return emit(Err(error)),
+            };
+            if let Err(error) = self.enter(depth) {
+                return emit(Err(error));
+            }
+            if !emit(Ok(value)) {
+                return false;
+            }
+        }
+    }
+
+    fn emit_interpolation(
+        &self,
+        segments: &Arc<[InterpolationOperand]>,
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        let expression_count = segments
+            .iter()
+            .filter(|segment| matches!(segment, InterpolationOperand::Expression(_)))
+            .count();
+        if expression_count >= self.limits.call_stack {
+            return emit(Err(resource("call-stack")));
+        }
+        let pieces = match interpolation_pieces(segments, self.bytecode, self.limits.output_bytes) {
+            Ok(pieces) => pieces,
+            Err(error) => return emit(Err(error)),
+        };
+
+        let mut pending = vec![InterpolationWork::Expand {
+            next: segments.len(),
+            pieces,
+        }];
+        while let Some(work) = pending.pop() {
+            let (mut next, pieces) = match work {
+                InterpolationWork::Expand { next, pieces } => (next, pieces),
+                InterpolationWork::Error(error) => return emit(Err(error)),
+            };
+
+            let mut expanded = false;
+            while next > 0 {
+                next -= 1;
+                let InterpolationOperand::Expression(node) = &segments[next] else {
+                    continue;
+                };
+                let slot = next;
+                let available = self.limits.fork_stack.saturating_sub(pending.len());
+                let mut outcomes = Vec::new();
+                let mut overflow = false;
+                self.emit_node(*node, input, environment, depth + 1, &mut |result| {
+                    if outcomes.len() >= available {
+                        overflow = true;
+                        return false;
+                    }
+                    let failed = result.is_err();
+                    outcomes.push(result);
+                    !failed
+                });
+                if overflow {
+                    return emit(Err(resource("fork-stack")));
+                }
+                for outcome in outcomes.into_iter().rev() {
+                    match outcome {
+                        Ok(value) => {
+                            let mut nested = pieces.clone();
+                            let piece = interpolation_remaining(&nested, self.limits.output_bytes)
+                                .and_then(|remaining| interpolation_value(&value, remaining));
+                            match piece {
+                                Ok(piece) => {
+                                    nested[slot] = Some(piece);
+                                    pending.push(InterpolationWork::Expand {
+                                        next,
+                                        pieces: nested,
+                                    });
+                                }
+                                Err(error) => pending.push(InterpolationWork::Error(error)),
+                            }
+                        }
+                        Err(error) => pending.push(InterpolationWork::Error(error)),
+                    }
+                }
+                let mut observations = self.observations.get();
+                observations.fork_stack_high_water =
+                    observations.fork_stack_high_water.max(pending.len());
+                self.observations.set(observations);
+                expanded = true;
+                break;
+            }
+            if expanded {
+                continue;
+            }
+
+            let capacity = match interpolation_capacity(&pieces, self.limits.output_bytes) {
+                Ok(capacity) => capacity,
+                Err(error) => return emit(Err(error)),
+            };
+            let mut output = String::with_capacity(capacity);
+            for piece in pieces {
+                let Some(piece) = piece else {
+                    return emit(Err(invalid(
+                        "interpolation segment missing after evaluation",
+                    )));
+                };
+                output.push_str(&piece);
+            }
+            if !emit(Ok(Value::string(output))) {
+                return false;
+            }
+        }
+        true
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "fold bytecode carries four bodies plus the shared evaluator context"
@@ -982,6 +1585,28 @@ impl Evaluator<'_> {
                 Err(error) => one_error(error),
             },
             Operation::Empty => Vec::new(),
+            Operation::RecursiveDescent => {
+                let mut output = Vec::new();
+                self.emit_recursive(input, depth, &mut |result| {
+                    output.push(result);
+                    true
+                });
+                output
+            }
+            Operation::Interpolation(segments) => {
+                let mut output = Vec::new();
+                self.emit_interpolation(
+                    &Arc::from(segments.clone()),
+                    input,
+                    environment,
+                    depth,
+                    &mut |result| {
+                        output.push(result);
+                        true
+                    },
+                );
+                output
+            }
             Operation::AccessField { base, key } => {
                 let key = match self.string(*key) {
                     Ok(key) => Arc::clone(key),
@@ -1387,10 +2012,9 @@ impl Evaluator<'_> {
                 }
                 value => one_error(type_error("tonumber", value)),
             },
-            "tostring" => vec![Ok(match input {
-                Value::String(_) => input.clone(),
-                _ => Value::string(input.to_string()),
-            })],
+            "tostring" => {
+                vec![interpolation_value(input, self.limits.output_bytes).map(Value::String)]
+            }
             "range" => self.range(arguments, input, environment, depth),
             "add" => fold_values(input, None, binary_add),
             "min" => extrema(input, false),
@@ -2258,7 +2882,10 @@ fn replace_or_create(
 mod tests {
     use std::{
         collections::{BTreeMap, BTreeSet},
-        sync::Arc,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
     };
 
     use super::Value;
@@ -2366,5 +2993,212 @@ mod tests {
             json(run("(.a, .b) += 10", r#"{"a":1,"b":2,"c":[3]}"#)),
             [r#"{"a":11,"b":12,"c":[3]}"#]
         );
+    }
+
+    #[test]
+    fn recursive_descent_is_depth_first_and_streams_scalars_in_object_order() {
+        assert_eq!(
+            json(run("..", r#"{"z":1,"a":[2,{"b":3}]}"#)),
+            [
+                r#"{"z":1,"a":[2,{"b":3}]}"#,
+                "1",
+                r#"[2,{"b":3}]"#,
+                "2",
+                r#"{"b":3}"#,
+                "3",
+            ]
+        );
+        assert_eq!(
+            json(run(".. | scalars", r#"{"z":1,"a":[2,{"b":3}]}"#)),
+            ["1", "2", "3"]
+        );
+        assert_eq!(json(run("..", "42")), ["42"]);
+    }
+
+    #[test]
+    fn interpolation_matches_jq_conversion_generator_order_nesting_and_errors() {
+        assert_eq!(
+            json(run(
+                r#""v=\(null),\(false),\(1),\("x"),\([1]),\({a:1})""#,
+                "null",
+            )),
+            [r#""v=null,false,1,x,[1],{\"a\":1}""#]
+        );
+        assert_eq!(
+            json(run(r#""x=\(1,2);y=\("a","b")""#, "null")),
+            [
+                r#""x=1;y=a""#,
+                r#""x=2;y=a""#,
+                r#""x=1;y=b""#,
+                r#""x=2;y=b""#
+            ]
+        );
+        assert_eq!(
+            json(run(r#""\(if true then "x\(1,2)" else "z" end)""#, "null")),
+            [r#""x1""#, r#""x2""#]
+        );
+        assert_eq!(json(run(r#""sum=\(1 + 2)""#, "null")), [r#""sum=3""#]);
+        assert_eq!(
+            json(run(r#""x=\((1,2) + 1);y=\(("a","b") + "!")""#, "null",)),
+            [
+                r#""x=2;y=a!""#,
+                r#""x=3;y=a!""#,
+                r#""x=2;y=b!""#,
+                r#""x=3;y=b!""#,
+            ]
+        );
+        let partial = json(run(r#""before=\(1,error("boom"),2)""#, "null"));
+        assert_eq!(partial[0], r#""before=1""#);
+        assert!(partial[1].starts_with("error:runtime error: boom"));
+        assert!(run(r#""\(empty)""#, "null").is_empty());
+    }
+
+    #[test]
+    fn recursive_cursor_obeys_depth_work_and_cancellation_after_partial_output() {
+        let plan = analyze(resolve(parse("..").unwrap(), &ResolveOptions::default()).unwrap())
+            .compile()
+            .unwrap()
+            .document_plan();
+        let mut input = Value::Null;
+        for _ in 0..128 {
+            input = Value::array([input]);
+        }
+        let mut depth_limited = Vm::new(
+            &plan,
+            input.clone(),
+            VmLimits {
+                path_stack: 16,
+                ..VmLimits::default()
+            },
+        );
+        for _ in 0..16 {
+            assert!(depth_limited.next_result().unwrap().is_some());
+        }
+        assert!(matches!(
+            depth_limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "path-stack"
+            })
+        ));
+
+        let mut work_limited = Vm::new(
+            &plan,
+            input.clone(),
+            VmLimits {
+                steps: 2,
+                ..VmLimits::default()
+            },
+        );
+        assert!(work_limited.next_result().unwrap().is_some());
+        assert!(matches!(
+            work_limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "vm-steps"
+            })
+        ));
+
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut cancelled =
+            Vm::new(&plan, input, VmLimits::default()).with_cancellation(Arc::clone(&cancellation));
+        assert!(cancelled.next_result().unwrap().is_some());
+        cancellation.store(true, Ordering::Relaxed);
+        assert!(matches!(
+            cancelled.next_result(),
+            Err(crate::VmError::Interrupted)
+        ));
+    }
+
+    #[test]
+    fn interpolation_generator_explosion_is_bounded_by_managed_forks() {
+        let plan = analyze(
+            resolve(
+                parse(r#""\(1,2,3)-\("a","b")""#).unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut limited = Vm::new(
+            &plan,
+            Value::Null,
+            VmLimits {
+                fork_stack: 1,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "fork-stack"
+            })
+        ));
+
+        let fallback_plan = analyze(
+            resolve(
+                parse(r#""\(range(0;3) + 0)""#).unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut fallback_limited = Vm::new(
+            &fallback_plan,
+            Value::Null,
+            VmLimits {
+                fork_stack: 1,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            fallback_limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "fork-stack"
+            })
+        ));
+
+        let output_plan = analyze(
+            resolve(
+                parse(r#""prefix=\(.)""#).unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut output_limited = Vm::new(
+            &output_plan,
+            Value::string("value"),
+            VmLimits {
+                output_bytes: 8,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            output_limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "output-bytes"
+            })
+        ));
+
+        let wide = Value::array(vec![Value::string("0123456789"); 100_000]);
+        let mut serialization_limited = Vm::new(
+            &output_plan,
+            wide,
+            VmLimits {
+                output_bytes: 16,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            serialization_limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "output-bytes"
+            })
+        ));
     }
 }
