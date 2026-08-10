@@ -63,6 +63,11 @@ pub(crate) enum TokenKind {
     Identifier(Arc<str>),
     Variable(Arc<str>),
     String(Arc<str>),
+    StringStart,
+    StringFragment(Arc<str>),
+    StringEnd,
+    InterpolationStart,
+    InterpolationEnd,
     Number(Arc<str>),
     Deferred(Arc<str>),
     EndOfInput,
@@ -112,36 +117,7 @@ struct Lexer<'a> {
 impl Lexer<'_> {
     fn run(mut self) -> Result<Vec<Token>, Box<Diagnostic>> {
         while self.index < self.bytes.len() {
-            match self.bytes[self.index] {
-                byte if byte.is_ascii_whitespace() => self.index += 1,
-                b'#' => self.comment(),
-                b'.' => self.dot(),
-                b'?' => self.single(TokenKind::Question),
-                b'(' => self.single(TokenKind::LeftParen),
-                b')' => self.single(TokenKind::RightParen),
-                b'[' => self.single(TokenKind::LeftBracket),
-                b']' => self.single(TokenKind::RightBracket),
-                b'{' => self.single(TokenKind::LeftBrace),
-                b'}' => self.single(TokenKind::RightBrace),
-                b':' => self.single(TokenKind::Colon),
-                b';' => self.single(TokenKind::Semicolon),
-                b',' => self.single(TokenKind::Comma),
-                b'|' => self.operator(b'=', TokenKind::Update, TokenKind::Pipe),
-                b'+' => self.operator(b'=', TokenKind::AddUpdate, TokenKind::Plus),
-                b'-' => self.operator(b'=', TokenKind::SubtractUpdate, TokenKind::Minus),
-                b'*' => self.operator(b'=', TokenKind::MultiplyUpdate, TokenKind::Star),
-                b'/' => self.slash(),
-                b'%' => self.single(TokenKind::Percent),
-                b'=' => self.operator(b'=', TokenKind::Equal, TokenKind::Assign),
-                b'!' => self.required_operator(b'=', TokenKind::NotEqual)?,
-                b'<' => self.operator(b'=', TokenKind::LessEqual, TokenKind::Less),
-                b'>' => self.operator(b'=', TokenKind::GreaterEqual, TokenKind::Greater),
-                b'"' => self.string()?,
-                b'$' => self.variable()?,
-                byte if byte.is_ascii_digit() => self.number()?,
-                byte if identifier_start(byte) => self.identifier(),
-                _ => return Err(self.error("TQ-LEX-TOKEN-001", "unexpected query character")),
-            }
+            self.next_token()?;
         }
         let offset = self.index as u64;
         self.tokens.push(Token {
@@ -149,6 +125,41 @@ impl Lexer<'_> {
             span: Span::new(self.source.id(), offset, offset),
         });
         Ok(self.tokens)
+    }
+
+    fn next_token(&mut self) -> Result<(), Box<Diagnostic>> {
+        match self.bytes[self.index] {
+            byte if byte.is_ascii_whitespace() => self.index += 1,
+            b'#' => self.comment(),
+            b'.' => self.dot(),
+            b'?' => self.single(TokenKind::Question),
+            b'(' => self.single(TokenKind::LeftParen),
+            b')' => self.single(TokenKind::RightParen),
+            b'[' => self.single(TokenKind::LeftBracket),
+            b']' => self.single(TokenKind::RightBracket),
+            b'{' => self.single(TokenKind::LeftBrace),
+            b'}' => self.single(TokenKind::RightBrace),
+            b':' => self.single(TokenKind::Colon),
+            b';' => self.single(TokenKind::Semicolon),
+            b',' => self.single(TokenKind::Comma),
+            b'|' => self.operator(b'=', TokenKind::Update, TokenKind::Pipe),
+            b'+' => self.operator(b'=', TokenKind::AddUpdate, TokenKind::Plus),
+            b'-' => self.operator(b'=', TokenKind::SubtractUpdate, TokenKind::Minus),
+            b'*' => self.operator(b'=', TokenKind::MultiplyUpdate, TokenKind::Star),
+            b'/' => self.slash(),
+            b'%' => self.single(TokenKind::Percent),
+            b'=' => self.operator(b'=', TokenKind::Equal, TokenKind::Assign),
+            b'!' => self.required_operator(b'=', TokenKind::NotEqual)?,
+            b'<' => self.operator(b'=', TokenKind::LessEqual, TokenKind::Less),
+            b'>' => self.operator(b'=', TokenKind::GreaterEqual, TokenKind::Greater),
+            b'"' => self.string()?,
+            b'$' => self.variable()?,
+            b'@' => self.format_string()?,
+            byte if byte.is_ascii_digit() => self.number()?,
+            byte if identifier_start(byte) => self.identifier(),
+            _ => return Err(self.error("TQ-LEX-TOKEN-001", "unexpected query character")),
+        }
+        Ok(())
     }
 
     fn comment(&mut self) {
@@ -220,24 +231,37 @@ impl Lexer<'_> {
     fn string(&mut self) -> Result<(), Box<Diagnostic>> {
         let start = self.index;
         self.index += 1;
-        let mut escaped = false;
+        let mut fragment_start = self.index;
+        let mut interpolated = false;
         while self.index < self.bytes.len() {
             let byte = self.bytes[self.index];
-            self.index += 1;
-            if escaped {
-                escaped = false;
-            } else if byte == b'\\' {
-                escaped = true;
-            } else if byte == b'"' {
-                let token = &self.source.text()[start..self.index];
-                if token.contains("\\(") {
-                    return Err(self.error_at(
-                        "TQ-CAP-INTERPOLATION",
-                        "string interpolation is deferred",
-                        start,
-                        self.index,
-                    ));
+            if byte == b'\\' && self.bytes.get(self.index + 1) == Some(&b'(') {
+                if !interpolated {
+                    self.push_span(start, start + 1, TokenKind::StringStart);
+                    interpolated = true;
                 }
+                self.push_fragment(fragment_start, self.index)?;
+                let interpolation_start = self.index;
+                self.index += 2;
+                self.push_span(
+                    interpolation_start,
+                    self.index,
+                    TokenKind::InterpolationStart,
+                );
+                self.interpolation(interpolation_start)?;
+                fragment_start = self.index;
+            } else if byte == b'\\' {
+                self.index = self.index.saturating_add(2).min(self.bytes.len());
+            } else if byte == b'"' {
+                if interpolated {
+                    self.push_fragment(fragment_start, self.index)?;
+                    let close = self.index;
+                    self.index += 1;
+                    self.push_span(close, self.index, TokenKind::StringEnd);
+                    return Ok(());
+                }
+                self.index += 1;
+                let token = &self.source.text()[start..self.index];
                 let decoded: String = serde_json::from_str(token).map_err(|_| {
                     self.error_at(
                         "TQ-LEX-STRING-001",
@@ -255,6 +279,8 @@ impl Lexer<'_> {
                     start,
                     self.index,
                 ));
+            } else {
+                self.index += 1;
             }
         }
         Err(self.error_at(
@@ -263,6 +289,43 @@ impl Lexer<'_> {
             start,
             self.index,
         ))
+    }
+
+    fn interpolation(&mut self, start: usize) -> Result<(), Box<Diagnostic>> {
+        let mut depth = 1_usize;
+        while self.index < self.bytes.len() {
+            match self.bytes[self.index] {
+                b'(' => {
+                    depth = depth.saturating_add(1);
+                    self.single(TokenKind::LeftParen);
+                }
+                b')' if depth == 1 => {
+                    let close = self.index;
+                    self.index += 1;
+                    self.push_span(close, self.index, TokenKind::InterpolationEnd);
+                    return Ok(());
+                }
+                b')' => {
+                    depth -= 1;
+                    self.single(TokenKind::RightParen);
+                }
+                _ => self.next_token()?,
+            }
+        }
+        Err(self.error_at(
+            "TQ-LEX-INTERPOLATION-001",
+            "unterminated string interpolation",
+            start,
+            self.index,
+        ))
+    }
+
+    fn push_fragment(&mut self, start: usize, end: usize) -> Result<(), Box<Diagnostic>> {
+        let encoded = format!("\"{}\"", &self.source.text()[start..end]);
+        let decoded: String = serde_json::from_str(&encoded)
+            .map_err(|_| self.error_at("TQ-LEX-STRING-001", "invalid string escape", start, end))?;
+        self.push_span(start, end, TokenKind::StringFragment(decoded.into()));
+        Ok(())
     }
 
     fn variable(&mut self) -> Result<(), Box<Diagnostic>> {
@@ -291,6 +354,32 @@ impl Lexer<'_> {
         }
         let name: Arc<str> = self.source.text()[name_start..self.index].into();
         self.push(start, TokenKind::Variable(name));
+        Ok(())
+    }
+
+    fn format_string(&mut self) -> Result<(), Box<Diagnostic>> {
+        let start = self.index;
+        self.index += 1;
+        if !self
+            .bytes
+            .get(self.index)
+            .is_some_and(|byte| identifier_start(*byte))
+        {
+            return Err(self.error_at(
+                "TQ-LEX-FORMAT-001",
+                "expected format name after '@'",
+                start,
+                self.index,
+            ));
+        }
+        while self
+            .bytes
+            .get(self.index)
+            .is_some_and(|byte| identifier_continue(*byte))
+        {
+            self.index += 1;
+        }
+        self.push(start, TokenKind::Deferred("format-strings".into()));
         Ok(())
     }
 
@@ -387,9 +476,13 @@ impl Lexer<'_> {
     }
 
     fn push(&mut self, start: usize, kind: TokenKind) {
+        self.push_span(start, self.index, kind);
+    }
+
+    fn push_span(&mut self, start: usize, end: usize, kind: TokenKind) {
         self.tokens.push(Token {
             kind,
-            span: Span::new(self.source.id(), start as u64, self.index as u64),
+            span: Span::new(self.source.id(), start as u64, end as u64),
         });
     }
 
@@ -449,6 +542,31 @@ mod tests {
                 .iter()
                 .any(|token| matches!(token.kind, TokenKind::Foreach))
         );
+    }
+
+    #[test]
+    fn tokenizes_nested_interpolation_and_preserves_escaped_markers() {
+        let source = SourceFile::new(
+            SourceId::new(0),
+            "query",
+            "\"a=\\(1, \"b=\\(.)\") literal=\\\\(x)\"",
+        );
+        let tokens = lex(&source).unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::StringStart));
+        assert_eq!(
+            tokens
+                .iter()
+                .filter(|token| matches!(token.kind, TokenKind::InterpolationStart))
+                .count(),
+            2
+        );
+        assert!(tokens.iter().any(|token| {
+            matches!(&token.kind, TokenKind::StringFragment(value) if value.contains("literal=\\(x)"))
+        }));
+        assert!(matches!(
+            tokens[tokens.len() - 2].kind,
+            TokenKind::StringEnd
+        ));
     }
 
     #[test]

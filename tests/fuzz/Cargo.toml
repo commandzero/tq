@@ -55,5 +55,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "recursive_interpolation"
+path = "fuzz_targets/recursive_interpolation.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 members = ["."]

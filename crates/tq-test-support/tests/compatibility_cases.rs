@@ -276,13 +276,26 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
         ],
     );
     assert_capabilities(
+        "recursive-interpolation.jsonl",
+        &[
+            "recursive.descent",
+            "recursive.order",
+            "recursive.scalar",
+            "recursive.deep",
+            "interpolation.string",
+            "interpolation.conversion",
+            "interpolation.escape",
+            "interpolation.generator",
+            "interpolation.nested",
+            "result.partial",
+        ],
+    );
+    assert_capabilities(
         "deferred.jsonl",
         &[
             "deferred.function",
             "deferred.modules",
             "deferred.labels",
-            "deferred.recursive-descent",
-            "deferred.interpolation",
             "deferred.regex",
             "deferred.dates",
             "deferred.environment",

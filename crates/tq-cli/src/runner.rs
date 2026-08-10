@@ -1351,6 +1351,7 @@ fn vm_limits(options: &RunOptions) -> VmLimits {
         steps: options.limits.vm_steps,
         path_stack: options.limits.depth,
         call_stack: options.limits.depth.saturating_mul(4),
+        output_bytes: usize::try_from(options.limits.output_bytes).unwrap_or(usize::MAX),
         ..VmLimits::default()
     }
 }
@@ -2012,6 +2013,23 @@ mod tests {
                 "3",
                 "foreach (1,2) as $x (0; . + $x; .)",
             ],
+            b"",
+        );
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
+        assert_eq!(stdout, b"\x1e1\n");
+
+        let (status, stdout, _) = execute(
+            &["--input-format", "json", "--max-results", "2", ".."],
+            b"[1,2]",
+        );
+        assert!(matches!(
+            status,
+            Err(super::RunError::Resource("result-count"))
+        ));
+        assert_eq!(stdout, b"\x1e[2]: 1,2\n\x1e1\n");
+
+        let (status, stdout, _) = execute(
+            &["-n", "--max-output-bytes", "5", r#"1, "abcdef=\(.)""#],
             b"",
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);

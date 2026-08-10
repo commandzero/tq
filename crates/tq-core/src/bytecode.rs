@@ -7,7 +7,10 @@ use thiserror::Error;
 
 use crate::{
     BuiltinRegistry, Diagnostic, DiagnosticClass, Span, Value,
-    ast::{Access, AssignmentOperator, BinaryOperator, Expr, ExprKind, ObjectKey, UnaryOperator},
+    ast::{
+        Access, AssignmentOperator, BinaryOperator, Expr, ExprKind, InterpolationSegment,
+        ObjectKey, UnaryOperator,
+    },
 };
 
 /// Immutable validated tq bytecode.
@@ -127,6 +130,8 @@ pub(crate) enum Operation {
     Literal(u32),
     Variable(u32),
     Empty,
+    RecursiveDescent,
+    Interpolation(Vec<InterpolationOperand>),
     AccessField {
         base: u32,
         key: u32,
@@ -196,6 +201,12 @@ pub(crate) enum Operation {
         path: u32,
         value: u32,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum InterpolationOperand {
+    Literal(u32),
+    Expression(u32),
 }
 
 #[derive(Clone, Debug)]
@@ -390,6 +401,20 @@ impl Compiler {
             }
             ExprKind::Variable(name) => Operation::Variable(self.string(name)),
             ExprKind::Empty => Operation::Empty,
+            ExprKind::RecursiveDescent => Operation::RecursiveDescent,
+            ExprKind::Interpolation(segments) => Operation::Interpolation(
+                segments
+                    .iter()
+                    .map(|segment| match segment {
+                        InterpolationSegment::Literal { value, .. } => {
+                            Ok(InterpolationOperand::Literal(self.string(value)))
+                        }
+                        InterpolationSegment::Expression(expression) => Ok(
+                            InterpolationOperand::Expression(self.expression(expression)?),
+                        ),
+                    })
+                    .collect::<Result<_, Box<Diagnostic>>>()?,
+            ),
             ExprKind::Access { base, access } => {
                 let base = self.expression(base)?;
                 match access {
@@ -608,6 +633,14 @@ fn validate_instruction(
             target(*falsey)?;
         }
         Operation::Raise(message) | Operation::Variable(message) => string(*message)?,
+        Operation::Interpolation(segments) => {
+            for segment in segments {
+                match segment {
+                    InterpolationOperand::Literal(value) => string(*value)?,
+                    InterpolationOperand::Expression(expression) => target(*expression)?,
+                }
+            }
+        }
         Operation::AccessField { base, key } => {
             target(*base)?;
             string(*key)?;
@@ -717,7 +750,8 @@ fn validate_instruction(
         | Operation::Return
         | Operation::EndCatch
         | Operation::Identity
-        | Operation::Empty => {}
+        | Operation::Empty
+        | Operation::RecursiveDescent => {}
     }
     Ok(())
 }
@@ -940,6 +974,19 @@ mod tests {
         .disassemble();
         assert!(folds.contains("Reduce"));
         assert!(folds.contains("Foreach"));
+
+        let recursive_interpolation = analyze(
+            resolve(
+                parse("\"value=\\(.. | scalars)\"").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .disassemble();
+        assert!(recursive_interpolation.contains("RecursiveDescent"));
+        assert!(recursive_interpolation.contains("Interpolation"));
     }
 
     #[test]
