@@ -64,9 +64,29 @@ pub(crate) enum ExprKind {
         update: Box<Expr>,
         extract: Box<Expr>,
     },
+    Define {
+        definition: Box<Definition>,
+        body: Box<Expr>,
+    },
+    Include {
+        path: Arc<str>,
+        metadata: Option<Box<Expr>>,
+        body: Box<Expr>,
+    },
+    Import {
+        path: Arc<str>,
+        alias: Arc<str>,
+        metadata: Option<Box<Expr>>,
+        body: Box<Expr>,
+    },
+    Module {
+        metadata: Box<Expr>,
+        body: Box<Expr>,
+    },
     Call {
         name: Arc<str>,
         arguments: Vec<Expr>,
+        target: Option<CallTarget>,
     },
     TryCatch {
         expression: Box<Expr>,
@@ -77,6 +97,36 @@ pub(crate) enum ExprKind {
         path: Box<Expr>,
         value: Box<Expr>,
     },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Definition {
+    pub(crate) name: Arc<str>,
+    pub(crate) parameters: Vec<FunctionParameter>,
+    pub(crate) body: Expr,
+    pub(crate) span: Span,
+    pub(crate) symbol: Option<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FunctionParameter {
+    pub(crate) name: Arc<str>,
+    pub(crate) kind: ParameterKind,
+    pub(crate) span: Span,
+    pub(crate) runtime_name: Option<Arc<str>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ParameterKind {
+    Filter,
+    Value,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CallTarget {
+    Builtin,
+    User(u32),
+    Parameter { function: u32, index: u32 },
 }
 
 #[derive(Clone, Debug)]
@@ -321,7 +371,65 @@ fn render(expr: &Expr, output: &mut String) {
             render(extract, output);
             output.push(')');
         }
-        ExprKind::Call { name, arguments } => {
+        ExprKind::Define { definition, body } => {
+            output.push_str("def(");
+            output.push_str(&definition.name);
+            for parameter in &definition.parameters {
+                output.push_str("; ");
+                if parameter.kind == ParameterKind::Value {
+                    output.push('$');
+                }
+                output.push_str(&parameter.name);
+            }
+            output.push_str(" => ");
+            render(&definition.body, output);
+            output.push_str("; ");
+            render(body, output);
+            output.push(')');
+        }
+        ExprKind::Include {
+            path,
+            metadata,
+            body,
+        } => {
+            output.push_str("include(");
+            output.push_str(&Value::string(Arc::clone(path)).to_string());
+            if let Some(metadata) = metadata {
+                output.push_str(", metadata: ");
+                render(metadata, output);
+            }
+            output.push_str("; ");
+            render(body, output);
+            output.push(')');
+        }
+        ExprKind::Import {
+            path,
+            alias,
+            metadata,
+            body,
+        } => {
+            output.push_str("import(");
+            output.push_str(&Value::string(Arc::clone(path)).to_string());
+            output.push_str(" as ");
+            output.push_str(alias);
+            if let Some(metadata) = metadata {
+                output.push_str(", metadata: ");
+                render(metadata, output);
+            }
+            output.push_str("; ");
+            render(body, output);
+            output.push(')');
+        }
+        ExprKind::Module { metadata, body } => {
+            output.push_str("module(");
+            render(metadata, output);
+            output.push_str("; ");
+            render(body, output);
+            output.push(')');
+        }
+        ExprKind::Call {
+            name, arguments, ..
+        } => {
             output.push_str("call(");
             output.push_str(name);
             for argument in arguments {

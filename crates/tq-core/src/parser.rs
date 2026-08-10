@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::{
     Diagnostic, DiagnosticClass, Number, Parsed, Query, SourceFile, SourceId, Span, Value,
     ast::{
-        Access, AssignmentOperator, BinaryOperator, Expr, ExprKind, InterpolationSegment,
-        ObjectEntry, ObjectKey, UnaryOperator,
+        Access, AssignmentOperator, BinaryOperator, Definition, Expr, ExprKind, FunctionParameter,
+        InterpolationSegment, ObjectEntry, ObjectKey, ParameterKind, UnaryOperator,
     },
     lexer::{Token, TokenKind, lex, validate_utf8},
 };
@@ -31,14 +31,26 @@ pub fn parse_bytes(name: &str, bytes: &[u8]) -> Result<Query<Parsed>, Box<Diagno
 
 fn parse_named(name: &str, text: &str) -> Result<Query<Parsed>, Box<Diagnostic>> {
     let source = SourceFile::new(SourceId::new(0), name, text);
-    let tokens = lex(&source)?;
-    let ast = Parser {
-        source: &source,
+    let ast = parse_source(&source)?;
+    Ok(Query::from_ast(source, ast))
+}
+
+pub(crate) fn parse_module_ast(
+    name: &str,
+    text: &str,
+    source_id: SourceId,
+) -> Result<Expr, Box<Diagnostic>> {
+    parse_source(&SourceFile::new(source_id, name, text))
+}
+
+fn parse_source(source: &SourceFile) -> Result<Expr, Box<Diagnostic>> {
+    let tokens = lex(source)?;
+    Parser {
+        source,
         tokens,
         index: 0,
     }
-    .complete()?;
-    Ok(Query::from_ast(source, ast))
+    .complete()
 }
 
 struct Parser<'a> {
@@ -366,6 +378,10 @@ impl Parser<'_> {
             TokenKind::Try => self.try_catch(token.span),
             TokenKind::Reduce => self.fold(token.span, false),
             TokenKind::Foreach => self.fold(token.span, true),
+            TokenKind::Def => self.definition(token.span),
+            TokenKind::Include => self.include(token.span),
+            TokenKind::Import => self.import(token.span),
+            TokenKind::Module => self.module(token.span),
             TokenKind::Deferred(capability) => Err(self.deferred(&capability, token.span)),
             _ => Err(self.error_at(
                 "TQ-PARSE-EXPRESSION-001",
@@ -447,7 +463,11 @@ impl Parser<'_> {
                 .span;
         }
         Ok(Expr::new(
-            ExprKind::Call { name, arguments },
+            ExprKind::Call {
+                name,
+                arguments,
+                target: None,
+            },
             joined(span, end),
         ))
     }
@@ -618,6 +638,176 @@ impl Parser<'_> {
         Ok(Expr::new(kind, joined(open, close.span)))
     }
 
+    fn definition(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let name = self.advance().clone();
+        let TokenKind::Identifier(name_value) = name.kind else {
+            return Err(self.error_at(
+                "TQ-PARSE-DEF-001",
+                "expected filter name after 'def'",
+                name.span,
+            ));
+        };
+        let mut parameters = Vec::new();
+        if self
+            .take(|kind| matches!(kind, TokenKind::LeftParen))
+            .is_some()
+        {
+            if !matches!(self.current().kind, TokenKind::RightParen) {
+                loop {
+                    let parameter = self.advance().clone();
+                    let (name, kind) = match parameter.kind {
+                        TokenKind::Identifier(name) => (name, ParameterKind::Filter),
+                        TokenKind::Variable(name) => (name, ParameterKind::Value),
+                        _ => {
+                            return Err(self.error_at(
+                                "TQ-PARSE-DEF-PARAMETER-001",
+                                "expected filter or value parameter",
+                                parameter.span,
+                            ));
+                        }
+                    };
+                    parameters.push(FunctionParameter {
+                        name,
+                        kind,
+                        span: parameter.span,
+                        runtime_name: None,
+                    });
+                    if self
+                        .take(|kind| matches!(kind, TokenKind::Semicolon))
+                        .is_none()
+                    {
+                        break;
+                    }
+                }
+            }
+            self.expect(
+                |kind| matches!(kind, TokenKind::RightParen),
+                "')' after definition parameters",
+            )?;
+        }
+        self.expect(
+            |kind| matches!(kind, TokenKind::Colon),
+            "':' before definition body",
+        )?;
+        let definition_body = self.comma()?;
+        let semicolon = self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "';' after definition body",
+        )?;
+        let body = self.following_filter(semicolon.span)?;
+        let definition = Definition {
+            name: name_value,
+            parameters,
+            span: joined(open, definition_body.span),
+            body: definition_body,
+            symbol: None,
+        };
+        let span = joined(open, body.span);
+        Ok(Expr::new(
+            ExprKind::Define {
+                definition: Box::new(definition),
+                body: Box::new(body),
+            },
+            span,
+        ))
+    }
+
+    fn include(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let path = self.module_path("after 'include'")?;
+        let metadata = self.optional_module_metadata()?;
+        let semicolon = self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "';' after include directive",
+        )?;
+        let body = self.following_filter(semicolon.span)?;
+        let span = joined(open, body.span);
+        Ok(Expr::new(
+            ExprKind::Include {
+                path,
+                metadata,
+                body: Box::new(body),
+            },
+            span,
+        ))
+    }
+
+    fn import(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let path = self.module_path("after 'import'")?;
+        self.expect(
+            |kind| matches!(kind, TokenKind::As),
+            "'as' after import path",
+        )?;
+        let alias = self.advance().clone();
+        let TokenKind::Identifier(alias) = alias.kind else {
+            return Err(self.error_at(
+                "TQ-PARSE-IMPORT-001",
+                "expected module alias after 'as'",
+                alias.span,
+            ));
+        };
+        let metadata = self.optional_module_metadata()?;
+        let semicolon = self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "';' after import directive",
+        )?;
+        let body = self.following_filter(semicolon.span)?;
+        let span = joined(open, body.span);
+        Ok(Expr::new(
+            ExprKind::Import {
+                path,
+                alias,
+                metadata,
+                body: Box::new(body),
+            },
+            span,
+        ))
+    }
+
+    fn module(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let metadata = self.assignment()?;
+        let semicolon = self.expect(
+            |kind| matches!(kind, TokenKind::Semicolon),
+            "';' after module metadata",
+        )?;
+        let body = self.following_filter(semicolon.span)?;
+        let span = joined(open, body.span);
+        Ok(Expr::new(
+            ExprKind::Module {
+                metadata: Box::new(metadata),
+                body: Box::new(body),
+            },
+            span,
+        ))
+    }
+
+    fn module_path(&mut self, expected: &str) -> Result<Arc<str>, Box<Diagnostic>> {
+        let token = self.advance().clone();
+        match token.kind {
+            TokenKind::String(path) => Ok(path),
+            _ => Err(self.error_at(
+                "TQ-PARSE-MODULE-PATH-001",
+                &format!("expected constant module path {expected}"),
+                token.span,
+            )),
+        }
+    }
+
+    fn optional_module_metadata(&mut self) -> Result<Option<Box<Expr>>, Box<Diagnostic>> {
+        if matches!(self.current().kind, TokenKind::Semicolon) {
+            Ok(None)
+        } else {
+            self.assignment().map(Box::new).map(Some)
+        }
+    }
+
+    fn following_filter(&mut self, empty_span: Span) -> Result<Expr, Box<Diagnostic>> {
+        if matches!(self.current().kind, TokenKind::EndOfInput) {
+            Ok(Expr::new(ExprKind::Empty, empty_span))
+        } else {
+            self.comma()
+        }
+    }
+
     fn current(&self) -> &Token {
         &self.tokens[self.index.min(self.tokens.len() - 1)]
     }
@@ -771,6 +961,22 @@ mod tests {
             foreach.hir(),
             "foreach(access(., iterate) as $x; init: 0; update: add(., $x); extract: .)"
         );
+    }
+
+    #[test]
+    fn parses_source_spanned_definitions_and_module_directives() {
+        let query = parse(
+            "def twice(f): f | f; include \"shared\"; import \"math\" as m {search:\"lib\"}; twice(m::inc)",
+        )
+        .unwrap();
+        let hir = query.hir();
+        assert!(hir.starts_with("def(twice; f =>"));
+        assert!(hir.contains("include(\"shared\""));
+        assert!(hir.contains("import(\"math\" as m"));
+        assert!(hir.ends_with("call(twice, call(m::inc)))))"));
+
+        let module = parse("module {homepage:\"https://example.invalid\"}; def id: .;").unwrap();
+        assert!(module.hir().starts_with("module(object(homepage:"));
     }
 
     #[test]

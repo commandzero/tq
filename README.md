@@ -94,10 +94,25 @@ regression policy are reviewed in `docs/performance-baseline.md`; detailed
 syntax, framing, limits, and known-difference guidance lives in
 `docs/compatibility.md`.
 
+## jq user filters and modules
+
+Parameterized `def` filters support lexical capture, filter and value
+parameters, generator cardinality, shadowing, and recursion on tq's bounded
+managed call stack. Modules are loaded only from explicit roots:
+
+```console
+tq -L ./jq-libs 'import "metrics" as m; m::normalize' input.json
+tq -L ./jq-libs 'include "shared"; shared_filter' input.json
+```
+
+Repeat `-L` to search multiple roots in order. Absolute paths and `..` escapes
+are rejected after canonicalization; loaded module paths and SHA-256 digests are
+included in `--explain` and `--explain-json`. Module files may declare constant
+metadata with `module {...};`, observable through jq's `modulemeta` filter.
+
 ## Intentional MVP boundaries
 
-User-defined functions and modules, labels and breaks,
-recursive descent and interpolation, regex and date functions, environment or
+Labels and breaks, regex and date functions, environment or
 platform I/O, and the long tail of jq CLI switches
 are deferred with stable unsupported-capability diagnostics.
 

@@ -96,7 +96,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             }
         }
     }
-    assert_eq!(ids.len(), 14);
+    assert_eq!(ids.len(), 15);
 }
 
 #[test]
@@ -120,6 +120,7 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         "benchmark.identity-reencode",
         "benchmark.event-stream",
         "benchmark.recursive-scalars",
+        "benchmark.user-filter-call",
     ] {
         assert!(
             cases.contains(&format!("\"{workload}\"")),

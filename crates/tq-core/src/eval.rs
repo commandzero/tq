@@ -1,9 +1,10 @@
 //! Bounded evaluator for source-mapped expression bytecode.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::BTreeMap,
     io,
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -14,12 +15,26 @@ use indexmap::IndexMap;
 
 use crate::{
     Bytecode, Number, Object, Path, PathComponent, Value, VmError, VmLimits, VmObservations,
-    ast::{AssignmentOperator, BinaryOperator, UnaryOperator},
+    ast::{AssignmentOperator, BinaryOperator, ParameterKind, UnaryOperator},
     bytecode::{InterpolationOperand, KeyOperand, Operation},
 };
 
 type Environment = BTreeMap<Arc<str>, Value>;
 type Outcomes = Vec<Result<Value, VmError>>;
+type UserFrames = Arc<[UserFrame]>;
+
+#[derive(Clone)]
+struct FilterArgument {
+    node: u32,
+    environment: Arc<Environment>,
+    frames: UserFrames,
+}
+
+#[derive(Clone)]
+struct UserFrame {
+    symbol: u32,
+    filters: Vec<Option<FilterArgument>>,
+}
 
 pub(crate) fn evaluate_stream(
     bytecode: &Bytecode,
@@ -67,6 +82,32 @@ enum GeneratorContinuation {
         node: u32,
         environment: Arc<Environment>,
     },
+    BinaryLeft {
+        operator: BinaryOperator,
+        right: u32,
+        input: Value,
+        environment: Arc<Environment>,
+    },
+    BinaryRight {
+        operator: BinaryOperator,
+        left: Value,
+    },
+    Unary(UnaryOperator),
+    ArrayItem(Rc<RefCell<Vec<Value>>>),
+    AlternativeItem(Rc<Cell<bool>>),
+    Bind {
+        name: Arc<str>,
+        body: u32,
+        input: Value,
+        environment: Arc<Environment>,
+    },
+    Conditional {
+        branches: Arc<[(u32, u32)]>,
+        next: usize,
+        alternative: u32,
+        input: Value,
+        environment: Arc<Environment>,
+    },
     AccessIndex {
         node: u32,
         environment: Arc<Environment>,
@@ -85,6 +126,20 @@ enum GeneratorContinuation {
         input: Value,
         environment: Arc<Environment>,
     },
+    UserArgument {
+        symbol: u32,
+        arguments: Arc<[u32]>,
+        next: usize,
+        input: Value,
+        caller_environment: Arc<Environment>,
+        caller_frames: UserFrames,
+        filters: Vec<Option<FilterArgument>>,
+        bindings: Environment,
+    },
+    ReturnUser {
+        environment: Arc<Environment>,
+        frames: UserFrames,
+    },
     Raise,
 }
 
@@ -93,19 +148,37 @@ struct GeneratorWork {
     node: u32,
     input: Value,
     environment: Arc<Environment>,
+    frames: UserFrames,
     continuations: Vec<GeneratorContinuation>,
 }
 
 enum GeneratorTask {
     Eval(GeneratorWork),
+    Iterate {
+        values: Arc<[Value]>,
+        next: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishArray {
+        values: Rc<RefCell<Vec<Value>>>,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishAlternative {
+        matched: Rc<Cell<bool>>,
+        right: u32,
+        input: Value,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
     Traverse {
         cursor: TraversalCursor,
         environment: Arc<Environment>,
-        continuations: Vec<GeneratorContinuation>,
-    },
-    Deliver {
-        result: Result<Value, VmError>,
-        environment: Arc<Environment>,
+        frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
 }
@@ -178,6 +251,10 @@ impl TraversalCursor {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the generator admission walk exhaustively covers bytecode operations"
+)]
 fn generator_subset(bytecode: &Bytecode) -> bool {
     let mut pending = vec![bytecode.root()];
     let mut seen = vec![false; bytecode.instructions().len()];
@@ -193,17 +270,43 @@ fn generator_subset(bytecode: &Bytecode) -> bool {
             | Operation::Literal(_)
             | Operation::Variable(_)
             | Operation::Empty
-            | Operation::RecursiveDescent => {}
+            | Operation::RecursiveDescent
+            | Operation::ParameterCall { .. } => {}
             Operation::AccessField { base, .. }
             | Operation::Iterate(base)
-            | Operation::Optional(base) => pending.push(*base),
+            | Operation::Optional(base)
+            | Operation::Array(base)
+            | Operation::Unary { child: base, .. } => pending.push(*base),
             Operation::AccessIndex { base, index } => {
                 pending.push(*index);
                 pending.push(*base);
             }
-            Operation::Pipe { left, right } | Operation::Comma { left, right } => {
+            Operation::Pipe { left, right }
+            | Operation::Comma { left, right }
+            | Operation::Binary { left, right, .. } => {
                 pending.push(*right);
                 pending.push(*left);
+            }
+            Operation::Conditional {
+                branches,
+                alternative,
+            } => {
+                pending.push(*alternative);
+                for (condition, body) in branches {
+                    pending.push(*body);
+                    pending.push(*condition);
+                }
+            }
+            Operation::Bind { value, body, .. } => {
+                pending.push(*body);
+                pending.push(*value);
+            }
+            Operation::UserCall { symbol, arguments } => {
+                let Some(function) = bytecode.functions().get(*symbol as usize) else {
+                    return false;
+                };
+                pending.push(function.body);
+                pending.extend(arguments.iter().copied());
             }
             Operation::TryCatch { expression, catch } => {
                 if let Some(catch) = catch {
@@ -225,16 +328,28 @@ fn generator_subset(bytecode: &Bytecode) -> bool {
                             && matches!(
                                 name.as_ref(),
                                 "arrays"
+                                    | "add"
                                     | "booleans"
+                                    | "keys"
+                                    | "keys_unsorted"
+                                    | "length"
                                     | "iterables"
+                                    | "max"
+                                    | "min"
+                                    | "modulemeta"
                                     | "nulls"
                                     | "numbers"
                                     | "objects"
                                     | "scalars"
                                     | "strings"
+                                    | "tonumber"
                                     | "values"
+                                    | "reverse"
+                                    | "sort"
                                     | "tostring"
                                     | "type"
+                                    | "unique"
+                                    | "utf8bytelength"
                             ))
                 }) =>
             {
@@ -265,6 +380,7 @@ fn evaluate_generator_stream(
         node: bytecode.root(),
         input: input.clone(),
         environment,
+        frames: Arc::from([]),
         continuations: Vec::new(),
     })];
     let mut observations = VmObservations::default();
@@ -283,9 +399,77 @@ fn evaluate_generator_stream(
         observations.steps += 1;
         let (mut work, delivered) = match task {
             GeneratorTask::Eval(work) => (work, None),
+            GeneratorTask::Iterate {
+                values,
+                next,
+                environment,
+                frames,
+                continuations,
+            } => {
+                let Some(value) = values.get(next).cloned() else {
+                    continue;
+                };
+                if next + 1 < values.len() {
+                    pending.push(GeneratorTask::Iterate {
+                        values,
+                        next: next + 1,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                }
+                (
+                    GeneratorWork {
+                        node: bytecode.root(),
+                        input: Value::Null,
+                        environment,
+                        frames,
+                        continuations,
+                    },
+                    Some(Ok(value)),
+                )
+            }
+            GeneratorTask::FinishArray {
+                values,
+                environment,
+                frames,
+                continuations,
+            } => (
+                GeneratorWork {
+                    node: bytecode.root(),
+                    input: Value::Null,
+                    environment,
+                    frames,
+                    continuations,
+                },
+                Some(Ok(Value::array(values.take()))),
+            ),
+            GeneratorTask::FinishAlternative {
+                matched,
+                right,
+                input,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if matched.get() {
+                    continue;
+                }
+                (
+                    GeneratorWork {
+                        node: right,
+                        input,
+                        environment,
+                        frames,
+                        continuations,
+                    },
+                    None,
+                )
+            }
             GeneratorTask::Traverse {
                 mut cursor,
                 environment,
+                frames,
                 continuations,
             } => {
                 if cursor.depth() > limits.path_stack {
@@ -303,6 +487,7 @@ fn evaluate_generator_stream(
                         pending.push(GeneratorTask::Traverse {
                             cursor,
                             environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
                             continuations: continuations.clone(),
                         });
                         (
@@ -310,6 +495,7 @@ fn evaluate_generator_stream(
                                 node: bytecode.root(),
                                 input: Value::Null,
                                 environment,
+                                frames,
                                 continuations,
                             },
                             Some(Ok(value)),
@@ -322,19 +508,6 @@ fn evaluate_generator_stream(
                     }
                 }
             }
-            GeneratorTask::Deliver {
-                result,
-                environment,
-                continuations,
-            } => (
-                GeneratorWork {
-                    node: bytecode.root(),
-                    input: Value::Null,
-                    environment,
-                    continuations,
-                },
-                Some(result),
-            ),
         };
         observations.value_stack_high_water = observations.value_stack_high_water.max(1);
         observations.fork_stack_high_water = observations.fork_stack_high_water.max(pending.len());
@@ -385,6 +558,7 @@ fn evaluate_generator_stream(
                     pending.push(GeneratorTask::Traverse {
                         cursor: TraversalCursor::new(work.input.clone()),
                         environment: Arc::clone(&work.environment),
+                        frames: Arc::clone(&work.frames),
                         continuations: work.continuations.clone(),
                     });
                     None
@@ -405,6 +579,7 @@ fn evaluate_generator_stream(
                                 pieces,
                                 work.input.clone(),
                                 Arc::clone(&work.environment),
+                                Arc::clone(&work.frames),
                                 work.continuations.clone(),
                                 bytecode,
                                 limits.output_bytes,
@@ -463,6 +638,7 @@ fn evaluate_generator_stream(
                             node: *right,
                             input: work.input.clone(),
                             environment: Arc::clone(&work.environment),
+                            frames: Arc::clone(&work.frames),
                             continuations: work.continuations.clone(),
                         };
                         work.node = *left;
@@ -471,6 +647,131 @@ fn evaluate_generator_stream(
                         observations.fork_stack_high_water =
                             observations.fork_stack_high_water.max(pending.len());
                         None
+                    }
+                }
+                Operation::Array(child) => {
+                    let values = Rc::new(RefCell::new(Vec::new()));
+                    pending.push(GeneratorTask::FinishArray {
+                        values: Rc::clone(&values),
+                        environment: Arc::clone(&work.environment),
+                        frames: Arc::clone(&work.frames),
+                        continuations: work.continuations.clone(),
+                    });
+                    work.continuations
+                        .push(GeneratorContinuation::ArrayItem(values));
+                    work.node = *child;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Unary { operator, child } => {
+                    work.continuations
+                        .push(GeneratorContinuation::Unary(*operator));
+                    work.node = *child;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Binary {
+                    operator,
+                    left,
+                    right,
+                } => {
+                    if *operator == BinaryOperator::Alternative {
+                        let matched = Rc::new(Cell::new(false));
+                        pending.push(GeneratorTask::FinishAlternative {
+                            matched: Rc::clone(&matched),
+                            right: *right,
+                            input: work.input.clone(),
+                            environment: Arc::clone(&work.environment),
+                            frames: Arc::clone(&work.frames),
+                            continuations: work.continuations.clone(),
+                        });
+                        work.continuations
+                            .push(GeneratorContinuation::AlternativeItem(matched));
+                    } else {
+                        work.continuations.push(GeneratorContinuation::BinaryLeft {
+                            operator: *operator,
+                            right: *right,
+                            input: work.input.clone(),
+                            environment: Arc::clone(&work.environment),
+                        });
+                    }
+                    work.node = *left;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Bind { value, name, body } => match bytecode.string(*name) {
+                    Some(name) => {
+                        work.continuations.push(GeneratorContinuation::Bind {
+                            name: Arc::clone(name),
+                            body: *body,
+                            input: work.input.clone(),
+                            environment: Arc::clone(&work.environment),
+                        });
+                        work.node = *value;
+                        pending.push(GeneratorTask::Eval(work.clone()));
+                        None
+                    }
+                    None => Some(Err(invalid("string missing after validation"))),
+                },
+                Operation::Conditional {
+                    branches,
+                    alternative,
+                } => {
+                    if let Some((condition, _)) = branches.first() {
+                        work.continuations.push(GeneratorContinuation::Conditional {
+                            branches: Arc::from(branches.clone()),
+                            next: 0,
+                            alternative: *alternative,
+                            input: work.input.clone(),
+                            environment: Arc::clone(&work.environment),
+                        });
+                        work.node = *condition;
+                    } else {
+                        work.node = *alternative;
+                    }
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::UserCall { symbol, arguments } => schedule_user_call(
+                    *symbol,
+                    Arc::from(arguments.clone()),
+                    0,
+                    work.input.clone(),
+                    Arc::clone(&work.environment),
+                    Arc::clone(&work.frames),
+                    vec![None; arguments.len()],
+                    work.environment.as_ref().clone(),
+                    work.continuations.clone(),
+                    bytecode,
+                    limits.call_stack,
+                    &mut pending,
+                ),
+                Operation::ParameterCall {
+                    function,
+                    parameter,
+                } => {
+                    let argument = work
+                        .frames
+                        .iter()
+                        .rev()
+                        .find(|frame| frame.symbol == *function)
+                        .and_then(|frame| frame.filters.get(*parameter as usize))
+                        .and_then(Clone::clone);
+                    match argument {
+                        Some(argument) => {
+                            work.continuations.push(GeneratorContinuation::ReturnUser {
+                                environment: Arc::clone(&work.environment),
+                                frames: Arc::clone(&work.frames),
+                            });
+                            work.node = argument.node;
+                            work.environment = argument.environment;
+                            work.frames = argument.frames;
+                            pending.push(GeneratorTask::Eval(work.clone()));
+                            None
+                        }
+                        None => Some(Err(invalid(
+                            "filter parameter missing from active user frame",
+                        ))),
                     }
                 }
                 Operation::TryCatch { expression, catch } => {
@@ -506,6 +807,14 @@ fn evaluate_generator_stream(
                         }))
                     }
                 }
+                Operation::Call { name, arguments }
+                    if arguments.is_empty()
+                        && bytecode
+                            .string(*name)
+                            .is_some_and(|name| name.as_ref() == "modulemeta") =>
+                {
+                    Some(module_metadata(bytecode, &work.input))
+                }
                 Operation::Call { name, arguments } if arguments.is_empty() => bytecode
                     .string(*name)
                     .ok_or_else(|| invalid("string missing after validation"))
@@ -535,18 +844,34 @@ fn evaluate_generator_stream(
                                     node,
                                     input: Value::string(catch_value(&error)),
                                     environment,
+                                    frames: work.frames,
                                     continuations: work.continuations,
                                 }));
                             }
                             handled = true;
                             break;
                         }
+                        GeneratorContinuation::ReturnUser {
+                            environment,
+                            frames,
+                        } => {
+                            work.environment = environment;
+                            work.frames = frames;
+                        }
                         GeneratorContinuation::AccessField(_)
                         | GeneratorContinuation::Iterate
                         | GeneratorContinuation::Pipe { .. }
+                        | GeneratorContinuation::BinaryLeft { .. }
+                        | GeneratorContinuation::BinaryRight { .. }
+                        | GeneratorContinuation::Unary(_)
+                        | GeneratorContinuation::ArrayItem(_)
+                        | GeneratorContinuation::AlternativeItem(_)
+                        | GeneratorContinuation::Bind { .. }
+                        | GeneratorContinuation::Conditional { .. }
                         | GeneratorContinuation::AccessIndex { .. }
                         | GeneratorContinuation::ApplyIndex(_)
                         | GeneratorContinuation::Interpolate { .. }
+                        | GeneratorContinuation::UserArgument { .. }
                         | GeneratorContinuation::Raise => {}
                     }
                 }
@@ -580,6 +905,7 @@ fn evaluate_generator_stream(
                         node,
                         input: value,
                         environment,
+                        frames: work.frames,
                         continuations: work.continuations,
                     }));
                     break;
@@ -589,29 +915,123 @@ fn evaluate_generator_stream(
                         node,
                         input: value,
                         environment,
+                        frames: work.frames,
+                        continuations: work.continuations,
+                    }));
+                    break;
+                }
+                GeneratorContinuation::BinaryLeft {
+                    operator,
+                    right,
+                    input,
+                    environment,
+                } => {
+                    if (operator == BinaryOperator::And && !value.is_truthy())
+                        || (operator == BinaryOperator::Or && value.is_truthy())
+                    {
+                        result = Ok(Value::Bool(operator == BinaryOperator::Or));
+                        continue;
+                    }
+                    work.continuations.push(GeneratorContinuation::BinaryRight {
+                        operator,
+                        left: value,
+                    });
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: right,
+                        input,
+                        environment,
+                        frames: work.frames,
+                        continuations: work.continuations,
+                    }));
+                    break;
+                }
+                GeneratorContinuation::BinaryRight { operator, left } => {
+                    result = if matches!(operator, BinaryOperator::And | BinaryOperator::Or) {
+                        Ok(Value::Bool(value.is_truthy()))
+                    } else {
+                        binary_value(operator, &left, &value)
+                    };
+                }
+                GeneratorContinuation::Unary(operator) => {
+                    result = unary(operator, &value);
+                }
+                GeneratorContinuation::ArrayItem(values) => {
+                    values.borrow_mut().push(value);
+                    break;
+                }
+                GeneratorContinuation::AlternativeItem(matched) => {
+                    if value.is_truthy() {
+                        matched.set(true);
+                        result = Ok(value);
+                    } else {
+                        break;
+                    }
+                }
+                GeneratorContinuation::Bind {
+                    name,
+                    body,
+                    input,
+                    environment,
+                } => {
+                    let mut nested = environment.as_ref().clone();
+                    nested.insert(name, value);
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: body,
+                        input,
+                        environment: Arc::new(nested),
+                        frames: work.frames,
+                        continuations: work.continuations,
+                    }));
+                    break;
+                }
+                GeneratorContinuation::Conditional {
+                    branches,
+                    next,
+                    alternative,
+                    input,
+                    environment,
+                } => {
+                    let node = if value.is_truthy() {
+                        branches[next].1
+                    } else if next + 1 < branches.len() {
+                        let condition = branches[next + 1].0;
+                        work.continuations.push(GeneratorContinuation::Conditional {
+                            branches,
+                            next: next + 1,
+                            alternative,
+                            input: input.clone(),
+                            environment: Arc::clone(&environment),
+                        });
+                        condition
+                    } else {
+                        alternative
+                    };
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node,
+                        input,
+                        environment,
+                        frames: work.frames,
                         continuations: work.continuations,
                     }));
                     break;
                 }
                 GeneratorContinuation::Iterate => {
-                    let values = match value {
-                        Value::Array(values) => values.to_vec(),
-                        Value::Object(values) => values.values().cloned().collect(),
+                    let values: Arc<[Value]> = match value {
+                        Value::Array(values) => values,
+                        Value::Object(values) => {
+                            values.values().cloned().collect::<Vec<_>>().into()
+                        }
                         value => {
                             result = Err(type_error("iterate", &value));
                             continue;
                         }
                     };
-                    if pending.len().saturating_add(values.len()) > limits.fork_stack {
-                        if !emit(Err(resource("fork-stack")), observations) {
-                            return observations;
-                        }
-                        return observations;
-                    }
-                    for value in values.into_iter().rev() {
-                        pending.push(GeneratorTask::Deliver {
-                            result: Ok(value),
+                    if !values.is_empty() {
+                        pending.push(GeneratorTask::Iterate {
+                            values,
+                            next: 0,
                             environment: Arc::clone(&work.environment),
+                            frames: Arc::clone(&work.frames),
                             continuations: work.continuations.clone(),
                         });
                     }
@@ -646,6 +1066,7 @@ fn evaluate_generator_stream(
                         pieces,
                         input,
                         environment,
+                        Arc::clone(&work.frames),
                         work.continuations.clone(),
                         bytecode,
                         limits.output_bytes,
@@ -655,6 +1076,59 @@ fn evaluate_generator_stream(
                         continue;
                     }
                     break;
+                }
+                GeneratorContinuation::UserArgument {
+                    symbol,
+                    arguments,
+                    next,
+                    input,
+                    caller_environment,
+                    caller_frames,
+                    filters,
+                    mut bindings,
+                } => {
+                    let Some(function) = bytecode.functions().get(symbol as usize) else {
+                        result = Err(invalid("user function missing after validation"));
+                        continue;
+                    };
+                    let Some(parameter) = function.parameters.get(next) else {
+                        result = Err(invalid("user function parameter missing after validation"));
+                        continue;
+                    };
+                    let Some(name) = parameter
+                        .runtime_name
+                        .and_then(|name| bytecode.string(name))
+                    else {
+                        result = Err(invalid("value parameter name missing after validation"));
+                        continue;
+                    };
+                    bindings.insert(Arc::clone(name), value);
+                    if let Some(next_result) = schedule_user_call(
+                        symbol,
+                        arguments,
+                        next + 1,
+                        input,
+                        caller_environment,
+                        caller_frames,
+                        filters,
+                        bindings,
+                        work.continuations.clone(),
+                        bytecode,
+                        limits.call_stack,
+                        &mut pending,
+                    ) {
+                        result = next_result;
+                        continue;
+                    }
+                    break;
+                }
+                GeneratorContinuation::ReturnUser {
+                    environment,
+                    frames,
+                } => {
+                    work.environment = environment;
+                    work.frames = frames;
+                    result = Ok(value);
                 }
                 GeneratorContinuation::Raise => {
                     let message = match value {
@@ -671,6 +1145,89 @@ fn evaluate_generator_stream(
 
 #[allow(
     clippy::too_many_arguments,
+    reason = "user-call scheduling keeps every captured VM resource explicit"
+)]
+fn schedule_user_call(
+    symbol: u32,
+    arguments: Arc<[u32]>,
+    mut next: usize,
+    input: Value,
+    caller_environment: Arc<Environment>,
+    caller_frames: UserFrames,
+    mut filters: Vec<Option<FilterArgument>>,
+    bindings: Environment,
+    mut continuations: Vec<GeneratorContinuation>,
+    bytecode: &Bytecode,
+    call_limit: usize,
+    pending: &mut Vec<GeneratorTask>,
+) -> Option<Result<Value, VmError>> {
+    let Some(function) = bytecode.functions().get(symbol as usize) else {
+        return Some(Err(invalid("user function missing after validation")));
+    };
+    if arguments.len() != function.parameters.len() {
+        return Some(Err(invalid("user function arity changed after validation")));
+    }
+    while let Some(parameter) = function.parameters.get(next) {
+        match parameter.kind {
+            ParameterKind::Filter => {
+                filters[next] = Some(FilterArgument {
+                    node: arguments[next],
+                    environment: Arc::clone(&caller_environment),
+                    frames: Arc::clone(&caller_frames),
+                });
+                next += 1;
+            }
+            ParameterKind::Value => {
+                continuations.push(GeneratorContinuation::UserArgument {
+                    symbol,
+                    arguments,
+                    next,
+                    input: input.clone(),
+                    caller_environment: Arc::clone(&caller_environment),
+                    caller_frames: Arc::clone(&caller_frames),
+                    filters,
+                    bindings,
+                });
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node: continuations
+                        .last()
+                        .and_then(|continuation| match continuation {
+                            GeneratorContinuation::UserArgument {
+                                arguments, next, ..
+                            } => arguments.get(*next).copied(),
+                            _ => None,
+                        })
+                        .expect("just-pushed user argument is structurally complete"),
+                    input,
+                    environment: caller_environment,
+                    frames: caller_frames,
+                    continuations,
+                }));
+                return None;
+            }
+        }
+    }
+    if caller_frames.len() >= call_limit {
+        return Some(Err(resource("call-stack")));
+    }
+    continuations.push(GeneratorContinuation::ReturnUser {
+        environment: caller_environment,
+        frames: Arc::clone(&caller_frames),
+    });
+    let mut frames = caller_frames.to_vec();
+    frames.push(UserFrame { symbol, filters });
+    pending.push(GeneratorTask::Eval(GeneratorWork {
+        node: function.body,
+        input,
+        environment: Arc::new(bindings),
+        frames: frames.into(),
+        continuations,
+    }));
+    None
+}
+
+#[allow(
+    clippy::too_many_arguments,
     reason = "interpolation continuation state is explicit and independently bounded"
 )]
 fn schedule_interpolation(
@@ -679,6 +1236,7 @@ fn schedule_interpolation(
     mut pieces: Vec<Option<Arc<str>>>,
     input: Value,
     environment: Arc<Environment>,
+    frames: UserFrames,
     mut continuations: Vec<GeneratorContinuation>,
     bytecode: &Bytecode,
     output_limit: usize,
@@ -707,6 +1265,7 @@ fn schedule_interpolation(
                     node,
                     input,
                     environment,
+                    frames,
                     continuations,
                 }));
                 return None;
@@ -780,6 +1339,12 @@ fn generator_builtin(
     output_limit: usize,
 ) -> Result<Option<Value>, VmError> {
     let selected = match name {
+        "add" => {
+            return fold_values(input, None, binary_add)
+                .into_iter()
+                .next()
+                .transpose();
+        }
         "arrays" => matches!(input, Value::Array(_)),
         "booleans" => matches!(input, Value::Bool(_)),
         "iterables" => matches!(input, Value::Array(_) | Value::Object(_)),
@@ -789,12 +1354,33 @@ fn generator_builtin(
         "scalars" => !matches!(input, Value::Array(_) | Value::Object(_)),
         "strings" => matches!(input, Value::String(_)),
         "values" => !matches!(input, Value::Null),
+        "keys" | "keys_unsorted" => return keys(input, name == "keys").map(Some),
+        "length" => return length(input).map(Some),
+        "max" => return extrema(input, true).into_iter().next().transpose(),
+        "min" => return extrema(input, false).into_iter().next().transpose(),
+        "reverse" => return reverse(input).into_iter().next().transpose(),
+        "sort" => return sort_values(input).into_iter().next().transpose(),
+        "tonumber" => match input {
+            Value::Number(_) => return Ok(Some(input.clone())),
+            Value::String(value) => {
+                return Number::parse(value)
+                    .map(Value::Number)
+                    .map(Some)
+                    .map_err(|error| runtime(error.to_string()));
+            }
+            value => return Err(type_error("tonumber", value)),
+        },
         "tostring" => {
             return interpolation_value(input, output_limit)
                 .map(Value::String)
                 .map(Some);
         }
         "type" => return Ok(Some(Value::string(type_name(input)))),
+        "unique" => return unique_values(input).into_iter().next().transpose(),
+        "utf8bytelength" => match input {
+            Value::String(value) => return number_usize(value.len()).map(Some),
+            value => return Err(type_error("utf8bytelength", value)),
+        },
         _ => return Err(invalid("generator built-in left admitted subset")),
     };
     Ok(selected.then(|| input.clone()))
@@ -856,6 +1442,24 @@ impl io::Write for BoundedJsonWriter {
     }
 }
 
+fn write_jq_number(writer: &mut BoundedJsonWriter, value: &Number) -> Result<(), VmError> {
+    let literal = value.to_string();
+    let Some(exponent) = literal.find(['e', 'E']) else {
+        return writer.push(&literal);
+    };
+    let sign = exponent + 1;
+    if literal
+        .as_bytes()
+        .get(sign)
+        .is_some_and(|byte| *byte == b'+' || *byte == b'-')
+    {
+        return writer.push(&literal);
+    }
+    writer.push(&literal[..sign])?;
+    writer.push("+")?;
+    writer.push(&literal[sign..])
+}
+
 enum JsonFrame<'a> {
     Value(&'a Value),
     Array(&'a [Value], usize),
@@ -871,10 +1475,7 @@ fn bounded_json(value: &Value, output_limit: usize) -> Result<String, VmError> {
             JsonFrame::Value(Value::Bool(value)) => {
                 writer.push(if *value { "true" } else { "false" })?;
             }
-            JsonFrame::Value(Value::Number(value)) => {
-                std::fmt::write(&mut writer, format_args!("{value}"))
-                    .map_err(|_| resource("output-bytes"))?;
-            }
+            JsonFrame::Value(Value::Number(value)) => write_jq_number(&mut writer, value)?,
             JsonFrame::Value(Value::String(value)) => {
                 serde_json::to_writer(&mut writer, value.as_ref())
                     .map_err(|_| resource("output-bytes"))?;
@@ -918,6 +1519,18 @@ fn bounded_json(value: &Value, output_limit: usize) -> Result<String, VmError> {
         }
     }
     Ok(writer.output)
+}
+
+fn module_metadata(bytecode: &Bytecode, input: &Value) -> Result<Value, VmError> {
+    let Value::String(requested) = input else {
+        return Err(type_error("modulemeta", input));
+    };
+    bytecode
+        .modules()
+        .iter()
+        .find(|module| module.name == requested.as_ref())
+        .map(|module| module.metadata.clone())
+        .ok_or_else(|| runtime(format!("module {requested} was not loaded")))
 }
 
 struct Evaluator<'a> {
@@ -1964,6 +2577,7 @@ impl Evaluator<'_> {
     ) -> Outcomes {
         match name {
             "empty" => Vec::new(),
+            "modulemeta" => vec![module_metadata(self.bytecode, input)],
             "type" => vec![Ok(Value::string(type_name(input)))],
             "length" => vec![length(input)],
             "utf8bytelength" => match input {
@@ -2905,6 +3519,7 @@ mod tests {
             query,
             &ResolveOptions {
                 variables: variables.keys().cloned().collect::<BTreeSet<_>>(),
+                ..ResolveOptions::default()
             },
         )
         .unwrap();
@@ -2981,6 +3596,8 @@ mod tests {
             ["[1,2]"]
         );
         assert_eq!(json(run("type, length", r"[1,2]")), [r#""array""#, "2"]);
+        assert_eq!(json(run("tostring | length", "1e4096")), ["7"]);
+        assert_eq!(json(run(r#""\(.)""#, "1e4096")), [r#""1e+4096""#]);
         assert_eq!(
             json(run("try error(\"boom\") catch .", "null")),
             [r#""boom""#]
@@ -3013,6 +3630,62 @@ mod tests {
             ["1", "2", "3"]
         );
         assert_eq!(json(run("..", "42")), ["42"]);
+    }
+
+    #[test]
+    fn user_functions_preserve_generator_arguments_scope_and_managed_recursion() {
+        assert_eq!(
+            json(run("def pair($x; $y): $x, $y; pair((1,2); (3,4))", "null")),
+            ["1", "3", "1", "4", "2", "3", "2", "4"]
+        );
+        assert_eq!(json(run("def twice(f): f | f; twice(. + 1)", "1")), ["3"]);
+        assert_eq!(
+            json(run("def wrapped(f): [f, (not)]; wrapped((1,2))", "null")),
+            ["[1,2,true]"]
+        );
+        assert_eq!(
+            json(run("def fallback: empty // 9; fallback", "null")),
+            ["9"]
+        );
+        assert_eq!(
+            json(run(
+                "1 as $x | def captured: $x; 2 as $x | captured",
+                "null"
+            )),
+            ["1"]
+        );
+        assert_eq!(
+            json(run(
+                "def down($n): if $n == 0 then 0 else $n, down($n - 1) end; down(3)",
+                "null"
+            )),
+            ["3", "2", "1", "0"]
+        );
+
+        let plan = analyze(
+            resolve(
+                parse("def forever: forever; forever").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut limited = Vm::new(
+            &plan,
+            Value::Null,
+            VmLimits {
+                call_stack: 8,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "call-stack"
+            })
+        ));
     }
 
     #[test]

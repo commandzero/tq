@@ -293,8 +293,6 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
     assert_capabilities(
         "deferred.jsonl",
         &[
-            "deferred.function",
-            "deferred.modules",
             "deferred.labels",
             "deferred.regex",
             "deferred.dates",
@@ -313,6 +311,27 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
         assert_eq!(case["classification"], "deferred", "line {}", index + 1);
         assert_eq!(case["status"], "deferred", "line {}", index + 1);
     }
+}
+
+#[test]
+fn functions_and_modules_cover_scope_calls_loading_and_failures() {
+    assert_capabilities(
+        "functions-modules.jsonl",
+        &[
+            "function.definition",
+            "function.parameter.value",
+            "function.parameter.filter",
+            "function.scope",
+            "function.recursion",
+            "function.failure.unknown",
+            "function.failure.arity",
+            "module.import",
+            "module.include",
+            "module.metadata",
+            "module.cycle",
+            "module.confinement",
+        ],
+    );
 }
 
 fn assert_capabilities(file: &str, required: &[&str]) {

@@ -243,6 +243,11 @@ fn run_filter<R: Read, W: Write, E: Write>(
     let variables = parse_external_arguments(options)?;
     let resolve_options = ResolveOptions {
         variables: variables.keys().cloned().collect::<BTreeSet<_>>(),
+        module_roots: options.module_paths.clone(),
+        module_limit: options.limits.depth,
+        module_bytes: usize::try_from(options.limits.input_bytes)
+            .unwrap_or(usize::MAX)
+            .min(ResolveOptions::default().module_bytes),
     };
     let parsed = parse_bytes(&query_name, &query).map_err(RunError::Compile)?;
     let resolved = resolve(parsed, &resolve_options).map_err(RunError::Compile)?;
@@ -418,6 +423,7 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
 fn validate_capability_policy(options: &RunOptions) -> Result<(), RunError> {
     let uses_filesystem = matches!(&options.filter, FilterSource::File(_))
         || options.files.iter().any(|path| path != Path::new("-"))
+        || !options.module_paths.is_empty()
         || options.report_file.is_some()
         || options.arguments.iter().any(|argument| {
             matches!(
@@ -1861,7 +1867,10 @@ fn exit_status(enabled: bool, last: Option<&Value>) -> ExitStatus {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Write};
+    use std::{
+        fs,
+        io::{self, Write},
+    };
 
     use super::run_with_io;
     use crate::{Command, ExitStatus, parse_args};
@@ -1902,6 +1911,112 @@ mod tests {
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"\x1ename: Ada\n");
         assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn explicit_module_roots_import_include_metadata_and_reject_cycles() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("sample.jq"),
+            "module {kind:\"test\"}; def twice($x): $x * 2;",
+        )
+        .unwrap();
+        fs::write(root.path().join("included.jq"), "def answer: 42;").unwrap();
+        fs::write(root.path().join("a.jq"), "include \"b\"; def a: 1;").unwrap();
+        fs::write(root.path().join("b.jq"), "include \"a\"; def b: 2;").unwrap();
+        fs::write(root.path().join("c.jq"), "include \"d\"; def c: 3;").unwrap();
+        fs::write(root.path().join("d.jq"), "def d: 4;").unwrap();
+        fs::write(root.path().join("large.jq"), "def large: 123456;").unwrap();
+        let root = root.path().to_string_lossy().into_owned();
+
+        let arguments = [
+            "-L",
+            root.as_str(),
+            "-n",
+            "--output-format",
+            "json",
+            "-c",
+            "import \"sample\" as s; include \"included\"; s::twice(3), answer, (\"sample\" | modulemeta)",
+        ];
+        let (status, stdout, stderr) = execute(&arguments, b"");
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(
+            stdout,
+            b"6\n42\n{\"kind\":\"test\",\"deps\":[],\"defs\":[\"twice/1\"]}\n"
+        );
+        assert!(stderr.is_empty());
+
+        let cycle = ["-L", root.as_str(), "-n", "include \"a\"; ."];
+        let (status, stdout, _) = execute(&cycle, b"must not be consumed");
+        let error = status.unwrap_err().to_string();
+        assert!(error.contains("cyclic module import"));
+        assert!(error.contains("a.jq") && error.contains("b.jq"));
+        assert!(stdout.is_empty());
+
+        let escape = ["-L", root.as_str(), "-n", "include \"../outside\"; ."];
+        let (status, _, _) = execute(&escape, b"");
+        assert!(
+            status
+                .unwrap_err()
+                .to_string()
+                .contains("escapes configured roots")
+        );
+
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            let target = outside.path().join("outside.jq");
+            fs::write(&target, "def escaped: 1;").unwrap();
+            std::os::unix::fs::symlink(target, root.as_str().to_owned() + "/linked.jq").unwrap();
+            let linked = ["-L", root.as_str(), "-n", "include \"linked\"; ."];
+            let (status, _, _) = execute(&linked, b"");
+            assert!(
+                status
+                    .unwrap_err()
+                    .to_string()
+                    .contains("resolves outside root")
+            );
+        }
+
+        let count_limited = [
+            "-L",
+            root.as_str(),
+            "--max-depth",
+            "1",
+            "-n",
+            "include \"c\"; .",
+        ];
+        let (status, _, _) = execute(&count_limited, b"");
+        assert!(
+            status
+                .unwrap_err()
+                .to_string()
+                .contains("module count limit")
+        );
+
+        let bytes_limited = [
+            "-L",
+            root.as_str(),
+            "--max-input-bytes",
+            "8",
+            "-n",
+            "include \"large\"; .",
+        ];
+        let (status, _, _) = execute(&bytes_limited, b"");
+        assert!(status.unwrap_err().to_string().contains("byte limit"));
+
+        let explain = [
+            "-L",
+            root.as_str(),
+            "-n",
+            "--explain-json",
+            "import \"sample\" as s; s::twice(1)",
+        ];
+        let (status, _, stderr) = execute(&explain, b"");
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        let report: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
+        assert_eq!(report["modules"].as_array().unwrap().len(), 1);
+        assert_eq!(report["modules"][0]["sha256"].as_str().unwrap().len(), 64);
     }
 
     #[test]

@@ -160,6 +160,8 @@ pub struct RunOptions {
     pub filter: FilterSource,
     /// Ordered paths, with `-` denoting stdin.
     pub files: Vec<PathBuf>,
+    /// Explicit jq module search roots, in command-line order.
+    pub module_paths: Vec<PathBuf>,
     /// Input parser override/detection mode.
     pub input_format: InputFormat,
     /// Structured output syntax.
@@ -366,7 +368,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: Some('L'),
         syntax: "-L, --library-path DIR",
         value: true,
-        description: "reserved module search path",
+        description: "add an explicit jq module search path",
     },
     OptionSpec {
         short: None,
@@ -514,6 +516,7 @@ where
     let mut inline_filter = None;
     let mut filter_file = None;
     let mut files = Vec::new();
+    let mut module_paths = Vec::new();
     let mut input_format = InputFormat::Auto;
     let mut output_format = OutputFormat::Toon;
     let mut framing = ToonFraming::Sequence;
@@ -694,10 +697,7 @@ where
             "--args" => positional_argument_kind = Some(PositionalArgumentKind::String),
             "--jsonargs" => positional_argument_kind = Some(PositionalArgumentKind::Json),
             "-L" | "--library-path" => {
-                let _ = next_value(&mut tokens, &token)?;
-                return Err(CliError::Unsupported(
-                    "module paths are reserved for the jq-user-functions-modules change".to_owned(),
-                ));
+                module_paths.push(PathBuf::from(next_value(&mut tokens, &token)?));
             }
             "--argfile" | "--run-tests" => return Err(CliError::Unsupported(token)),
             "--explain" => explain = Some(ExplainFormat::Human),
@@ -816,6 +816,7 @@ where
     }
     let uses_filesystem = matches!(&filter, FilterSource::File(_))
         || files.iter().any(|path| path != std::path::Path::new("-"))
+        || !module_paths.is_empty()
         || report_file.is_some()
         || external.iter().any(|argument| {
             matches!(
@@ -832,6 +833,7 @@ where
     Ok(Command::Run(Box::new(RunOptions {
         filter,
         files,
+        module_paths,
         input_format,
         output_format,
         framing,
@@ -1085,6 +1087,10 @@ mod tests {
         };
         assert!(matches!(
             parse_args_with_policy([".", "input.json"], denied_files),
+            Err(CliError::Incompatible(message)) if message.contains("filesystem")
+        ));
+        assert!(matches!(
+            parse_args_with_policy(["-L", "modules", "."], denied_files),
             Err(CliError::Incompatible(message)) if message.contains("filesystem")
         ));
 
