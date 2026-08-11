@@ -110,10 +110,21 @@ are rejected after canonicalization; loaded module paths and SHA-256 digests are
 included in `--explain` and `--explain-json`. Module files may declare constant
 metadata with `module {...};`, observable through jq's `modulemeta` filter.
 
+## Regex, date, and governed platform built-ins
+
+Unicode-aware `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`, and
+`gsub` use a bounded linear-time regex engine. UTC parsing, formatting, broken
+down time, and epoch conversion support jq's date arrays across the documented
+year 0000 through 9999 range.
+
+Ambient effects are explicit: use `--allow-environment` for `env`, and
+`--allow-platform` for `now`, local timezone conversion, and input metadata.
+See [the compatibility policy](docs/jq-regex-date-platform.md) for engine
+differences, limits, redaction, and release-host classifications.
+
 ## Intentional MVP boundaries
 
-Labels and breaks, regex and date functions, environment or
-platform I/O, and the long tail of jq CLI switches
+Labels and breaks and the long tail of jq CLI switches
 are deferred with stable unsupported-capability diagnostics.
 
 The numeric model is a hybrid: accepted input literals preserve arbitrary

@@ -146,7 +146,55 @@ fn published_full_report_has_only_reviewed_jq_target_divergences() {
             "numeric.policy-index-over".to_owned(),
             "result sequence, exit code, error class".to_owned(),
         ),
+        (
+            "date.range-error".to_owned(),
+            "result sequence, exit code, error class".to_owned(),
+        ),
+        (
+            "regex.unsupported-lookaround".to_owned(),
+            "result sequence, exit code, error class".to_owned(),
+        ),
     ]);
     assert_eq!(actual, expected, "unreviewed jq-target compatibility drift");
     assert_eq!(report.capability_counts.untested, 0);
+
+    for (case_id, expected_class) in [
+        (
+            "regex.unsupported-lookaround",
+            tq_test_support::compatibility::ErrorClass::UnsupportedCapability,
+        ),
+        (
+            "date.range-error",
+            tq_test_support::compatibility::ErrorClass::RuntimeRange,
+        ),
+        (
+            "environment.denied",
+            tq_test_support::compatibility::ErrorClass::RuntimePolicy,
+        ),
+        (
+            "platform.denied",
+            tq_test_support::compatibility::ErrorClass::RuntimePolicy,
+        ),
+    ] {
+        let case = report
+            .cases
+            .iter()
+            .find(|case| case.id == case_id)
+            .unwrap_or_else(|| panic!("missing published case {case_id}"));
+        let tq_observations = case
+            .observations
+            .iter()
+            .filter(|observation| observation.tool == ToolKind::Tq)
+            .collect::<Vec<_>>();
+        assert!(
+            !tq_observations.is_empty(),
+            "missing tq evidence for {case_id}"
+        );
+        assert!(
+            tq_observations
+                .iter()
+                .all(|observation| observation.error_class == Some(expected_class)),
+            "wrong tq error class for {case_id}"
+        );
+    }
 }

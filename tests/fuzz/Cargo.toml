@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+serde_json = "1.0.151"
 tq-core = { path = "../../crates/tq-core" }
 tq-cli = { path = "../../crates/tq-cli" }
 tq-toon = { path = "../../crates/tq-toon" }
@@ -65,6 +66,13 @@ bench = false
 [[bin]]
 name = "user_functions"
 path = "fuzz_targets/user_functions.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "regex_date_platform"
+path = "fuzz_targets/regex_date_platform.rs"
 test = false
 doc = false
 bench = false

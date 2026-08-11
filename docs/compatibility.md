@@ -70,8 +70,11 @@ intentionally small:
 | `numeric.policy-digits-over` | result/exit/error | bounded numeric digit envelope |
 | `numeric.policy-exponent-over` | result/exit/error | bounded exponent expansion envelope |
 | `numeric.policy-index-over` | result/exit/error | bounded index envelope |
+| `date.range-error` | result/exit/error | portable UTC support is intentionally bounded to years 0000 through 9999 |
+| `regex.unsupported-lookaround` | result/exit/error | the linear-time regex engine rejects Oniguruma look-around |
 
-Features outside the MVP have stable unsupported or deferred status. These
-features include labels and breaks, regex, date, platform, and environment
-built-ins. Each
-feature has a separate OpenSpec change under `openspec/changes/`.
+Features outside the MVP have stable unsupported or deferred status. Labels
+and breaks remain deferred. Regex and UTC date built-ins are supported; ambient
+environment, clock, local-timezone, and input-metadata access requires explicit
+capability flags. Engine and release-host differences are documented in
+`docs/jq-regex-date-platform.md`.

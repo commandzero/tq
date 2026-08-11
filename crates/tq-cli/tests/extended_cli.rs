@@ -16,8 +16,19 @@ struct Outcome {
 }
 
 fn tq(arguments: &[&str], stdin: &[u8]) -> Outcome {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_tq"))
-        .args(arguments)
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tq"));
+    command.args(arguments);
+    run_tq(command, stdin)
+}
+
+fn tq_with_environment(arguments: &[&str], stdin: &[u8], key: &str, value: &str) -> Outcome {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tq"));
+    command.args(arguments).env(key, value);
+    run_tq(command, stdin)
+}
+
+fn run_tq(mut command: Command, stdin: &[u8]) -> Outcome {
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -35,6 +46,71 @@ fn tq(arguments: &[&str], stdin: &[u8]) -> Outcome {
         stdout: output.stdout,
         stderr: output.stderr,
     }
+}
+
+#[test]
+fn denied_ambient_access_redacts_diagnostics_and_report_observations() {
+    use tq_test_support::compatibility::{
+        ErrorClass, FixtureFormat, ObservationState, ProcessStatus, ToolKind, ToolObservation,
+        encode_hex,
+    };
+
+    const SENTINEL: &str = "tq-redaction-sentinel-never-report-this";
+    let output = tq_with_environment(
+        &["--output-format", "json", "-c", "env"],
+        b"null\n",
+        "TQ_REDACTION_SENTINEL",
+        SENTINEL,
+    );
+    assert_eq!(output.code, 5);
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("capability policy"));
+    assert!(
+        !output
+            .stderr
+            .windows(SENTINEL.len())
+            .any(|bytes| bytes == SENTINEL.as_bytes())
+    );
+
+    let observation = ToolObservation {
+        tool: ToolKind::Tq,
+        input_format: Some(FixtureFormat::Json),
+        state: ObservationState::Executed,
+        results: Vec::new(),
+        stdout_hex: Some(encode_hex(&output.stdout)),
+        raw_stdout_hex: None,
+        stderr_hex: Some(encode_hex(&output.stderr)),
+        process_status: Some(ProcessStatus::Exited),
+        exit_code: Some(output.code),
+        error_class: Some(ErrorClass::RuntimePolicy),
+        wall_time_micros: Some(0),
+        note: None,
+    };
+    let report_bytes = serde_json::to_vec(&observation).expect("compatibility observation JSON");
+    assert!(
+        !report_bytes
+            .windows(SENTINEL.len())
+            .any(|bytes| bytes == SENTINEL.as_bytes())
+    );
+}
+
+#[test]
+fn regex_and_date_failures_keep_distinct_cli_experiences() {
+    let unsupported = tq(
+        &["--output-format", "json", "-c", r#"test("(?=a)")"#],
+        b"\"a\"\n",
+    );
+    assert_eq!(unsupported.code, 2);
+    assert!(unsupported.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("not supported"));
+
+    let range = tq(
+        &["--output-format", "json", "-c", "todateiso8601"],
+        b"253402300800\n",
+    );
+    assert_eq!(range.code, 5);
+    assert!(range.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&range.stderr).contains("numeric range error"));
 }
 
 #[test]

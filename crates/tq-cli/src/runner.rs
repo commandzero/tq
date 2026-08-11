@@ -13,7 +13,7 @@ use std::{
 
 use thiserror::Error;
 use tq_core::{
-    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
+    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events, Number,
     PathComponent, Plan, PlanKind, Query, ResolveOptions, Resolved, Value, Vm, VmError, VmLimits,
     VmObservations, analyze_with_context, parse_bytes, resolve,
 };
@@ -29,6 +29,11 @@ use crate::{
 };
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
+const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
+const INPUT_FILENAME: &str = "__tq_input_filename";
+const INPUT_LINE_NUMBER: &str = "__tq_input_line_number";
 
 /// Command execution failure with a stable exit category.
 #[derive(Debug, Error)]
@@ -89,7 +94,9 @@ impl RunError {
     #[must_use]
     pub fn status(&self) -> ExitStatus {
         match self {
-            Self::Cli(CliError::Unsupported(_)) | Self::Unsupported(_) => ExitStatus::Unsupported,
+            Self::Cli(CliError::Unsupported(_))
+            | Self::Unsupported(_)
+            | Self::Runtime(VmError::Unsupported { .. }) => ExitStatus::Unsupported,
             Self::Cli(_) | Self::Io(_) | Self::IoPath { .. } => ExitStatus::Usage,
             Self::Compile(_) => ExitStatus::Compile,
             Self::Resource(_)
@@ -242,7 +249,11 @@ fn run_filter<R: Read, W: Write, E: Write>(
     let (query_name, query) = load_filter(options)?;
     let variables = parse_external_arguments(options)?;
     let resolve_options = ResolveOptions {
-        variables: variables.keys().cloned().collect::<BTreeSet<_>>(),
+        variables: variables
+            .keys()
+            .filter(|name| !name.starts_with("__tq_"))
+            .cloned()
+            .collect::<BTreeSet<_>>(),
         module_roots: options.module_paths.clone(),
         module_limit: options.limits.depth,
         module_bytes: usize::try_from(options.limits.input_bytes)
@@ -440,6 +451,18 @@ fn validate_capability_policy(options: &RunOptions) -> Result<(), RunError> {
     if options.color == ColorMode::Always && !options.capability_policy.terminal {
         return Err(CliError::Incompatible(
             "--color-output is disabled by terminal capability policy".to_owned(),
+        )
+        .into());
+    }
+    if options.allow_environment && !options.capability_policy.environment {
+        return Err(CliError::Incompatible(
+            "environment access is disabled by capability policy".to_owned(),
+        )
+        .into());
+    }
+    if options.allow_platform && !options.capability_policy.platform {
+        return Err(CliError::Incompatible(
+            "platform access is disabled by capability policy".to_owned(),
         )
         .into());
     }
@@ -1358,6 +1381,8 @@ fn vm_limits(options: &RunOptions) -> VmLimits {
         path_stack: options.limits.depth,
         call_stack: options.limits.depth.saturating_mul(4),
         output_bytes: usize::try_from(options.limits.output_bytes).unwrap_or(usize::MAX),
+        regex_pattern_bytes: options.limits.token_bytes,
+        regex_input_bytes: usize::try_from(options.limits.input_bytes).unwrap_or(usize::MAX),
         ..VmLimits::default()
     }
 }
@@ -1622,6 +1647,33 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
         (Arc::from("positional"), Value::array(positional)),
     ]);
     values.insert(Arc::from("ARGS"), Value::object(arguments));
+    if options.allow_environment && options.capability_policy.environment {
+        let environment = std::env::vars_os()
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            .map(|(name, value)| (Arc::from(name), Value::string(value)))
+            .collect::<tq_core::Object>();
+        values.insert(Arc::from(AMBIENT_ENVIRONMENT), Value::object(environment));
+    }
+    values.insert(
+        Arc::from(AMBIENT_PLATFORM),
+        Value::Bool(options.allow_platform && options.capability_policy.platform),
+    );
+    let input_filename = if options.null_input {
+        "<null-input>".to_owned()
+    } else {
+        options
+            .files
+            .first()
+            .filter(|path| *path != Path::new("-"))
+            .map_or_else(|| "<stdin>".to_owned(), |path| path.display().to_string())
+    };
+    values.insert(Arc::from(INPUT_FILENAME), Value::string(input_filename));
+    values.insert(
+        Arc::from(INPUT_LINE_NUMBER),
+        Value::Number(Number::parse("1").expect("one is an admitted number")),
+    );
     Ok(values)
 }
 
@@ -1885,6 +1937,53 @@ mod tests {
         let mut stderr = Vec::new();
         let status = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
         (status, stdout, stderr)
+    }
+
+    #[test]
+    fn ambient_builtins_are_denied_by_default_and_admitted_explicitly() {
+        let (denied, output, error) = execute(&["--output-format", "json", "-c", "env"], b"null\n");
+        assert!(denied.is_err());
+        assert!(output.is_empty());
+        let error = String::from_utf8(error).expect("UTF-8 stderr");
+        assert!(error.is_empty(), "run_with_io returns errors to its caller");
+
+        for query in ["now", "input_filename"] {
+            let (denied, output, error) =
+                execute(&["--output-format", "json", "-c", query], b"null\n");
+            let denied = denied.expect_err("platform access should be denied by default");
+            assert_eq!(denied.status(), ExitStatus::Runtime);
+            assert!(denied.to_string().contains("capability policy"));
+            assert!(output.is_empty());
+            assert!(error.is_empty());
+        }
+
+        let (allowed, output, error) = execute(
+            &[
+                "--allow-environment",
+                "--output-format",
+                "json",
+                "-c",
+                "env | type",
+            ],
+            b"null\n",
+        );
+        assert_eq!(allowed.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"\"object\"\n");
+        assert!(error.is_empty());
+
+        let (platform, output, error) = execute(
+            &[
+                "--allow-platform",
+                "--output-format",
+                "json",
+                "-c",
+                "[input_filename, input_line_number, (now | type)]",
+            ],
+            b"null\n",
+        );
+        assert_eq!(platform.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[\"<stdin>\",1,\"number\"]\n");
+        assert!(error.is_empty());
     }
 
     #[derive(Default)]

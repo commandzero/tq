@@ -19,6 +19,7 @@ fuzz_target!(|data: &[u8]| {
                 path_stack: 64,
                 fork_stack: 64,
                 output_bytes: 4096,
+                ..VmLimits::default()
             },
         );
         for _ in 0..64 {

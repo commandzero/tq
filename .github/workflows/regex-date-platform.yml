@@ -1,0 +1,35 @@
+name: Regex, date, and platform contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/regex-date-platform.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/tq-cli/**"
+      - "crates/tq-core/**"
+      - "crates/tq-test-support/**"
+      - "tests/compatibility/cases/regex-date-platform.jsonl"
+      - "tests/platform/**"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-host-contract:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify UTC boundaries and portable regex behavior
+        run: cargo test -p tq-core regex_date_platform_release_host_contract
+      - name: Verify ambient policy and redaction
+        run: cargo test -p tq-cli ambient

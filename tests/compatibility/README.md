@@ -17,8 +17,9 @@ examples below before you move a filter with advanced jq language features.
 | Folds | `reduce .items[] as $x (0; . + $x)` | Supported |
 | Recursive descent | `.. \| scalars` | Supported |
 | Interpolation | `"name=\(.name)"` | Supported |
-| Regular expressions | `test("^prod-")` | Deferred |
-| Time and environment | `now`, `env.HOME` | Deferred |
+| Regular expressions | `test("^prod-")` | Supported with documented engine differences |
+| UTC date/time | `fromdateiso8601`, `gmtime` | Supported |
+| Local time and environment | `now`, `env.HOME` | Supported with explicit capability flags |
 
 Important migration differences:
 
@@ -28,10 +29,11 @@ Important migration differences:
   structured default is TOON Text Sequence.
 - YAML output uses exact-number-preserving YAML 1.2 flow syntax.
 - `-L` is repeatable and searches only explicit, confined module roots.
+- `env` requires `--allow-environment`; clock, timezone, and input metadata
+  require `--allow-platform`.
 
 The generated report records current capability counts and all raw-byte
-adaptations. Its next priorities are labels/breaks and regex/date/platform
-built-ins.
+adaptations. Its next priority is labels and breaks.
 
 The complete evidence is in [coverage-v1.json](reviews/coverage-v1.json). The
 older [reference candidate](baselines/jq-yq-mvp-v1.json) compares jq and yq

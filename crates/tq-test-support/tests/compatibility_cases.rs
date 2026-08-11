@@ -290,16 +290,7 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
             "result.partial",
         ],
     );
-    assert_capabilities(
-        "deferred.jsonl",
-        &[
-            "deferred.labels",
-            "deferred.regex",
-            "deferred.dates",
-            "deferred.environment",
-            "deferred.platform-io",
-        ],
-    );
+    assert_capabilities("deferred.jsonl", &["deferred.labels"]);
 
     let deferred = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -311,6 +302,35 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
         assert_eq!(case["classification"], "deferred", "line {}", index + 1);
         assert_eq!(case["status"], "deferred", "line {}", index + 1);
     }
+}
+
+#[test]
+fn regex_date_and_platform_cases_cover_portable_and_governed_behavior() {
+    assert_capabilities(
+        "regex-date-platform.jsonl",
+        &[
+            "regex.test",
+            "regex.match",
+            "regex.capture",
+            "regex.scan",
+            "regex.split",
+            "regex.splits",
+            "regex.sub",
+            "regex.gsub",
+            "regex.unsupported",
+            "date.fromdateiso8601",
+            "date.todateiso8601",
+            "date.strptime",
+            "date.strftime",
+            "date.range",
+            "date.localtime",
+            "environment.snapshot",
+            "environment.denied",
+            "platform.denied",
+            "platform.input-filename",
+            "platform.now",
+        ],
+    );
 }
 
 #[test]
