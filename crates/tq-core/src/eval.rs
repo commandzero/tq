@@ -17,7 +17,13 @@ use crate::{
     Bytecode, Number, Object, Path, PathComponent, Value, VmError, VmLimits, VmObservations,
     ast::{AssignmentOperator, BinaryOperator, ParameterKind, UnaryOperator},
     bytecode::{InterpolationOperand, KeyOperand, Operation},
+    stdlib,
 };
+
+pub(crate) const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
+pub(crate) const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
+pub(crate) const INPUT_FILENAME: &str = "__tq_input_filename";
+pub(crate) const INPUT_LINE_NUMBER: &str = "__tq_input_line_number";
 
 type Environment = BTreeMap<Arc<str>, Value>;
 type Outcomes = Vec<Result<Value, VmError>>;
@@ -2665,10 +2671,170 @@ impl Evaluator<'_> {
                 };
                 one_error(VmError::Runtime { message })
             }
+            "test" | "match" | "capture" | "scan" | "split" | "splits" | "sub" | "gsub" => {
+                self.regex_call(name, arguments, input, environment, depth)
+            }
+            "fromdate" | "fromdateiso8601" => vec![stdlib::fromdate_iso8601(input)],
+            "todate" | "todateiso8601" => {
+                vec![stdlib::todate_iso8601(input, self.limits.output_bytes)]
+            }
+            "gmtime" => vec![stdlib::gmtime(input)],
+            "localtime" => vec![stdlib::localtime(input, ambient_platform(environment))],
+            "mktime" => vec![stdlib::mktime(input)],
+            "strptime" => {
+                self.argument_values(
+                    arguments,
+                    input,
+                    environment,
+                    depth,
+                    0,
+                    |format| match format {
+                        Value::String(format) => stdlib::strptime(input, format),
+                        value => Err(type_error("strptime", value)),
+                    },
+                )
+            }
+            "strftime" => {
+                self.argument_values(
+                    arguments,
+                    input,
+                    environment,
+                    depth,
+                    0,
+                    |format| match format {
+                        Value::String(format) => {
+                            stdlib::strftime(input, format, self.limits.output_bytes)
+                        }
+                        value => Err(type_error("strftime", value)),
+                    },
+                )
+            }
+            "strflocaltime" => self.argument_values(
+                arguments,
+                input,
+                environment,
+                depth,
+                0,
+                |format| match format {
+                    Value::String(format) => stdlib::strflocaltime(
+                        input,
+                        format,
+                        ambient_platform(environment),
+                        self.limits.output_bytes,
+                    ),
+                    value => Err(type_error("strflocaltime", value)),
+                },
+            ),
+            "now" => vec![stdlib::now(ambient_platform(environment))],
+            "env" => vec![ambient_environment(environment)],
+            "input_filename" => vec![ambient_value(environment, INPUT_FILENAME, "input_filename")],
+            "input_line_number" => vec![ambient_value(
+                environment,
+                INPUT_LINE_NUMBER,
+                "input_line_number",
+            )],
             _ => one_error(VmError::Unsupported {
                 operation: format!("builtin {name}").into(),
             }),
         }
+    }
+
+    fn regex_call(
+        &self,
+        name: &str,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+    ) -> Outcomes {
+        let Value::String(input) = input else {
+            return one_error(type_error(name, input));
+        };
+        let Some(pattern_node) = arguments.first() else {
+            return one_error(invalid("regex pattern argument missing"));
+        };
+        let pattern_values = self.node(
+            *pattern_node,
+            &Value::String(Arc::clone(input)),
+            environment,
+            depth,
+        );
+        let flags_index = usize::from(matches!(name, "sub" | "gsub")) + 1;
+        let flag_values = if let Some(flags) = arguments.get(flags_index) {
+            self.node(
+                *flags,
+                &Value::String(Arc::clone(input)),
+                environment,
+                depth,
+            )
+        } else {
+            vec![Ok(Value::string(""))]
+        };
+        let mut output = Vec::new();
+        for pattern in &pattern_values {
+            let pattern = match pattern {
+                Ok(Value::String(pattern)) => pattern,
+                Ok(value) => {
+                    output.push(Err(type_error(name, value)));
+                    continue;
+                }
+                Err(error) => {
+                    output.push(Err(error.clone()));
+                    continue;
+                }
+            };
+            for flags in &flag_values {
+                let flags = match flags {
+                    Ok(Value::String(flags)) => flags,
+                    Ok(value) => {
+                        output.push(Err(type_error(name, value)));
+                        continue;
+                    }
+                    Err(error) => {
+                        output.push(Err(error.clone()));
+                        continue;
+                    }
+                };
+                let result = match name {
+                    "test" => stdlib::regex_test(input, pattern, flags, self.limits)
+                        .map(|value| vec![value]),
+                    "match" => stdlib::regex_matches(input, pattern, flags, self.limits),
+                    "capture" => stdlib::regex_capture(input, pattern, flags, self.limits),
+                    "scan" => stdlib::regex_scan(input, pattern, flags, self.limits),
+                    "split" => stdlib::regex_split(input, pattern, flags, false, self.limits),
+                    "splits" => stdlib::regex_split(input, pattern, flags, true, self.limits),
+                    "sub" | "gsub" => {
+                        let Some(replacement_node) = arguments.get(1) else {
+                            return one_error(invalid("regex replacement argument missing"));
+                        };
+                        stdlib::regex_substitute(
+                            input,
+                            pattern,
+                            flags,
+                            name == "gsub",
+                            self.limits,
+                            |context| match first_value(self.node(
+                                *replacement_node,
+                                context,
+                                environment,
+                                depth,
+                            )) {
+                                Ok(Value::String(value)) => Ok(value),
+                                Ok(value) => Err(type_error(name, &value)),
+                                Err(error) => Err(error),
+                            },
+                        )
+                        .map(|value| vec![value])
+                    }
+                    _ => unreachable!("regex dispatch is exhaustive"),
+                };
+                match result {
+                    Ok(values) => output.extend(values.into_iter().map(Ok)),
+                    Err(error) => output.push(Err(error)),
+                }
+            }
+        }
+        output
     }
 
     fn argument_values(
@@ -3038,6 +3204,32 @@ fn invalid(message: &'static str) -> VmError {
 
 fn resource(resource: &'static str) -> VmError {
     VmError::Resource { resource }
+}
+
+fn ambient_platform(environment: &Environment) -> bool {
+    matches!(environment.get(AMBIENT_PLATFORM), Some(Value::Bool(true)))
+}
+
+fn ambient_environment(environment: &Environment) -> Result<Value, VmError> {
+    match environment.get(AMBIENT_ENVIRONMENT) {
+        Some(Value::Object(values)) => Ok(Value::Object(Arc::clone(values))),
+        _ => Err(runtime(
+            "env requires environment access permitted by capability policy".to_owned(),
+        )),
+    }
+}
+
+fn ambient_value(environment: &Environment, key: &str, operation: &str) -> Result<Value, VmError> {
+    if !ambient_platform(environment) {
+        return Err(runtime(format!(
+            "{operation} requires platform access permitted by capability policy"
+        )));
+    }
+    environment.get(key).cloned().ok_or_else(|| {
+        runtime(format!(
+            "{operation} metadata is unavailable for this input mode"
+        ))
+    })
 }
 
 fn type_name(value: &Value) -> &'static str {
@@ -3502,6 +3694,8 @@ mod tests {
         },
     };
 
+    use indexmap::IndexMap;
+
     use super::Value;
     use crate::{ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
 
@@ -3540,6 +3734,17 @@ mod tests {
         values
     }
 
+    fn first_error_with_limits(query: &str, input: &str, limits: VmLimits) -> crate::VmError {
+        let plan = analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap())
+            .compile()
+            .unwrap()
+            .document_plan();
+        let input: Value = serde_json::from_str(input).unwrap();
+        Vm::new(&plan, input, limits)
+            .next_result()
+            .expect_err("query should fail before producing a result")
+    }
+
     fn json(values: Vec<Result<Value, String>>) -> Vec<String> {
         values
             .into_iter()
@@ -3547,6 +3752,126 @@ mod tests {
                 value.map_or_else(|error| format!("error:{error}"), |value| value.to_string())
             })
             .collect()
+    }
+
+    #[test]
+    fn regex_builtins_match_jq_unicode_captures_scans_splits_and_substitution() {
+        assert_eq!(
+            json(run(r#"match("a"; "g")"#, r#""éaéa""#)),
+            vec![
+                r#"{"offset":1,"length":1,"string":"a","captures":[]}"#,
+                r#"{"offset":3,"length":1,"string":"a","captures":[]}"#,
+            ]
+        );
+        assert_eq!(
+            json(run(r#"capture("(?<x>a)(?<y>z)?")"#, r#""a""#)),
+            vec![r#"{"x":"a","y":null}"#]
+        );
+        assert_eq!(
+            json(run(r#"scan("([a-z]+)([0-9]+)")"#, r#""ab12cd34""#)),
+            vec![r#"["ab","12"]"#, r#"["cd","34"]"#]
+        );
+        assert_eq!(
+            json(run(
+                r#"sub("(?<x>[a-z]+)(?<n>[0-9]+)"; "\(.n)-\(.x)")"#,
+                r#""abc123""#,
+            )),
+            vec![r#""123-abc""#]
+        );
+        assert!(json(run(r#"test("(?=a)")"#, r#""a""#))[0].contains("not supported"));
+    }
+
+    #[test]
+    fn regex_pattern_input_and_compiled_program_limits_are_resources() {
+        for (query, limits, expected) in [
+            (
+                r#"test("ab")"#,
+                VmLimits {
+                    regex_pattern_bytes: 1,
+                    ..VmLimits::default()
+                },
+                "regex-pattern-bytes",
+            ),
+            (
+                r#"test("ab")"#,
+                VmLimits {
+                    regex_input_bytes: 1,
+                    ..VmLimits::default()
+                },
+                "regex-input-bytes",
+            ),
+            (
+                r#"test("(?:[A-Za-z0-9_]{1,100}){100}")"#,
+                VmLimits {
+                    regex_compiled_bytes: 1,
+                    ..VmLimits::default()
+                },
+                "regex-compiled-bytes",
+            ),
+        ] {
+            let error = first_error_with_limits(query, r#""ab""#, limits);
+            assert_eq!(error, crate::VmError::Resource { resource: expected });
+        }
+    }
+
+    #[test]
+    fn utc_date_builtins_round_trip_with_stable_arrays() {
+        assert_eq!(
+            json(run("fromdateiso8601", r#""2015-03-05T23:51:47Z""#)),
+            vec!["1425599507"]
+        );
+        assert_eq!(
+            json(run("gmtime", "1425599507")),
+            vec!["[2015,2,5,23,51,47,4,63]"]
+        );
+        assert_eq!(
+            json(run(
+                r#"gmtime | strftime("%Y-%m-%dT%H:%M:%SZ")"#,
+                "1425599507",
+            )),
+            vec![r#""2015-03-05T23:51:47Z""#]
+        );
+        assert!(matches!(
+            first_error_with_limits("todateiso8601", "253402300800", VmLimits::default()),
+            crate::VmError::NumericRange { .. }
+        ));
+    }
+
+    #[test]
+    fn regex_date_platform_release_host_contract_covers_utc_boundaries() {
+        for timestamp in ["0000-01-01T00:00:00Z", "9999-12-30T22:00:00Z"] {
+            let input = serde_json::to_string(timestamp).unwrap();
+            assert_eq!(
+                json(run("fromdateiso8601 | todateiso8601", &input)),
+                [input]
+            );
+        }
+    }
+
+    #[test]
+    fn ambient_builtins_require_reserved_policy_admission_without_echoing_values() {
+        assert!(json(run("env", "null"))[0].contains("capability policy"));
+        let mut variables = BTreeMap::new();
+        variables.insert(
+            Arc::from(super::AMBIENT_ENVIRONMENT),
+            Value::object(IndexMap::from([(
+                Arc::from("SECRET"),
+                Value::string("redacted"),
+            )])),
+        );
+        variables.insert(Arc::from(super::AMBIENT_PLATFORM), Value::Bool(true));
+        variables.insert(
+            Arc::from(super::INPUT_FILENAME),
+            Value::string("fixture.json"),
+        );
+        assert_eq!(
+            json(run_with_variables("env | type", "null", variables.clone())),
+            vec![r#""object""#]
+        );
+        assert_eq!(
+            json(run_with_variables("input_filename", "null", variables)),
+            vec![r#""fixture.json""#]
+        );
     }
 
     #[test]

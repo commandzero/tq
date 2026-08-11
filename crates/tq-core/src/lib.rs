@@ -28,6 +28,7 @@ mod parser;
 mod path;
 mod phase;
 mod resolve;
+mod stdlib;
 mod value;
 mod vm;
 

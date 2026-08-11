@@ -77,6 +77,10 @@ pub enum ColorMode {
 
 /// Ambient capability policy for library callers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent ambient authorities remain explicit and denyable"
+)]
 pub struct CapabilityPolicy {
     /// Permit filter, input, argument, and report file access.
     pub filesystem: bool,
@@ -84,6 +88,8 @@ pub struct CapabilityPolicy {
     pub environment: bool,
     /// Permit ambient terminal inspection and explicit color.
     pub terminal: bool,
+    /// Permit clock, local-timezone, and input-source metadata inspection.
+    pub platform: bool,
 }
 
 impl Default for CapabilityPolicy {
@@ -92,6 +98,7 @@ impl Default for CapabilityPolicy {
             filesystem: true,
             environment: true,
             terminal: true,
+            platform: true,
         }
     }
 }
@@ -202,6 +209,10 @@ pub struct RunOptions {
     pub unbuffered: bool,
     /// Platform binary-output request.
     pub binary: bool,
+    /// Query may inspect an explicitly admitted environment snapshot.
+    pub allow_environment: bool,
+    /// Query may inspect clock, timezone, and input-source metadata.
+    pub allow_platform: bool,
     /// Canonical TOON writer controls.
     pub toon_writer: WriterConfig,
     /// External variables in declaration order.
@@ -339,6 +350,18 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         syntax: "--unbuffered",
         value: false,
         description: "flush after every output",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--allow-environment",
+        value: false,
+        description: "permit env to inspect a redaction-safe process snapshot",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--allow-platform",
+        value: false,
+        description: "permit clock, timezone, and input metadata built-ins",
     },
     OptionSpec {
         short: None,
@@ -538,6 +561,8 @@ where
     let mut color = ColorMode::Auto;
     let mut unbuffered = false;
     let mut binary = false;
+    let mut allow_environment = false;
+    let mut allow_platform = false;
     let mut toon_writer = WriterConfig::default();
     let mut external = Vec::new();
     let mut external_names = BTreeSet::new();
@@ -608,6 +633,8 @@ where
             "-M" | "--monochrome-output" => color = ColorMode::Never,
             "--tab" => json_indent = JsonIndent::Tabs,
             "--unbuffered" => unbuffered = true,
+            "--allow-environment" => allow_environment = true,
+            "--allow-platform" => allow_platform = true,
             "-b" | "--binary" => binary = true,
             "-n" | "--null-input" => null_input = true,
             "-R" | "--raw-input" => raw_input = true,
@@ -809,6 +836,16 @@ where
             "--color-output is disabled by terminal capability policy".to_owned(),
         ));
     }
+    if allow_environment && !capability_policy.environment {
+        return Err(CliError::Incompatible(
+            "environment access is disabled by capability policy".to_owned(),
+        ));
+    }
+    if allow_platform && !capability_policy.platform {
+        return Err(CliError::Incompatible(
+            "platform access is disabled by capability policy".to_owned(),
+        ));
+    }
     if (raw_output || join_output) && framing == ToonFraming::Unframed {
         return Err(CliError::Incompatible(
             "raw output has its own separators and cannot be --unframed".to_owned(),
@@ -854,6 +891,8 @@ where
         color,
         unbuffered,
         binary,
+        allow_environment,
+        allow_platform,
         toon_writer,
         arguments: external,
         positional_argument_kind,
@@ -1102,5 +1141,30 @@ mod tests {
             parse_args_with_policy(["--output-format", "json", "-C", "."], denied_terminal),
             Err(CliError::Incompatible(message)) if message.contains("terminal")
         ));
+
+        let denied_environment = CapabilityPolicy {
+            environment: false,
+            ..CapabilityPolicy::default()
+        };
+        assert!(matches!(
+            parse_args_with_policy(["--allow-environment", "env"], denied_environment),
+            Err(CliError::Incompatible(message)) if message.contains("environment")
+        ));
+
+        let denied_platform = CapabilityPolicy {
+            platform: false,
+            ..CapabilityPolicy::default()
+        };
+        assert!(matches!(
+            parse_args_with_policy(["--allow-platform", "now"], denied_platform),
+            Err(CliError::Incompatible(message)) if message.contains("platform")
+        ));
+
+        let Command::Run(run) = parse_args(["--allow-environment", "--allow-platform", "."])
+            .expect("ambient admission flags")
+        else {
+            panic!("run command")
+        };
+        assert!(run.allow_environment && run.allow_platform);
     }
 }

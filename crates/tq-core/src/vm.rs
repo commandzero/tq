@@ -32,6 +32,12 @@ pub struct VmLimits {
     pub steps: u64,
     /// Maximum bytes in one materialized interpolation result.
     pub output_bytes: usize,
+    /// Maximum UTF-8 bytes admitted in one regex pattern.
+    pub regex_pattern_bytes: usize,
+    /// Maximum UTF-8 bytes searched by one regex operation.
+    pub regex_input_bytes: usize,
+    /// Maximum compiled regex program bytes requested from the engine.
+    pub regex_compiled_bytes: usize,
 }
 
 impl Default for VmLimits {
@@ -43,6 +49,9 @@ impl Default for VmLimits {
             fork_stack: 4096,
             steps: 10_000_000,
             output_bytes: 8 * 1024 * 1024 * 1024,
+            regex_pattern_bytes: 64 * 1024,
+            regex_input_bytes: 64 * 1024 * 1024,
+            regex_compiled_bytes: 2 * 1024 * 1024,
         }
     }
 }
@@ -79,6 +88,12 @@ pub enum VmError {
         /// Stable resource name.
         resource: &'static str,
     },
+    /// A numeric value is outside the portable range admitted by an operation.
+    #[error("numeric range error: {message}")]
+    NumericRange {
+        /// Stable range failure message.
+        message: Arc<str>,
+    },
     /// Validated bytecode invariant was violated during execution.
     #[error("invalid executable state: {message}")]
     InvalidProgram {
@@ -102,6 +117,7 @@ impl VmError {
     pub fn diagnostic(&self) -> Diagnostic {
         let class = match self {
             Self::Resource { .. } => DiagnosticClass::Resource,
+            Self::NumericRange { .. } => DiagnosticClass::NumericRange,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,
             Self::Interrupted => DiagnosticClass::Cancelled,
             Self::Runtime { .. } | Self::InvalidProgram { .. } => DiagnosticClass::Runtime,

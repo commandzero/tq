@@ -18,6 +18,10 @@ pub enum ErrorClass {
     InputParse,
     /// Evaluation encountered an invalid type, path, or explicit error.
     RuntimeTypePath,
+    /// Evaluation rejected a numeric value outside its portable range.
+    RuntimeRange,
+    /// Evaluation denied ambient access under the active capability policy.
+    RuntimePolicy,
     /// A configured resource limit was exceeded.
     Resource,
     /// Harness wall-time limit was exceeded.
@@ -199,11 +203,21 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
     if code == 0 {
         return None;
     }
+    let stderr = String::from_utf8_lossy(&outcome.stderr).to_ascii_lowercase();
+    let unsupported = stderr.contains("unsupported")
+        || stderr.contains("not supported")
+        || stderr.contains("not implemented");
     if code == 2 && matches!(tool, ToolKind::Jq | ToolKind::Yq | ToolKind::Tq) {
+        if tool == ToolKind::Tq
+            && unsupported
+            && (stderr.contains("bytecode operation is not executable")
+                || stderr.contains("unsupported mode:"))
+        {
+            return Some(ErrorClass::UnsupportedCapability);
+        }
         return Some(ErrorClass::CliUsage);
     }
-    let stderr = String::from_utf8_lossy(&outcome.stderr).to_ascii_lowercase();
-    if stderr.contains("unsupported") || stderr.contains("not implemented") {
+    if unsupported {
         return Some(ErrorClass::UnsupportedCapability);
     }
     if stderr.contains("resource")
@@ -211,6 +225,12 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
         || stderr.contains("step limit")
     {
         return Some(ErrorClass::Resource);
+    }
+    if stderr.contains("numeric range error") {
+        return Some(ErrorClass::RuntimeRange);
+    }
+    if stderr.contains("capability policy") {
+        return Some(ErrorClass::RuntimePolicy);
     }
     if stderr.contains("parse error") && (tool == ToolKind::Jq || stderr.contains("input")) {
         return Some(ErrorClass::InputParse);

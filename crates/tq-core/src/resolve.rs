@@ -61,30 +61,52 @@ const BUILTINS: &[Builtin] = &[
     builtin("add", 0, 0, true),
     builtin("arrays", 0, 0, false),
     builtin("booleans", 0, 0, false),
+    builtin("capture", 1, 2, false),
     builtin("empty", 0, 0, false),
+    builtin("env", 0, 0, false),
     builtin("error", 0, 1, false),
     builtin("flatten", 0, 1, true),
+    builtin("fromdate", 0, 0, false),
+    builtin("fromdateiso8601", 0, 0, false),
+    builtin("gmtime", 0, 0, false),
+    builtin("gsub", 2, 3, false),
     builtin("has", 1, 1, false),
     builtin("in", 1, 1, false),
+    builtin("input_filename", 0, 0, false),
+    builtin("input_line_number", 0, 0, false),
     builtin("iterables", 0, 0, false),
     builtin("keys", 0, 0, true),
     builtin("keys_unsorted", 0, 0, false),
     builtin("length", 0, 0, false),
+    builtin("localtime", 0, 0, false),
     builtin("map", 1, 1, true),
     builtin("map_values", 1, 1, true),
     builtin("max", 0, 0, true),
+    builtin("match", 1, 2, false),
     builtin("min", 0, 0, true),
+    builtin("mktime", 0, 0, false),
     builtin("modulemeta", 0, 0, false),
     builtin("nulls", 0, 0, false),
+    builtin("now", 0, 0, false),
     builtin("numbers", 0, 0, false),
     builtin("objects", 0, 0, false),
     builtin("range", 1, 3, false),
     builtin("reverse", 0, 0, true),
+    builtin("scan", 1, 2, false),
     builtin("scalars", 0, 0, false),
     builtin("select", 1, 1, false),
     builtin("sort", 0, 0, true),
     builtin("sort_by", 1, 1, true),
+    builtin("split", 1, 2, false),
+    builtin("splits", 1, 2, false),
+    builtin("strftime", 1, 1, false),
+    builtin("strflocaltime", 1, 1, false),
+    builtin("strptime", 1, 1, false),
     builtin("strings", 0, 0, false),
+    builtin("sub", 2, 3, false),
+    builtin("test", 1, 2, false),
+    builtin("todate", 0, 0, false),
+    builtin("todateiso8601", 0, 0, false),
     builtin("tonumber", 0, 0, false),
     builtin("tostring", 0, 0, false),
     builtin("type", 0, 0, false),
@@ -1156,10 +1178,6 @@ impl Resolver {
 
 fn deferred_builtin(name: &str) -> Option<&'static str> {
     match name {
-        "env" => Some("environment"),
-        "fromdateiso8601" => Some("dates"),
-        "input_filename" => Some("platform-io"),
-        "test" => Some("regex"),
         "nan" => Some("nonfinite-result"),
         "recurse" | "walk" => Some("recursive-builtins"),
         _ => None,
@@ -1401,7 +1419,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_is_versioned_and_checks_arity_and_deferred_names() {
+    fn registry_is_versioned_and_checks_arity_and_new_builtin_names() {
         assert_eq!(BuiltinRegistry::VERSION, 1);
         assert!(BuiltinRegistry.get("sort_by").unwrap().blocking);
         assert_eq!(
@@ -1410,12 +1428,14 @@ mod tests {
                 .code,
             "TQ-RESOLVE-ARITY-001"
         );
-        assert_eq!(
-            resolve(parse("test(\"a\")").unwrap(), &ResolveOptions::default())
-                .unwrap_err()
-                .code,
-            "TQ-CAP-REGEX"
-        );
+        resolve(parse("test(\"a\")").unwrap(), &ResolveOptions::default()).unwrap();
+        resolve(
+            parse("fromdateiso8601").unwrap(),
+            &ResolveOptions::default(),
+        )
+        .unwrap();
+        resolve(parse("env").unwrap(), &ResolveOptions::default()).unwrap();
+        resolve(parse("input_filename").unwrap(), &ResolveOptions::default()).unwrap();
     }
 
     #[test]
@@ -1429,10 +1449,6 @@ mod tests {
             assert_eq!(parse(query).unwrap_err().code, code, "{query}");
         }
         let resolve_cases = [
-            ("test(\"a\")", "TQ-CAP-REGEX"),
-            ("fromdateiso8601", "TQ-CAP-DATES"),
-            ("env", "TQ-CAP-ENVIRONMENT"),
-            ("input_filename", "TQ-CAP-PLATFORM-IO"),
             ("nan", "TQ-CAP-NONFINITE-RESULT"),
             ("recurse", "TQ-CAP-RECURSIVE-BUILTINS"),
         ];

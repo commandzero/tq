@@ -110,3 +110,41 @@ fn timeout_and_signal_are_stable_error_classes() {
         Some(ErrorClass::Signal)
     );
 }
+
+#[test]
+fn tq_unsupported_range_and_policy_diagnostics_have_distinct_classes() {
+    for (stderr, expected) in [
+        (
+            "bytecode operation is not executable in this language wave: regex syntax is not supported by the selected engine",
+            ErrorClass::UnsupportedCapability,
+        ),
+        (
+            "numeric range error: todateiso8601 timestamp is outside the supported range",
+            ErrorClass::RuntimeRange,
+        ),
+        (
+            "env requires environment access permitted by capability policy",
+            ErrorClass::RuntimePolicy,
+        ),
+    ] {
+        let mut process = outcome(b"");
+        process.exit_code = Some(if expected == ErrorClass::UnsupportedCapability {
+            2
+        } else {
+            5
+        });
+        process.stderr = stderr.as_bytes().to_vec();
+        assert_eq!(
+            normalize_raw(ToolKind::Tq, &process).error_class,
+            Some(expected)
+        );
+    }
+
+    let mut unsupported_option = outcome(b"");
+    unsupported_option.exit_code = Some(2);
+    unsupported_option.stderr = b"tq: unsupported option '--unknown'".to_vec();
+    assert_eq!(
+        normalize_raw(ToolKind::Tq, &unsupported_option).error_class,
+        Some(ErrorClass::CliUsage)
+    );
+}

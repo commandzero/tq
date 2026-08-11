@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "reference": "jq 1.8.x",
+  "verification": {
+    "workflow": ".github/workflows/regex-date-platform.yml",
+    "matrix": ["ubuntu-latest", "macos-latest", "windows-latest"],
+    "utc_boundary_test": "cargo test -p tq-core regex_date_platform_release_host_contract",
+    "ambient_policy_test": "cargo test -p tq-cli ambient"
+  },
+  "release_hosts": {
+    "linux": {
+      "utc_range": "0000-01-01T00:00:00Z..=9999-12-30T22:00:00.999999999Z",
+      "local_timezone": "system configuration; requires --allow-platform",
+      "environment": "Unicode name/value pairs only; requires --allow-environment"
+    },
+    "macos": {
+      "utc_range": "0000-01-01T00:00:00Z..=9999-12-30T22:00:00.999999999Z",
+      "local_timezone": "system configuration; requires --allow-platform",
+      "environment": "Unicode name/value pairs only; requires --allow-environment"
+    },
+    "windows": {
+      "utc_range": "0000-01-01T00:00:00Z..=9999-12-30T22:00:00.999999999Z",
+      "local_timezone": "system configuration; requires --allow-platform",
+      "environment": "Unicode name/value pairs only; requires --allow-environment"
+    }
+  },
+  "portable_contract": {
+    "regex_offsets": "Unicode scalar-value indices",
+    "utc_epoch": "Unix seconds",
+    "denied_ambient_access": "stable policy error without ambient values",
+    "reports": "ambient values are never serialized unless the query explicitly returns them"
+  }
+}
