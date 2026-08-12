@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.36",
+  "rank": 36,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 34543829,
+    "title": "jq: Cannot index array with string",
+    "score": 115,
+    "url": "https://stackoverflow.com/questions/34543829/jq-cannot-index-array-with-string",
+    "body_html": "<p>I have the following in a file (which I will call &quot;myfile&quot;):</p>\n<pre><code>[{\n    &quot;id&quot;: 123,\n    &quot;name&quot;: &quot;John&quot;,\n    &quot;aux&quot;: [{\n        &quot;abc&quot;: &quot;random&quot;,\n        &quot;def&quot;: &quot;I want this&quot;\n    }],\n    &quot;blah&quot;: 23.11\n}]\n</code></pre>\n<p>I could parse it if the file did not have the first <code>[</code> and last <code>]</code> as follows:</p>\n<pre><code>$ cat myfile | jq -r '.aux[] | .def'\nI want this\n$\n</code></pre>\n<p>but with the <code>[</code> and <code>]</code> I get:</p>\n<pre><code>$ cat myfile | jq -r '.aux[] | .def'\njq: error: Cannot index array with string\n</code></pre>\n<p>How can I deal with the <code>[</code> and <code>]</code> using jq? (I'm sure I could parse them off with a different tool but I want to learn correct usage of jq.</p>\n"
+  },
+  "answer": {
+    "answer_id": 34544406,
+    "score": 190,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/34544406",
+    "body_html": "<p>It should be:</p>\n<pre class=\"lang-none prettyprint-override\"><code>jq -r '.[].aux[].def' file.json\n</code></pre>\n<p><code>.[]</code> iterates over the outer array, <code>.aux[]</code> then iterates over the the <code>aux</code> array of every node and prints the <code>.def</code> property.</p>\n<p>This will output:</p>\n<pre class=\"lang-none prettyprint-override\"><code>I want this\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | .aux[] | .[\"def\"]",
+    "input": [
+      {
+        "id": 123,
+        "name": "John",
+        "aux": [
+          {
+            "abc": "random",
+            "def": "I want this"
+          }
+        ],
+        "blah": 23.11
+      }
+    ]
+  }
+}

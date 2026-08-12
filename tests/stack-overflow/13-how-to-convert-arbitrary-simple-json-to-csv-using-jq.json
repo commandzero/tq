@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.13",
+  "rank": 13,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 32960857,
+    "title": "How to convert arbitrary simple JSON to CSV using jq?",
+    "score": 250,
+    "url": "https://stackoverflow.com/questions/32960857/how-to-convert-arbitrary-simple-json-to-csv-using-jq",
+    "body_html": "<p>Using <a href=\"https://stedolan.github.io/jq/\">jq</a>, how can arbitrary JSON encoding an array of shallow objects be converted to CSV?</p>\n\n<p>There are plenty of Q&amp;As on this site that cover specific data models which hard-code the fields, but answers to this question should work given any JSON, with the only restriction that it's an array of objects with scalar properties (no deep/complex/sub-objects, as flattening these is another question). The result should contain a header row giving the field names. Preference will be given to answers that preserve the field order of the first object, but it's not a requirement. Results may enclose all cells with double-quotes, or only enclose those that require quoting (e.g. 'a,b').</p>\n\n<h2>Examples</h2>\n\n<ol>\n<li><p>Input:</p>\n\n<pre><code>[\n    {\"code\": \"NSW\", \"name\": \"New South Wales\", \"level\":\"state\", \"country\": \"AU\"},\n    {\"code\": \"AB\", \"name\": \"Alberta\", \"level\":\"province\", \"country\": \"CA\"},\n    {\"code\": \"ABD\", \"name\": \"Aberdeenshire\", \"level\":\"council area\", \"country\": \"GB\"},\n    {\"code\": \"AK\", \"name\": \"Alaska\", \"level\":\"state\", \"country\": \"US\"}\n]\n</code></pre>\n\n<p>Possible output:</p>\n\n<pre><code>code,name,level,country\nNSW,New South Wales,state,AU\nAB,Alberta,province,CA\nABD,Aberdeenshire,council area,GB\nAK,Alaska,state,US\n</code></pre>\n\n<p>Possible output:</p>\n\n<pre><code>\"code\",\"name\",\"level\",\"country\"\n\"NSW\",\"New South Wales\",\"state\",\"AU\"\n\"AB\",\"Alberta\",\"province\",\"CA\"\n\"ABD\",\"Aberdeenshire\",\"council area\",\"GB\"\n\"AK\",\"Alaska\",\"state\",\"US\"\n</code></pre></li>\n<li><p>Input:</p>\n\n<pre><code>[\n    {\"name\": \"bang\", \"value\": \"!\", \"level\": 0},\n    {\"name\": \"letters\", \"value\": \"a,b,c\", \"level\": 0},\n    {\"name\": \"letters\", \"value\": \"x,y,z\", \"level\": 1},\n    {\"name\": \"bang\", \"value\": \"\\\"!\\\"\", \"level\": 1}\n]\n</code></pre>\n\n<p>Possible output:</p>\n\n<pre><code>name,value,level\nbang,!,0\nletters,\"a,b,c\",0\nletters,\"x,y,z\",1\nbang,\"\"\"!\"\"\",0\n</code></pre>\n\n<p>Possible output:</p>\n\n<pre><code>\"name\",\"value\",\"level\"\n\"bang\",\"!\",\"0\"\n\"letters\",\"a,b,c\",\"0\"\n\"letters\",\"x,y,z\",\"1\"\n\"bang\",\"\"\"!\"\"\",\"1\"\n</code></pre></li>\n</ol>\n"
+  },
+  "answer": {
+    "answer_id": 32965227,
+    "score": 332,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/32965227",
+    "body_html": "<p>First, obtain an array containing all the different object property names in your object array input. Those will be the columns of your CSV:</p>\n\n<pre><code>(map(keys) | add | unique) as $cols\n</code></pre>\n\n<p>Then, for each object in the object array input, map the column names you obtained to the corresponding properties in the object. Those will be the rows of your CSV.</p>\n\n<pre><code>map(. as $row | $cols | map($row[.])) as $rows\n</code></pre>\n\n<p>Finally, put the column names before the rows, as a header for the CSV, and pass the resulting row stream to the <code>@csv</code> filter.</p>\n\n<pre><code>$cols, $rows[] | @csv\n</code></pre>\n\n<p>All together now. Remember to use the <code>-r</code> flag to get the result as a raw string:</p>\n\n<pre><code>jq -r '(map(keys) | add | unique) as $cols | map(. as $row | $cols | map($row[.])) as $rows | $cols, $rows[] | @csv'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "map({\"code\": .code, \"name\": .name, \"level\": .level, \"country\": .country})",
+    "input": [
+      {
+        "code": "NSW",
+        "name": "New South Wales",
+        "level": "state",
+        "country": "AU"
+      },
+      {
+        "code": "AB",
+        "name": "Alberta",
+        "level": "province",
+        "country": "CA"
+      },
+      {
+        "code": "ABD",
+        "name": "Aberdeenshire",
+        "level": "council area",
+        "country": "GB"
+      },
+      {
+        "code": "AK",
+        "name": "Alaska",
+        "level": "state",
+        "country": "US"
+      }
+    ]
+  }
+}

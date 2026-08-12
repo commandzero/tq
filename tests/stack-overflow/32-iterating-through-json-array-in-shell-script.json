@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.32",
+  "rank": 32,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 33950596,
+    "title": "Iterating through JSON array in Shell script",
+    "score": 125,
+    "url": "https://stackoverflow.com/questions/33950596/iterating-through-json-array-in-shell-script",
+    "body_html": "<p>I have a JSON data as follows in data.json file</p>\n\n<pre><code>[\n  {\"original_name\":\"pdf_convert\",\"changed_name\":\"pdf_convert_1\"},\n  {\"original_name\":\"video_encode\",\"changed_name\":\"video_encode_1\"},\n  {\"original_name\":\"video_transcode\",\"changed_name\":\"video_transcode_1\"}\n]\n</code></pre>\n\n<p>I want to iterate through the array and extract the value for each element in a loop. I saw <a href=\"https://stedolan.github.io/jq/manual/\" rel=\"noreferrer\">jq</a>. I find it difficult to use it to iterate. How can I do that?</p>\n"
+  },
+  "answer": {
+    "answer_id": 33952539,
+    "score": 212,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/33952539",
+    "body_html": "<p>Just use a filter that would return each item in the array.  Then loop over the results, just make sure you use the compact output option (<code>-c</code>) so each result is put on a single line and is treated as one item in the loop.</p>\n\n<pre><code>jq -c '.[]' input.json | while read i; do\n    # do stuff with $i\ndone\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[]",
+    "input": [
+      {
+        "original_name": "pdf_convert",
+        "changed_name": "pdf_convert_1"
+      },
+      {
+        "original_name": "video_encode",
+        "changed_name": "video_encode_1"
+      },
+      {
+        "original_name": "video_transcode",
+        "changed_name": "video_transcode_1"
+      }
+    ]
+  }
+}

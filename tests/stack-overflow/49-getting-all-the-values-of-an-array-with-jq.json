@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.49",
+  "rank": 49,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 45523425,
+    "title": "getting all the values of an array with jq",
+    "score": 80,
+    "url": "https://stackoverflow.com/questions/45523425/getting-all-the-values-of-an-array-with-jq",
+    "body_html": "<p>I parse a json file with jq:</p>\n<pre class=\"lang-none prettyprint-override\"><code>jq .response[1].text file.json\n</code></pre>\n<p>It works fine, but each time I have to enter the number .response[2].text, .response[3].text etc. I want to get all the values at once (200 values)</p>\n<p>But when I do:</p>\n<pre class=\"lang-none prettyprint-override\"><code>jq .response[].text file.json\n</code></pre>\n<p>It gives an error: Cannot index number with string &quot;text&quot;</p>\n<p>The file looks like this:</p>\n<pre class=\"lang-json prettyprint-override\"><code>{\n  &quot;response&quot;: [\n    1000,\n    {\n      &quot;id&quot;: ,\n      &quot;date&quot;: ,\n      &quot;owner_id&quot;: ,\n      &quot;from_id&quot;: ,\n      &quot;post_type&quot;: &quot;post&quot;,\n      &quot;text&quot;: &quot;blabla&quot;,\n      &quot;attachment&quot;: {\n        &quot;type&quot;: &quot;photo&quot;,\n        &quot;photo&quot;: {\n          &quot;pid&quot;: ,\n          &quot;aid&quot;: -7,\n          &quot;owner_id&quot;: \n        }\n      },\n      &quot;attachments&quot;: [\n        {\n          &quot;type&quot;: &quot;photo&quot;,\n          &quot;photo&quot;: {\n          }\n        },\n        {\n          &quot;type&quot;: &quot;link&quot;,\n          &quot;link&quot;: {\n            &quot;url&quot;: &quot;&quot;,\n            &quot;title&quot;: &quot;&quot;,\n            &quot;description&quot;: &quot;&quot;,\n            &quot;target&quot;: &quot;external&quot;\n          }\n        }\n      ],\n      &quot;post_source&quot;: {\n        &quot;type&quot;: &quot;vk&quot;\n      },\n      &quot;comments&quot;: {\n        &quot;count&quot;: 0,\n        &quot;groups_can_post&quot;: true,\n        &quot;can_post&quot;: 1\n      },\n    },\n    {\n      &quot;id&quot;: ,\n      &quot;date&quot;: ,\n      &quot;owner_id&quot;: ,\n      &quot;from_id&quot;: ,\n      &quot;post_type&quot;: &quot;post&quot;,\n      &quot;text&quot;:    &quot;blabla&quot;,\n      &quot;attachment&quot;: {\n        &quot;type&quot;: &quot;link&quot;,\n        &quot;link&quot;: {\n          &quot;url&quot;: &quot;&quot;,\n          &quot;title&quot;: &quot;&quot;,\n          &quot;description&quot;: &quot;&quot;,\n          &quot;target&quot;: &quot;external&quot;,\n          &quot;\n        }\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 45524015,
+    "score": 105,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/45524015",
+    "body_html": "<p>Evidently one of the items in the array is a string. If your jq supports \"?\", then one possibility would be to use it:</p>\n\n<pre><code>.response[].text?\n</code></pre>\n\n<p>Another would be to check the type explicitly, e.g.:</p>\n\n<pre><code>.response[] | objects | .text\n</code></pre>\n\n<p>Yet another possibility:</p>\n\n<pre><code>.response[] | select(type==\"object\" and has(\"text\")) | .text\n</code></pre>\n\n<p>If you want to have a placeholder value when there is no \"text\" field:</p>\n\n<pre><code> .response[] | if type==\"object\" and has(\"text\") then .text else null end\n</code></pre>\n\n<p>So it really depends on your requirements and perhaps the version of jq that you are using.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".response[] | select(has(\"text\")) | .text",
+    "input": {
+      "response": [
+        {
+          "text": "first"
+        },
+        {
+          "status": 200
+        },
+        {
+          "text": "second"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.11",
+  "rank": 11,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 40027395,
+    "title": "Passing bash variable to jq",
+    "score": 281,
+    "url": "https://stackoverflow.com/questions/40027395/passing-bash-variable-to-jq",
+    "body_html": "<p>I have written a script to retrieve certain value from <code>file.json</code>. It works if I provide the value to jq <code>select</code>, but the variable doesn't seem to work (or I don't know how to use it).</p>\n\n<pre><code>#!/bin/sh\n\n#this works ***\nprojectID=$(cat file.json | jq -r '.resource[] | select(.username==\"myemail@hotmail.com\") | .id')\necho \"$projectID\"\n\nEMAILID=myemail@hotmail.com\n\n#this does not work *** no value is printed\nprojectID=$(cat file.json | jq -r '.resource[] | select(.username==\"$EMAILID\") | .id')\necho \"$projectID\"\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 40027637,
+    "score": 420,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/40027637",
+    "body_html": "<p>Consider also passing in the shell variable (EMAILID) as a jq variable (here also EMAILID, for the sake of illustration):</p>\n<pre><code>   projectID=$(jq -r --arg EMAILID &quot;$EMAILID&quot; '\n        .resource[]\n        | select(.username==$EMAILID) \n        | .id' file.json)\n</code></pre>\n<h3>Postscript</h3>\n<p>For the record, another possibility would be to use jq's <code>env</code> function for accessing environment variables.  For example, consider this sequence of bash commands:</p>\n<pre><code>EMAILID=foo@bar.com  # not exported\nEMAILID=&quot;$EMAILID&quot; jq -n 'env.EMAILID'\n</code></pre>\n<p>The output is a JSON string:</p>\n<pre><code>&quot;foo@bar.com&quot;\n</code></pre>\n<h3>shell arrays</h3>\n<p>Unfortunately, shell arrays are a different kettle of fish.\nHere are two SO resources regarding the ingestion of such arrays:</p>\n<p><a href=\"https://stackoverflow.com/questions/61588841/jq-create-json-array-using-bash-array-with-space\">JQ - create JSON array using bash array with space</a></p>\n<p><a href=\"https://stackoverflow.com/questions/49184557/convert-bash-array-to-json-array-and-insert-to-file-using-jq\">Convert bash array to json array and insert to file using jq</a></p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".resource[] | select(.username == \"myemail@hotmail.com\") | .id",
+    "input": {
+      "resource": [
+        {
+          "username": "myemail@hotmail.com",
+          "id": 42
+        },
+        {
+          "username": "other@example.com",
+          "id": 7
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,760 @@
+[
+  {
+    "query": ".name",
+    "input": {
+      "name": "lambda",
+      "id": 1,
+      "nested": {
+        "text": "My status"
+      }
+    }
+  },
+  {
+    "query": ".name",
+    "input": {
+      "name": "Google",
+      "id": 1
+    }
+  },
+  {
+    "query": ".[] | select(.location == \"Stockholm\") | .name",
+    "input": {
+      "FOO": {
+        "name": "Donald",
+        "location": "Stockholm"
+      },
+      "BAR": {
+        "name": "Walt",
+        "location": "Stockholm"
+      },
+      "BAZ": {
+        "name": "Jack",
+        "location": "Whereever"
+      }
+    }
+  },
+  {
+    "query": ".users[] | \"\\(.first) \\(.last)\"",
+    "input": {
+      "users": [
+        {
+          "first": "Stevie",
+          "last": "Wonder"
+        },
+        {
+          "first": "Michael",
+          "last": "Jackson"
+        }
+      ]
+    }
+  },
+  {
+    "query": ".[] | select(.Names[] == \"foo_data\") | .Id",
+    "input": [
+      {
+        "Id": "a1",
+        "Names": [
+          "condescending_jones",
+          "loving_hoover"
+        ]
+      },
+      {
+        "Id": "a2",
+        "Names": [
+          "foo_data"
+        ]
+      },
+      {
+        "Id": "a3",
+        "Names": [
+          "jovial_wozniak"
+        ]
+      },
+      {
+        "Id": "a4",
+        "Names": [
+          "bar_data"
+        ]
+      }
+    ]
+  },
+  {
+    "query": "length",
+    "input": [
+      {
+        "cid": 49,
+        "l10n": "cent million"
+      },
+      {
+        "cid": 50,
+        "l10n": "100 millions"
+      }
+    ]
+  },
+  {
+    "query": ".",
+    "input": {
+      "name": "jq",
+      "platform": "macOS"
+    }
+  },
+  {
+    "query": "{\"login\": .login, \"id\": .id}",
+    "input": {
+      "login": "dmaxfield",
+      "id": 7449977,
+      "email": "d@example.test"
+    }
+  },
+  {
+    "query": "keys | sort | .[]",
+    "input": {
+      "email": "madireddy@test.com",
+      "id": "2323",
+      "name": "test",
+      "date": "02-03-2014-13:41",
+      "type": "application"
+    }
+  },
+  {
+    "query": ".[] | select((.processedBarsVolume <= 5) and .processedBars > 0)",
+    "input": [
+      {
+        "processedBarsVolume": 4,
+        "processedBars": 2
+      },
+      {
+        "processedBarsVolume": 8,
+        "processedBars": 3
+      }
+    ]
+  },
+  {
+    "query": ".resource[] | select(.username == \"myemail@hotmail.com\") | .id",
+    "input": {
+      "resource": [
+        {
+          "username": "myemail@hotmail.com",
+          "id": 42
+        },
+        {
+          "username": "other@example.com",
+          "id": 7
+        }
+      ]
+    }
+  },
+  {
+    "query": ".[] | .value",
+    "input": [
+      {
+        "value1": 200,
+        "value": {
+          "aaa": {
+            "value1": "v1"
+          },
+          "bbb": {
+            "value1": "v1"
+          }
+        }
+      },
+      {
+        "status": 200,
+        "value": {
+          "aaa": {
+            "value3": "v3"
+          },
+          "ddd": {
+            "value3": "v3"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "query": "map({\"code\": .code, \"name\": .name, \"level\": .level, \"country\": .country})",
+    "input": [
+      {
+        "code": "NSW",
+        "name": "New South Wales",
+        "level": "state",
+        "country": "AU"
+      },
+      {
+        "code": "AB",
+        "name": "Alberta",
+        "level": "province",
+        "country": "CA"
+      },
+      {
+        "code": "ABD",
+        "name": "Aberdeenshire",
+        "level": "council area",
+        "country": "GB"
+      },
+      {
+        "code": "AK",
+        "name": "Alaska",
+        "level": "state",
+        "country": "US"
+      }
+    ]
+  },
+  {
+    "query": ".",
+    "input": {
+      "repos": [
+        {
+          "name": "jq",
+          "stars": 1
+        },
+        {
+          "name": "tq",
+          "stars": 2
+        }
+      ]
+    }
+  },
+  {
+    "query": ".shipping",
+    "input": {
+      "shipping": {
+        "local": true,
+        "us": true,
+        "us_rate": {
+          "amount": "0.00",
+          "currency": "USD",
+          "symbol": "$"
+        }
+      }
+    }
+  },
+  {
+    "query": ".c",
+    "input": {
+      "a": 1,
+      "b": 2,
+      "c": "{\"id\":\"9ee\",\"parent\":\"abc\"}"
+    }
+  },
+  {
+    "query": ".[0].City == .[1].City",
+    "input": [
+      {
+        "People": [
+          "John",
+          "Bryan"
+        ],
+        "City": "Boston",
+        "State": "MA"
+      },
+      {
+        "People": [
+          "Bryan",
+          "John"
+        ],
+        "State": "MA",
+        "City": "Boston"
+      }
+    ]
+  },
+  {
+    "query": ".issues[] | {\"key\": .key, \"status\": .fields.status.name, \"assignee\": .fields.assignee.emailAddress}",
+    "input": {
+      "issues": [
+        {
+          "key": "SEA-739",
+          "fields": {
+            "status": {
+              "name": "Open"
+            },
+            "assignee": {
+              "emailAddress": null
+            }
+          }
+        },
+        {
+          "key": "SEA-738",
+          "fields": {
+            "status": {
+              "name": "Resolved"
+            },
+            "assignee": {
+              "emailAddress": "user2@mycompany.com"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "query": ".Actions[] | .properties.other",
+    "input": {
+      "Actions": [
+        {
+          "value": "1",
+          "properties": {
+            "name": "abc",
+            "age": "2",
+            "other": "test1"
+          }
+        },
+        {
+          "value": "2",
+          "properties": {
+            "name": "def",
+            "age": "3",
+            "other": "test2"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "query": "{\"channel\": (.profile_type + \".\" + .channel)}",
+    "input": {
+      "channel": "youtube",
+      "profile_type": "video",
+      "member_key": "hello"
+    }
+  },
+  {
+    "query": ".components.rows | sort_by(.id)",
+    "input": {
+      "components": {
+        "rows": [
+          {
+            "id": "kjalajsdjf",
+            "name": "Value1"
+          },
+          {
+            "id": "CHARTS",
+            "name": "Charts"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "query": ".address = \"abcde\"",
+    "input": {
+      "address": "old",
+      "city": "Boston"
+    }
+  },
+  {
+    "query": ".[] | [.id, .name]",
+    "input": [
+      {
+        "name": "George",
+        "id": 12,
+        "email": "george@domain.example"
+      },
+      {
+        "name": "Jack",
+        "id": 18,
+        "email": "jack@domain.example"
+      },
+      {
+        "name": "Joe",
+        "id": 19,
+        "email": "joe@domain.example"
+      }
+    ]
+  },
+  {
+    "query": "keys[]",
+    "input": {
+      "host1": {
+        "ip": "10.1.2.3"
+      },
+      "host2": {
+        "ip": "10.1.2.2"
+      },
+      "host3": {
+        "ip": "10.1.18.1"
+      }
+    }
+  },
+  {
+    "query": ".example[\"sub-example\"][] | .name",
+    "input": {
+      "example": {
+        "sub-example": [
+          {
+            "name": "123-345",
+            "tag": 100
+          },
+          {
+            "name": "234-456",
+            "tag": 100
+          },
+          {
+            "name": "4a7-a07a5",
+            "tag": 100
+          }
+        ]
+      }
+    }
+  },
+  {
+    "query": ".",
+    "input": {
+      "name": "jq",
+      "platform": "windows"
+    }
+  },
+  {
+    "query": "map({\"name\": .name, \"email\": .email})",
+    "input": [
+      {
+        "name": "John",
+        "email": "john@company.com",
+        "extra": 1
+      },
+      {
+        "name": "Brad",
+        "email": "brad@company.com",
+        "extra": 2
+      }
+    ]
+  },
+  {
+    "query": ".data.messages += [{\"date\":\"2010-01-07T19:55:99.999Z\",\"xml\":\"new.xml\",\"status\":\"OKKK\",\"message\":\"added\"}]",
+    "input": {
+      "report": "1.0",
+      "data": {
+        "date": "2010-01-07",
+        "messages": [
+          {
+            "date": "2010-01-07T19:58:42.949Z",
+            "xml": "old.xml",
+            "status": "OK",
+            "message": "loaded"
+          },
+          {
+            "date": "2010-01-07T20:22:46.949Z",
+            "xml": "old2.xml",
+            "status": "NOK",
+            "message": "duplicated"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "query": ".[] | .number | tostring",
+    "input": [
+      {
+        "number": 3,
+        "string": "three"
+      },
+      {
+        "number": 7,
+        "string": "seven"
+      }
+    ]
+  },
+  {
+    "query": ".[0]",
+    "input": [
+      {
+        "a": "x"
+      },
+      {
+        "a": "y"
+      },
+      {
+        "a": "z"
+      }
+    ]
+  },
+  {
+    "query": ".key",
+    "input": {
+      "key": "value"
+    }
+  },
+  {
+    "query": ".[]",
+    "input": [
+      {
+        "original_name": "pdf_convert",
+        "changed_name": "pdf_convert_1"
+      },
+      {
+        "original_name": "video_encode",
+        "changed_name": "video_encode_1"
+      },
+      {
+        "original_name": "video_transcode",
+        "changed_name": "video_transcode_1"
+      }
+    ]
+  },
+  {
+    "query": ".result | select(.property_history != null) | .property_history | map(select(.event_name == \"Sold\"))[0].date",
+    "input": {
+      "result": {
+        "property_history": [
+          {
+            "event_name": "Listed",
+            "date": "2020-01-01"
+          },
+          {
+            "event_name": "Sold",
+            "date": "2020-02-02"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "query": ".theList[] | select(.id == 2 or .id == 4)",
+    "input": {
+      "theList": [
+        {
+          "id": 1,
+          "name": "Horst"
+        },
+        {
+          "id": 2,
+          "name": "Fritz"
+        },
+        {
+          "id": 3,
+          "name": "Walter"
+        },
+        {
+          "id": 4,
+          "name": "Gerhart"
+        }
+      ]
+    }
+  },
+  {
+    "query": ".geo != null",
+    "input": {
+      "geo": {
+        "lat": 1,
+        "lon": 2
+      },
+      "name": "place"
+    }
+  },
+  {
+    "query": ".[] | .aux[] | .[\"def\"]",
+    "input": [
+      {
+        "id": 123,
+        "name": "John",
+        "aux": [
+          {
+            "abc": "random",
+            "def": "I want this"
+          }
+        ],
+        "blah": 23.11
+      }
+    ]
+  },
+  {
+    "query": ".",
+    "input": {
+      "name": "John",
+      "age": 31,
+      "city": "New York"
+    }
+  },
+  {
+    "query": "map(.a)",
+    "input": [
+      {
+        "a": "green",
+        "b": "white"
+      },
+      {
+        "a": "red",
+        "c": "purple"
+      }
+    ]
+  },
+  {
+    "query": ".status",
+    "input": {
+      "status": "ok",
+      "hostname": "0b0b495a46db",
+      "component-status": [
+        {
+          "status-code": 200,
+          "component": "Service1",
+          "status": "OK"
+        },
+        {
+          "status-code": 200,
+          "component": "Service2",
+          "status": "OK"
+        }
+      ]
+    }
+  },
+  {
+    "query": ".response.text",
+    "input": {
+      "requestType": "POST",
+      "response": {
+        "size": 78,
+        "text": "{\"recordID\":123,\"title\":\"Hello World\",\"content\":\"Lorem ipsum...\"}"
+      }
+    }
+  },
+  {
+    "query": ".[].AssetId",
+    "input": [
+      {
+        "AssetId": 14462955,
+        "Name": "Cultural Item"
+      },
+      {
+        "AssetId": 114385498,
+        "Name": "Redspybot"
+      },
+      {
+        "AssetId": 29715011,
+        "Name": "American Cowboy"
+      }
+    ]
+  },
+  {
+    "query": ".[] | .name",
+    "input": [
+      {
+        "name": "one",
+        "imageTags": [
+          "latest",
+          "stable"
+        ]
+      },
+      {
+        "name": "two",
+        "imageTags": [
+          "foo",
+          "latest"
+        ]
+      },
+      {
+        "name": "three",
+        "imageTags": []
+      }
+    ]
+  },
+  {
+    "query": ".",
+    "input": {
+      "name": "jq",
+      "color": "terminal"
+    }
+  },
+  {
+    "query": ".[].group",
+    "input": [
+      {
+        "timestamp": 1448369447295,
+        "group": "employees",
+        "uid": "elgalu"
+      },
+      {
+        "timestamp": 1448369447296,
+        "group": "services",
+        "uid": "pacts"
+      }
+    ]
+  },
+  {
+    "query": ".USD.price",
+    "input": {
+      "OPEN.BTC": {
+        "volume24": 0.932166,
+        "price": 0.09995,
+        "updated": "2016-05-04T03:03:29.000Z"
+      },
+      "USD": {
+        "price": 1
+      }
+    }
+  },
+  {
+    "query": ".[].username",
+    "input": [
+      {
+        "username": "jdoe",
+        "name": "John Doe"
+      },
+      {
+        "username": "jadoe",
+        "name": "Jane Doe"
+      }
+    ]
+  },
+  {
+    "query": ".fruit[] | select(. == \"orange\")",
+    "input": {
+      "fruit": [
+        "apple",
+        "orange",
+        "pomegranate",
+        "apricot",
+        "mango"
+      ]
+    }
+  },
+  {
+    "query": ".[] | select(.name == \"foo\")",
+    "input": [
+      {
+        "name": "foo",
+        "id": 1
+      },
+      {
+        "name": "bar",
+        "id": 2
+      },
+      {
+        "name": "foo",
+        "id": 3
+      }
+    ]
+  },
+  {
+    "query": ".response[] | select(has(\"text\")) | .text",
+    "input": {
+      "response": [
+        {
+          "text": "first"
+        },
+        {
+          "status": 200
+        },
+        {
+          "text": "second"
+        }
+      ]
+    }
+  },
+  {
+    "query": ".[].user, .[].date, .[].email",
+    "input": [
+      {
+        "user": "danielrvt",
+        "date": "11/10/1988",
+        "email": "myemail@domain.com"
+      },
+      {
+        "user": "second",
+        "date": "12/11/1989",
+        "email": "second@domain.com"
+      }
+    ]
+  }
+]
+

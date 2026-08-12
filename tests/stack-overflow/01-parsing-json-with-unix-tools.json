@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.01",
+  "rank": 1,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 1955505,
+    "title": "Parsing JSON with Unix tools",
+    "score": 1321,
+    "url": "https://stackoverflow.com/questions/1955505/parsing-json-with-unix-tools",
+    "body_html": "<p>I'm trying to parse JSON returned from a curl request, like so:</p>\n\n<pre><code>curl 'http://twitter.com/users/username.json' |\n    sed -e 's/[{}]/''/g' | \n    awk -v k=\"text\" '{n=split($0,a,\",\"); for (i=1; i&lt;=n; i++) print a[i]}'\n</code></pre>\n\n<p>The above splits the JSON into fields, for example:</p>\n\n<pre><code>% ...\n\"geo_enabled\":false\n\"friends_count\":245\n\"profile_text_color\":\"000000\"\n\"status\":\"in_reply_to_screen_name\":null\n\"source\":\"web\"\n\"truncated\":false\n\"text\":\"My status\"\n\"favorited\":false\n% ...\n</code></pre>\n\n<p>How do I print a specific field (denoted by the <code>-v k=text</code>)?</p>\n"
+  },
+  "answer": {
+    "answer_id": 1955555,
+    "score": 1794,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/1955555",
+    "body_html": "<p>There are a number of tools specifically designed for the purpose of manipulating JSON from the command line, and will be a lot easier and more reliable than doing it with Awk, such as <a href=\"https://stedolan.github.io/jq/\" rel=\"noreferrer\"><code>jq</code></a>:</p>\n<pre><code>curl -s 'https://api.github.com/users/lambda' | jq -r '.name'\n</code></pre>\n<p>You can also do this with tools that are likely already installed on your system, like Python using the <a href=\"https://docs.python.org/2/library/json.html\" rel=\"noreferrer\"><code>json</code> module</a>, and so avoid any extra dependencies, while still having the benefit of a proper JSON parser. The following assume you want to use UTF-8, which the original JSON should be encoded in and is what most modern terminals use as well:</p>\n<p>Python 3:</p>\n<pre><code>curl -s 'https://api.github.com/users/lambda' | \\\n    python3 -c &quot;import sys, json; print(json.load(sys.stdin)['name'])&quot;\n</code></pre>\n<p>Python 2:</p>\n<pre><code>export PYTHONIOENCODING=utf8\ncurl -s 'https://api.github.com/users/lambda' | \\\n    python2 -c &quot;import sys, json; print json.load(sys.stdin)['name']&quot;\n</code></pre>\n<h2>Frequently Asked Questions</h2>\n<h3>Why not a pure shell solution?</h3>\n<p>The standard <a href=\"https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html\" rel=\"noreferrer\">POSIX/Single Unix Specification shell</a> is a very limited language which doesn't contain facilities for representing sequences (list or arrays) or associative arrays (also known as hash tables, maps, dicts, or objects in some other languages). This makes representing the result of parsing JSON somewhat tricky in portable shell scripts. There are <a href=\"https://stackoverflow.com/questions/688849/associative-arrays-in-shell-scripts\">somewhat hacky ways to do it</a>, but many of them can break if keys or values contain certain special characters.</p>\n<p>Bash 4 and later, zsh, and ksh have support for arrays and associative arrays, but these shells are not universally available (macOS stopped updating Bash at Bash 3, due to a change from GPLv2 to GPLv3, while many Linux systems don't have zsh installed out of the box). It's possible that you could write a script that would work in either Bash 4 or zsh, one of which is available on most macOS, Linux, and BSD systems these days, but it would be tough to write a shebang line that worked for such a polyglot script.</p>\n<p>Finally, writing a full fledged JSON parser in shell would be a significant enough dependency that you might as well just use an existing dependency like jq or Python instead. It's not going to be a one-liner, or even small five-line snippet, to do a good implementation.</p>\n<h3>Why not use awk, sed, or grep?</h3>\n<p>It is possible to use these tools to do some quick extraction from JSON with a known shape and formatted in a known way, such as one key per line. There are several examples of suggestions for this in other answers.</p>\n<p>However, these tools are designed for line based or record based formats; they are not designed for recursive parsing of matched delimiters with possible escape characters.</p>\n<p>So these quick and dirty solutions using awk/sed/grep are likely to be fragile, and break if some aspect of the input format changes, such as collapsing whitespace, or adding additional levels of nesting to the JSON objects, or an escaped quote within a string. A solution that is robust enough to handle all JSON input without breaking will also be fairly large and complex, and so not too much different than adding another dependency on <code>jq</code> or Python.</p>\n<p>I have had to deal with large amounts of customer data being deleted due to poor input parsing in a shell script before, so I never recommend quick and dirty methods that may be fragile in this way. If you're doing some one-off processing, see the other answers for suggestions, but I still highly recommend just using an existing tested JSON parser.</p>\n<h2>Historical notes</h2>\n<p>This answer originally recommended <a href=\"http://github.com/micha/jsawk\" rel=\"noreferrer\">jsawk</a>, which should still work, but is a little more cumbersome to use than <code>jq</code>, and depends on a standalone JavaScript interpreter being installed which is less common than a Python interpreter, so the above answers are probably preferable:</p>\n<pre><code>curl -s 'https://api.github.com/users/lambda' | jsawk -a 'return this.name'\n</code></pre>\n<p>This answer also originally used the Twitter API from the question, but that API no longer works, making it hard to copy the examples to test out, and the new Twitter API requires API keys, so I've switched to using the GitHub API which can be used easily without API keys.  The first answer for the original question would be:</p>\n<pre><code>curl 'http://twitter.com/users/username.json' | jq -r '.text'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".name",
+    "input": {
+      "name": "lambda",
+      "id": 1,
+      "nested": {
+        "text": "My status"
+      }
+    }
+  }
+}

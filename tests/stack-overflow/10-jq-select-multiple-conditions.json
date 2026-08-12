@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.10",
+  "rank": 10,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 33057420,
+    "title": "JQ: Select multiple conditions",
+    "score": 301,
+    "url": "https://stackoverflow.com/questions/33057420/jq-select-multiple-conditions",
+    "body_html": "<p>I have a json and at the moment using select to get only the data which match one condition, I need to filter based on more conditions.</p>\n\n<p>For e.g:</p>\n\n<pre><code>.[] | select((.processedBarsVolume &lt;= 5) &amp;&amp; .processedBars &gt; 0)\n</code></pre>\n\n<p>How I can do this ?</p>\n"
+  },
+  "answer": {
+    "answer_id": 33059058,
+    "score": 560,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/33059058",
+    "body_html": "<p><code>jq</code> supports the <a href=\"https://jqlang.github.io/jq/manual/#and-or-not\" rel=\"noreferrer\">Boolean operators and/or/not</a>, so it would look like:</p>\n<pre><code>.[] | select((.processedBarsVolume &lt;= 5) and .processedBars &gt; 0)\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | select((.processedBarsVolume <= 5) and .processedBars > 0)",
+    "input": [
+      {
+        "processedBarsVolume": 4,
+        "processedBars": 2
+      },
+      {
+        "processedBarsVolume": 8,
+        "processedBars": 3
+      }
+    ]
+  }
+}

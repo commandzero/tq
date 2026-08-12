@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.35",
+  "rank": 35,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 19573517,
+    "title": "jq Conditional output",
+    "score": 120,
+    "url": "https://stackoverflow.com/questions/19573517/jq-conditional-output",
+    "body_html": "<p>I'm using <a href=\"http://stedolan.github.io/jq/\">jq</a> to play with json. I was wondering how to conditionally print something in that.</p>\n\n<p>Say I am interested in a field call <code>geo</code>. I used the following command and find out there is only one entry whose <code>geo</code> is <code>null</code>:</p>\n\n<pre><code>% cat all.json | jq '.geo != null' | sort | uniq -c              \n   1 false\n6891 true\n</code></pre>\n\n<p>How can I print out that entry only without printing everything else?</p>\n\n<p>Didn't see something like <code>print</code> command in the manual. And this doesn't work: <code>cat all.json | jq 'if .place == null then . end'</code>. <code>jq</code> complained about syntax error.</p>\n"
+  },
+  "answer": {
+    "answer_id": 20489951,
+    "score": 197,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/20489951",
+    "body_html": "<p>You can use the <a href=\"https://stedolan.github.io/jq/manual/#select(boolean_expression)\" rel=\"nofollow noreferrer\">select</a> function to get only required entries:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq 'select(.geo != null)' all.json\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".geo != null",
+    "input": {
+      "geo": {
+        "lat": 1,
+        "lon": 2
+      },
+      "name": "place"
+    }
+  }
+}

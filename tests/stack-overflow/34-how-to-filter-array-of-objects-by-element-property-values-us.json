@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.34",
+  "rank": 34,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 38121740,
+    "title": "How to filter array of objects by element property values using jq?",
+    "score": 120,
+    "url": "https://stackoverflow.com/questions/38121740/how-to-filter-array-of-objects-by-element-property-values-using-jq",
+    "body_html": "<p>I like to filter json files using <a href=\"https://stedolan.github.io/jq/\" rel=\"noreferrer\">jq</a>:</p>\n\n<pre><code>jq . some.json\n</code></pre>\n\n<p>Given the json containing an array of objects:</p>\n\n<pre><code>{\n  \"theList\": [\n    {\n      \"id\": 1,\n      \"name\": \"Horst\"\n    },\n    {\n      \"id\": 2,\n      \"name\": \"Fritz\"\n    },\n    {\n      \"id\": 3,\n      \"name\": \"Walter\"\n    },\n    {\n      \"id\": 4,\n      \"name\": \"Gerhart\"\n    },\n    {\n      \"id\": 5,\n      \"name\": \"Harmut\"\n    }\n  ]\n}\n</code></pre>\n\n<p>I want to filter that list to only show the elements with id having the value 2 and 4, so the expected output is:</p>\n\n<pre><code>{\n  \"id\": 2,\n  \"name\": \"Fritz\"\n},\n{\n  \"id\": 4,\n  \"name\": \"Gerhart\"\n}\n</code></pre>\n\n<p>How do I filter the json using jq? I have played around with select and map, yet didn't got any of those to work, e.g.:</p>\n\n<pre><code>$ jq '.theList[] | select(.id == 2) or select(.id == 4)' array.json\ntrue\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 38122029,
+    "score": 179,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/38122029",
+    "body_html": "<p><strong>From the docs:</strong></p>\n\n<blockquote>\n<pre><code>jq '.[] | select(.id == \"second\")' \n</code></pre>\n  \n  <p><strong>Input</strong> <code>[{\"id\": \"first\", \"val\": 1}, {\"id\": \"second\", \"val\": 2}]</code> </p>\n  \n  <p><strong>Output</strong> <code>{\"id\": \"second\", \"val\": 2}</code></p>\n</blockquote>\n\n<p>I think you can do something like this:</p>\n\n<pre><code>jq '.theList[] | select(.id == 2 or .id == 4)' array.json\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".theList[] | select(.id == 2 or .id == 4)",
+    "input": {
+      "theList": [
+        {
+          "id": 1,
+          "name": "Horst"
+        },
+        {
+          "id": 2,
+          "name": "Fritz"
+        },
+        {
+          "id": 3,
+          "name": "Walter"
+        },
+        {
+          "id": 4,
+          "name": "Gerhart"
+        }
+      ]
+    }
+  }
+}

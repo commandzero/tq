@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.02",
+  "rank": 2,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 44656515,
+    "title": "How to remove double-quotes in jq output for parsing json files in bash?",
+    "score": 797,
+    "url": "https://stackoverflow.com/questions/44656515/how-to-remove-double-quotes-in-jq-output-for-parsing-json-files-in-bash",
+    "body_html": "<p>I'm using jq to parse a JSON file as shown <a href=\"http://xmodulo.com/how-to-parse-json-string-via-command-line-on-linux.html#comment-13001\" rel=\"noreferrer\">here</a>. However, the results for string values contain the &quot;double-quotes&quot; as expected:</p>\n\n<pre class=\"lang-none prettyprint-override\"><code>$ cat json.txt | jq '.name'\n&quot;Google&quot;\n</code></pre>\n<p>How can I pipe this into another command to remove the &quot;&quot;?</p>\n<pre class=\"lang-none prettyprint-override\"><code>$ cat json.txt | jq '.name' | other_command\nGoogle\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 44656583,
+    "score": 1429,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/44656583",
+    "body_html": "<p>Use the <code>-r</code> (or <code>--raw-output</code>) option to emit raw strings as output:</p>\n\n<pre><code>jq -r '.name' &lt;json.txt\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".name",
+    "input": {
+      "name": "Google",
+      "id": 1
+    }
+  }
+}

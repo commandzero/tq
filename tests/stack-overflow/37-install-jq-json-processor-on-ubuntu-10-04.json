@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.37",
+  "rank": 37,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 33184780,
+    "title": "Install jq JSON processor on Ubuntu 10.04",
+    "score": 112,
+    "url": "https://stackoverflow.com/questions/33184780/install-jq-json-processor-on-ubuntu-10-04",
+    "body_html": "<p>Is there a way to install jq JSON processor on Ubuntu 10.04?</p>\n\n<p>I Tried the usual <code>sudo apt-get install jq</code> but got the error <code>E: Couldn't find package jq</code></p>\n"
+  },
+  "answer": {
+    "answer_id": 44546590,
+    "score": 197,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/44546590",
+    "body_html": "<p>It is possible to perform <code>sudo apt-get install jq</code> however you need to inform the system where to find jq.</p>\n<p>ℹ️ <strong>Note</strong>: Ubuntu 14+ users can skip to step 3! 🎉</p>\n<h1>Install</h1>\n<ol>\n<li><p>Open your sources file in a text editor:</p>\n<pre><code> sudo vim /etc/apt/sources.list\n</code></pre>\n</li>\n<li><p>Add the following line to the end of that file (note <code>deb</code> is not a command, <a href=\"https://askubuntu.com/questions/233064/why-am-i-getting-command-deb-not-found/233069\">more info</a>):</p>\n<blockquote>\n<p>deb <a href=\"http://us.archive.ubuntu.com/ubuntu\" rel=\"noreferrer\">http://us.archive.ubuntu.com/ubuntu</a> vivid main universe</p>\n</blockquote>\n</li>\n<li><p>Then re-index apt-get so that it can find <code>jq</code>:</p>\n<pre><code> sudo apt-get update\n</code></pre>\n</li>\n<li><p>Then do the normal install and you should be the proud new user of <code>jq</code>!</p>\n<pre><code> sudo apt-get install jq\n</code></pre>\n</li>\n</ol>\n<h1>Test</h1>\n<p>Test it works! Try this to see it pretty print some example json</p>\n<pre><code>echo '{ &quot;name&quot;:&quot;John&quot;, &quot;age&quot;:31, &quot;city&quot;:&quot;New York&quot; }' | jq .\n</code></pre>\n<p>The result should appear like so in your terminal:</p>\n<pre><code>{\n  &quot;name&quot;: &quot;John&quot;,\n  &quot;age&quot;: 31,\n  &quot;city&quot;: &quot;New York&quot;\n}\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".",
+    "input": {
+      "name": "John",
+      "age": 31,
+      "city": "New York"
+    }
+  }
+}

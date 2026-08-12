@@ -32,7 +32,25 @@ The Make targets refresh or replay the selected corpus and write local reports:
 make benchmark-smoke
 make benchmark-standard
 make benchmark-large
+make benchmark-stack-overflow
 ```
+
+The checked-in Stack Overflow scenarios use the shared Rust correctness and
+measurement harness through that target.
+
+To regenerate the scenarios from Stack Exchange API snapshots, use the Rust
+fixture generator:
+
+```sh
+cargo run --quiet -p tq-test-support --bin tq-stack-overflow-scenarios -- \
+  --questions /path/to/questions.json \
+  --answers /path/to/answers \
+  --patch /tmp/stack-overflow.patch
+```
+
+The generator reads the checked-in benchmark definitions from
+`tests/stack-overflow-benchmarks.json` and emits an apply-patch-compatible
+snapshot without modifying the scenario directory directly.
 
 For an explicit reproducible run, first build tq in release mode and pass the
 recorded corpus manifest:

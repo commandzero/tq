@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.03",
+  "rank": 3,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 18592173,
+    "title": "Select objects based on value of variable in object using jq",
+    "score": 556,
+    "url": "https://stackoverflow.com/questions/18592173/select-objects-based-on-value-of-variable-in-object-using-jq",
+    "body_html": "<p>I have the following json file:</p>\n<pre><code>{\n    &quot;FOO&quot;: {\n        &quot;name&quot;: &quot;Donald&quot;,\n        &quot;location&quot;: &quot;Stockholm&quot;\n    },\n    &quot;BAR&quot;: {\n        &quot;name&quot;: &quot;Walt&quot;,\n        &quot;location&quot;: &quot;Stockholm&quot;\n    },\n    &quot;BAZ&quot;: {\n        &quot;name&quot;: &quot;Jack&quot;,\n        &quot;location&quot;: &quot;Whereever&quot;\n    }\n}\n</code></pre>\n<p>I am using jq and want to get the &quot;name&quot; elements of the objects where 'location' is 'Stockholm'.</p>\n<p>I know I can get all names by</p>\n<pre><code>cat json | jq .[] | jq .&quot;name&quot;\n&quot;Jack&quot;\n&quot;Walt&quot;\n&quot;Donald&quot;\n</code></pre>\n<p>But I can't figure out how to print only certain objects, given the value of a sub key (here: <code>&quot;location&quot; : &quot;Stockholm&quot;</code>).</p>\n"
+  },
+  "answer": {
+    "answer_id": 18608100,
+    "score": 788,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/18608100",
+    "body_html": "<p>Adapted from this post on <a href=\"https://zerokspot.com/weblog/2013/07/18/processing-json-with-jq/\" rel=\"noreferrer\">Processing JSON with jq</a>, you can use the <a href=\"https://stedolan.github.io/jq/manual/#select(boolean_expression)\" rel=\"noreferrer\"><code>select(bool)</code></a> like this:</p>\n\n<pre class=\"lang-sh prettyprint-override\"><code>$ jq '.[] | select(.location==\"Stockholm\")' json\n{\n  \"location\": \"Stockholm\",\n  \"name\": \"Walt\"\n}\n{\n  \"location\": \"Stockholm\",\n  \"name\": \"Donald\"\n}\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | select(.location == \"Stockholm\") | .name",
+    "input": {
+      "FOO": {
+        "name": "Donald",
+        "location": "Stockholm"
+      },
+      "BAR": {
+        "name": "Walt",
+        "location": "Stockholm"
+      },
+      "BAZ": {
+        "name": "Jack",
+        "location": "Whereever"
+      }
+    }
+  }
+}

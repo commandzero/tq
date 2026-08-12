@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.50",
+  "rank": 50,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 43192556,
+    "title": "Using jq with bash to run command for each object in array",
+    "score": 79,
+    "url": "https://stackoverflow.com/questions/43192556/using-jq-with-bash-to-run-command-for-each-object-in-array",
+    "body_html": "<p>How can I run a Bash command for every JSON object in a JSON array using <code>jq</code>? So far I have this:</p>\n<pre><code>cat credentials.json | jq -r '.[] | .user, .date, .email' | mycommand -u {user} -d {date} -e {email}\n</code></pre>\n<p>This doesn't seem to work. How can I take the parameters out of the JSON array into my command?</p>\n<p>My JSON file looks something like this:</p>\n<pre><code>[\n   &quot;user&quot;: &quot;danielrvt&quot;,\n   &quot;date&quot;: &quot;11/10/1988&quot;,\n   &quot;email&quot;: &quot;myemail@domain.com&quot;,\n   ...\n]\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 43192740,
+    "score": 89,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/43192740",
+    "body_html": "<p>Your best bet is probably to output each record in something like TSV format, then read that from a shell loop.</p>\n\n<pre><code>jq -r '.[]|[.user, .date, .email] | @tsv' |\n  while IFS=$'\\t' read -r user date email; do\n    mycommand -u \"$user\" -d \"$date\" -e \"$email\"\n  done\n</code></pre>\n\n<p><code>jq</code> itself doesn't have anything like a <code>system</code> call to run an external command from within a filter, although it seems that <a href=\"https://github.com/stedolan/jq/issues/147\" rel=\"noreferrer\">they are working on it</a>.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[].user, .[].date, .[].email",
+    "input": [
+      {
+        "user": "danielrvt",
+        "date": "11/10/1988",
+        "email": "myemail@domain.com"
+      },
+      {
+        "user": "second",
+        "date": "12/11/1989",
+        "email": "second@domain.com"
+      }
+    ]
+  }
+}

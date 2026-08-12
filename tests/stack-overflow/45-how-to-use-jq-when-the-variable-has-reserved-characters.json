@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.45",
+  "rank": 45,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 37018393,
+    "title": "How to use jq when the variable has reserved characters?",
+    "score": 84,
+    "url": "https://stackoverflow.com/questions/37018393/how-to-use-jq-when-the-variable-has-reserved-characters",
+    "body_html": "<p>I'm trying to get the following to work and it's not, help me please:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>curl -s 'https://cryptofresh.com/api/asset/markets?asset=MKR' | jq .OPEN.BTC\n</code></pre>\n<p>The variable in question includes a period, I tried just about everything to escape the period &amp;&amp; also tried surrounding it in quotes; no go ; this is the variable I'm looking to pull from (I ran jq without any filters, and truncated the output here to show what I need. Thanks in advance future problem solver!</p>\n<pre><code>curl -s 'https://cryptofresh.com/api/asset/markets?asset=MKR' | jq\n....\n &quot;OPEN.BTC&quot;: {\n&quot;volume24&quot;: 0.932166,\n&quot;price&quot;: 0.09995,\n&quot;updated&quot;: &quot;2016-05-04T03:03:29.000Z&quot;\n},\n....\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 37018703,
+    "score": 132,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/37018703",
+    "body_html": "<p>When a key contains characters that are invalid for identifiers, you'll have to quote the name.</p>\n<pre><code>.&quot;OPEN.BTC&quot;\n</code></pre>\n<p>Or for older versions of jq, use an index.</p>\n<pre><code>.[&quot;OPEN.BTC&quot;]\n</code></pre>\n<h4>Example</h4>\n<pre class=\"lang-sh prettyprint-override\"><code>... | jq '.&quot;OPEN.BTC&quot;'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".USD.price",
+    "input": {
+      "OPEN.BTC": {
+        "volume24": 0.932166,
+        "price": 0.09995,
+        "updated": "2016-05-04T03:03:29.000Z"
+      },
+      "USD": {
+        "price": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.12",
+  "rank": 12,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 19529688,
+    "title": "How to merge 2 JSON objects from 2 files using jq?",
+    "score": 266,
+    "url": "https://stackoverflow.com/questions/19529688/how-to-merge-2-json-objects-from-2-files-using-jq",
+    "body_html": "<p>I'm using the <a href=\"https://github.com/stedolan/jq\" rel=\"noreferrer\">jq</a> tools (jq-json-processor) in shell script to parse json.</p>\n<p>I've got 2 json files and <strong>want to merge them into one unique file</strong></p>\n<p>Here the content of files:</p>\n<p><strong>file1</strong></p>\n<pre><code>{\n    &quot;value1&quot;: 200,\n    &quot;timestamp&quot;: 1382461861,\n    &quot;value&quot;: {\n        &quot;aaa&quot;: {\n            &quot;value1&quot;: &quot;v1&quot;,\n            &quot;value2&quot;: &quot;v2&quot;\n        },\n        &quot;bbb&quot;: {\n            &quot;value1&quot;: &quot;v1&quot;,\n            &quot;value2&quot;: &quot;v2&quot;\n        },\n        &quot;ccc&quot;: {\n            &quot;value1&quot;: &quot;v1&quot;,\n            &quot;value2&quot;: &quot;v2&quot;\n        }\n    }\n}\n</code></pre>\n<p><strong>file2</strong></p>\n<pre><code>{\n    &quot;status&quot;: 200,\n    &quot;timestamp&quot;: 1382461861,\n    &quot;value&quot;: {\n        &quot;aaa&quot;: {\n            &quot;value3&quot;: &quot;v3&quot;,\n            &quot;value4&quot;: 4\n        },\n        &quot;bbb&quot;: {\n            &quot;value3&quot;: &quot;v3&quot;\n        },      \n        &quot;ddd&quot;: {\n            &quot;value3&quot;: &quot;v3&quot;,\n            &quot;value4&quot;: 4\n        }\n    }\n}\n</code></pre>\n<p><strong>expected result</strong></p>\n<pre><code>{\n    &quot;value&quot;: {\n        &quot;aaa&quot;: {\n            &quot;value1&quot;: &quot;v1&quot;,\n            &quot;value2&quot;: &quot;v2&quot;,\n            &quot;value3&quot;: &quot;v3&quot;,\n            &quot;value4&quot;: 4\n        },\n        &quot;bbb&quot;: {\n            &quot;value1&quot;: &quot;v1&quot;,\n            &quot;value2&quot;: &quot;v2&quot;,\n            &quot;value3&quot;: &quot;v3&quot;\n        },\n        &quot;ccc&quot;: {\n            &quot;value1&quot;: &quot;v1&quot;,\n            &quot;value2&quot;: &quot;v2&quot;\n        },\n        &quot;ddd&quot;: {\n            &quot;value3&quot;: &quot;v3&quot;,\n            &quot;value4&quot;: 4\n        }\n    }\n}\n</code></pre>\n<p>I try a lot of combinations but the only result i get is the following, which is not the expected result:</p>\n<pre><code>{\n  &quot;ccc&quot;: {\n    &quot;value2&quot;: &quot;v2&quot;,\n    &quot;value1&quot;: &quot;v1&quot;\n  },\n  &quot;bbb&quot;: {\n    &quot;value2&quot;: &quot;v2&quot;,\n    &quot;value1&quot;: &quot;v1&quot;\n  },\n  &quot;aaa&quot;: {\n    &quot;value2&quot;: &quot;v2&quot;,\n    &quot;value1&quot;: &quot;v1&quot;\n  }\n}\n{\n  &quot;ddd&quot;: {\n    &quot;value4&quot;: 4,\n    &quot;value3&quot;: &quot;v3&quot;\n  },\n  &quot;bbb&quot;: {\n    &quot;value3&quot;: &quot;v3&quot;\n  },\n  &quot;aaa&quot;: {\n    &quot;value4&quot;: 4,\n    &quot;value3&quot;: &quot;v3&quot;\n  }\n}\n</code></pre>\n<p>Using this command:</p>\n<pre><code>jq -s '.[].value' file1 file2\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 24904276,
+    "score": 324,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/24904276",
+    "body_html": "<p>Since 1.4 this is now possible with the <code>*</code> operator. When given two objects, it will merge them recursively. For example,</p>\n\n<pre><code>jq -s '.[0] * .[1]' file1 file2\n</code></pre>\n\n<p><strong>Important: Note the <code>-s (--slurp)</code> flag, which puts files in the same array.</strong></p>\n\n<p>Would get you:</p>\n\n<pre><code>{\n  \"value1\": 200,\n  \"timestamp\": 1382461861,\n  \"value\": {\n    \"aaa\": {\n      \"value1\": \"v1\",\n      \"value2\": \"v2\",\n      \"value3\": \"v3\",\n      \"value4\": 4\n    },\n    \"bbb\": {\n      \"value1\": \"v1\",\n      \"value2\": \"v2\",\n      \"value3\": \"v3\"\n    },\n    \"ccc\": {\n      \"value1\": \"v1\",\n      \"value2\": \"v2\"\n    },\n    \"ddd\": {\n      \"value3\": \"v3\",\n      \"value4\": 4\n    }\n  },\n  \"status\": 200\n}\n</code></pre>\n\n<p>If you also want to get rid of the other keys (like your expected result), one way to do it is this:</p>\n\n<pre><code>jq -s '.[0] * .[1] | {value: .value}' file1 file2\n</code></pre>\n\n<p>Or the presumably somewhat more efficient (because it doesn't merge any other values):</p>\n\n<pre><code>jq -s '.[0].value * .[1].value | {value: .}' file1 file2\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | .value",
+    "input": [
+      {
+        "value1": 200,
+        "value": {
+          "aaa": {
+            "value1": "v1"
+          },
+          "bbb": {
+            "value1": "v1"
+          }
+        }
+      },
+      {
+        "status": 200,
+        "value": {
+          "aaa": {
+            "value3": "v3"
+          },
+          "ddd": {
+            "value3": "v3"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.41",
+  "rank": 41,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 35677309,
+    "title": "Output specific key value in object for each element in array with jq for JSON",
+    "score": 98,
+    "url": "https://stackoverflow.com/questions/35677309/output-specific-key-value-in-object-for-each-element-in-array-with-jq-for-json",
+    "body_html": "<p>I have an array:</p>\n\n<pre><code>[\n    {\n        \"AssetId\": 14462955,\n        \"Name\": \"Cultural Item\"\n    },\n    {\n        \"AssetId\": 114385498,\n        \"Name\": \"Redspybot\"\n    },\n    {\n        \"AssetId\": 29715011,\n        \"Name\": \"American Cowboy\"\n    },\n    {\n        \"AssetId\": 98253651,\n        \"Name\": \"Mahem\"\n    }\n]\n</code></pre>\n\n<p>I would like to loop through each object in this array, and pick out the value of each key called <code>AssetId</code> and output it.\nHow would I do this using jq for the command line?</p>\n"
+  },
+  "answer": {
+    "answer_id": 35677443,
+    "score": 115,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/35677443",
+    "body_html": "<p>The command-line tool <code>jq</code> writes to STDOUT and/or STDERR.  If you want to write the .AssetId information to STDOUT, then one possibility would be as follows: </p>\n\n<pre><code>jq -r \".[] | .AssetId\" input.json\n</code></pre>\n\n<p>Output:</p>\n\n<pre><code>14462955\n114385498\n29715011\n98253651\n</code></pre>\n\n<p>A more robust incantation would be: <code>.[] | .AssetId?</code> but your choice will depend on what you want if there is no key named \"AssetId\".</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[].AssetId",
+    "input": [
+      {
+        "AssetId": 14462955,
+        "Name": "Cultural Item"
+      },
+      {
+        "AssetId": 114385498,
+        "Name": "Redspybot"
+      },
+      {
+        "AssetId": 29715011,
+        "Name": "American Cowboy"
+      }
+    ]
+  }
+}

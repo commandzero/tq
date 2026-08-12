@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.48",
+  "rank": 48,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 37563691,
+    "title": "jq select value from array",
+    "score": 82,
+    "url": "https://stackoverflow.com/questions/37563691/jq-select-value-from-array",
+    "body_html": "<p>I have the following JSON file with example values:</p>\n<pre class=\"lang-json prettyprint-override\"><code>{\n  &quot;files&quot;: [{\n    &quot;fileName&quot;: &quot;FOO&quot;,\n    &quot;md5&quot;: &quot;blablabla&quot;\n  }, {\n    &quot;fileName&quot;: &quot;BAR&quot;,\n    &quot;md5&quot;: &quot;alaldlafj&quot;\n  }]\n}\n</code></pre>\n<p>Now what I want is to return the <code>md5</code> value where for example the <code>fileName</code> is &quot;FOO&quot;. For this I have the following statement in <code>jq</code>:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>cat &lt;file&gt;.json | jq '.[] | select(.fileName==&quot;FOO&quot;)' \n</code></pre>\n<p>However response back is: <code>jq: error (at &lt;stdin&gt;:11): Cannot index array with string &quot;fileName&quot;</code></p>\n<p>What is the correct way to return the md5 value where the key fileName equals a certain argument?</p>\n"
+  },
+  "answer": {
+    "answer_id": 37567004,
+    "score": 103,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/37567004",
+    "body_html": "<p>Found the answer:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>cat &lt;file&gt;.json | jq -r '.files[] | select(.fileName==&quot;FOO&quot;) | .md5'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | select(.name == \"foo\")",
+    "input": [
+      {
+        "name": "foo",
+        "id": 1
+      },
+      {
+        "name": "bar",
+        "id": 2
+      },
+      {
+        "name": "foo",
+        "id": 3
+      }
+    ]
+  }
+}

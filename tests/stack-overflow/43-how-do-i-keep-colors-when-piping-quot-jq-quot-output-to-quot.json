@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.43",
+  "rank": 43,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 62809196,
+    "title": "How do I keep colors when piping &quot;jq&quot; output to &quot;less&quot;?",
+    "score": 92,
+    "url": "https://stackoverflow.com/questions/62809196/how-do-i-keep-colors-when-piping-jq-output-to-less",
+    "body_html": "<p>I have a simple json file and if I pipe the output of &quot;jq&quot; into &quot;less&quot;, the colors get removed.</p>\n<p>This works:</p>\n<pre class=\"lang-sh prettyprint-override\"><code># yey, lots of colors\njq &quot;.&quot; /tmp/myfile.json\n</code></pre>\n<p>This doesn't work:</p>\n<pre class=\"lang-sh prettyprint-override\"><code># ugly output :( , no colors\njq &quot;.&quot; /tmp/myfile.json | less -R\n</code></pre>\n<p>Any ideas on how to make &quot;less&quot; keep the colors?</p>\n"
+  },
+  "answer": {
+    "answer_id": 62809275,
+    "score": 145,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/62809275",
+    "body_html": "<p>It is <code>jq</code> that is suppressing the colours. From the <code>man</code> page</p>\n<pre><code>       o   --color-output / -C and --monochrome-output / -M:\n\n           By default, jq outputs colored JSON if writing to a terminal.\nYou can force it to produce color even if writing to a pipe or a file\nusing -C, and disable color with -M\n</code></pre>\n<p>So, just use:</p>\n<pre><code>jq -C &quot;.&quot; /tmp/myfile.json | less -R\n</code></pre>\n<p>and it will output colours regardless. The <code>less</code> command doesn't need the <code>-R</code> switch on my version, but I believe it does on older versions. If you see the <code>ESC...</code> codes, you will need that switch.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".",
+    "input": {
+      "name": "jq",
+      "color": "terminal"
+    }
+  }
+}

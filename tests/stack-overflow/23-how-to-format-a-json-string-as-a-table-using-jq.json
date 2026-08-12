@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.23",
+  "rank": 23,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 39139107,
+    "title": "How to format a JSON string as a table using jq?",
+    "score": 166,
+    "url": "https://stackoverflow.com/questions/39139107/how-to-format-a-json-string-as-a-table-using-jq",
+    "body_html": "<p>Just started out with Bash scripting and stumbled upon jq to work with JSON.</p>\n<p>I need to transform a JSON string like below to a table for output in the terminal.</p>\n<pre><code>[{\n    &quot;name&quot;: &quot;George&quot;,\n    &quot;id&quot;: 12,\n    &quot;email&quot;: &quot;george@domain.example&quot;\n}, {\n    &quot;name&quot;: &quot;Jack&quot;,\n    &quot;id&quot;: 18,\n    &quot;email&quot;: &quot;jack@domain.example&quot;\n}, {\n    &quot;name&quot;: &quot;Joe&quot;,\n    &quot;id&quot;: 19,\n    &quot;email&quot;: &quot;joe@domain.example&quot;\n}]\n</code></pre>\n<p>What I want to display in the terminal:</p>\n<pre><code>ID        Name\n=================\n12        George\n18        Jack\n19        Joe\n</code></pre>\n<p>Notice how I don't want to display the email property for each row, so the jq command should involve some filtering. The following gives me a plain list of names and id's:</p>\n<pre><code>list=$(echo &quot;$data&quot; | jq -r '.[] | .name, .id')\nprintf &quot;$list&quot;\n</code></pre>\n<p>The problem with that is, I cannot display it like a table. I know jq has some formatting options, but not nearly as good as the options I have when using <code>printf</code>. I think I want to get these values in an array which I can then loop through myself to do the formatting...? The things I tried give me varying results, but never what I really want.</p>\n<p>Can someone point me in the right direction?</p>\n"
+  },
+  "answer": {
+    "answer_id": 39139478,
+    "score": 118,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/39139478",
+    "body_html": "<p>Why not something like:</p>\n<pre><code>echo '[{\n    &quot;name&quot;: &quot;George&quot;,\n    &quot;id&quot;: 12,\n    &quot;email&quot;: &quot;george@domain.example&quot;\n}, {\n    &quot;name&quot;: &quot;Jack&quot;,\n    &quot;id&quot;: 18,\n    &quot;email&quot;: &quot;jack@domain.example&quot;\n}, {\n    &quot;name&quot;: &quot;Joe&quot;,\n    &quot;id&quot;: 19,\n    &quot;email&quot;: &quot;joe@domain.example&quot;\n}]' | jq -r '.[] | &quot;\\(.id)\\t\\(.name)&quot;'\n</code></pre>\n<p>Output</p>\n<pre><code>12  George\n18  Jack\n19  Joe\n</code></pre>\n<hr />\n<p><strong>Edit 1 :</strong> For fine grained formatting use tools like <code>awk</code></p>\n<pre><code> echo '[{\n    &quot;name&quot;: &quot;George&quot;,\n    &quot;id&quot;: 12,\n    &quot;email&quot;: &quot;george@domain.example&quot;\n}, {\n    &quot;name&quot;: &quot;Jack&quot;,\n    &quot;id&quot;: 18,\n    &quot;email&quot;: &quot;jack@domain.example&quot;\n}, {\n    &quot;name&quot;: &quot;Joe&quot;,\n    &quot;id&quot;: 19,\n    &quot;email&quot;: &quot;joe@domain.example&quot;\n}]' | jq -r '.[] | [.id, .name] | @csv' | awk -v FS=&quot;,&quot; 'BEGIN{print &quot;ID\\tName&quot;;print &quot;============&quot;}{printf &quot;%s\\t%s%s&quot;,$1,$2,ORS}'\nID  Name\n============\n12  &quot;George&quot;\n18  &quot;Jack&quot;\n19  &quot;Joe&quot;\n</code></pre>\n<hr />\n<p><strong>Edit 2 :</strong> In reply to</p>\n<blockquote>\n<p>There's no way I can get a variable containing an array straight\nfrom jq?</p>\n</blockquote>\n<p>Why not?</p>\n<p>A bit involved example( in fact modified from yours ) where email is changed to an array demonstrates this</p>\n<pre><code>echo '[{\n    &quot;name&quot;: &quot;George&quot;,\n    &quot;id&quot;: 20,\n    &quot;email&quot;: [ &quot;george@domain1.example&quot; , &quot;george@domain2.example&quot; ]\n}, {\n    &quot;name&quot;: &quot;Jack&quot;,\n    &quot;id&quot;: 18,\n    &quot;email&quot;: [ &quot;jack@domain3.example&quot; , &quot;jack@domain5.example&quot; ]\n}, {\n    &quot;name&quot;: &quot;Joe&quot;,\n    &quot;id&quot;: 19,\n    &quot;email&quot;: [ &quot;joe@domain.example&quot; ]\n}]' | jq -r '.[] | .email'\n</code></pre>\n<p><strong>Output</strong></p>\n<pre><code>[\n  &quot;george@domain1.example&quot;,\n  &quot;george@domain2.example&quot;\n]\n[\n  &quot;jack@domain3.example&quot;,\n  &quot;jack@domain5.example&quot;\n]\n[\n  &quot;joe@domain.example&quot;\n]\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | [.id, .name]",
+    "input": [
+      {
+        "name": "George",
+        "id": 12,
+        "email": "george@domain.example"
+      },
+      {
+        "name": "Jack",
+        "id": 18,
+        "email": "jack@domain.example"
+      },
+      {
+        "name": "Joe",
+        "id": 19,
+        "email": "joe@domain.example"
+      }
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.47",
+  "rank": 47,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 43259563,
+    "title": "How to check if element exists in array with jq",
+    "score": 82,
+    "url": "https://stackoverflow.com/questions/43259563/how-to-check-if-element-exists-in-array-with-jq",
+    "body_html": "<p>I have an array and I need to check if elements exists in that array or to get that element from the array using \njq, <strong>fruit.json</strong>:</p>\n\n<pre><code>{\n    \"fruit\": [\n        \"apple\", \n        \"orange\",\n        \"pomegranate\",\n        \"apricot\",\n        \"mango\"\n    ]\n}\n\n\ncat fruit.json | jq '.fruit .apple' \n</code></pre>\n\n<p>does not work</p>\n"
+  },
+  "answer": {
+    "answer_id": 43269105,
+    "score": 122,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/43269105",
+    "body_html": "<p>The semantics of 'contains' is not straightforward at all.  In general, it would be better to use 'index' to test if an array has a specific value, e.g.</p>\n<pre><code>.fruit | index( &quot;orange&quot; )\n</code></pre>\n<p>However, if the item of interest is itself an array, the general form:</p>\n<pre><code> ARRAY | index( [ITEM] )\n</code></pre>\n<p>should be used, e.g.:</p>\n<pre><code>[1, [2], 3] | index( [[2]] )  #=&gt; 1\n</code></pre>\n<h3>IN/1</h3>\n<p>If your jq has <code>IN/1</code> then a better solution is to use it:</p>\n<pre><code>.fruit as $f | &quot;orange&quot; | IN($f[])\n</code></pre>\n<p>If your jq has <code>first/1</code> (as does jq 1.5), then here is a fast definition of <code>IN/1</code> to use:</p>\n<pre><code>def IN(s): first((s == .) // empty) // false;\n</code></pre>\n<h2><code>any(_;_)</code></h2>\n<p>Another efficient alternative that is sometimes more convenient is to use <code>any/2</code>, e.g.</p>\n<pre><code>any(.fruit[]; . == &quot;orange&quot;)\n</code></pre>\n<p>or equivalently:</p>\n<p><code>any(.fruit[] == &quot;orange&quot;; .)</code></p>\n<h2>WARNING regarding `in`</h2>\n<p>In a comment, someone suggested using `in`, but `in` has very different semantics compared to `IN`.  For example, consider that the following returns `true`:</p>\n<p><code>jq -n '1 | in([0,4])'</code></p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".fruit[] | select(. == \"orange\")",
+    "input": {
+      "fruit": [
+        "apple",
+        "orange",
+        "pomegranate",
+        "apricot",
+        "mango"
+      ]
+    }
+  }
+}

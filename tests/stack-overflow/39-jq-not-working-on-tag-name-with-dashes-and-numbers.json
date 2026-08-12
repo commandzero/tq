@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.39",
+  "rank": 39,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 37344329,
+    "title": "jq not working on tag name with dashes and numbers",
+    "score": 102,
+    "url": "https://stackoverflow.com/questions/37344329/jq-not-working-on-tag-name-with-dashes-and-numbers",
+    "body_html": "<p>I am using <code>jq</code> but having &quot;-&quot; in my json tag make <code>jq</code> not compile. I cannot escape it to make it works. Here is the command:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>curl -X GET -H &quot;X-AppKey:foo&quot; &quot;foo/v2/_status&quot; | jq '.component-status[]'\n</code></pre>\n<p>I have read in the github of <code>jq</code> this post <a href=\"https://github.com/stedolan/jq/issues/202\" rel=\"noreferrer\">https://github.com/stedolan/jq/issues/202</a> but I cannot make it work.</p>\n<p>This is the output of the <code>curl</code>:</p>\n<pre><code>{\n  &quot;status&quot;: &quot;ok&quot;,\n  &quot;hostname&quot;: &quot;0b0b495a46db&quot;,\n  &quot;component-status&quot;: [\n   {\n     &quot;status-code&quot;: 200,\n     &quot;component&quot;: &quot;Service1&quot;,\n     &quot;status&quot;: &quot;OK&quot;\n   },\n   {\n     &quot;status-code&quot;: 200,\n     &quot;component&quot;: &quot;Service2&quot;,\n     &quot;status&quot;: &quot;OK&quot;\n   }\n  ]\n }\n</code></pre>\n<p>Any idea?</p>\n"
+  },
+  "answer": {
+    "answer_id": 37344498,
+    "score": 191,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/37344498",
+    "body_html": "<p>You need to enclose in brackets and double quotes:</p>\n\n<pre><code>jq '.\"component-status\"'\n</code></pre>\n\n<p>With your given input it returns:</p>\n\n<pre><code>[\n  {\n    \"status\": \"OK\",\n    \"component\": \"Service1\",\n    \"status-code\": 200\n  },\n  {\n    \"status\": \"OK\",\n    \"component\": \"Service2\",\n    \"status-code\": 200\n  }\n]\n</code></pre>\n\n<p>The <a href=\"https://stedolan.github.io/jq/manual/#Basicfilters\" rel=\"noreferrer\">jq Manual (development) --> Basic filters</a>:</p>\n\n<blockquote>\n<pre><code>.foo, .foo.bar\n</code></pre>\n  \n  <p>The simplest useful filter is <code>.foo</code>. When given a JSON object (aka\n  dictionary or hash) as input, it produces the value at the key “foo”,\n  or null if there’s none present.</p>\n  \n  <p>If the key contains special characters, you need to surround it with\n  double quotes like this: <code>.\"foo$\"</code>.</p>\n</blockquote>\n\n<p>From the github issue <a href=\"https://github.com/stedolan/jq/issues/38#issuecomment-9770240\" rel=\"noreferrer\">Cannot select field if field name has dashes</a>:</p>\n\n<blockquote>\n  <p>Currently, that gets parsed as a subtraction. You can always\n  explicitly use strings for when your keys don't fit identifier syntax.</p>\n</blockquote>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".status",
+    "input": {
+      "status": "ok",
+      "hostname": "0b0b495a46db",
+      "component-status": [
+        {
+          "status-code": 200,
+          "component": "Service1",
+          "status": "OK"
+        },
+        {
+          "status-code": 200,
+          "component": "Service2",
+          "status": "OK"
+        }
+      ]
+    }
+  }
+}

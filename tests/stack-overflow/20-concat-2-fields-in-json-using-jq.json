@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.20",
+  "rank": 20,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 37710718,
+    "title": "Concat 2 fields in JSON using jq",
+    "score": 177,
+    "url": "https://stackoverflow.com/questions/37710718/concat-2-fields-in-json-using-jq",
+    "body_html": "<p>I am using <code>jq</code> to reformat my <code>JSON</code>.</p>\n\n<p>JSON String:</p>\n\n<p><code>{\"channel\": \"youtube\", \"profile_type\": \"video\", \"member_key\": \"hello\"}</code></p>\n\n<p>Wanted output:</p>\n\n<p><code>{\"channel\" : \"profile_type.youtube\"}</code></p>\n\n<p>My command:</p>\n\n<p><code>echo '{\"channel\": \"youtube\", \"profile_type\": \"video\", \"member_key\": \"hello\"}' | jq -c '. | {channel: .profile_type + \".\" + .member_key}'</code></p>\n\n<p>I know that the command below concatenates the string. But it is not working in the same logic as above:</p>\n\n<p><code>echo '{\"channel\": \"youtube\", \"profile_type\": \"video\", \"member_key\": \"hello\"}' | jq -c '.profile_type + \".\" + .member_key'</code></p>\n\n<p>How can I achieve my result using ONLY jq?</p>\n"
+  },
+  "answer": {
+    "answer_id": 37710802,
+    "score": 235,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/37710802",
+    "body_html": "<p>Use <a href=\"https://stedolan.github.io/jq/manual/#Parenthesis\" rel=\"noreferrer\">parentheses</a> around the string concatenation code:</p>\n<pre><code>echo '{&quot;channel&quot;: &quot;youtube&quot;, &quot;profile_type&quot;: &quot;video&quot;, &quot;member_key&quot;: &quot;hello&quot;}' \\\n | jq '{channel: (.profile_type + &quot;.&quot; + .channel)}'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "{\"channel\": (.profile_type + \".\" + .channel)}",
+    "input": {
+      "channel": "youtube",
+      "profile_type": "video",
+      "member_key": "hello"
+    }
+  }
+}

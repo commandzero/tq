@@ -46,6 +46,16 @@ case "$campaign:$profile" in
             --cache-root "$cache_root" \
             --origin "$corpus_origin"
         ;;
+    benchmark:stack-overflow)
+        mkdir -p "$work_root"
+        cargo build --quiet --release -p tq-cli
+        TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
+        export TQ_BIN
+        exec cargo run --quiet -p tq-test-support --bin tq-stack-overflow -- run \
+            --scenario-dir tests/stack-overflow \
+            --output "$work_root/stack-overflow.json" \
+            --report benchmarks/stack-overflow.md
+        ;;
     fuzz:default)
         seconds="${TQ_FUZZ_SECONDS:-10}"
         root="$PWD"

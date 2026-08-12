@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.07",
+  "rank": 7,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 37668134,
+    "title": "How to install JQ on Mac on the command line?",
+    "score": 349,
+    "url": "https://stackoverflow.com/questions/37668134/how-to-install-jq-on-mac-on-the-command-line",
+    "body_html": "<p>I need to know the most efficient way of installing JQ on Mac (El Capitan). The code is downloaded to my Mac but I would like to know how I can install and operate it via the command line.</p>\n"
+  },
+  "answer": {
+    "answer_id": 49261843,
+    "score": 410,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/49261843",
+    "body_html": "<p>You can install any application/packages with brew on mac. If you want to know the exact command just search your package on <a href=\"https://brewinstall.org\" rel=\"noreferrer\">https://brewinstall.org</a> and you will get the set of commands needed to install that package.</p>\n<p>First open terminal and install brew</p>\n<pre><code>/bin/bash -c &quot;$(curl -fsSL raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)&quot;\n</code></pre>\n<p>Now Install jq</p>\n<pre><code>brew install jq\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".",
+    "input": {
+      "name": "jq",
+      "platform": "macOS"
+    }
+  }
+}

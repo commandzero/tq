@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.38",
+  "rank": 38,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 34477547,
+    "title": "How to combine the sequence of objects in jq into one object?",
+    "score": 109,
+    "url": "https://stackoverflow.com/questions/34477547/how-to-combine-the-sequence-of-objects-in-jq-into-one-object",
+    "body_html": "<p>I would like to convert the stream of objects:</p>\n\n<pre><code>{\n  \"a\": \"green\",\n  \"b\": \"white\"\n}\n{\n  \"a\": \"red\",\n  \"c\": \"purple\"\n}\n</code></pre>\n\n<p>into one object:</p>\n\n<pre><code>{\n  \"a\": \"red\",\n  \"b\": \"white\",\n  \"c\": \"purple\"\n}\n</code></pre>\n\n<p>Also, how can I wrap the same sequence into an array?</p>\n\n<pre><code>[\n    {\n      \"a\": \"green\",\n      \"b\": \"white\"\n    },\n    {\n      \"a\": \"red\",\n      \"c\": \"purple\"\n    }\n]\n</code></pre>\n\n<p>Sadly, the manual is seriously lacking in comprehensiveness, and googling doesn't find the answers either.</p>\n"
+  },
+  "answer": {
+    "answer_id": 34477713,
+    "score": 150,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/34477713",
+    "body_html": "<p>If your input is a stream of objects, then unless your jq has <code>inputs</code>, the objects must be &quot;slurped&quot;, e.g. using the -s command-line option, in order to combine them.</p>\n<p>Thus one way to combine objects in the input stream is to use:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -s add\n</code></pre>\n<p>For the second problem, creating an array:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -s .\n</code></pre>\n<p>There are of course other alternatives, but these are simple and do not require the most recent version of jq. With jq 1.5 and later, you can use 'inputs', e.g. <code>jq -n '[inputs]'</code></p>\n<h2>Efficient solution</h2>\n<p>For the first problem (reduction), rather than slurping (whether via the -s option, or using <code>[inputs]</code>), it would be more efficient to use <code>reduce</code> with <code>inputs</code> and the -n command-line option.  For example, to combine the stream of objects into a single object:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -n 'reduce inputs as $in (null; . + $in)'\n</code></pre>\n<p>Equivalently, without <code>--null-input</code>:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq 'reduce inputs as $in (.; . + $in)'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "map(.a)",
+    "input": [
+      {
+        "a": "green",
+        "b": "white"
+      },
+      {
+        "a": "red",
+        "c": "purple"
+      }
+    ]
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.28",
+  "rank": 28,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 42245288,
+    "title": "Add new element to existing JSON array with jq",
+    "score": 133,
+    "url": "https://stackoverflow.com/questions/42245288/add-new-element-to-existing-json-array-with-jq",
+    "body_html": "<p>I want to append an element to an array in a JSON file using the <code>jq``add</code> command, but it's not working. </p>\n\n<p><code>report-2017-01-07.json</code> file:</p>\n\n<pre><code>{  \n   \"report\": \"1.0\",\n   \"data\": {  \n      \"date\": \"2010-01-07\",\n      \"messages\": [  \n         {  \n            \"date\": \"2010-01-07T19:58:42.949Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"OK\",\n            \"message\": \"metadata loaded into iRODS successfully\"\n         },\n         {  \n            \"date\": \"2010-01-07T20:22:46.949Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"NOK\",\n            \"message\": \"metadata duplicated into iRODS\"\n         },\n         {  \n            \"date\": \"2010-01-07T22:11:55.949Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"NOK\",\n            \"message\": \"metadata was not validated by XSD schema\"\n         }\n      ]\n   }\n}\n</code></pre>\n\n<p>I am using this command:</p>\n\n<pre><code>$ cat report-2017-01-07.json \n| jq -s '.data.messages {\"date\": \"2010-01-07T19:55:99.999Z\", \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\", \"status\": \"OKKK\", \"message\": \"metadata loaded into iRODS successfullyyyyy\"}'\njq: error: syntax error, unexpected '{', expecting $end (Unix shell quoting issues?) at &lt;top-level&gt;, line 1:\n.data.messages {\"date\": \"2010-01-07T19:55:99.999Z\", \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\", \"status\": \"OKKK\", \"message\": \"metadata loaded into iRODS successfullyyyyy\"}               \njq: 1 compile error\n</code></pre>\n\n<p>Here's how I want the output to look:</p>\n\n<pre><code>{\n    \"report\": \"1.0\",\n    \"data\": {\n        \"date\": \"2010-01-07\",\n        \"messages\": [{\n            \"date\": \"2010-01-07T19:58:42.949Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"OK\",\n            \"message\": \"metadata loaded into iRODS successfully\"\n        }, {\n            \"date\": \"2010-01-07T20:22:46.949Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"NOK\",\n            \"message\": \"metadata duplicated into iRODS\"\n        }, {\n            \"date\": \"2010-01-07T22:11:55.949Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"NOK\",\n            \"message\": \"metadata was not validated by XSD schema\"\n        }, {\n            \"date\": \"2010-01-07T19:55:99.999Z\",\n            \"xml\": \"xml_samplesheet_2017_01_07_run_09.xml\",\n            \"status\": \"OKKKKKKK\",\n            \"message\": \"metadata loaded into iRODS successfullyyyyy\"\n        }]\n    }\n}\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 42248841,
+    "score": 194,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/42248841",
+    "body_html": "<p>The <code>|= .+ </code> part in the filter adds a new element to the existing array. You can use <code>jq</code> with filter like:</p>\n<pre><code>jq '.data.messages[3] |= . + {\n      &quot;date&quot;: &quot;2010-01-07T19:55:99.999Z&quot;, \n      &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;, \n      &quot;status&quot;: &quot;OKKK&quot;, \n      &quot;message&quot;: &quot;metadata loaded into iRODS successfullyyyyy&quot;\n}' inputJson\n</code></pre>\n<p>To avoid using the hardcoded length value <code>3</code> and dynamically add a new element, use <code>. | length</code> which returns the length, which can be used as the next array index, i.e.,</p>\n<pre><code>jq '.data.messages[.data.messages| length] |= . + {\n      &quot;date&quot;: &quot;2010-01-07T19:55:99.999Z&quot;, \n      &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;, \n      &quot;status&quot;: &quot;OKKK&quot;, \n      &quot;message&quot;: &quot;metadata loaded into iRODS successfullyyyyy&quot;\n}' inputJson\n</code></pre>\n<p>(or) as per peak's suggestion in the comments, using the <code>+=</code> operator alone</p>\n<pre><code>jq '.data.messages += [{\n     &quot;date&quot;: &quot;2010-01-07T19:55:99.999Z&quot;,\n     &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;, \n     &quot;status&quot;: &quot;OKKK&quot;, \n     &quot;message&quot;: &quot;metadata loaded into iRODS successfullyyyyy&quot;\n}]'\n</code></pre>\n<p>which produces the output you need:</p>\n<pre><code>{\n  &quot;report&quot;: &quot;1.0&quot;,\n  &quot;data&quot;: {\n    &quot;date&quot;: &quot;2010-01-07&quot;,\n    &quot;messages&quot;: [\n      {\n        &quot;date&quot;: &quot;2010-01-07T19:58:42.949Z&quot;,\n        &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;,\n        &quot;status&quot;: &quot;OK&quot;,\n        &quot;message&quot;: &quot;metadata loaded into iRODS successfully&quot;\n      },\n      {\n        &quot;date&quot;: &quot;2010-01-07T20:22:46.949Z&quot;,\n        &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;,\n        &quot;status&quot;: &quot;NOK&quot;,\n        &quot;message&quot;: &quot;metadata duplicated into iRODS&quot;\n      },\n      {\n        &quot;date&quot;: &quot;2010-01-07T22:11:55.949Z&quot;,\n        &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;,\n        &quot;status&quot;: &quot;NOK&quot;,\n        &quot;message&quot;: &quot;metadata was not validated by XSD schema&quot;\n      },\n      {\n        &quot;date&quot;: &quot;2010-01-07T19:55:99.999Z&quot;,\n        &quot;xml&quot;: &quot;xml_samplesheet_2017_01_07_run_09.xml&quot;,\n        &quot;status&quot;: &quot;OKKK&quot;,\n        &quot;message&quot;: &quot;metadata loaded into iRODS successfullyyyyy&quot;\n      }\n    ]\n  }\n}\n</code></pre>\n<p>Use <a href=\"https://jqplay.org/\" rel=\"noreferrer\">jq-play</a> to dry-run your <code>jq-filter</code> and optimize any way you want.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".data.messages += [{\"date\":\"2010-01-07T19:55:99.999Z\",\"xml\":\"new.xml\",\"status\":\"OKKK\",\"message\":\"added\"}]",
+    "input": {
+      "report": "1.0",
+      "data": {
+        "date": "2010-01-07",
+        "messages": [
+          {
+            "date": "2010-01-07T19:58:42.949Z",
+            "xml": "old.xml",
+            "status": "OK",
+            "message": "loaded"
+          },
+          {
+            "date": "2010-01-07T20:22:46.949Z",
+            "xml": "old2.xml",
+            "status": "NOK",
+            "message": "duplicated"
+          }
+        ]
+      }
+    }
+  }
+}

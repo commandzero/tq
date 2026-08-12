@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.05",
+  "rank": 5,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 26701538,
+    "title": "jq: how to filter an array of objects based on values in an inner array?",
+    "score": 518,
+    "url": "https://stackoverflow.com/questions/26701538/jq-how-to-filter-an-array-of-objects-based-on-values-in-an-inner-array",
+    "body_html": "<p>Given this input:</p>\n<pre><code>[\n  {\n    &quot;Id&quot;: &quot;cb94e7a42732b598ad18a8f27454a886c1aa8bbba6167646d8f064cd86191e2b&quot;,\n    &quot;Names&quot;: [\n      &quot;condescending_jones&quot;,\n      &quot;loving_hoover&quot;\n    ]\n  },\n  {\n    &quot;Id&quot;: &quot;186db739b7509eb0114a09e14bcd16bf637019860d23c4fc20e98cbe068b55aa&quot;,\n    &quot;Names&quot;: [\n      &quot;foo_data&quot;\n    ]\n  },\n  {\n    &quot;Id&quot;: &quot;a4b7e6f5752d8dcb906a5901f7ab82e403b9dff4eaaeebea767a04bac4aada19&quot;,\n    &quot;Names&quot;: [\n      &quot;jovial_wozniak&quot;\n    ]\n  },\n  {\n    &quot;Id&quot;: &quot;76b71c496556912012c20dc3cbd37a54a1f05bffad3d5e92466900a003fbb623&quot;,\n    &quot;Names&quot;: [\n      &quot;bar_data&quot;\n    ]\n  }\n]\n</code></pre>\n<p>I'm trying to construct a filter with <a href=\"http://stedolan.github.io/jq/\" rel=\"noreferrer\">jq</a> that returns all objects with <code>Id</code>s that <strong>do not</strong> contain &quot;data&quot; in the inner <code>Names</code> array, with the output being newline-separated.  For the above data, the output I'd like is:</p>\n<pre><code>cb94e7a42732b598ad18a8f27454a886c1aa8bbba6167646d8f064cd86191e2b\na4b7e6f5752d8dcb906a5901f7ab82e403b9dff4eaaeebea767a04bac4aada19\n</code></pre>\n<p>I think I'm somewhat close with this:</p>\n<pre><code>(. - select(.Names[] contains(&quot;data&quot;))) | .[] .Id\n</code></pre>\n<p>but the <code>select</code> filter is not correct and it doesn't compile (get <code>error: syntax error, unexpected IDENT</code>).</p>\n"
+  },
+  "answer": {
+    "answer_id": 26701851,
+    "score": 754,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/26701851",
+    "body_html": "<p>Very close! In your <code>select</code> expression, you have to use a pipe (<code>|</code>) before <code>contains</code>.</p>\n\n<p>This filter produces the expected output.</p>\n\n<pre><code>. - map(select(.Names[] | contains (\"data\"))) | .[] .Id\n</code></pre>\n\n<p>The <a href=\"https://github.com/stedolan/jq/wiki/Cookbook#filter-objects-based-on-the-contents-of-a-key\" rel=\"noreferrer\">jq Cookbook</a> has an example of the syntax.</p>\n\n<blockquote>\n  <h1>Filter objects based on the contents of a key</h1>\n  \n  <p>E.g., I only want objects whose genre key contains \"house\".</p>\n\n<pre><code>$ json='[{\"genre\":\"deep house\"}, {\"genre\": \"progressive house\"}, {\"genre\": \"dubstep\"}]'\n$ echo \"$json\" | jq -c '.[] | select(.genre | contains(\"house\"))'\n{\"genre\":\"deep house\"}\n{\"genre\":\"progressive house\"}\n</code></pre>\n</blockquote>\n\n<p><a href=\"https://stackoverflow.com/questions/26701538/how-to-filter-an-array-of-objects-based-on-values-in-an-inner-array-with-jq/26701851?noredirect=1#comment65634694_26701851\">Colin D</a> asks how to preserve the JSON structure of the array, so that the final output is a single JSON array rather than a stream of JSON objects.</p>\n\n<p>The simplest way is to wrap the whole expression in an array constructor:</p>\n\n<pre><code>$ echo \"$json\" | jq -c '[ .[] | select( .genre | contains(\"house\")) ]'\n[{\"genre\":\"deep house\"},{\"genre\":\"progressive house\"}]\n</code></pre>\n\n<p>You can also use the map function:</p>\n\n<pre><code>$ echo \"$json\" | jq -c 'map(select(.genre | contains(\"house\")))'\n[{\"genre\":\"deep house\"},{\"genre\":\"progressive house\"}]\n</code></pre>\n\n<p>map unpacks the input array, applies the filter to every element, and creates a new array. In other words, <code>map(f)</code> is equivalent to <code>[.[]|f]</code>.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | select(.Names[] == \"foo_data\") | .Id",
+    "input": [
+      {
+        "Id": "a1",
+        "Names": [
+          "condescending_jones",
+          "loving_hoover"
+        ]
+      },
+      {
+        "Id": "a2",
+        "Names": [
+          "foo_data"
+        ]
+      },
+      {
+        "Id": "a3",
+        "Names": [
+          "jovial_wozniak"
+        ]
+      },
+      {
+        "Id": "a4",
+        "Names": [
+          "bar_data"
+        ]
+      }
+    ]
+  }
+}
