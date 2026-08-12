@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.27",
+  "rank": 27,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 38061346,
+    "title": "jq: output array of json objects",
+    "score": 134,
+    "url": "https://stackoverflow.com/questions/38061346/jq-output-array-of-json-objects",
+    "body_html": "<p>Say I have the input:</p>\n\n<pre><code>{\n    \"name\": \"John\",\n    \"email\": \"john@company.com\"\n}\n{\n    \"name\": \"Brad\",\n    \"email\": \"brad@company.com\"\n}\n</code></pre>\n\n<p>How do I get the output:</p>\n\n<pre><code>[\n    {\n        \"name\": \"John\",\n        \"email\": \"john@company.com\"\n    },\n    {\n        \"name\": \"Brad\",\n        \"email\": \"brad@company.com\"\n    }\n]\n</code></pre>\n\n<p>I tried both:</p>\n\n<pre><code>jq '[. | {name, email}]'\n</code></pre>\n\n<p>and </p>\n\n<pre><code>jq '. | [{name, email}]'\n</code></pre>\n\n<p>which both gave me the output</p>\n\n<pre><code>[\n    {\n        \"name\": \"John\",\n        \"email\": \"john@company.com\"\n    }\n]\n[\n    {\n        \"name\": \"Brad\",\n        \"email\": \"brad@company.com\"\n    }\n]\n</code></pre>\n\n<p>I also saw no options for an array output in the documentations, any help appreciated</p>\n"
+  },
+  "answer": {
+    "answer_id": 38061430,
+    "score": 185,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/38061430",
+    "body_html": "<p>Use slurp mode:</p>\n\n<blockquote>\n<pre><code>  o   --slurp/-s:\n\n      Instead of running the filter for each JSON object\n      in the input, read the entire input stream into a large\n      array and run the filter just once.\n</code></pre>\n</blockquote>\n\n<pre><code>$ jq -s '.' &lt; tmp.json\n[\n  {\n    \"name\": \"John\",\n    \"email\": \"john@company.com\"\n  },\n  {\n    \"name\": \"Brad\",\n    \"email\": \"brad@company.com\"\n  }\n]\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "map({\"name\": .name, \"email\": .email})",
+    "input": [
+      {
+        "name": "John",
+        "email": "john@company.com",
+        "extra": 1
+      },
+      {
+        "name": "Brad",
+        "email": "brad@company.com",
+        "extra": 2
+      }
+    ]
+  }
+}

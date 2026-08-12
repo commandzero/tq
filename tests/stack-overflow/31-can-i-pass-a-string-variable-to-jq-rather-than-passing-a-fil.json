@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.31",
+  "rank": 31,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 47105490,
+    "title": "Can I pass a string variable to jq rather than passing a file?",
+    "score": 127,
+    "url": "https://stackoverflow.com/questions/47105490/can-i-pass-a-string-variable-to-jq-rather-than-passing-a-file",
+    "body_html": "<p>I want to convert JSON string into an array in bash.\nThe JSON string is passed to the bash script as an argument (it doesn't exist in a file).</p>\n\n<p>Is there a way of achieving it without using some temp files?</p>\n\n<p>Similarly to this:</p>\n\n<pre><code>script.sh\n\n#! /bin/bash\njson_data='{\"key\":\"value\"}'\njq '.key' $json_data\n\njq: error: Could not open file {key:value}: No such file or directory\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 47105805,
+    "score": 209,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/47105805",
+    "body_html": "<p>I would suggest using a bash <a href=\"https://linux.die.net/abs-guide/x15683.html\" rel=\"noreferrer\">here string</a>.  e.g.</p>\n\n<pre><code>jq '.key' &lt;&lt;&lt; \"$json_data\"\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".key",
+    "input": {
+      "key": "value"
+    }
+  }
+}

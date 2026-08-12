@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.22",
+  "rank": 22,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 42716734,
+    "title": "Modify a key-value in a json using jq in-place",
+    "score": 172,
+    "url": "https://stackoverflow.com/questions/42716734/modify-a-key-value-in-a-json-using-jq-in-place",
+    "body_html": "<p>I have a json in which I want to modify a particular value but the terminal always displays the json with the modified value but it does not actually change the value in the particular file.</p>\n<p>Sample json:</p>\n<pre class=\"lang-json prettyprint-override\"><code>{\n    &quot;name&quot;: &quot;abcd&quot;,\n    &quot;age&quot;: 30,\n    &quot;address&quot;: &quot;abc&quot;\n}\n</code></pre>\n<p>I want to change the value of address in the file itself but so far I've been unable to do so. I tried using:</p>\n<pre><code>jq '.address = &quot;abcde&quot;' test.json\n</code></pre>\n<p>but it didn't work. Any suggestions?</p>\n"
+  },
+  "answer": {
+    "answer_id": 42717073,
+    "score": 126,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/42717073",
+    "body_html": "<p>AFAIK <code>jq</code> does not support in-place editing, so you must redirect to a temporary file first and then replace your original file with it, or use <code>sponge</code> utility from the moreutils package, like that:</p>\n\n<pre><code>jq '.address = \"abcde\"' test.json|sponge test.json\n</code></pre>\n\n<p>There are other techniques to \"redirect to the same file\", like saving your output in a variable e.t.c. \"Unix &amp; Linux StackExchange\" is a good place to start, if you want to learn more about this.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".address = \"abcde\"",
+    "input": {
+      "address": "old",
+      "city": "Boston"
+    }
+  }
+}

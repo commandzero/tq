@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.08",
+  "rank": 8,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 34834519,
+    "title": "How do I select multiple fields in jq?",
+    "score": 314,
+    "url": "https://stackoverflow.com/questions/34834519/how-do-i-select-multiple-fields-in-jq",
+    "body_html": "<p>My input file is newline delimited JSON (<code>ndjson</code>) looking something like this:</p>\n<pre><code>{\n  &quot;login&quot;: &quot;dmaxfield&quot;,\n  &quot;id&quot;: 7449977,\n  ...\n}\n{\n  &quot;login&quot;: &quot;dmaxfield&quot;,\n  &quot;id&quot;: 7449977,\n  ...\n}\n</code></pre>\n<p>I can get all the <code>login</code> names with this : <code>cat members | jq '.[].login'</code> but I have not been able to crack the syntax to get both the <code>login</code> <em>and</em> <code>id</code>?</p>\n"
+  },
+  "answer": {
+    "answer_id": 34835208,
+    "score": 401,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/34835208",
+    "body_html": "<p>You can use <code>jq '.[] | .login, .id'</code> to obtain each login followed by its id.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "{\"login\": .login, \"id\": .id}",
+    "input": {
+      "login": "dmaxfield",
+      "id": 7449977,
+      "email": "d@example.test"
+    }
+  }
+}

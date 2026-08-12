@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.40",
+  "rank": 40,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 34340549,
+    "title": "Convert string to json in jq",
+    "score": 100,
+    "url": "https://stackoverflow.com/questions/34340549/convert-string-to-json-in-jq",
+    "body_html": "<h2>Background</h2>\n\n<p>I have a json file that contains a string of json within an object:</p>\n\n<pre><code>{\n    \"requestType\": \"POST\",\n    \"response\": {\n        \"size\": 78,\n        \"text\": \"{\\\"recordID\\\":123, \\\"title\\\":\\\"Hello World\\\", \\\"content\\\":\\\"Lorem ipsum...\\\"}\"\n    }\n}\n</code></pre>\n\n<p>I need to interperet the contents of the <code>.response.text</code> string as json using the json command line interpereter, <a href=\"https://stedolan.github.io/jq/\" rel=\"noreferrer\">jq</a>.</p>\n\n<p>When I run this command:</p>\n\n<pre><code>jq '.response.text | @json'\n</code></pre>\n\n<p>Output: <code>\"\\\"{\\\\\\\"recordID\\\\\\\":123, \\\\\\\"title\\\\\\\":\\\\\\\"Hello World\\\\\\\", \\\\\\\"content\\\\\\\":\\\\\\\"Lorem ipsum...\\\\\\\"}\\\"\"</code></p>\n\n<p>I get some weird escaped json string instead of json that I can access via something like this: <code>.response.text | @json | .recordID</code>.</p>\n\n<p>I realize that the <code>@json</code> function will take json and output a json escaped string, so there must be another way, but <code>@text</code> doesn't seem to do anything.</p>\n\n<h2>Question</h2>\n\n<p>Is there some way to convert a string of escaped json to actual json that I can parse with a command such as this: <code>jq '.response.text | @json | .title'</code> and get this output: <code>\"Hello World\"</code>?</p>\n"
+  },
+  "answer": {
+    "answer_id": 34340787,
+    "score": 154,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/34340787",
+    "body_html": "<p>Use <a href=\"https://jqlang.github.io/jq/manual/#convert-to-from-json\" rel=\"noreferrer\"><code>fromjson</code></a>.</p>\n<p>It parses a string to its appropriate json value.  <code>tojson</code> (and <code>@json</code>) goes the other way around and takes a json value and converts it to a string.</p>\n<p>So you could do this:</p>\n<pre><code>.response.text | fromjson.title\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".response.text",
+    "input": {
+      "requestType": "POST",
+      "response": {
+        "size": 78,
+        "text": "{\"recordID\":123,\"title\":\"Hello World\",\"content\":\"Lorem ipsum...\"}"
+      }
+    }
+  }
+}

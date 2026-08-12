@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.29",
+  "rank": 29,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 35365769,
+    "title": "How do I use jq to convert number to string?",
+    "score": 130,
+    "url": "https://stackoverflow.com/questions/35365769/how-do-i-use-jq-to-convert-number-to-string",
+    "body_html": "<p>Given the following jq command and Json:</p>\n<pre><code>jq '.[]|[.string,.number]|join(&quot;: &quot;)' &lt;&lt;&lt; '\n[\n  {\n    &quot;number&quot;: 3,\n    &quot;string&quot;: &quot;three&quot;\n  },\n  {\n    &quot;number&quot;: 7,\n    &quot;string&quot;: &quot;seven&quot;\n  }\n]\n'\n</code></pre>\n<p>I'm trying to format the output as:</p>\n<pre><code>three: 3\nseven: 7\n</code></pre>\n<p>Unfortunately, my attempt is resulting in the following error:</p>\n<blockquote>\n<p>jq: error: string and number cannot be added</p>\n</blockquote>\n<p>How do I convert the number to string so both can be joined?</p>\n"
+  },
+  "answer": {
+    "answer_id": 35365770,
+    "score": 130,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/35365770",
+    "body_html": "<p>The jq command has the <a href=\"https://stedolan.github.io/jq/manual/#tostring\">tostring</a> function.  It took me a while to learn to use it by trial and error.  Here is how to use it:</p>\n\n<pre><code>jq -r '.[] | [ .string, .number|tostring ] | join(\": \")' &lt;&lt;&lt; '\n[{ \"number\": 9, \"string\": \"nine\"},\n { \"number\": 4, \"string\": \"four\"}]\n'\nnine: 9\nfour: 4\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | .number | tostring",
+    "input": [
+      {
+        "number": 3,
+        "string": "three"
+      },
+      {
+        "number": 7,
+        "string": "seven"
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.25",
+  "rank": 25,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 39228500,
+    "title": "Extract a specific field from JSON output using jq",
+    "score": 158,
+    "url": "https://stackoverflow.com/questions/39228500/extract-a-specific-field-from-json-output-using-jq",
+    "body_html": "<p>I have a JSON output as follows:</p>\n\n<pre><code>{\n  \"example\": {\n    \"sub-example\": [\n      {\n        \"name\": \"123-345\",\n        \"tag\" : 100\n      },\n      {\n        \"name\": \"234-456\",\n        \"tag\" : 100\n      },\n      {\n        \"name\": \"4a7-a07a5\",\n        \"tag\" : 100\n      }\n    ]\n  }\n}\n</code></pre>\n\n<p>I want to extract the values of the three \"name\" fields and store it in three variables.</p>\n\n<p>I tried <code>cat json_file | jq '.[\"example.sub-example.name\"]'</code> to extract the value of the \"name\" field but that doesn't work.</p>\n\n<p>Can anyone tell me how to achieve this using jq (or some other method)?</p>\n"
+  },
+  "answer": {
+    "answer_id": 39228718,
+    "score": 180,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/39228718",
+    "body_html": "<p>If you just want to extract the <code>name</code> fields, the command you're looking for is <code>jq '.example.\"sub-example\" | .[] | .name'</code>. If you want to keep the names in an array, wrap the whole <code>jq</code> expression in square brackets.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".example[\"sub-example\"][] | .name",
+    "input": {
+      "example": {
+        "sub-example": [
+          {
+            "name": "123-345",
+            "tag": 100
+          },
+          {
+            "name": "234-456",
+            "tag": 100
+          },
+          {
+            "name": "4a7-a07a5",
+            "tag": 100
+          }
+        ]
+      }
+    }
+  }
+}

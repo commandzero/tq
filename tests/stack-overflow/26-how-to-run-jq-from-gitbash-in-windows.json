@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.26",
+  "rank": 26,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 53967693,
+    "title": "How to run jq from gitbash in Windows?",
+    "score": 154,
+    "url": "https://stackoverflow.com/questions/53967693/how-to-run-jq-from-gitbash-in-windows",
+    "body_html": "<p>I have <code>gitbash</code> in Windows. I am trying to run <code>jq</code> but it's giving me error.</p>\n<pre><code>$ ./jq-win64.exe \njq \nparse error: Invalid numeric literal at line 2, column 0\n</code></pre>\n<p><em>Intention</em>: I want to use <code>jq</code> to parse json.</p>\n"
+  },
+  "answer": {
+    "answer_id": 53967916,
+    "score": 96,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/53967916",
+    "body_html": "<p>Using <code>jq-win64.exe</code> from <a href=\"https://github.com/stedolan/jq/releases\" rel=\"noreferrer\"><code>github.com/stedolan/jq/releases</code></a>, I get</p>\n\n<pre><code>vonc@voncav MINGW64 /d/prgs/dl\n$ ./jq-win64.exe --version\njq-1.6\n\nvonc@voncav MINGW64 /d/prgs/dl\n$ echo '{\"foo\": 0}' | ./jq-win64.exe .\n{\n  \"foo\": 0\n}\n</code></pre>\n\n<p>So it does work, but it then depends on the json document you are parsing with it.<br>\nIf that json document is not well-formed, that would generate the error you see.</p>\n\n<p>In your bash session, you can define (or add to your <code>~/.bashrc</code>) an alias:</p>\n\n<pre><code>alias jq=/path/to/jq-win64.exe\n</code></pre>\n\n<p>That way, you don't need to use <code>./jq</code>, but directly <code>jq</code>.</p>\n\n<pre><code>$ echo '{\"foo\": 0}' | jq\n</code></pre>\n\n<p>In my case:</p>\n\n<pre><code>vonc@voncav:/$ alias jq=/mnt/d/dwnl/jq-win64.exe\nvonc@voncav:/$ echo '{\"foo\": 0}' | jq\n{\n  \"foo\": 0\n}\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".",
+    "input": {
+      "name": "jq",
+      "platform": "windows"
+    }
+  }
+}

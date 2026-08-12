@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.15",
+  "rank": 15,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 31034746,
+    "title": "How do I update a single value in a json document using jq?",
+    "score": 230,
+    "url": "https://stackoverflow.com/questions/31034746/how-do-i-update-a-single-value-in-a-json-document-using-jq",
+    "body_html": "<p>Appologies if I've overlooked something very obvious; I've just found <code>jq</code> and am trying to use it to update one JSON value without affecting the surrounding data.</p>\n\n<p>I'd like to pipe a <code>curl</code> result into <code>jq</code>, update a value, and pipe the updated JSON to a <code>curl -X PUT</code>.  Something like </p>\n\n<pre><code>curl http://example.com/shipping.json | jq '.' field: value | curl -X PUT http://example.com/shipping.json\n</code></pre>\n\n<p>So far I've hacked it together using <code>sed</code>, but after looking at a few examples of the <code>|=</code> operator in <code>jq</code> I'm sure that I don't need these.</p>\n\n<p>Here's a JSON sample--how would I use <code>jq</code> to set <code>\"local\": false</code>, while preserving the rest of the JSON?</p>\n\n<pre><code>{\n  \"shipping\": {\n    \"local\": true,\n    \"us\": true,\n    \"us_rate\": {\n      \"amount\": \"0.00\",\n      \"currency\": \"USD\",\n      \"symbol\": \"$\"\n    }\n  }\n}\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 31037640,
+    "score": 217,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/31037640",
+    "body_html": "<p>You set values of an object using the <code>=</code> operator.  <code>|=</code> on the other hand is used to update a value.  Use <code>|=</code> if you need to know the current value of the property, it will be passed as the <strong>input</strong> (.) on your right hand side (if set). Using <code>=</code> on the other hand does not set the input at all for the RHS, it will simply be <code>null</code>.  It's a subtle but important difference.  The context of the RHS changes.</p>\n<p>Since you are setting a property to a constant value, use the <code>=</code> operator.</p>\n<pre><code>.shipping.local = false\n</code></pre>\n<p>Just note that when setting a value to a property, it doesn't necessarily have to exist.  You can add new values easily this way.</p>\n<pre><code>.shipping.local = false | .shipping.canada = false | .shipping.mexico = true\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".shipping",
+    "input": {
+      "shipping": {
+        "local": true,
+        "us": true,
+        "us_rate": {
+          "amount": "0.00",
+          "currency": "USD",
+          "symbol": "$"
+        }
+      }
+    }
+  }
+}

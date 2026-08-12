@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.19",
+  "rank": 19,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 36565295,
+    "title": "jq to replace text directly on file (like sed -i)",
+    "score": 183,
+    "url": "https://stackoverflow.com/questions/36565295/jq-to-replace-text-directly-on-file-like-sed-i",
+    "body_html": "<p>I have a json file that needs to be updated on a certain condition. </p>\n\n<p>Sample json</p>\n\n<pre><code>{\n   \"Actions\" : [\n      {\n         \"value\" : \"1\",\n         \"properties\" : {\n            \"name\" : \"abc\",\n            \"age\" : \"2\",\n            \"other \": \"test1\"\n          }\n      },\n      {\n         \"value\" : \"2\",\n         \"properties\" : {\n            \"name\" : \"def\",\n            \"age\" : \"3\",\n            \"other\" : \"test2\"\n          }\n      }\n   ]\n}\n</code></pre>\n\n<p>I am writing a script that makes use of Jq to match a value and update, as shown below</p>\n\n<pre><code>cat sample.json |  jq '.Actions[] | select (.properties.age == \"3\") .properties.other = \"no-test\"'\n</code></pre>\n\n<p>Output (printed to terminal)</p>\n\n<pre><code>{\n  \"value\": \"1\",\n  \"properties\": {\n    \"name\": \"abc\",\n    \"age\": \"2\",\n    \"other \": \"test1\"\n  }\n}\n{\n  \"value\": \"2\",\n  \"properties\": {\n    \"name\": \"def\",\n    \"age\": \"3\",\n    \"other\": \"no-test\"\n  }\n}\n</code></pre>\n\n<p>While this command makes the needed change, it outputs the entire json on the terminal and does not make change to the file itself. </p>\n\n<p>Please advise if there is an option to have jq make changes on the file directly (similar to sed -i).</p>\n"
+  },
+  "answer": {
+    "answer_id": 36577521,
+    "score": 152,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/36577521",
+    "body_html": "<p>This post addresses the question about the absence of the equivalent of sed's &quot;-i&quot; option, and in particular the situation described:</p>\n<blockquote>\n<p>I have a bunch of files and writing each one to a separate file wouldn't be easy.</p>\n</blockquote>\n<p>There are several options, at least if you are working in a Mac or Linux or similar environment.  Their pros and cons are discussed at\n<a href=\"http://backreference.org/2011/01/29/in-place-editing-of-files/\" rel=\"nofollow noreferrer\">http://backreference.org/2011/01/29/in-place-editing-of-files/</a>\nso I'll focus on just three techniques:</p>\n<p>One is simply to use &quot;&amp;&amp;&quot; along the lines of:</p>\n<pre><code>jq ... INPUT &gt; INPUT.tmp &amp;&amp; mv INPUT.tmp INPUT\n</code></pre>\n<p>Another is to use the <code>sponge</code> utility (part of <a href=\"https://joeyh.name/code/moreutils/\" rel=\"nofollow noreferrer\">moreutils</a>):</p>\n<pre><code>jq ... INPUT | sponge INPUT\n</code></pre>\n<p>The third option might be useful if it is advantageous to avoid updating a file if there are no changes to it. Here is a script which illustrates such a function:</p>\n<pre><code>#!/bin/bash\n\nfunction maybeupdate {\n    local f=&quot;$1&quot;\n    cmp -s &quot;$f&quot; &quot;$f.tmp&quot;\n    if [ $? = 0 ] ; then\n      /bin/rm &quot;$f.tmp&quot;\n    else\n      /bin/mv &quot;$f.tmp&quot; &quot;$f&quot;\n    fi\n}\n\nfor f\ndo\n    jq . &quot;$f&quot; &gt; &quot;$f.tmp&quot;\n    maybeupdate &quot;$f&quot;\ndone\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".Actions[] | .properties.other",
+    "input": {
+      "Actions": [
+        {
+          "value": "1",
+          "properties": {
+            "name": "abc",
+            "age": "2",
+            "other": "test1"
+          }
+        },
+        {
+          "value": "2",
+          "properties": {
+            "name": "def",
+            "age": "3",
+            "other": "test2"
+          }
+        }
+      ]
+    }
+  }
+}

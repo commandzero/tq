@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.33",
+  "rank": 33,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 42097410,
+    "title": "How to check for presence of &#39;key&#39; in jq before iterating over the values",
+    "score": 124,
+    "url": "https://stackoverflow.com/questions/42097410/how-to-check-for-presence-of-key-in-jq-before-iterating-over-the-values",
+    "body_html": "<p>I get <code>Cannot iterate over null (null)</code> from the below query because <code>.property_history</code> is not present in <code>result</code> object.</p>\n<p>How do I check for the presence of <code>.property_history</code> key before proceeding with <code>map(...)</code>?</p>\n<p>I tried using something like</p>\n<pre><code>sold_year= `echo &quot;$content&quot; | jq 'if has(&quot;property_history&quot;) then \nmap(select(.event_name == &quot;Sold&quot;))[0].date' else null end\n</code></pre>\n<p><strong>Original Query:</strong></p>\n<pre><code>sold_year=`echo &quot;$content&quot; | jq '.result.property_history | map(select(.event_name == &quot;Sold&quot;))[0].date'`\n</code></pre>\n<p><strong>JSON:</strong></p>\n<pre class=\"lang-json prettyprint-override\"><code>{\n    &quot;result&quot;:{\n        &quot;property_history&quot;:[\n            {\n                &quot;date&quot;:&quot;01/27/2016&quot;,\n                &quot;price_changed&quot;:0,\n                &quot;price&quot;:899750,\n                &quot;event_name&quot;:&quot;Listed&quot;,\n                &quot;sqft&quot;:0\n            },\n            {\n                &quot;date&quot;:&quot;12/15/2015&quot;,\n                &quot;price_changed&quot;:0,\n                &quot;price&quot;:899750,\n                &quot;event_name&quot;:&quot;Listed&quot;,\n                &quot;sqft&quot;:2357\n            },\n            {\n                &quot;date&quot;:&quot;08/30/2004&quot;,\n                &quot;price_changed&quot;:0,\n                &quot;price&quot;:739000,\n                &quot;event_name&quot;:&quot;Sold&quot;,\n                &quot;sqft&quot;:2357\n            }\n        ]\n    }\n}\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 42099242,
+    "score": 134,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/42099242",
+    "body_html": "<p>You can use the <a href=\"https://stedolan.github.io/jq/manual/#select(boolean_expression)\" rel=\"nofollow noreferrer\">select-expression</a> in <code>jq</code> to do what you intend to achieve, something as,</p>\n<pre><code>jq '.result\n  | select(.property_history != null)\n  | .property_history\n  | map(select(.event_name == &quot;Sold&quot;))[0].date'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".result | select(.property_history != null) | .property_history | map(select(.event_name == \"Sold\"))[0].date",
+    "input": {
+      "result": {
+        "property_history": [
+          {
+            "event_name": "Listed",
+            "date": "2020-01-01"
+          },
+          {
+            "event_name": "Sold",
+            "date": "2020-02-02"
+          }
+        ]
+      }
+    }
+  }
+}

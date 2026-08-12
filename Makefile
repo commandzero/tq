@@ -9,7 +9,7 @@ OPENSPEC ?= openspec
 .PHONY: help fmt fmt-check check lint test openspec-validate \
 	preflight-infra preflight engine-gate \
 	compatibility-smoke compatibility-full \
-	benchmark-smoke benchmark-standard benchmark-large fuzz
+	benchmark-smoke benchmark-standard benchmark-large benchmark-stack-overflow fuzz
 
 help:
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "%-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -53,6 +53,9 @@ benchmark-standard: ## Run refreshed standard-size benchmarks
 
 benchmark-large: ## Run refreshed natural large-file benchmarks
 	@./scripts/run-campaign.sh benchmark large
+
+benchmark-stack-overflow: ## Run the checked-in Stack Overflow jq benchmark
+	@./scripts/run-campaign.sh benchmark stack-overflow
 
 fuzz: ## Run bounded parser and differential fuzz checks
 	@./scripts/run-campaign.sh fuzz default

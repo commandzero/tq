@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.30",
+  "rank": 30,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 38500363,
+    "title": "get the first (or n&#39;th) element in a jq json parsing",
+    "score": 128,
+    "url": "https://stackoverflow.com/questions/38500363/get-the-first-or-nth-element-in-a-jq-json-parsing",
+    "body_html": "<p>I can get the 1st element in a JSON inside []</p>\n<pre class=\"lang-bash prettyprint-override\"><code>$ echo \\\n    '[{&quot;a&quot;:&quot;x&quot;, &quot;b&quot;:true}, {&quot;a&quot;:&quot;XML&quot;, &quot;b&quot;:false}]' | \\\n    jq '.[1]'\n</code></pre>\n<pre class=\"lang-json prettyprint-override\"><code>{\n  &quot;a&quot;:\n    &quot;XML&quot;,\n  &quot;b&quot;:\n    false\n}\n</code></pre>\n<p>But if the json is already disassembled (for instance, after filtering entries using 'select'), how can I choose a single entry and avoid the error seen here?</p>\n<pre class=\"lang-bash prettyprint-override\"><code>$ echo \\\n    '[{&quot;a&quot;:&quot;x&quot;, &quot;b&quot;:true}, {&quot;a&quot;:&quot;x&quot;, &quot;b&quot;:false}, {&quot;a&quot;:&quot;XML&quot;, &quot;b&quot;:false}]' | \\\n    jq \\\n      '.[] | select( .a == &quot;x&quot;)'\n</code></pre>\n<pre class=\"lang-json prettyprint-override\"><code>{\n  &quot;a&quot;:\n    &quot;x&quot;,\n  &quot;b&quot;:\n    true\n}\n{\n  &quot;a&quot;:\n    &quot;x&quot;,\n  &quot;b&quot;:\n    false\n}\n</code></pre>\n<pre class=\"lang-bash prettyprint-override\"><code>$ echo \\\n    '[{&quot;a&quot;:&quot;x&quot;, &quot;b&quot;:true}, {&quot;a&quot;:&quot;x&quot;, &quot;b&quot;:false}, {&quot;a&quot;:&quot;XML&quot;, &quot;b&quot;:false}]' | \\\n    jq \\\n      '.[] | select( .a == &quot;x&quot;) | .[1]'\n</code></pre>\n<pre class=\"lang-none prettyprint-override\"><code>jq: error (at &lt;stdin&gt;:1): Cannot index object with number\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 38500610,
+    "score": 151,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/38500610",
+    "body_html": "<p>You can wrap the results from <code>select</code> in an array:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq '[.[]|select(.a==&quot;x&quot;)][0]' your.json\n</code></pre>\n<p>Output:</p>\n<pre><code>{\n  &quot;a&quot;: &quot;x&quot;,\n  &quot;b&quot;: false\n}\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[0]",
+    "input": [
+      {
+        "a": "x"
+      },
+      {
+        "a": "y"
+      },
+      {
+        "a": "z"
+      }
+    ]
+  }
+}

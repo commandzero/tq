@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.16",
+  "rank": 16,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 35154684,
+    "title": "how to parse a JSON String with jq (or other alternatives)?",
+    "score": 217,
+    "url": "https://stackoverflow.com/questions/35154684/how-to-parse-a-json-string-with-jq-or-other-alternatives",
+    "body_html": "<p>I'm trying to get <code>jq</code> to parse a JSON structure like:</p>\n\n<pre><code>{\n  \"a\" : 1,\n  \"b\" : 2,\n  \"c\" : \"{\\\"id\\\":\\\"9ee ...\\\",\\\"parent\\\":\\\"abc...\\\"}\\n\"\n}\n</code></pre>\n\n<p>That is, an element in the JSON is a string with escaped json.</p>\n\n<p>So, I have something along the lines of\n<code>$ jq [.c] myFile.json | jq [.id]</code></p>\n\n<p>But that crashes with <code>jq: error: Cannot index string with string</code></p>\n\n<p>This is because the output of .c is a string, not more JSON.\nHow do I get jq to parse this string?</p>\n\n<p>My initial solution is to use sed to replace all the escape chars (<code>\\\":\\\"</code>, <code>\\\",\\\"</code> and <code>\\\"</code>) but that's messy, I assume there's a way built into <code>jq</code> to do this?</p>\n\n<p>Thanks!</p>\n\n<p>edit:\nAlso, the jq version available here is:</p>\n\n<pre><code>$ jq --version\njq version 1.3\n</code></pre>\n\n<p>I guess I could update it if required.</p>\n"
+  },
+  "answer": {
+    "answer_id": 35155249,
+    "score": 375,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/35155249",
+    "body_html": "<p>jq has the <a href=\"https://stedolan.github.io/jq/manual/v1.5/#Convertto/fromJSON\" rel=\"noreferrer\"><code>fromjson</code></a> builtin for this:</p>\n\n<pre><code>jq '.c | fromjson | .id' myFile.json\n</code></pre>\n\n<p><code>fromjson</code> was added in version 1.4.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".c",
+    "input": {
+      "a": 1,
+      "b": 2,
+      "c": "{\"id\":\"9ee\",\"parent\":\"abc\"}"
+    }
+  }
+}

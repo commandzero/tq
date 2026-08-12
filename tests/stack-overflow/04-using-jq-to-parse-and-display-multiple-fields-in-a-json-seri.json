@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.04",
+  "rank": 4,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 28164849,
+    "title": "Using jq to parse and display multiple fields in a json serially",
+    "score": 549,
+    "url": "https://stackoverflow.com/questions/28164849/using-jq-to-parse-and-display-multiple-fields-in-a-json-serially",
+    "body_html": "<p>I have this Json</p>\n<pre><code>{\n    &quot;users&quot;: [\n        {\n            &quot;first&quot;: &quot;Stevie&quot;,\n            &quot;last&quot;: &quot;Wonder&quot;\n        },\n        {\n            &quot;first&quot;: &quot;Michael&quot;,\n            &quot;last&quot;: &quot;Jackson&quot;\n        }\n    ]\n}\n</code></pre>\n<p>Using jq I'd like to display first and last name serially. Like so -</p>\n<pre><code>Stevie Wonder\nMichael Jackson\n</code></pre>\n<p>This is how far I have gotten -</p>\n<pre><code>jq '.users[].first, .users[].last'\n</code></pre>\n<p>But it displays</p>\n<pre><code>&quot;Stevie&quot;\n&quot;Michael&quot;\n&quot;Wonder&quot;\n&quot;Jackson&quot;\n</code></pre>\n<p>Notice the following:</p>\n<ol>\n<li>The double quotes that I do not want.</li>\n<li>The carriage return that I do not want.</li>\n<li>It's jumbled up. My query displays all the first names first, and then all the last names. However, I want first-last, first-last pair.</li>\n</ol>\n"
+  },
+  "answer": {
+    "answer_id": 31418194,
+    "score": 764,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/31418194",
+    "body_html": "<p>I recommend using String Interpolation:</p>\n<pre><code>jq '.users[] | &quot;\\(.first) \\(.last)&quot;'\n</code></pre>\n<p>We are piping down the result of <code>.users[]</code> to generate the string &quot;.first .last&quot; using string interpolation. <code>\\(foo)</code> syntax is used for string interpolation in <code>jq</code>. So, for the above example, it becomes &quot;Stevie Wonder&quot; (<code>&quot;.users[].first .users[].second&quot;</code> working elementwise) and &quot;Michael Jackson&quot;.</p>\n<p>jq reference: <a href=\"http://stedolan.github.io/jq/manual/#Stringinterpolation-%5C%28foo%29\" rel=\"noreferrer\">String interpolation</a></p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".users[] | \"\\(.first) \\(.last)\"",
+    "input": {
+      "users": [
+        {
+          "first": "Stevie",
+          "last": "Wonder"
+        },
+        {
+          "first": "Michael",
+          "last": "Jackson"
+        }
+      ]
+    }
+  }
+}

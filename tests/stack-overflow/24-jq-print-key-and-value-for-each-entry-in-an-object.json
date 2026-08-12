@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.24",
+  "rank": 24,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 34226370,
+    "title": "jq: print key and value for each entry in an object",
+    "score": 164,
+    "url": "https://stackoverflow.com/questions/34226370/jq-print-key-and-value-for-each-entry-in-an-object",
+    "body_html": "<p>How do I get <strong>jq</strong> to take json like this:</p>\n\n<pre><code>{\n  \"host1\": { \"ip\": \"10.1.2.3\" },\n  \"host2\": { \"ip\": \"10.1.2.2\" },\n  \"host3\": { \"ip\": \"10.1.18.1\" }\n}\n</code></pre>\n\n<p>and generate this output:</p>\n\n<pre><code>host1, 10.1.2.3\nhost2, 10.1.2.2\nhost3, 10.1.18.1\n</code></pre>\n\n<p>I'm not interested in the formatting, I just can't figure out how to access the key name and value.</p>\n"
+  },
+  "answer": {
+    "answer_id": 34227629,
+    "score": 275,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/34227629",
+    "body_html": "<p>To get the top-level keys as a stream, you can use the <a href=\"https://stedolan.github.io/jq/manual/#Builtinoperatorsandfunctions\" rel=\"noreferrer\">built-in function</a> <code>keys[]</code>.  So one solution to your particular problem would be:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -r 'keys[] as $k | &quot;\\($k), \\(.[$k] | .ip)&quot;' \n</code></pre>\n<p><code>keys</code> produces the key names in sorted order; if you want them in the original order, use <code>keys_unsorted</code>.</p>\n<p>Another alternative, which produces keys in the original order, is:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -r 'to_entries[] | &quot;\\(.key), \\(.value | .ip)&quot;'\n</code></pre>\n<h3>CSV and TSV output</h3>\n<p>The @csv and @tsv filters might also be worth considering here, e.g.</p>\n<pre><code>jq -r 'to_entries[] | [.key, .value.ip] | @tsv'\n</code></pre>\n<p>produces:</p>\n<pre><code>host1   10.1.2.3\nhost2   10.1.2.2\nhost3   10.1.18.1\n</code></pre>\n<h3>Embedded objects</h3>\n<p>If the keys of interest are embedded as in the following example, the jq filter would have to be modified along the lines shown.</p>\n<p>Input:</p>\n<pre class=\"lang-json prettyprint-override\"><code>{\n  &quot;myhosts&quot;: {\n    &quot;host1&quot;: { &quot;ip&quot;: &quot;10.1.2.3&quot; },\n    &quot;host2&quot;: { &quot;ip&quot;: &quot;10.1.2.2&quot; },\n    &quot;host3&quot;: { &quot;ip&quot;: &quot;10.1.18.1&quot; }\n  }\n}\n</code></pre>\n<p>Modification:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -r '.myhosts | keys[] as $k | &quot;\\($k), \\(.[$k] | .ip)&quot;'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "keys[]",
+    "input": {
+      "host1": {
+        "ip": "10.1.2.3"
+      },
+      "host2": {
+        "ip": "10.1.2.2"
+      },
+      "host3": {
+        "ip": "10.1.18.1"
+      }
+    }
+  }
+}

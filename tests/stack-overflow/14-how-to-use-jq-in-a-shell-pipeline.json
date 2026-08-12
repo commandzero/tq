@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.14",
+  "rank": 14,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 33247228,
+    "title": "How to use `jq` in a shell pipeline?",
+    "score": 244,
+    "url": "https://stackoverflow.com/questions/33247228/how-to-use-jq-in-a-shell-pipeline",
+    "body_html": "<p>I can't seem to get <code>jq</code> to behave &quot;normally&quot; in a shell pipeline.  For example:</p>\n<pre><code>$ curl -s https://api.github.com/users/octocat/repos | jq | cat\n</code></pre>\n<p>results in <code>jq</code> simply printing out its help text*.  The same thing happens if I try to redirect <code>jq</code>'s output to a file:</p>\n<pre><code>$ curl -s https://api.github.com/users/octocat/repos | jq &gt; /tmp/stuff.json\n</code></pre>\n<p>Is <code>jq</code> deliberately bailing out if it determines that it's not being run from a tty?  How can I prevent this behavior so that I can use <code>jq</code> in a pipeline?</p>\n<p>Edit: it looks like this is no longer an issue in recent versions of <code>jq</code>. I have <code>jq-1.6</code> now and the examples above work as expected.</p>\n<hr />\n<p>* <sub>(I realize this example contains a <a href=\"http://porkmail.org/era/unix/award.html\" rel=\"noreferrer\">useless use of cat</a>; it's for illustration purposes only)</sub></p>\n"
+  },
+  "answer": {
+    "answer_id": 33247259,
+    "score": 398,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/33247259",
+    "body_html": "<p>You need to supply a filter as an argument. To pass the JSON through unmodified other than the pretty printing <code>jq</code> provides by default, use the identity filter <code>.</code>:</p>\n\n<pre><code>curl -s https://api.github.com/users/octocat/repos | jq '.' | cat\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".",
+    "input": {
+      "repos": [
+        {
+          "name": "jq",
+          "stars": 1
+        },
+        {
+          "name": "tq",
+          "stars": 2
+        }
+      ]
+    }
+  }
+}

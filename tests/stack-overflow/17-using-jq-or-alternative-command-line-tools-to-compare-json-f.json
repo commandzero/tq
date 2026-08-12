@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.17",
+  "rank": 17,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 31930041,
+    "title": "Using jq or alternative command line tools to compare JSON files",
+    "score": 214,
+    "url": "https://stackoverflow.com/questions/31930041/using-jq-or-alternative-command-line-tools-to-compare-json-files",
+    "body_html": "<p>Are there any command line utilities that can be used to find if two JSON files are identical with invariance to within-dictionary-key and within-list-element ordering?</p>\n\n<p>Could this be done with <a href=\"http://stedolan.github.io/jq/\" rel=\"noreferrer\"><code>jq</code></a> or some other equivalent tool?</p>\n\n<h2>Examples:</h2>\n\n<p>These two JSON files are identical</p>\n\n<p><code>A</code>:</p>\n\n<pre><code>{\n  \"People\": [\"John\", \"Bryan\"],\n  \"City\": \"Boston\",\n  \"State\": \"MA\"\n}\n</code></pre>\n\n<p><code>B</code>:</p>\n\n<pre><code>{\n  \"People\": [\"Bryan\", \"John\"],\n  \"State\": \"MA\",\n  \"City\": \"Boston\"\n}\n</code></pre>\n\n<p>but these two JSON files are different:</p>\n\n<p><code>A</code>:</p>\n\n<pre><code>{\n  \"People\": [\"John\", \"Bryan\", \"Carla\"],\n  \"City\": \"Boston\",\n  \"State\": \"MA\"\n}\n</code></pre>\n\n<p><code>C</code>:</p>\n\n<pre><code>{\n  \"People\": [\"Bryan\", \"John\"],\n  \"State\": \"MA\",\n  \"City\": \"Boston\"\n}\n</code></pre>\n\n<p>That would be:</p>\n\n<pre><code>$ some_diff_command A.json B.json\n\n$ some_diff_command A.json C.json\nThe files are not structurally identical\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 31933234,
+    "score": 53,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/31933234",
+    "body_html": "<p>Since jq's comparison already compares objects without taking into account key ordering, all that's left is to sort all lists inside the object before comparing them. Assuming your two files are named <code>a.json</code> and <code>b.json</code>, on the latest jq nightly:</p>\n\n<pre><code>jq --argfile a a.json --argfile b b.json -n '($a | (.. | arrays) |= sort) as $a | ($b | (.. | arrays) |= sort) as $b | $a == $b'\n</code></pre>\n\n<p>This program should return \"true\" or \"false\" depending on whether or not the objects are equal using the definition of equality you ask for.</p>\n\n<p>EDIT: The <code>(.. | arrays) |= sort</code> construct doesn't actually work as expected on some edge cases. <a href=\"https://github.com/stedolan/jq/issues/893\" rel=\"noreferrer\">This GitHub issue</a> explains why and provides some alternatives, such as:</p>\n\n<pre><code>def post_recurse(f): def r: (f | select(. != null) | r), .; r; def post_recurse: post_recurse(.[]?); (post_recurse | arrays) |= sort\n</code></pre>\n\n<p>Applied to the jq invocation above:</p>\n\n<pre><code>jq --argfile a a.json --argfile b b.json -n 'def post_recurse(f): def r: (f | select(. != null) | r), .; r; def post_recurse: post_recurse(.[]?); ($a | (post_recurse | arrays) |= sort) as $a | ($b | (post_recurse | arrays) |= sort) as $b | $a == $b'\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[0].City == .[1].City",
+    "input": [
+      {
+        "People": [
+          "John",
+          "Bryan"
+        ],
+        "City": "Boston",
+        "State": "MA"
+      },
+      {
+        "People": [
+          "Bryan",
+          "John"
+        ],
+        "State": "MA",
+        "City": "Boston"
+      }
+    ]
+  }
+}

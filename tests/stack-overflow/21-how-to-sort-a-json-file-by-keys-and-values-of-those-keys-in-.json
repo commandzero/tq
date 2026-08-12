@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.21",
+  "rank": 21,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 30331504,
+    "title": "How to sort a json file by keys and values of those keys in jq",
+    "score": 176,
+    "url": "https://stackoverflow.com/questions/30331504/how-to-sort-a-json-file-by-keys-and-values-of-those-keys-in-jq",
+    "body_html": "<p>We're building a website using the Pentaho CTools library, which has a graphical dashboard editor which writes out JSON-format files for part of the dashboard.</p>\n\n<p>I'd like to apply a transform to these files before check-in to git in order to sort them by key and then by the value of certain keys. The purpose is to make diffs easier, since the editor has a habit of rearranging all of the json fields.</p>\n\n<p>For example, we might have something like this:</p>\n\n<pre><code>{\n  \"components\": {\n    \"rows\": [\n      {\n        \"id\": \"CHARTS\",\n        \"name\": \"Charts\",\n        \"parent\": \"UnIqEiD\",\n        \"properties\": [\n          {\n            \"name\": \"Group\",\n            \"type\": \"Label\",\n            \"value\": \"Charts\"\n          }\n        ],\n        \"type\": \"Label\",\n        \"typeDesc\": \"&lt;i&gt;Group&lt;/i&gt;\"\n      },\n      {\n        \"id\": \"kjalajsdjf\",\n        \"meta_cdwSupport\": \"true\",\n        \"parent\": \"CHARTS\",\n        \"properties\": [\n          {\n            \"name\": \"name\",\n            \"type\": \"Id\",\n            \"value\": \"Value1\"\n          },\n          {\n            \"name\": \"title\",\n            \"type\": \"String\",\n            \"value\": \"Value2\"\n          },\n          {\n            \"name\": \"listeners\",\n            \"type\": \"Listeners\",\n            \"value\": \"[]\"\n          },\n...\n</code></pre>\n\n<p>We are able to <code>jq --sort-keys</code> (<a href=\"http://stedolan.github.io/jq/\" rel=\"noreferrer\">http://stedolan.github.io/jq/</a>) to sort all of the keys, but I'm struggling to find out how to use the <code>sort_by</code> function to then sort certain specific elements by the value of certain keys (so, in the example above, sorting by <code>properties.name</code> for example. Any ideas?</p>\n"
+  },
+  "answer": {
+    "answer_id": 58011343,
+    "score": 175,
+    "accepted": false,
+    "selection": "highest-voted",
+    "url": "https://stackoverflow.com/a/58011343",
+    "body_html": "<p>This doesn't answer the question, but here is another way to sort by attributes/keys:</p>\n<p>From <a href=\"https://dyn.manpages.debian.org/jump?q=jq\" rel=\"noreferrer\"><code>man jq</code></a>:</p>\n<blockquote>\n<p><strong>--sort-keys</strong> / <strong>-S</strong>:<br />\nOutput the fields of each object with the keys in sorted order.</p>\n</blockquote>\n<p>Example:</p>\n\n<pre class=\"lang-bash prettyprint-override\"><code>jq --sort-keys . my_file &gt; sorted_file\n</code></pre>\n<p>-or-</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -S . my_file &gt; sorted_file\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".components.rows | sort_by(.id)",
+    "input": {
+      "components": {
+        "rows": [
+          {
+            "id": "kjalajsdjf",
+            "name": "Value1"
+          },
+          {
+            "id": "CHARTS",
+            "name": "Charts"
+          }
+        ]
+      }
+    }
+  }
+}

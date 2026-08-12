@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.18",
+  "rank": 18,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 40396445,
+    "title": "Get outputs from jq on a single line",
+    "score": 187,
+    "url": "https://stackoverflow.com/questions/40396445/get-outputs-from-jq-on-a-single-line",
+    "body_html": "<p>I got below output using: <a href=\"https://stackoverflow.com/a/40330344\">https://stackoverflow.com/a/40330344</a></p>\n\n<pre><code> (.issues[] | {key, status: .fields.status.name, assignee: .fields.assignee.emailAddress})\n</code></pre>\n\n<p>Output:</p>\n\n<pre><code> {  \n   \"key\": \"SEA-739\",\n   \"status\": \"Open\",\n   \"assignee\": null\n }\n {\n   \"key\": \"SEA-738\",\n   \"status\": \"Resolved\",\n   \"assignee\": \"user2@mycompany.com\"\n }\n</code></pre>\n\n<p>But I need to parse each and every line but it's tough to identify which assignee is for which key as far as key group is concerned. Is this possible to make one bunch in one row using jq?</p>\n\n<p>Expected output:</p>\n\n<pre><code>{ \"key\": \"SEA-739\", \"status\": \"Open\", \"assignee\": null }\n{ \"key\": \"SEA-738\", \"status\": \"Resolved\", \"assignee\": \"user2@mycompany.com\"}\n</code></pre>\n\n<p>OR</p>\n\n<pre><code>{ \"SEA-739\", \"Open\", null }\n{ \"SEA-738\", \"Resolved\", user2@mycompany.com }\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 40396556,
+    "score": 308,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/40396556",
+    "body_html": "<p><strong><code>-c</code></strong> is what you likely need</p>\n\n<p>Using the output you posted above, you can process it further:</p>\n\n<p><pre>\njq <strong>-c</strong> . input\n</pre></p>\n\n<p>To Give;</p>\n\n<pre><code>{\"key\":\"SEA-739\",\"status\":\"Open\",\"assignee\":null}\n{\"key\":\"SEA-738\",\"status\":\"Resolved\",\"assignee\":\"user2@mycompany.com\"}\n</code></pre>\n\n<p>Or you can just change your original command\n</p>\n\n<p></p>\n\n<p><strong>FROM</strong></p>\n\n<p><pre>\njq <strong>-r</strong> '(.issues[] | {key, status: .fields.status.name, assignee: .fields.assignee.emailAddress})'\n</pre></p>\n\n<p> \n<strong>TO</strong></p>\n\n<p><pre>jq <strong>-c</strong> '(.issues[] | {key, status: .fields.status.name, assignee: .fields.assignee.emailAddress})'\n</pre></p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".issues[] | {\"key\": .key, \"status\": .fields.status.name, \"assignee\": .fields.assignee.emailAddress}",
+    "input": {
+      "issues": [
+        {
+          "key": "SEA-739",
+          "fields": {
+            "status": {
+              "name": "Open"
+            },
+            "assignee": {
+              "emailAddress": null
+            }
+          }
+        },
+        {
+          "key": "SEA-738",
+          "fields": {
+            "status": {
+              "name": "Resolved"
+            },
+            "assignee": {
+              "emailAddress": "user2@mycompany.com"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.46",
+  "rank": 46,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 48426052,
+    "title": "How to extract a field from each object in an array with jq?",
+    "score": 84,
+    "url": "https://stackoverflow.com/questions/48426052/how-to-extract-a-field-from-each-object-in-an-array-with-jq",
+    "body_html": "<p>I performed a cURL request to get all the users in our Gitlab server, like this.</p>\n<pre><code>$ curl -H &quot;Private-Token: a;sldkfja;slkdfj&quot; https://gitlab.domain.com/api/v3/users?active=true &gt; my_file.json\n</code></pre>\n<p>and (part of) my_file.json looks like:</p>\n<pre><code>[\n  {\n    &quot;username&quot; : &quot;jdoe&quot;,\n    &quot;name&quot; : &quot;John Doe&quot;,\n    ...\n  },\n  {\n    &quot;username&quot; : &quot;jadoe&quot;,\n    &quot;name&quot; : &quot;Jane Doe&quot;,\n    ...\n  }\n]\n</code></pre>\n<p>I stored the response in <code>my_file.json</code>. How can I use <code>jq</code> to get all the <code>username</code> values?</p>\n<pre><code>$ cat my_file.json | jq -r 'what to put here?'\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 48426543,
+    "score": 132,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/48426543",
+    "body_html": "<pre><code>$ jq -r '.[].username' my_file.json\njdoe\njadoe\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[].username",
+    "input": [
+      {
+        "username": "jdoe",
+        "name": "John Doe"
+      },
+      {
+        "username": "jadoe",
+        "name": "Jane Doe"
+      }
+    ]
+  }
+}

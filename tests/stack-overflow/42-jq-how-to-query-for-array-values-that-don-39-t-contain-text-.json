@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.42",
+  "rank": 42,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 42746828,
+    "title": "jq: how to query for array values that don&#39;t contain text &quot;foo&quot;?",
+    "score": 92,
+    "url": "https://stackoverflow.com/questions/42746828/jq-how-to-query-for-array-values-that-dont-contain-text-foo",
+    "body_html": "<p>I have an aws query where I want to filter all the <code>imageTags</code> that <strong>don't</strong> end with <em>latest</em>.</p>\n<p>I tried this, but it filters things containing <em>latest</em>, where I want to filter things <strong>not</strong> containing <em>latest</em> (or <strong>not</strong> ending with <em>latest</em>):</p>\n<pre><code>aws ecr describe-images --repository-name &lt;repo&gt; --output json \\\n  | jq '.[]' \\\n  | jq '.[]' \\\n  | jq &quot;select ((.imagePushedAt &lt; 14893094695) and (.imageTags[] | contains(\\&quot;latest\\&quot;)))&quot;\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 42747910,
+    "score": 141,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/42747910",
+    "body_html": "<p>You can use <code>not</code> to reverse the logic</p>\n\n<pre><code>(.imageTags[] | contains(\\\"latest\\\") | not)\n</code></pre>\n\n<p>Also, I'd imagine you can simplify your pipeline into a single <code>jq</code> call.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[] | .name",
+    "input": [
+      {
+        "name": "one",
+        "imageTags": [
+          "latest",
+          "stable"
+        ]
+      },
+      {
+        "name": "two",
+        "imageTags": [
+          "foo",
+          "latest"
+        ]
+      },
+      {
+        "name": "three",
+        "imageTags": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.09",
+  "rank": 9,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 23118341,
+    "title": "How to get key names from JSON using jq",
+    "score": 314,
+    "url": "https://stackoverflow.com/questions/23118341/how-to-get-key-names-from-json-using-jq",
+    "body_html": "<p><code>curl http://testhost.test.com:8080/application/app/version | jq '.version' | jq '.[]'</code></p>\n<p>The above command outputs only the values as below:</p>\n<pre><code>&quot;madireddy@test.com&quot;\n\n&quot;2323&quot;\n\n&quot;test&quot;\n\n&quot;02-03-2014-13:41&quot;\n\n&quot;application&quot;\n</code></pre>\n<p>How can I get the key names instead like the below:</p>\n<pre class=\"lang-none prettyprint-override\"><code>email\n\nversionID\n\ncontext\n\ndate\n\nversionName\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 23118607,
+    "score": 439,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/23118607",
+    "body_html": "<p>To get the keys in the order they appear in the original JSON use the <a href=\"https://jqlang.org/manual/#keys-keys_unsorted\" rel=\"nofollow noreferrer\"><code>keys_unsorted</code></a> function:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq 'keys_unsorted' file.json\n</code></pre>\n<p>If you want the keys sorted alphanumerically, you can use the <a href=\"https://jqlang.org/manual/#keys-keys_unsorted\" rel=\"nofollow noreferrer\"><code>keys</code></a> function:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq 'keys' file.json\n</code></pre>\n<p>Complete example</p>\n<pre class=\"lang-bash prettyprint-override\"><code>$ cat file.json\n{ &quot;Created-By&quot; : &quot;Apache Maven&quot;, &quot;Build-Number&quot; : &quot;&quot;, &quot;Archiver-Version&quot; : &quot;Plexus Archiver&quot;, &quot;Build-Id&quot; : &quot;&quot;,  &quot;Build-Tag&quot; : &quot;&quot;, &quot;Built-By&quot; : &quot;cporter&quot;}\n\n$ jq 'keys_unsorted' file.json                                         \n[\n  &quot;Created-By&quot;,\n  &quot;Build-Number&quot;,\n  &quot;Archiver-Version&quot;,\n  &quot;Build-Id&quot;,\n  &quot;Build-Tag&quot;,\n  &quot;Built-By&quot;\n]\n\n$ jq 'keys' file.json\n[\n  &quot;Archiver-Version&quot;,\n  &quot;Build-Id&quot;,\n  &quot;Build-Number&quot;,\n  &quot;Build-Tag&quot;,\n  &quot;Built-By&quot;,\n  &quot;Created-By&quot;\n]\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "keys | sort | .[]",
+    "input": {
+      "email": "madireddy@test.com",
+      "id": "2323",
+      "name": "test",
+      "date": "02-03-2014-13:41",
+      "type": "application"
+    }
+  }
+}

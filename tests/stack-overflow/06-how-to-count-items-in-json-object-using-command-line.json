@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.06",
+  "rank": 6,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 21334348,
+    "title": "How to count items in JSON object using command line?",
+    "score": 474,
+    "url": "https://stackoverflow.com/questions/21334348/how-to-count-items-in-json-object-using-command-line",
+    "body_html": "<p>I'm getting this kind of <code>JSON</code> reply from a <code>curl</code> command:</p>\n\n<pre><code>[\n  {\n    \"cid\": 49,\n    \"pyn\": \"yi4\",\n    \"hans\": \"亿\",\n    \"hant\": \"億\",\n    \"tid\": 68,\n    \"l10n\": \"cent million\",\n    \"pid\": 1,\n    \"pos\": \"num\",\n    \"pos_txt\": \"\"\n  },\n  {\n    \"cid\": 50,\n    \"pyn\": \"yi4\",\n    \"hans\": \"亿\",\n    \"hant\": \"億\",\n    \"tid\": 69,\n    \"l10n\": \"100 millions\",\n    \"pid\": 1,\n    \"pos\": \"num\",\n    \"pos_txt\": \"\"\n  }\n]\n</code></pre>\n\n<p>How can I count the number of items in the array (here <code>2</code>), using <code>Bash</code> or a command line (e.g. <code>underscore</code>) ?</p>\n"
+  },
+  "answer": {
+    "answer_id": 21355442,
+    "score": 751,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/21355442",
+    "body_html": "<p>Just throwing another solution in the mix...</p>\n\n<p>Try <a href=\"http://stedolan.github.io/jq/\" rel=\"noreferrer\"><code>jq</code></a>, a lightweight and flexible command-line JSON processor:</p>\n\n<pre><code>jq length /tmp/test.json\n</code></pre>\n\n<p>Prints the length of the array of objects.</p>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": "length",
+    "input": [
+      {
+        "cid": 49,
+        "l10n": "cent million"
+      },
+      {
+        "cid": 50,
+        "l10n": "100 millions"
+      }
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "id": "stack-overflow.44",
+  "rank": 44,
+  "source": {
+    "tag": "jq",
+    "sort": "votes",
+    "retrieved_from": "https://stackoverflow.com/questions/tagged/jq?tab=votes&pagesize=50",
+    "question_id": 33895076,
+    "title": "Exclude column from jq json output",
+    "score": 85,
+    "url": "https://stackoverflow.com/questions/33895076/exclude-column-from-jq-json-output",
+    "body_html": "<p>I would like to get rid of the <code>timestamp</code> field here using <a href=\"https://stedolan.github.io/jq/\" rel=\"noreferrer\">jq</a> JSON processor.</p>\n\n<pre><code>[\n  {\n    \"timestamp\": 1448369447295,\n    \"group\": \"employees\",\n    \"uid\": \"elgalu\"\n  },\n  {\n    \"timestamp\": 1448369447296,\n    \"group\": \"employees\",\n    \"uid\": \"mike\"\n  },\n  {\n    \"timestamp\": 1448369786667,\n    \"group\": \"services\",\n    \"uid\": \"pacts\"\n  }\n]\n</code></pre>\n\n<p>White listing would also works for me, i.e. <code>select uid, group</code></p>\n\n<p>Ultimately what I would really like is a list with unique values like this:</p>\n\n<pre><code>employees,elgalu\nemployees,mike\nservices,pacts\n</code></pre>\n"
+  },
+  "answer": {
+    "answer_id": 33895231,
+    "score": 147,
+    "accepted": true,
+    "selection": "accepted",
+    "url": "https://stackoverflow.com/a/33895231",
+    "body_html": "<p>If you just want to delete the timestamps you can use the <code>del()</code> function:</p>\n\n<pre><code>jq 'del(.[].timestamp)' input.json\n</code></pre>\n\n<hr>\n\n<p>However to achieve the desired output, I would not use the <code>del()</code> function. Since you know which fields should appear in output, you can simply populate an array with <code>group</code> and <code>id</code> and then use the <code>join()</code> function:</p>\n\n<pre><code>jq -r '.[]|[.group,.uid]|join(\",\")' input.json\n</code></pre>\n\n<p><code>-r</code> stands for <em>raw ouput</em>. <code>jq</code> will not print quotes around the values.</p>\n\n<p>Output:</p>\n\n<pre class=\"lang-none prettyprint-override\"><code>employees,elgalu\nemployees,mike\nservices,pacts\n</code></pre>\n"
+  },
+  "benchmark": {
+    "input_format": "json",
+    "query": ".[].group",
+    "input": [
+      {
+        "timestamp": 1448369447295,
+        "group": "employees",
+        "uid": "elgalu"
+      },
+      {
+        "timestamp": 1448369447296,
+        "group": "services",
+        "uid": "pacts"
+      }
+    ]
+  }
+}
