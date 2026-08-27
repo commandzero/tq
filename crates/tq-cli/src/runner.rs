@@ -308,9 +308,14 @@ fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
     let mut available = true;
     for path in options.files.iter().filter(|path| *path != Path::new("-")) {
         let identity = path.display().to_string();
-        let reader = LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
-        let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
-        available &= decoder_events_available(probe.selected);
+        if let Some(format) = format_from_path(path) {
+            available &= decoder_events_available(format);
+        } else {
+            let reader =
+                LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
+            let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            available &= decoder_events_available(probe.selected);
+        }
     }
     Ok(available)
 }
@@ -1721,7 +1726,11 @@ fn load_inputs<R: Read>(
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
         } else {
             let decode = DecodeOptions {
-                format: options.input_format,
+                format: if options.input_format == InputFormat::Auto {
+                    format_from_path(&path).unwrap_or(InputFormat::Auto)
+                } else {
+                    options.input_format
+                },
                 maximum_source_bytes: usize::try_from(options.limits.input_bytes)
                     .unwrap_or(usize::MAX),
                 toon: tq_toon::DecoderConfig {
@@ -1759,6 +1768,19 @@ fn open_path(path: &Path) -> Result<File, RunError> {
         path: path.display().to_string(),
         source,
     })
+}
+
+fn format_from_path(path: &Path) -> Option<InputFormat> {
+    let extension = path.extension()?.to_str()?;
+    if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
+        Some(InputFormat::Yaml)
+    } else if extension.eq_ignore_ascii_case("json") {
+        Some(InputFormat::Json)
+    } else if extension.eq_ignore_ascii_case("toon") {
+        Some(InputFormat::Toon)
+    } else {
+        None
+    }
 }
 
 fn raw_documents(

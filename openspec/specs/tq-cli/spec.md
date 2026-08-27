@@ -8,7 +8,11 @@ variables, diagnostics, exit statuses, and explicitly deferred CLI behavior.
 ## Requirements
 
 ### Requirement: jq-like command shape
-The CLI SHALL support `tq [OPTIONS] FILTER [FILE...]` and a filter file option. With no input files it MUST read stdin; a file argument of `-` MUST refer to stdin in the ordered input list.
+The CLI SHALL support `tq [OPTIONS] [FILTER [FILE...]]` and a filter file option. When neither a positional filter nor a filter file is supplied, the CLI MUST use the identity filter `.`. With no input files it MUST read stdin; a file argument of `-` MUST refer to stdin in the ordered input list.
+
+#### Scenario: Implicit identity filter
+- **WHEN** structured input is piped to `tq` without arguments
+- **THEN** the CLI evaluates the identity filter against stdin
 
 #### Scenario: Pipe input
 - **WHEN** TOON is piped to `tq '.name'`

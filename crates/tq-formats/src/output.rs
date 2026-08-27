@@ -83,6 +83,9 @@ pub enum OutputError {
     /// JSON serialization or output error.
     #[error("JSON output failed: {0}")]
     Json(#[from] serde_json::Error),
+    /// YAML scalar serialization failure.
+    #[error("YAML output failed: {0}")]
+    Yaml(#[from] yaml_serde::Error),
     /// Direct output I/O error.
     #[error("structured output failed: {0}")]
     Io(#[from] std::io::Error),
@@ -97,7 +100,7 @@ impl OutputError {
                 error.kind() == std::io::ErrorKind::BrokenPipe
             }
             Self::Json(error) => error.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe),
-            Self::Toon(SequenceError::Cardinality(_)) => false,
+            Self::Yaml(_) | Self::Toon(SequenceError::Cardinality(_)) => false,
         }
     }
 }
@@ -158,12 +161,81 @@ where
                 if options.yaml_document_start {
                     writer.write_all(b"---\n")?;
                 }
-                // JSON flow syntax is valid YAML 1.2 and preserves tq's exact
-                // arbitrary-precision numeric tokens through serde_json.
-                serde_json::to_writer(&mut writer, value.borrow())?;
+                write_yaml_value(&mut writer, value.borrow(), 0)?;
                 writer.write_all(b"\n")?;
             }
         }
+    }
+    Ok(())
+}
+
+fn write_yaml_value(
+    writer: &mut impl Write,
+    value: &Value,
+    indent: usize,
+) -> Result<(), OutputError> {
+    match value {
+        Value::Null => writer.write_all(b"null")?,
+        Value::Bool(value) => writer.write_all(if *value { b"true" } else { b"false" })?,
+        Value::Number(value) => writer.write_all(value.to_string().as_bytes())?,
+        Value::String(value) => write_yaml_string(writer, value)?,
+        Value::Array(values) if values.is_empty() => writer.write_all(b"[]")?,
+        Value::Object(values) if values.is_empty() => writer.write_all(b"{}")?,
+        Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                if index > 0 {
+                    writer.write_all(b"\n")?;
+                }
+                write_indent(writer, indent)?;
+                writer.write_all(b"-")?;
+                if matches!(value, Value::Array(values) if !values.is_empty())
+                    || matches!(value, Value::Object(values) if !values.is_empty())
+                {
+                    writer.write_all(b"\n")?;
+                    write_yaml_value(writer, value, indent + 2)?;
+                } else {
+                    writer.write_all(b" ")?;
+                    write_yaml_value(writer, value, indent + 2)?;
+                }
+            }
+        }
+        Value::Object(values) => {
+            for (index, (key, value)) in values.iter().enumerate() {
+                if index > 0 {
+                    writer.write_all(b"\n")?;
+                }
+                write_indent(writer, indent)?;
+                write_yaml_string(writer, key)?;
+                writer.write_all(b":")?;
+                if matches!(value, Value::Array(values) if !values.is_empty())
+                    || matches!(value, Value::Object(values) if !values.is_empty())
+                {
+                    writer.write_all(b"\n")?;
+                    write_yaml_value(writer, value, indent + 2)?;
+                } else {
+                    writer.write_all(b" ")?;
+                    write_yaml_value(writer, value, indent + 2)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_yaml_string(writer: &mut impl Write, value: &str) -> Result<(), OutputError> {
+    let encoded = yaml_serde::to_string(value)?;
+    let encoded = encoded.strip_suffix('\n').unwrap_or(&encoded);
+    if encoded.contains('\n') {
+        serde_json::to_writer(writer, value)?;
+    } else {
+        writer.write_all(encoded.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn write_indent(writer: &mut impl Write, indent: usize) -> Result<(), std::io::Error> {
+    for _ in 0..indent {
+        writer.write_all(b" ")?;
     }
     Ok(())
 }
@@ -233,5 +305,28 @@ mod tests {
             );
             assert!(output.is_empty());
         }
+    }
+
+    #[test]
+    fn yaml_uses_block_layout_and_preserves_exact_numbers() {
+        let value: Value =
+            serde_json::from_str(r#"{"name":"Ada","items":[1,{"n":9007199254740993}],"empty":[]}"#)
+                .unwrap();
+        let mut yaml = Vec::new();
+        write_results(
+            &mut yaml,
+            [&value],
+            OutputOptions {
+                format: OutputFormat::Yaml,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(yaml.clone()).unwrap(),
+            "name: Ada\nitems:\n  - 1\n  -\n    n: 9007199254740993\nempty: []\n"
+        );
+        let decoded = crate::decode_yaml(&yaml, "round-trip").unwrap();
+        assert_eq!(decoded[0].value, value);
     }
 }

@@ -268,6 +268,18 @@ struct OptionSpec {
 
 const OPTION_REGISTRY: &[OptionSpec] = &[
     OptionSpec {
+        short: Some('i'),
+        syntax: "-i, --input-format FORMAT",
+        value: true,
+        description: "select auto, TOON, YAML, JSON, or TOON sequence input",
+    },
+    OptionSpec {
+        short: Some('o'),
+        syntax: "-o, --output-format FORMAT",
+        value: true,
+        description: "select TOON, YAML, or JSON output",
+    },
+    OptionSpec {
         short: Some('n'),
         syntax: "-n, --null-input",
         value: false,
@@ -473,7 +485,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
 pub fn generated_help() -> String {
     let mut help = String::from(
         "tq - jq-compatible queries over TOON, YAML, and JSON\n\n\
-Usage: tq [OPTIONS] FILTER [FILE...]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\nOptions:\n",
+Usage: tq [OPTIONS] [FILTER [FILE...]]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\nOptions:\n",
     );
     for option in OPTION_REGISTRY {
         let _ = writeln!(help, "  {:<31} {}", option.syntax, option.description);
@@ -607,10 +619,10 @@ where
                     ));
                 }
             }
-            "--input-format" => {
+            "-i" | "--input-format" => {
                 input_format = parse_input(&token, next_value(&mut tokens, &token)?)?;
             }
-            "--output-format" => {
+            "-o" | "--output-format" => {
                 output_format = parse_output(&token, next_value(&mut tokens, &token)?)?;
             }
             "--seq" => framing = ToonFraming::Sequence,
@@ -782,7 +794,7 @@ where
     let filter = match (inline_filter, filter_file) {
         (Some(filter), None) => FilterSource::Inline(filter),
         (None, Some(path)) => FilterSource::File(path),
-        (None, None) => return Err(CliError::Usage("missing FILTER or --from-file".to_owned())),
+        (None, None) => FilterSource::Inline(".".to_owned()),
         (Some(_), Some(_)) => unreachable!("checked above"),
     };
     if raw_input && input_format != InputFormat::Auto {
@@ -1050,6 +1062,12 @@ mod tests {
             panic!("run command")
         };
         assert_eq!(run.filter, FilterSource::File("query.tq".into()));
+
+        let Command::Run(run) = parse_args(Vec::<&str>::new()).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.filter, FilterSource::Inline(".".to_owned()));
+        assert!(run.files.is_empty());
     }
 
     #[test]
@@ -1072,6 +1090,15 @@ mod tests {
         assert_eq!(run.output_format, OutputFormat::Json);
         assert_eq!(run.framing, ToonFraming::Sequence);
         assert!(run.raw_output && run.slurp && run.exit_status);
+    }
+
+    #[test]
+    fn parses_short_format_options_with_separate_or_attached_values() {
+        let Command::Run(run) = parse_args(["-i", "yaml", "-ojson", "."]).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.input_format, InputFormat::Yaml);
+        assert_eq!(run.output_format, OutputFormat::Json);
     }
 
     #[test]
