@@ -1,6 +1,6 @@
-# jq reduce/foreach evidence — 2026-08-10
+# jq reduce/foreach evidence, 2026-08-10
 
-This artifact records compatibility and natural-data evidence for the
+This report records compatibility and natural-data results for the
 `jq-reduce-foreach` change.
 
 ## Compatibility
@@ -38,8 +38,8 @@ The machine identity was
 The detailed local report is
 `benchmarks/.work/jq-reduce-foreach-standard.json`.
 
-The macOS benchmark sampler did not publish RSS, so matching one-shot
-`/usr/bin/time -l` runs supplied exact peak values: tq used 132,726,784 bytes
+The macOS benchmark sampler did not publish RSS. Matching one-shot
+`/usr/bin/time -l` runs supplied exact peak values. tq used 132,726,784 bytes
 (126.58 MiB), while jq used 61,210,624 bytes (58.37 MiB). tq reported a
 `blocking-document` plan, 42,632 VM steps, one result, value-stack high water
 1, call-stack high water 7, and no pending fork or path frames.

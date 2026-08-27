@@ -1,9 +1,9 @@
 # jq 1.8.x CLI option inventory
 
-This inventory is the admission registry for jq-shaped command-line options.
-It is based on jq 1.8.x help/manual behavior and executable probes. `tq` keeps
-its TOON-first defaults, so jq output switches apply to JSON output unless an
-adaptation is called out below.
+This table records which jq command-line options `tq` accepts. It comes from jq
+1.8.x help text, the manual, and executable probes. `tq` keeps its TOON-first
+defaults, so jq formatting switches apply to JSON unless the table says
+otherwise.
 
 | Option | Classification | tq contract |
 | --- | --- | --- |
@@ -39,24 +39,23 @@ adaptation is called out below.
 ## tq extensions
 
 `--input-format`, `--output-format`, `--toon-sequence-input`, `--unframed`,
-`--argtoon`, TOON writer controls, explain/trace/report controls, and resource
-limits are intentionally tq-specific. YAML output is admitted explicitly with
-`--output-format yaml`; it never follows filename inference.
+`--argtoon`, the TOON writer settings, explain and report controls, and resource
+limits belong to tq rather than jq. Request YAML with `--output-format yaml`.
+The output format never follows the filename.
 
 ## Environment, terminal, and filesystem policy
 
-Library callers may disable environment, terminal, or filesystem integration
-through `CapabilityPolicy`. The process CLI permits them, but ambient color is
-never used by injectable test I/O. Explicit `-C` is deterministic, `-M` wins,
-the last explicit color flag wins, `NO_COLOR` disables ambient color, and `JQ_COLORS` is not interpreted because
-tq publishes one stable palette. Every filter/input/argument file is read under
-the per-source byte limit, and diagnostics identify the path without including
-file contents or argument values.
+Library callers can disable environment, terminal, or filesystem access through
+`CapabilityPolicy`. The process CLI permits those integrations. Injectable test
+I/O never uses ambient color. `-C` selects tq's fixed palette, `-M` wins, and
+the last color flag wins. `NO_COLOR` disables ambient color. tq ignores
+`JQ_COLORS`. The per-source byte limit applies to every filter, input, and
+argument file. Diagnostics name the path but omit file contents and argument
+values.
 
 ## Evidence scope
 
-Executable shell cases cover argv parsing, stdin, ordered files, output bytes,
-stderr, and exit classes. The published full campaign records the exact
-reference executable identity and currently exercises these cases against a jq
-1.8.2 reference build, including 1.8-only behavior such as `--raw-output0`.
-Platform-dependent behavior remains explicitly classified in the inventory.
+Executable shell cases cover argument parsing, stdin, ordered files, output
+bytes, stderr, and exit classes. The full campaign records the exact reference
+binary and runs these cases against jq 1.8.2, including 1.8-only behavior such
+as `--raw-output0`. The table marks platform-dependent behavior.

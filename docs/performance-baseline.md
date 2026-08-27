@@ -1,15 +1,13 @@
 # Performance review policy
 
-Benchmark corpus files, generated formats, and full sample collections are
-local working data. They stay in `benchmarks/.work/` and Git ignores them.
-Do not add them to the repository.
+Keep corpus files, generated formats, and full sample collections in
+`benchmarks/.work/`. Git ignores that directory. Do not commit these files.
 
-After review, add one concise `YYYY-MM-DD.md` Markdown artifact in `benchmarks/`.
-It must state the input size, tool versions, commands under review, timing,
-peak RSS, comparison method, and important failures. It must not include the
-full corpus or per-sample collection.
+After review, add one concise `YYYY-MM-DD.md` report to `benchmarks/`. Record the
+input size, tool versions, commands, timing, peak RSS, comparison method, and
+important failures. Leave out the full corpus and per-sample data.
 
-The current reviewed artifact is
+The current reviewed report is
 [2026-08-06.md](../benchmarks/2026-08-06.md).
 
 ## Self-regression policy
@@ -32,5 +30,5 @@ TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --re
   --minimum-regression-samples 5
 ```
 
-The gate is not evaluated when the profile, machine, corpus artifact, or tool
-identity differs. Reference-tool changes remain comparison metadata.
+The gate skips comparisons when the profile, machine, corpus artifact, or tool
+identity differs. A reference-tool change is metadata, not a regression.

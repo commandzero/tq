@@ -1,27 +1,25 @@
 # jq compatibility
 
-`tq` targets jq 1.8.x semantics for the implemented MVP surface. Filters use
-the ordinary jq command shape: identity/literals, `.field`, `.[expr]`, indexes
-and slices, `[]`, pipes and comma generators, arrays and ordered objects,
-variables, conditionals, operators, core collection/selection/conversion/range/
-ordering/aggregation built-ins, optional access, `try/catch`, path updates,
-parameterized user filters, and explicit-root modules.
-Stateful `reduce` and `foreach` folds preserve jq generator order, accumulator
-scope, update multiplicity, intermediate extraction, and partial output before
-a later error.
-Run `tq --help` for the complete current switch set and `tq --explain-json
-FILTER` for its plan and retention classification.
+`tq` follows jq 1.8.x semantics for the features it supports. That includes
+navigation, pipes and comma generators, arrays and ordered objects, variables,
+conditionals, operators, common built-ins, optional access, `try/catch`, path
+updates, user filters, and modules from explicit roots. Stateful `reduce` and
+`foreach` folds preserve jq's generator order, accumulator scope, update count,
+intermediate results, and output produced before a later error.
+
+Run `tq --help` for the current switches. Run `tq --explain-json FILTER` to see
+the plan and what it retains in memory.
 
 ## Input and output
 
-Each source uses bounded syntax detection. Canonical TOON remains preferred,
-JSON object and array openers commit to the JSON decoder before YAML, and YAML
-document/directive/root-sequence markers commit to YAML. Use
+The format detector reads a bounded prefix. It prefers canonical TOON. A JSON
+object or array opener selects JSON before YAML, while YAML document,
+directive, and root-sequence markers select YAML. Use
 `--input-format toon|yaml|json` to select exactly one parser.
 
-Structured output is a TOON Text Sequence: each result is `RS`, canonical TOON,
-and `LF`. This deliberately differs from jq's newline-delimited JSON and keeps
-multiple results and a late error unambiguous. Select `--output-format json`
+Structured output is a TOON Text Sequence. Each result is `RS`, canonical TOON,
+and `LF`. This differs from jq's newline-delimited JSON. The framing separates
+multiple results and preserves complete records before a late error. Select `--output-format json`
 for JSON output, `--output-format yaml` for exact-number-preserving YAML 1.2
 flow output, `-r` for raw strings, `-j` to join raw outputs, or
 `--unframed` for exactly one TOON value. `--unframed` rejects zero or multiple
@@ -60,9 +58,9 @@ query. SIGINT is cooperative and a closed downstream pipe is successful.
 
 ## Reviewed differences
 
-The current full jq 1.8.2/yq/tq report is
+The current jq 1.8.2, yq, and tq report is
 `tests/compatibility/reviews/coverage-v1.json`. Its jq/tq difference allowlist is
-intentionally small:
+small:
 
 | Case | Difference | Reason |
 | --- | --- | --- |
@@ -70,11 +68,11 @@ intentionally small:
 | `numeric.policy-digits-over` | result/exit/error | bounded numeric digit envelope |
 | `numeric.policy-exponent-over` | result/exit/error | bounded exponent expansion envelope |
 | `numeric.policy-index-over` | result/exit/error | bounded index envelope |
-| `date.range-error` | result/exit/error | portable UTC support is intentionally bounded to years 0000 through 9999 |
+| `date.range-error` | result/exit/error | portable UTC support stops at years 0000 and 9999 |
 | `regex.unsupported-lookaround` | result/exit/error | the linear-time regex engine rejects Oniguruma look-around |
 
-Features outside the MVP have stable unsupported or deferred status. Labels
-and breaks remain deferred. Regex and UTC date built-ins are supported; ambient
-environment, clock, local-timezone, and input-metadata access requires explicit
-capability flags. Engine and release-host differences are documented in
-`docs/jq-regex-date-platform.md`.
+Features outside the MVP report a stable unsupported or deferred status.
+Labels and breaks are deferred. Regex and UTC date built-ins work without extra
+permissions. Environment, clock, local-timezone, and input-metadata access need
+capability flags. See [regex, date, and platform compatibility](jq-regex-date-platform.md)
+for engine and release-host differences.

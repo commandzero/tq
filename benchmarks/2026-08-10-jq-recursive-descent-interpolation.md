@@ -1,7 +1,7 @@
-# jq recursive descent and interpolation evidence — 2026-08-10
+# jq recursive descent and interpolation evidence, 2026-08-10
 
-This artifact records compatibility, traversal timing, and resource guidance
-for `jq-recursive-descent-interpolation`.
+This report records compatibility, traversal timing, and resource limits for
+`jq-recursive-descent-interpolation`.
 
 ## Compatibility
 
