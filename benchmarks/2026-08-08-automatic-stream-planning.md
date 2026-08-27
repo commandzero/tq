@@ -1,6 +1,6 @@
-# Automatic stream planning release evidence — 2026-08-08, verified 2026-08-09
+# Automatic stream planning release evidence, 2026-08-08, verified 2026-08-09
 
-This artifact records the compatibility and natural-large checks for the
+This report records the compatibility and natural-large checks for the
 `automatic-stream-planning` change. Commands used the release `tq` binary from
 this worktree and the frozen Microsoft US Buildings Georgia GeoJSON snapshot
 (`1,119,571,788` bytes). Full machine-readable execution reports were emitted
@@ -10,8 +10,8 @@ with `--report-file`; the facts below are the reviewed release summary.
 
 `make compatibility-full` completed all 158 cases. The campaign retained its
 existing `observed-differences` disposition across jq, yq, and tq. The jq/tq
-result sequences for the automatic-planning candidate shapes—including
-projection, selection, and nested iteration—were identical.
+result sequences for the candidate projection, selection, and nested iteration
+shapes were identical.
 
 ## Natural-large automatic plans
 
@@ -29,7 +29,7 @@ the source JSON SHA-256 was
 | `.features[].properties.mag` | subtree with static projection | 3,981,792 | 540.01 s | 1.98 MiB/s | ~2.3 MiB | 0 bytes; depth 0 |
 | `.features[] \| select(.properties.mag >= 2) \| .id` | auto-detected JSON, subtree | 0 | 421.95 s | 2.53 MiB/s | 4,014,080-byte peak (3.83 MiB) | 16,705 bytes; depth 5 |
 
-The peak-RSS verification command intentionally omitted `--input-format`:
+The peak-RSS command omitted `--input-format` to test automatic detection:
 
 ```console
 /usr/bin/time -l target/release/tq --output-format json -c \

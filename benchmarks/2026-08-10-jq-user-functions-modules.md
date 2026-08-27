@@ -1,6 +1,6 @@
-# jq user functions and modules evidence — 2026-08-10
+# jq user functions and modules evidence, 2026-08-10
 
-This artifact records compatibility and natural-data evidence for
+This report records compatibility and natural-data results for
 `jq-user-functions-modules`.
 
 ## Compatibility

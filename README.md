@@ -1,16 +1,14 @@
 # tq
 
-`tq` is a jq-shaped query tool for TOON, YAML, and JSON, written in Rust. It
-uses jq 1.8.x as the language target, emits TOON Text Sequences by default, and
-can stream JSON or TOON inputs without retaining the complete document.
+`tq` is a Rust query tool for TOON, YAML, and JSON. Its command line and query
+language follow jq 1.8.x, but structured output defaults to TOON Text Sequence.
+It can stream JSON and TOON without keeping the whole document in memory.
 
-The MVP implements identity and literals; field, computed, index, slice, and
-iteration navigation; pipes and generators; array and ordered-object
-construction; conditionals and operators; lexical and CLI variables; the core
-type, collection, selection, conversion, range, ordering, and aggregation
-built-ins; `empty`, `error`, optional access, and `try/catch`; jq-style path
-updates; and stateful `reduce` and `foreach` folds with bounded managed
-accumulator frames.
+The current release covers the jq language most filters need: navigation,
+pipes and generators, arrays and ordered objects, conditionals, operators,
+variables, path updates, user filters, modules, and the common built-ins. It
+also supports `empty`, `error`, optional access, `try/catch`, `reduce`, and
+`foreach`. See [jq compatibility](docs/compatibility.md) for the exact boundary.
 
 ## Build and use
 
@@ -21,11 +19,10 @@ cargo build --release
 target/release/tq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
-Input is read from stdin when no file is supplied. Multiple files and `-` are
-processed in argument order. Bounded input detection recognizes canonical TOON,
-commits JSON object/array openers to JSON, and recognizes explicit YAML markers.
-Use `--input-format toon|yaml|json` when the syntax is ambiguous or when you
-need one parser.
+With no file argument, `tq` reads stdin. It processes multiple files and `-` in
+the order given. The format detector recognizes canonical TOON and explicit
+YAML markers. A JSON object or array opener selects the JSON parser. Use
+`--input-format toon|yaml|json` for ambiguous input or to force one parser.
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
@@ -33,42 +30,39 @@ tq --input-format json --output-format json -c '.features | length' feed.json
 tq --input-format yaml -r '.people[].name' people.yaml
 ```
 
-Structured output defaults to an RFC 7464-style sequence whose records are an
-ASCII RS byte, one canonical TOON document, and LF. This keeps zero, one, and
-many results unambiguous and preserves complete earlier records if evaluation
-later fails. Use `--output-format json` for jq-style JSON texts, `-r` for raw
-strings, `-j` to join raw output, or `--unframed` when exactly one TOON result is
-required.
+Each structured result is framed as an ASCII RS byte, one canonical TOON
+document, and LF. The framing makes zero, one, and many results distinct. If a
+later result fails, earlier complete records remain valid. Use
+`--output-format json` for jq-style JSON, `-r` for raw strings, `-j` to join raw
+output, or `--unframed` when the query must return exactly one TOON value.
 
 ## Streaming and memory
 
 `--stream` creates jq-compatible `[path,value]` records and container-end
-`[path]` records from JSON or TOON decoder events. YAML is processed one
-document at a time. Use explicit streaming to limit memory use for large
-sources:
+`[path]` records from JSON or TOON decoder events. For YAML, `tq` decodes one
+document at a time. Use streaming to keep memory bounded on large inputs:
 
 ```console
 tq --stream --input-format json \
   'select(length == 2 and (.[0] | length) == 1)' buildings.geojson
 ```
 
-Use `--explain` or `--explain-json` to see the query plan and its memory
-limits. The plan can be event, subtree, document, whole-input, or blocking.
-Document plans retain one decoded input document. Slurp retains all input
-documents. Sorting, uniqueness, and final reductions also retain blocking
-state; a fold additionally retains one immutable accumulator and bounded
-managed evaluation state.
+Use `--explain` or `--explain-json` to inspect the query plan and its memory
+limits. Plans fall into five classes: event, subtree, document, whole-input,
+and blocking. A document plan keeps one decoded document. Slurp keeps every
+input document. Sorting, uniqueness, and final reductions keep blocking state.
+A fold keeps one immutable accumulator plus bounded evaluator state.
 
 Resource controls include `--max-input-bytes`, `--max-depth`,
 `--max-token-bytes`, `--max-line-bytes`, `--max-lookahead-bytes`,
 `--max-vm-steps`, `--max-results`, `--max-output-bytes`,
-`--prepare-memory-bytes`, and `--max-spool-bytes`. SIGINT is handled
-cooperatively and a closed downstream pipe exits successfully.
+`--prepare-memory-bytes`, and `--max-spool-bytes`. The evaluator checks for
+SIGINT between units of work. A closed downstream pipe exits successfully.
 
 ## Compatibility and benchmarks
 
-The compatibility suite executes the same cases through jq, yq, and tq and
-compares ordered JSON-model results, cardinality, failures, and raw framing.
+The compatibility suite runs the same cases through jq, yq, and tq. It compares
+result order, result count, failures, and raw framing.
 
 ```console
 make compatibility-smoke
@@ -76,11 +70,11 @@ make compatibility-full
 target/release/tq compatibility
 ```
 
-Benchmark campaigns cover natural small, medium, and large datasets in JSON,
-YAML, and TOON. Input representations are generated before timing and checked
-for ordered semantic equivalence. Reports preserve wall time, time to first
-result, CPU, peak RSS, throughput, output bytes, host/tool/corpus identity, and
-incorrect or failed outcomes. Natural inputs are never resized.
+Benchmark campaigns use natural small, medium, and large datasets in JSON,
+YAML, and TOON. Before timing starts, the runner generates each representation
+and checks that all formats have the same ordered values. Reports record time,
+CPU, peak RSS, throughput, output size, machine and tool identity, and every
+incorrect or failed run. The runner never resizes natural inputs.
 
 ```console
 make benchmark-smoke
@@ -89,10 +83,10 @@ make benchmark-large       # opt-in; uses the natural ~1 GB-class corpus
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the case-first workflow and
-`benchmarks/README.md` for campaign details. The accepted local numbers and
-regression policy are reviewed in `docs/performance-baseline.md`; detailed
-syntax, framing, limits, and known-difference guidance lives in
-`docs/compatibility.md`.
+[the benchmark guide](benchmarks/README.md) for campaign details. The
+[performance policy](docs/performance-baseline.md) defines the accepted local
+baseline. The [compatibility guide](docs/compatibility.md) documents syntax,
+framing, limits, and known differences.
 
 ## jq user filters and modules
 
@@ -105,10 +99,11 @@ tq -L ./jq-libs 'import "metrics" as m; m::normalize' input.json
 tq -L ./jq-libs 'include "shared"; shared_filter' input.json
 ```
 
-Repeat `-L` to search multiple roots in order. Absolute paths and `..` escapes
-are rejected after canonicalization; loaded module paths and SHA-256 digests are
-included in `--explain` and `--explain-json`. Module files may declare constant
-metadata with `module {...};`, observable through jq's `modulemeta` filter.
+Repeat `-L` to search multiple roots in order. The loader rejects absolute
+paths and `..` escapes after canonicalization. `--explain` and
+`--explain-json` include each loaded path and SHA-256 digest. A module may
+declare constant metadata with `module {...};`; jq's `modulemeta` filter reads
+it.
 
 ## Regex, date, and governed platform built-ins
 
@@ -117,20 +112,19 @@ Unicode-aware `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`, and
 down time, and epoch conversion support jq's date arrays across the documented
 year 0000 through 9999 range.
 
-Ambient effects are explicit: use `--allow-environment` for `env`, and
+Ambient data is opt-in. Use `--allow-environment` for `env`. Use
 `--allow-platform` for `now`, local timezone conversion, and input metadata.
 See [the compatibility policy](docs/jq-regex-date-platform.md) for engine
 differences, limits, redaction, and release-host classifications.
 
-## Intentional MVP boundaries
+## MVP boundaries
 
-Labels and breaks and the long tail of jq CLI switches
-are deferred with stable unsupported-capability diagnostics.
+Labels, breaks, and many less common jq CLI switches are deferred. `tq` reports
+them as unsupported capabilities.
 
-The numeric model is a hybrid: accepted input literals preserve arbitrary
-precision spelling until arithmetic requires jq-compatible binary64 behavior.
-Explicit digit, exponent-expansion, and index envelopes produce resource or
-range diagnostics rather than silently losing data. These envelope failures,
-and TOON versus JSON sequence framing bytes, are intentional jq divergences.
+The numeric model preserves the spelling of accepted input literals until
+arithmetic needs jq-compatible binary64 behavior. Digit, exponent-expansion,
+and index limits return resource or range errors instead of silently losing
+data. Those errors and TOON sequence framing are known differences from jq.
 
 Licensed under MIT.

@@ -1,7 +1,7 @@
 # tq feature comparison
 
-Use tq now for ordinary jq-style selection and transformation. Check the
-examples below before you move a filter with advanced jq language features.
+Most jq filters for selection and transformation work as written. Check this
+table before moving a filter that uses less common language or CLI features.
 
 | Feature | jq or yq example | tq |
 | --- | --- | --- |
@@ -21,9 +21,10 @@ examples below before you move a filter with advanced jq language features.
 | UTC date/time | `fromdateiso8601`, `gmtime` | Supported |
 | Local time and environment | `now`, `env.HOME` | Supported with explicit capability flags |
 
-Important migration differences:
+## Migration differences
 
-- tq structured output defaults to TOON Text Sequence. Use `--output-format json` for JSON consumers.
+- tq structured output defaults to TOON Text Sequence. Use
+  `--output-format json` for JSON consumers.
 - tq has documented digit, exponent, and index limits for large numbers.
 - jq JSON formatting switches require `--output-format json` because tq's
   structured default is TOON Text Sequence.
@@ -32,8 +33,8 @@ Important migration differences:
 - `env` requires `--allow-environment`; clock, timezone, and input metadata
   require `--allow-platform`.
 
-The generated report records current capability counts and all raw-byte
-adaptations. Its next priority is labels and breaks.
+The generated report records current capability counts and raw-byte
+differences. Labels and breaks are the next unsupported language features.
 
 The complete evidence is in [coverage-v1.json](reviews/coverage-v1.json). The
 older [reference candidate](baselines/jq-yq-mvp-v1.json) compares jq and yq

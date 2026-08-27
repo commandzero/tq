@@ -1,11 +1,11 @@
-# jq regex, date, and platform evidence — 2026-08-10
+# jq regex, date, and platform evidence, 2026-08-10
 
 ## Compatibility campaign
 
 The full jq/yq/tq campaign executed 194 catalog cases and 911 observations.
-All portable regex, UTC date, admitted environment-shape, input-filename,
+All portable regex, UTC date, allowed environment-shape, input-filename,
 local-year, and clock-type cases matched jq semantically. Two reviewed
-differences are intentional:
+differences remain:
 
 - `regex.unsupported-lookaround`: jq's Oniguruma engine accepts look-around;
   tq's linear-time Rust regex engine returns a stable unsupported diagnostic.
@@ -13,7 +13,7 @@ differences are intentional:
   contract stops at year 9999 with a stable range message.
 
 The published report is `tests/compatibility/reviews/coverage-v1.json`. It
-records the exact jq 1.8.x reference executable selected by the harness. The
+records the exact jq 1.8.x reference executable selected by the runner. The
 interactive edge-case baseline also used Apple jq 1.7.1 on arm64 macOS 26.5.
 
 ## Performance campaign
@@ -48,8 +48,8 @@ input metadata are denied unless the command and the library capability policy
 both admit them. Compatibility evidence observes only environment type and
 never serializes ambient values.
 
-The release-host contract is executable in
+The release-host checks run in
 `.github/workflows/regex-date-platform.yml`. Its Linux, macOS, and Windows
-matrix runs the portable UTC boundary test and the ambient-policy/redaction
-tests named in `tests/platform/regex-date-platform-v1.json`; the manifest does
-not treat a declared host as observed evidence without that test execution.
+matrix runs the portable UTC boundary test and the ambient-policy and redaction
+tests named in `tests/platform/regex-date-platform-v1.json`. The manifest does
+not count a declared host as evidence unless those tests ran there.

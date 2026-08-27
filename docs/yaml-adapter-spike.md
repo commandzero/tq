@@ -1,23 +1,22 @@
 # `yaml_serde` adapter spike
 
-The MVP adapter uses `yaml_serde` 0.10.x as requested. Its streaming
-`Deserializer` yields YAML documents independently, so tq can preserve document
-order and release each document after evaluation. A custom serde visitor builds
-`tq_core::Value` directly instead of detouring through `serde_json::Value`.
+The MVP adapter uses `yaml_serde` 0.10.x. Its streaming `Deserializer` yields
+one YAML document at a time, so tq preserves document order and releases each
+document after evaluation. A custom serde visitor builds `tq_core::Value`
+directly. It does not convert through `serde_json::Value`.
 
 The accepted profile is smaller than the full YAML data model:
 
-- mapping keys must be strings and duplicate keys are rejected before insert;
-- custom tags and non-finite floats are rejected;
-- aliases are resolved by the parser, while comments, style, directives, tag
-  spelling, and anchor identity are not retained;
-- signed and unsigned integers enter the exact decimal-literal side of the tq
-  number model;
-- finite YAML floats enter the explicit binary64/arithmetic side of the hybrid
-  model. This preserves the exact value exposed by `yaml_serde` and never
-  pretends that the original decimal spelling survived YAML scalar resolution.
+- Mapping keys must be strings. The visitor rejects duplicate keys before
+  insertion.
+- The parser rejects custom tags and non-finite floats.
+- The parser resolves aliases. tq does not retain comments, style, directives,
+  tag spelling, or anchor identity.
+- Signed and unsigned integers enter tq's exact decimal-literal number model.
+- Finite YAML floats enter the binary64 side of the number model. This keeps
+  the value returned by `yaml_serde`; YAML scalar resolution has already lost
+  the original decimal spelling.
 
-Tests cover multiple documents, insertion order, duplicate and non-string keys,
-tags, non-finite floats, and semantic equivalence with JSON and TOON. This is
-the MVP boundary. To retain source spelling, the YAML dependency needs a
-lower-level scalar-event API.
+Tests cover multiple documents, insertion order, invalid keys, tags,
+non-finite floats, and equivalence with JSON and TOON. Retaining source spelling
+would require a lower-level scalar-event API from the YAML dependency.

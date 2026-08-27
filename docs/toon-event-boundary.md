@@ -1,19 +1,19 @@
 # TOON event boundary
 
-`tq-toon::Decoder` separates TOON syntax from the tq execution engine. It reads
-through `BufRead`, retains one bounded physical line and active
-container/schema state, and yields source-spanned structural events. A consumer
-can stop at any event. It does not need to build the remaining document.
+`tq-toon::Decoder` keeps TOON parsing out of the tq execution engine. It reads
+through `BufRead`, keeps one bounded physical line plus active container and
+schema state, and yields structural events with source spans. A consumer can
+stop after any event without building the rest of the document.
 
-The public event vocabulary is intentionally small: document, object, key,
-array, and scalar boundaries. Array starts retain declared counts, while array
-ends report observed counts. The decoder owns syntax concerns—UTF-8, quoting,
-indentation, delimiter scope, row width, count validation, and resource limits.
-It does not know about jq filters or tq bytecode.
+The public event types cover document, object, key, array, and scalar
+boundaries. An array start carries its declared count. Its end reports the
+observed count. The decoder handles UTF-8, quoting, indentation, delimiter
+scope, row width, count validation, and resource limits. It knows nothing about
+jq filters or tq bytecode.
 
-`DomBuilder` is one consumer, used where a query genuinely requires a complete
-value. Streaming query paths should consume events directly. Future consumers
-may project paths, skip subtrees, or construct bounded windows.
+`DomBuilder` consumes these events when a query needs a complete value.
+Streaming queries consume them directly. Other consumers can project paths,
+skip subtrees, or construct bounded windows.
 
 This repository contains the decoder prototype. After the conformance corpus
 and real query consumers verify its contract, the `Decoder`, event types,
@@ -21,7 +21,7 @@ configuration, errors, and conformance fixtures can move together to
 `toon-rust`. tq can then depend on that package without a consumer change.
 This move is outside the MVP critical path.
 
-Safe dotted-path expansion is outside the event layer: keys are emitted exactly
-as decoded, together with quoted-key provenance. `DomBuilder` applies the
-requested expansion/conflict policy without coupling the reusable streaming
-decoder to object merge semantics.
+Dotted-path expansion happens outside the event layer. The decoder emits each
+key unchanged and records whether it was quoted. `DomBuilder` applies the
+requested expansion and conflict policy, so the decoder does not need object
+merge rules.
