@@ -270,6 +270,45 @@ fn yaml_multi_file_and_invalid_combinations_preserve_channels_and_status() {
 }
 
 #[test]
+fn yaml_extension_selects_yaml_input_and_short_formats_emit_block_yaml() {
+    let directory = tempdir().unwrap();
+    let source = directory.path().join("source.yaml");
+    fs::write(
+        &source,
+        "name: Ada\nmetadata:\n  active: true\nitems:\n  - one\n  - two\n",
+    )
+    .unwrap();
+
+    let output = tq(&["-oyaml", ".", source.to_str().unwrap()], b"");
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"name: Ada\nmetadata:\n  active: true\nitems:\n  - one\n  - two\n"
+    );
+    assert!(output.stderr.is_empty());
+
+    let output = tq(
+        &[
+            "-iyaml",
+            "-o",
+            "json",
+            "-c",
+            ".name",
+            source.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, b"\"Ada\"\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn generated_help_and_build_configuration_are_stdout_only() {
     for arguments in [&["--help"][..], &["--build-configuration"][..]] {
         let output = tq(arguments, b"");
@@ -282,6 +321,14 @@ fn generated_help_and_build_configuration_are_stdout_only() {
     for option in ["--raw-output0", "--sort-keys", "--slurpfile", "--jsonargs"] {
         assert!(help.contains(option), "missing {option}");
     }
+}
+
+#[test]
+fn argument_free_invocation_uses_identity_filter_over_stdin() {
+    let output = tq(&[], b"name: Ada\nactive: true\n");
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, b"\x1ename: Ada\nactive: true\n");
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
