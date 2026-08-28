@@ -390,6 +390,33 @@ fn ndjson_extension_enables_automatic_event_plan() {
 }
 
 #[test]
+fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
+    let directory = tempdir().unwrap();
+    let records = directory.path().join("records.data");
+    fs::write(&records, "{\"values\":[1,2,3]}\n").unwrap();
+
+    let output = tq(
+        &[
+            "-x",
+            "-ojsonl",
+            "--explain-json",
+            ".values[] | numbers",
+            records.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"1\n2\n3\n");
+    let explain: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(explain["execution"]["plan"], "events");
+}
+
+#[test]
 fn json_lines_stream_resets_roots_and_late_errors_keep_prior_output() {
     let streamed = tq(
         &["--stream", "-ijsonl", "-ojsonl", "."],

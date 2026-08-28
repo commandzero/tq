@@ -267,10 +267,8 @@ fn run_filter<R: Read, W: Write, E: Write>(
     if automatic_mode && options.input_format == InputFormat::Auto {
         if options.proxy_on_error {
             let file_events = !options.files.is_empty()
-                && options.files.iter().all(|path| {
-                    path != Path::new("-")
-                        && format_from_path(path).is_some_and(decoder_events_available)
-                });
+                && options.files.iter().all(|path| path != Path::new("-"))
+                && auto_file_events_available(options)?;
             return run_resolved_filter(
                 options,
                 resolved,
@@ -336,8 +334,13 @@ fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
         } else {
             let reader =
                 LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
-            let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
-            available &= decoder_events_available(probe.selected);
+            match probe_reader(reader, options.limits.lookahead_bytes) {
+                Ok((probe, _)) => available &= decoder_events_available(probe.selected),
+                Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
+                    available = false;
+                }
+                Err(error) => return Err(error.into()),
+            }
         }
     }
     Ok(available)
