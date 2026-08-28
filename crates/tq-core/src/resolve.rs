@@ -832,6 +832,9 @@ pub fn analyze(query: Query<Resolved>) -> Query<Analyzed> {
 #[must_use]
 pub fn analyze_with_context(query: Query<Resolved>, context: AnalysisContext) -> Query<Analyzed> {
     let mut analysis = Analysis::default();
+    if matches!(query.ast().kind, ExprKind::Identity) {
+        add_effect(&mut analysis, Effect::SemanticIdentity, query.ast().span);
+    }
     analyze_expr(query.ast(), &mut analysis);
     if context.whole_input {
         add_effect(&mut analysis, Effect::WholeInput, query.ast().span);
@@ -1353,6 +1356,7 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
 
 fn add_effect(analysis: &mut Analysis, effect: Effect, span: Span) {
     match effect {
+        Effect::SemanticIdentity => analysis.capabilities.semantic_identity = true,
         Effect::EventStream => analysis.capabilities.event_stream = true,
         Effect::Subtree => analysis.capabilities.subtree = true,
         Effect::Document => analysis.capabilities.document = true,
@@ -1472,6 +1476,22 @@ mod tests {
         assert!(capabilities.mutation);
         assert!(capabilities.generator);
         assert!(capabilities.possible_failure);
+    }
+
+    #[test]
+    fn semantic_identity_proof_is_narrow_and_survives_compilation() {
+        let identity = analyze(resolve(parse("(.)").unwrap(), &ResolveOptions::default()).unwrap());
+        assert!(identity.capabilities().semantic_identity);
+        assert!(identity.compile().unwrap().capabilities().semantic_identity);
+
+        for query in [". | .", ".a", "empty", "if true then . else . end"] {
+            let analyzed =
+                analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap());
+            assert!(
+                !analyzed.capabilities().semantic_identity,
+                "unexpected semantic-identity proof for {query}"
+            );
+        }
     }
 
     #[test]
