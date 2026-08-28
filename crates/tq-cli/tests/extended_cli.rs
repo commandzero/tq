@@ -414,6 +414,15 @@ fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
     assert_eq!(output.stdout, b"1\n2\n3\n");
     let explain: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(explain["execution"]["plan"], "events");
+
+    let stdin = tq(
+        &["-x", "-ojsonl", "--explain-json", ".values[] | numbers"],
+        b"{\"values\":[4,5]}\n",
+    );
+    assert_eq!(stdin.code, 0, "{}", String::from_utf8_lossy(&stdin.stderr));
+    assert_eq!(stdin.stdout, b"4\n5\n");
+    let explain: serde_json::Value = serde_json::from_slice(&stdin.stderr).unwrap();
+    assert_eq!(explain["execution"]["plan"], "events");
 }
 
 #[test]

@@ -19,8 +19,8 @@ use tq_core::{
 };
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, JsonLinesDocumentSource, OutputError, OutputOptions,
-    StreamOptions, ToonFraming, decode_bytes, decode_json, decode_toon, probe_reader, stream_json,
-    stream_toon, write_results,
+    StreamOptions, ToonFraming, decode_bytes, decode_json, decode_toon, probe_format, probe_reader,
+    stream_json, stream_toon, write_results,
 };
 
 use crate::{
@@ -266,9 +266,24 @@ fn run_filter<R: Read, W: Write, E: Write>(
         !options.stream && !options.slurp && !options.raw_input && !options.null_input;
     if automatic_mode && options.input_format == InputFormat::Auto {
         if options.proxy_on_error {
-            let file_events = !options.files.is_empty()
-                && options.files.iter().all(|path| path != Path::new("-"))
-                && auto_file_events_available(options)?;
+            let file_events = auto_file_events_available(options)?;
+            if options.files.is_empty() || options.files.iter().any(|path| path == Path::new("-")) {
+                let bytes = read_limited(&mut *stdin, options.limits.input_bytes, "<stdin>")?;
+                let stdin_events = match probe_format(&bytes, options.limits.lookahead_bytes) {
+                    Ok(probe) => decoder_events_available(probe.selected),
+                    Err(error) if proxyable_format_error(&error) => false,
+                    Err(error) => return Err(error.into()),
+                };
+                return run_resolved_filter(
+                    options,
+                    resolved,
+                    &variables,
+                    file_events && stdin_events,
+                    &mut bytes.as_slice(),
+                    stdout,
+                    stderr,
+                );
+            }
             return run_resolved_filter(
                 options,
                 resolved,
