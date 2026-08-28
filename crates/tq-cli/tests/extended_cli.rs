@@ -432,6 +432,90 @@ fn json_lines_line_limit_is_a_resource_error_without_record_disclosure() {
 }
 
 #[test]
+fn proxy_on_error_preserves_rejected_stdin_and_valid_transformations() {
+    let invalid = b"{\"unfinished\":\xff\n";
+    let proxied = tq(&["-ex", "-ijson"], invalid);
+    assert_eq!(proxied.code, 0);
+    assert_eq!(proxied.stdout, invalid);
+    assert!(proxied.stderr.is_empty());
+
+    let invalid_auto = b"\xffunrecognized\n";
+    let auto = tq(&["-x"], invalid_auto);
+    assert_eq!(auto.code, 0);
+    assert_eq!(auto.stdout, invalid_auto);
+    assert!(auto.stderr.is_empty());
+
+    let transformed = tq(&["-x", "-ijson", "-ojsonl", ".value"], b"{\"value\":7}\n");
+    assert_eq!(transformed.code, 0);
+    assert_eq!(transformed.stdout, b"7\n");
+    assert!(transformed.stderr.is_empty());
+}
+
+#[test]
+fn proxy_on_error_is_source_atomic_for_late_json_lines_failures() {
+    let input = b"{\"id\":1}\nnot-json\n{\"id\":3}\n";
+    let output = tq(&["-x", "-ijsonl", "-ojsonl", ".id"], input);
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, input);
+    assert!(output.stderr.is_empty());
+
+    let streamed = tq(&["-x", "--stream", "-ijsonl"], input);
+    assert_eq!(streamed.code, 0);
+    assert_eq!(streamed.stdout, input);
+    assert!(streamed.stderr.is_empty());
+
+    let slurped = tq(&["-x", "-s", "-ijsonl"], input);
+    assert_eq!(slurped.code, 0);
+    assert_eq!(slurped.stdout, input);
+    assert!(slurped.stderr.is_empty());
+}
+
+#[test]
+fn proxy_on_error_preserves_file_order_and_only_proxies_rejected_sources() {
+    let directory = tempdir().unwrap();
+    let first = directory.path().join("first.json");
+    let rejected = directory.path().join("rejected.json");
+    let last = directory.path().join("last.json");
+    fs::write(&first, "{\"id\":1}\n").unwrap();
+    fs::write(&rejected, "not-json\n").unwrap();
+    fs::write(&last, "{\"id\":3}\n").unwrap();
+
+    let output = tq(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            ".id",
+            first.to_str().unwrap(),
+            rejected.to_str().unwrap(),
+            last.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, b"1\nnot-json\n3\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn proxy_on_error_does_not_mask_resource_or_runtime_errors() {
+    let resource = tq(&["-x", "-ijson", "--max-input-bytes", "3"], b"null");
+    assert_eq!(resource.code, 5);
+    assert!(resource.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&resource.stderr).contains("input-bytes"));
+
+    let output_limit = tq(&["-x", "-ijson", "--max-output-bytes", "3"], b"invalid");
+    assert_eq!(output_limit.code, 5);
+    assert!(output_limit.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output_limit.stderr).contains("output-bytes"));
+
+    let runtime = tq(&["-x", "-ijson", "error(\"boom\")"], b"null\n");
+    assert_ne!(runtime.code, 0);
+    assert!(runtime.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&runtime.stderr).contains("boom"));
+}
+
+#[test]
 fn generated_help_and_build_configuration_are_stdout_only() {
     for arguments in [&["--help"][..], &["--build-configuration"][..]] {
         let output = tq(arguments, b"");
