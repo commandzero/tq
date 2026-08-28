@@ -1,8 +1,9 @@
 # tq
 
-`tq` is a Rust query tool for TOON, YAML, and JSON. Its command line and query
-language follow jq 1.8.x, but structured output defaults to TOON Text Sequence.
-It can stream JSON and TOON without keeping the whole document in memory.
+`tq` is a Rust query tool for TOON, YAML, JSON, and JSON Lines. Its command line
+and query language follow jq 1.8.x, but structured output defaults to TOON Text
+Sequence. It can stream JSON, JSON Lines, and TOON without keeping the whole
+input in memory.
 
 The current release covers the jq language most filters need: navigation,
 pipes and generators, arrays and ordered objects, conditionals, operators,
@@ -20,27 +21,32 @@ target/release/tq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
 With no file argument, `tq` reads stdin. It processes multiple files and `-` in
-the order given. The format detector recognizes canonical TOON and explicit
-YAML markers. A JSON object or array opener selects the JSON parser. Use
-`--input-format toon|yaml|json` for ambiguous input or to force one parser.
+the order given. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.jsonl`, and
+`.ndjson` extensions select their parser. Other sources use bounded content
+detection. Use `--input-format toon|yaml|json|jsonl` for ambiguous input or to
+force one parser. `ndjson` is an alias for `jsonl`.
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
 tq --input-format json --output-format json -c '.features | length' feed.json
 tq --input-format yaml -r '.people[].name' people.yaml
+tq -i jsonl -o jsonl '.event' events.ndjson
 ```
 
 Each structured result is framed as an ASCII RS byte, one canonical TOON
 document, and LF. The framing makes zero, one, and many results distinct. If a
 later result fails, earlier complete records remain valid. Use
-`--output-format json` for jq-style JSON, `-r` for raw strings, `-j` to join raw
-output, or `--unframed` when the query must return exactly one TOON value.
+`--output-format json` for jq-style JSON, or `--output-format jsonl` for one
+compact LF-terminated JSON value per result. Use `-r` for raw strings, `-j` to
+join raw output, or `--unframed` when the query must return exactly one TOON
+value.
 
 ## Streaming and memory
 
 `--stream` creates jq-compatible `[path,value]` records and container-end
-`[path]` records from JSON or TOON decoder events. For YAML, `tq` decodes one
-document at a time. Use streaming to keep memory bounded on large inputs:
+`[path]` records from JSON, JSON Lines, or TOON decoder events. JSON Lines resets
+the root path for every physical record. For YAML, `tq` decodes one document at
+a time. Use streaming to keep memory bounded on large inputs:
 
 ```console
 tq --stream --input-format json \

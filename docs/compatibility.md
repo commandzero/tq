@@ -14,21 +14,25 @@ the plan and what it retains in memory.
 
 The format detector reads a bounded prefix. It prefers canonical TOON. A JSON
 object or array opener selects JSON before YAML, while YAML document,
-directive, and root-sequence markers select YAML. Use
-`--input-format toon|yaml|json` to select exactly one parser.
+directive, and root-sequence markers select YAML. `.jsonl` and `.ndjson` files
+select strict one-value-per-line JSON Lines input. Use
+`--input-format toon|yaml|json|jsonl` to select exactly one parser; `ndjson` is
+an alias for `jsonl`.
 
 Structured output is a TOON Text Sequence. Each result is `RS`, canonical TOON,
 and `LF`. This differs from jq's newline-delimited JSON. The framing separates
-multiple results and preserves complete records before a late error. Select `--output-format json`
-for JSON output, `--output-format yaml` for exact-number-preserving YAML 1.2
-flow output, `-r` for raw strings, `-j` to join raw outputs, or
-`--unframed` for exactly one TOON value. `--unframed` rejects zero or multiple
-results instead of choosing one silently.
+multiple results and preserves complete records before a late error. Select
+`--output-format json` for JSON output, `--output-format jsonl` for compact
+LF-terminated JSON Lines, `--output-format yaml` for exact-number-preserving
+YAML 1.2 output, `-r` for raw strings, `-j` to join raw outputs, or `--unframed`
+for exactly one TOON value. `--unframed` rejects zero or multiple results
+instead of choosing one silently.
 
 The extended jq-shaped CLI supports short clusters plus `--raw-output0`,
 `-a/--ascii-output`, `-S/--sort-keys`, explicit color/monochrome output,
-`--tab`, reviewed `--indent`, and `--unbuffered`. JSON-specific switches require
-explicit JSON output. `--arg`, `--argjson`, and `--argtoon` populate both direct
+`--tab`, reviewed `--indent`, and `--unbuffered`. JSON Lines output is always
+compact and rejects pretty, indentation, tab, raw, joined, and forced-color
+output. `--arg`, `--argjson`, and `--argtoon` populate both direct
 variables and `$ARGS.named`; `--args`/`--jsonargs` populate `$ARGS.positional`;
 and `--rawfile`/`--slurpfile` use the configured per-source byte limit. See
 `docs/jq-1.8-cli-options.md` for the complete classification.

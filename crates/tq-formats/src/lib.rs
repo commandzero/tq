@@ -10,8 +10,9 @@ mod output;
 mod stream;
 
 pub use adapters::{
-    DecodeOptions, ProbeReport, ReplayReader, VecDocumentSource, decode_bytes, decode_json,
-    decode_toon, decode_toon_sequence, decode_yaml, probe_format, probe_reader,
+    DecodeOptions, JsonLinesDocumentSource, ProbeReport, ReplayReader, VecDocumentSource,
+    decode_bytes, decode_json, decode_json_lines, decode_toon, decode_toon_sequence, decode_yaml,
+    probe_format, probe_reader,
 };
 pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
 pub use stream::{StreamOptions, stream_json, stream_toon};
@@ -27,6 +28,8 @@ pub enum InputFormat {
     Yaml,
     /// JSON text.
     Json,
+    /// One JSON value per physical line.
+    JsonLines,
     /// Record Separator framed TOON sequence.
     ToonSequence,
 }
@@ -38,6 +41,8 @@ pub enum OutputFormat {
     Toon,
     /// Compact or pretty JSON result text.
     Json,
+    /// Compact LF-terminated JSON values.
+    JsonLines,
     /// One YAML document per result.
     Yaml,
 }
@@ -94,4 +99,14 @@ pub enum FormatError {
     /// A source exceeds its configured byte limit.
     #[error("input resource limit exceeded: {0}")]
     Resource(&'static str),
+    /// One physical input line exceeds a configured resource limit.
+    #[error("input resource limit exceeded for '{identity}' at line {line}: {resource}")]
+    ResourceLine {
+        /// User-visible source name.
+        identity: String,
+        /// One-based physical line number.
+        line: u64,
+        /// Stable resource name.
+        resource: &'static str,
+    },
 }

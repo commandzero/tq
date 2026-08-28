@@ -156,6 +156,16 @@ where
                 writer.write_all(b"\n")?;
             }
         }
+        OutputFormat::JsonLines => {
+            for value in values {
+                let mut encoded = serde_json::to_vec(value.borrow())?;
+                if options.ascii_json {
+                    encoded = escape_non_ascii(&encoded);
+                }
+                writer.write_all(&encoded)?;
+                writer.write_all(b"\n")?;
+            }
+        }
         OutputFormat::Yaml => {
             for value in values {
                 if options.yaml_document_start {
@@ -328,5 +338,38 @@ mod tests {
         );
         let decoded = crate::decode_yaml(&yaml, "round-trip").unwrap();
         assert_eq!(decoded[0].value, value);
+    }
+
+    #[test]
+    fn json_lines_is_compact_lf_terminated_and_exact() {
+        let values = [
+            serde_json::from_str::<Value>(r#"{"n":9007199254740993}"#).unwrap(),
+            Value::array(vec![Value::Bool(true)]),
+        ];
+        let mut output = Vec::new();
+        write_results(
+            &mut output,
+            &values,
+            OutputOptions {
+                format: OutputFormat::JsonLines,
+                pretty_json: true,
+                color_json: true,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(output, b"{\"n\":9007199254740993}\n[true]\n");
+
+        let mut empty = Vec::new();
+        write_results(
+            &mut empty,
+            Vec::<&Value>::new(),
+            OutputOptions {
+                format: OutputFormat::JsonLines,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(empty.is_empty());
     }
 }
