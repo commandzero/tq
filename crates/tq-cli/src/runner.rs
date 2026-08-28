@@ -1389,6 +1389,7 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
 ) -> Result<(), RunError> {
     let stream_options = StreamOptions {
         maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
         errors_as_values: false,
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
@@ -1944,6 +1945,7 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
 ) -> Result<(), RunError> {
     let stream_options = StreamOptions {
         maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
         errors_as_values: options.stream_errors,
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);

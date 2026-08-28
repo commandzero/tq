@@ -145,6 +145,7 @@ pub struct JsonLinesDocumentSource<R> {
     options: DecodeOptions,
     physical_line: u64,
     record_index: u64,
+    source_bytes: usize,
     line: Vec<u8>,
 }
 
@@ -158,6 +159,7 @@ impl<R: BufRead> JsonLinesDocumentSource<R> {
             options,
             physical_line: 0,
             record_index: 0,
+            source_bytes: 0,
             line: Vec::new(),
         }
     }
@@ -178,9 +180,18 @@ impl<R: BufRead> JsonLinesDocumentSource<R> {
                     resource: "line-bytes",
                 });
             }
-            self.line.extend_from_slice(&available[..content_bytes]);
             let consumed = content_bytes.saturating_add(usize::from(newline.is_some()));
+            let next_source_bytes = self.source_bytes.saturating_add(consumed);
+            if next_source_bytes > self.options.maximum_source_bytes {
+                return Err(FormatError::ResourceLine {
+                    identity: self.identity.clone(),
+                    line: self.physical_line.saturating_add(1),
+                    resource: "source-bytes",
+                });
+            }
+            self.line.extend_from_slice(&available[..content_bytes]);
             self.reader.consume(consumed);
+            self.source_bytes = next_source_bytes;
             if newline.is_some() {
                 return Ok(true);
             }
@@ -683,12 +694,13 @@ fn number<E: fmt::Display>(literal: E) -> Result<YamlRuntime, tq_core::NumberErr
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read as _;
+    use std::io::{BufReader, Read as _};
 
     use tq_toon::DecoderConfig;
 
     use super::{
-        DecodeOptions, decode_bytes, decode_json_lines, decode_toon_sequence, decode_yaml,
+        DecodeOptions, JsonLinesDocumentSource, decode_bytes, decode_json_lines,
+        decode_toon_sequence, decode_yaml,
     };
     use crate::InputFormat;
 
@@ -828,5 +840,22 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn json_lines_source_enforces_cumulative_source_limit() {
+        let mut source = JsonLinesDocumentSource::new(
+            BufReader::new(b"1\n2\n".as_slice()),
+            "limited.jsonl",
+            DecodeOptions {
+                format: InputFormat::JsonLines,
+                maximum_source_bytes: 2,
+                ..DecodeOptions::default()
+            },
+        );
+        assert!(source.next_document().unwrap().is_some());
+        let error = source.next_document().unwrap_err().to_string();
+        assert!(error.contains("limited.jsonl"));
+        assert!(error.contains("source-bytes"));
     }
 }
