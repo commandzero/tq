@@ -23,8 +23,10 @@ result-sized string as an intermediate representation.
 ### Requirement: Bounded array preparation and spooling
 When an output array's final length or tabular schema is unknown, the writer
 SHALL retain only one replayable representation of pending values. All active
-array preparations SHALL use one configurable aggregate in-memory threshold and
-then spool securely to temporary storage. The writer MUST write the final header
+replay preparations SHALL use one configurable aggregate in-memory threshold and
+then spool securely to temporary storage. Transient composite state that cannot
+yet transfer into replay MUST use that same threshold and fail with a resource
+diagnostic rather than allocate past it. The writer MUST write the final header
 before replaying the prepared body, replay values once in order, and expose
 whether spooling occurred.
 
@@ -42,7 +44,7 @@ whether spooling occurred.
 
 #### Scenario: Nested preparation budget
 - **WHEN** nested arrays are prepared concurrently
-- **THEN** their combined retained bytes do not exceed the configured aggregate threshold apart from bounded bookkeeping and current tokens
+- **THEN** their replay and transient retained bytes do not exceed the configured aggregate threshold apart from bounded bookkeeping and current tokens
 
 ### Requirement: Explicit unframed single output
 The writer SHALL support an unframed mode that produces exactly one standalone
