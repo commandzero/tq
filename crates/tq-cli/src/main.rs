@@ -1,9 +1,12 @@
 //! Command-line entry point for `tq`.
 
+use std::ffi::OsStr;
+
 fn main() -> std::process::ExitCode {
     let status = match tq_cli::parse_args(std::env::args_os().skip(1)) {
         Ok(mut command) => {
-            if std::env::var_os("TQ_BENCH_FORCE_DOCUMENT").is_some_and(|value| value == "1")
+            if std::env::var_os("TQ_BENCH_FORCE_DOCUMENT")
+                .is_some_and(|value| value == OsStr::new("1"))
                 && let tq_cli::Command::Run(options) = &mut command
             {
                 options.execution_override = tq_cli::ExecutionOverride::Document;
