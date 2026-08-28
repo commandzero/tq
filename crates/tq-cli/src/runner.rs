@@ -18,9 +18,9 @@ use tq_core::{
     VmObservations, analyze_with_context, parse_bytes, resolve,
 };
 use tq_formats::{
-    DecodeOptions, FormatError, InputFormat, OutputError, OutputOptions, StreamOptions,
-    ToonFraming, decode_bytes, decode_json, decode_toon, probe_reader, stream_json, stream_toon,
-    write_results,
+    DecodeOptions, FormatError, InputFormat, JsonLinesDocumentSource, OutputError, OutputOptions,
+    StreamOptions, ToonFraming, decode_bytes, decode_json, decode_toon, probe_reader, stream_json,
+    stream_toon, write_results,
 };
 
 use crate::{
@@ -221,7 +221,7 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
         Command::BuildConfiguration => {
             writeln!(
                 stdout,
-                "target={} binary-stdio={} formats=toon,yaml,json jq-target=1.8.x",
+                "target={} binary-stdio={} formats=toon,yaml,json,jsonl jq-target=1.8.x",
                 std::env::consts::OS,
                 if cfg!(windows) {
                     "requested-with--binary"
@@ -293,7 +293,11 @@ fn run_filter<R: Read, W: Write, E: Write>(
         options,
         resolved,
         &variables,
-        automatic_mode && matches!(options.input_format, InputFormat::Json | InputFormat::Toon),
+        automatic_mode
+            && matches!(
+                options.input_format,
+                InputFormat::Json | InputFormat::JsonLines | InputFormat::Toon
+            ),
         stdin,
         stdout,
         stderr,
@@ -301,16 +305,24 @@ fn run_filter<R: Read, W: Write, E: Write>(
 }
 
 const fn decoder_events_available(format: InputFormat) -> bool {
-    matches!(format, InputFormat::Json | InputFormat::Toon)
+    matches!(
+        format,
+        InputFormat::Json | InputFormat::JsonLines | InputFormat::Toon
+    )
 }
 
 fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
     let mut available = true;
     for path in options.files.iter().filter(|path| *path != Path::new("-")) {
         let identity = path.display().to_string();
-        let reader = LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
-        let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
-        available &= decoder_events_available(probe.selected);
+        if let Some(format) = format_from_path(path) {
+            available &= decoder_events_available(format);
+        } else {
+            let reader =
+                LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
+            let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            available &= decoder_events_available(probe.selected);
+        }
     }
     Ok(available)
 }
@@ -360,51 +372,61 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
     }
     let plan = program.document_plan();
 
-    let inputs = load_inputs(options, stdin)?;
-
-    let values = if options.slurp && !options.raw_input {
-        vec![Value::array(
-            inputs
-                .into_iter()
-                .map(|document| document.value)
-                .collect::<Vec<_>>(),
-        )]
-    } else {
-        inputs.into_iter().map(|document| document.value).collect()
-    };
     let mut result_output = ResultOutput::new(stdout, options);
     let mut result_count = 0_usize;
     let mut last = None;
     let mut observations = Vec::new();
     let mut runtime_error = None;
-    'documents: for input in values {
-        let mut vm = Vm::new_with_variables(&plan, input, vm_limits(options), variables.clone())
-            .with_trace_limit(options.trace_limit);
-        if let Some(flag) = cancellation() {
-            vm = vm.with_cancellation(flag);
-        }
-        loop {
-            match vm.next_result() {
-                Ok(Some(value)) => {
-                    last = Some(value.clone());
-                    result_output.emit(&value)?;
-                    result_count = result_count.saturating_add(1);
+    {
+        let mut evaluate = |input| -> Result<bool, RunError> {
+            let mut vm =
+                Vm::new_with_variables(&plan, input, vm_limits(options), variables.clone())
+                    .with_trace_limit(options.trace_limit);
+            if let Some(flag) = cancellation() {
+                vm = vm.with_cancellation(flag);
+            }
+            loop {
+                match vm.next_result() {
+                    Ok(Some(value)) => {
+                        last = Some(value.clone());
+                        result_output.emit(&value)?;
+                        result_count = result_count.saturating_add(1);
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        runtime_error = Some(error);
+                        break;
+                    }
                 }
-                Ok(None) => break,
-                Err(error) => {
-                    runtime_error = Some(error);
+            }
+            if options.trace_limit != 0 {
+                for entry in vm.trace() {
+                    writeln!(stderr, "trace: {entry}")?;
+                }
+            }
+            observations.push(vm.observations());
+            Ok(runtime_error.is_none())
+        };
+
+        if options.slurp || options.raw_input {
+            let inputs = load_inputs(options, stdin)?;
+            let values = if options.slurp && !options.raw_input {
+                vec![Value::array(
+                    inputs
+                        .into_iter()
+                        .map(|document| document.value)
+                        .collect::<Vec<_>>(),
+                )]
+            } else {
+                inputs.into_iter().map(|document| document.value).collect()
+            };
+            for input in values {
+                if !evaluate(input)? {
                     break;
                 }
             }
-        }
-        if options.trace_limit != 0 {
-            for entry in vm.trace() {
-                writeln!(stderr, "trace: {entry}")?;
-            }
-        }
-        observations.push(vm.observations());
-        if runtime_error.is_some() {
-            break 'documents;
+        } else {
+            for_each_structured_input(options, stdin, &mut evaluate)?;
         }
     }
 
@@ -429,6 +451,72 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
         return Err(RunError::Runtime(error));
     }
     Ok(exit_status(options.exit_status, last.as_ref()))
+}
+
+fn for_each_structured_input<R: Read, F>(
+    options: &RunOptions,
+    stdin: &mut R,
+    emit: &mut F,
+) -> Result<(), RunError>
+where
+    F: FnMut(Value) -> Result<bool, RunError>,
+{
+    if options.null_input {
+        let _ = emit(Value::Null)?;
+        return Ok(());
+    }
+    let files = if options.files.is_empty() {
+        vec![Path::new("-").to_owned()]
+    } else {
+        options.files.clone()
+    };
+    for path in files {
+        let format = selected_input_format(options, &path);
+        let keep_going = if path == Path::new("-") {
+            for_each_structured_reader(options, format, &mut *stdin, "<stdin>", emit)?
+        } else {
+            let identity = path.display().to_string();
+            for_each_structured_reader(options, format, open_path(&path)?, &identity, emit)?
+        };
+        if !keep_going {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn for_each_structured_reader<R: Read, F>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    emit: &mut F,
+) -> Result<bool, RunError>
+where
+    F: FnMut(Value) -> Result<bool, RunError>,
+{
+    if format == InputFormat::JsonLines {
+        let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+        let mut source = JsonLinesDocumentSource::new(
+            BufReader::new(reader),
+            identity,
+            decode_options(options, format),
+        );
+        while let Some(document) = source.next_document()? {
+            if !emit(document.value)? {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+
+    let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+    for document in decode_bytes(&bytes, identity, decode_options(options, format))? {
+        if !emit(document.value)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn validate_capability_policy(options: &RunOptions) -> Result<(), RunError> {
@@ -563,6 +651,7 @@ const fn input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Toon => "override:toon",
         InputFormat::Yaml => "override:yaml",
         InputFormat::Json => "override:json",
+        InputFormat::JsonLines => "override:jsonl",
         InputFormat::ToonSequence => "override:toon-sequence",
     }
 }
@@ -596,10 +685,22 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
             return Err(RunError::Interrupted);
         }
         if path == Path::new("-") {
-            stream_reader(options, &mut *stdin, "<stdin>", &mut executor)?;
+            stream_reader(
+                options,
+                selected_input_format(options, &path),
+                &mut *stdin,
+                "<stdin>",
+                &mut executor,
+            )?;
         } else {
             let identity = path.display().to_string();
-            stream_reader(options, open_path(&path)?, &identity, &mut executor)?;
+            stream_reader(
+                options,
+                selected_input_format(options, &path),
+                open_path(&path)?,
+                &identity,
+                &mut executor,
+            )?;
         }
     }
     executor.output.finish()?;
@@ -665,10 +766,22 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
             return Err(RunError::Interrupted);
         }
         if path == Path::new("-") {
-            automatic_reader(options, &mut *stdin, "<stdin>", &mut executor)?;
+            automatic_reader(
+                options,
+                selected_input_format(options, &path),
+                &mut *stdin,
+                "<stdin>",
+                &mut executor,
+            )?;
         } else {
             let identity = path.display().to_string();
-            automatic_reader(options, open_path(&path)?, &identity, &mut executor)?;
+            automatic_reader(
+                options,
+                selected_input_format(options, &path),
+                open_path(&path)?,
+                &identity,
+                &mut executor,
+            )?;
         }
         executor.finish_source()?;
     }
@@ -692,6 +805,7 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
 
 fn automatic_reader<R: Read, W: Write, E: Write, M>(
     options: &RunOptions,
+    format: InputFormat,
     reader: R,
     identity: &str,
     executor: &mut AutomaticExecutor<'_, W, E, M>,
@@ -701,8 +815,11 @@ fn automatic_reader<R: Read, W: Write, E: Write, M>(
         errors_as_values: false,
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
-    match options.input_format {
+    match format {
         InputFormat::Json => automatic_json_into(reader, stream_options, executor),
+        InputFormat::JsonLines => {
+            automatic_json_lines_into(reader, identity, options, stream_options, executor)
+        }
         InputFormat::Toon => automatic_toon_into(reader, options, stream_options, executor),
         InputFormat::Auto => {
             let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
@@ -712,13 +829,35 @@ fn automatic_reader<R: Read, W: Write, E: Write, M>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detected YAML cannot execute a decoder-event plan".to_owned(),
                 )),
-                InputFormat::Auto | InputFormat::ToonSequence => unreachable!("probe candidate"),
+                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                    unreachable!("probe candidate")
+                }
             }
         }
         InputFormat::Yaml | InputFormat::ToonSequence => Err(RunError::Unsupported(
             "automatic bounded plans require JSON or TOON decoder events".to_owned(),
         )),
     }
+}
+
+fn automatic_json_lines_into<R: Read, W: Write, E: Write, M>(
+    reader: R,
+    identity: &str,
+    options: &RunOptions,
+    stream_options: StreamOptions,
+    executor: &mut AutomaticExecutor<'_, W, E, M>,
+) -> Result<(), RunError> {
+    let mut source = JsonLinesDocumentSource::new(
+        BufReader::new(reader),
+        identity,
+        decode_options(options, InputFormat::JsonLines),
+    );
+    while let Some((record, line)) = source.next_record()? {
+        automatic_json_into(record.as_slice(), stream_options, executor)
+            .map_err(|error| json_lines_record_error(error, identity, line))?;
+        executor.finish_source()?;
+    }
+    Ok(())
 }
 
 fn automatic_json_into<R: Read, W: Write, E: Write, M>(
@@ -1199,6 +1338,7 @@ fn invalid_automatic_event() -> RunError {
 
 fn stream_reader<R: Read, W: Write, E: Write>(
     options: &RunOptions,
+    format: InputFormat,
     reader: R,
     identity: &str,
     executor: &mut StreamExecutor<'_, W, E>,
@@ -1208,8 +1348,11 @@ fn stream_reader<R: Read, W: Write, E: Write>(
         errors_as_values: options.stream_errors,
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
-    match options.input_format {
+    match format {
         InputFormat::Json => stream_json_into(reader, stream_options, executor),
+        InputFormat::JsonLines => {
+            stream_json_lines_into(reader, identity, options, stream_options, executor)
+        }
         InputFormat::Toon => stream_toon_into(reader, options, stream_options, executor),
         InputFormat::Auto => {
             let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
@@ -1219,7 +1362,9 @@ fn stream_reader<R: Read, W: Write, E: Write>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detection selected YAML, which is document-at-a-time and cannot satisfy --stream; use --input-format json for JSON syntax".to_owned(),
                 )),
-                InputFormat::Auto | InputFormat::ToonSequence => unreachable!("probe candidate"),
+                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                    unreachable!("probe candidate")
+                }
             }
         }
         InputFormat::Yaml => Err(RunError::Unsupported(
@@ -1228,6 +1373,37 @@ fn stream_reader<R: Read, W: Write, E: Write>(
         InputFormat::ToonSequence => Err(RunError::Unsupported(
             "TOON sequence input cannot currently be nested inside --stream".to_owned(),
         )),
+    }
+}
+
+fn stream_json_lines_into<R: Read, W: Write, E: Write>(
+    reader: R,
+    identity: &str,
+    options: &RunOptions,
+    stream_options: StreamOptions,
+    executor: &mut StreamExecutor<'_, W, E>,
+) -> Result<(), RunError> {
+    let mut source = JsonLinesDocumentSource::new(
+        BufReader::new(reader),
+        identity,
+        decode_options(options, InputFormat::JsonLines),
+    );
+    while let Some((record, line)) = source.next_record()? {
+        stream_json_into(record.as_slice(), stream_options, executor)
+            .map_err(|error| json_lines_record_error(error, identity, line))?;
+    }
+    Ok(())
+}
+
+fn json_lines_record_error(error: RunError, identity: &str, line: u64) -> RunError {
+    match error {
+        RunError::Input(FormatError::Parse { message, .. }) => {
+            RunError::Input(FormatError::Parse {
+                format: InputFormat::JsonLines,
+                message: format!("{identity}:{line}: {message}"),
+            })
+        }
+        error => error,
     }
 }
 
@@ -1462,8 +1638,10 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             &mut self.written,
             self.options.limits.output_bytes,
         );
-        if self.options.output_format == tq_formats::OutputFormat::Json
-            && !self.options.pretty_json
+        if matches!(
+            self.options.output_format,
+            tq_formats::OutputFormat::Json | tq_formats::OutputFormat::JsonLines
+        ) && !self.options.pretty_json
             && !self.options.ascii_output
             && self.options.color != ColorMode::Always
         {
@@ -1720,19 +1898,7 @@ fn load_inputs<R: Read>(
         if options.raw_input {
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
         } else {
-            let decode = DecodeOptions {
-                format: options.input_format,
-                maximum_source_bytes: usize::try_from(options.limits.input_bytes)
-                    .unwrap_or(usize::MAX),
-                toon: tq_toon::DecoderConfig {
-                    strict: options.strict,
-                    maximum_depth: options.limits.depth,
-                    maximum_token_bytes: options.limits.token_bytes,
-                    maximum_line_bytes: options.limits.line_bytes,
-                    maximum_lookahead_bytes: options.limits.lookahead_bytes,
-                    ..tq_toon::DecoderConfig::default()
-                },
-            };
+            let decode = decode_options(options, selected_input_format(options, &path));
             documents.extend(decode_bytes(&bytes, identity, decode)?);
         }
     }
@@ -1759,6 +1925,47 @@ fn open_path(path: &Path) -> Result<File, RunError> {
         path: path.display().to_string(),
         source,
     })
+}
+
+fn format_from_path(path: &Path) -> Option<InputFormat> {
+    let extension = path.extension()?.to_str()?;
+    if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
+        Some(InputFormat::Yaml)
+    } else if extension.eq_ignore_ascii_case("jsonl") || extension.eq_ignore_ascii_case("ndjson") {
+        Some(InputFormat::JsonLines)
+    } else if extension.eq_ignore_ascii_case("json") {
+        Some(InputFormat::Json)
+    } else if extension.eq_ignore_ascii_case("toon") {
+        Some(InputFormat::Toon)
+    } else {
+        None
+    }
+}
+
+fn selected_input_format(options: &RunOptions, path: &Path) -> InputFormat {
+    if options.input_format == InputFormat::Auto && path != Path::new("-") {
+        format_from_path(path).unwrap_or(InputFormat::Auto)
+    } else {
+        options.input_format
+    }
+}
+
+fn decode_options(options: &RunOptions, format: InputFormat) -> DecodeOptions {
+    DecodeOptions {
+        format,
+        maximum_source_bytes: usize::try_from(options.limits.input_bytes).unwrap_or(usize::MAX),
+        maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
+        maximum_line_bytes: options.limits.line_bytes,
+        toon: tq_toon::DecoderConfig {
+            strict: options.strict,
+            maximum_depth: options.limits.depth,
+            maximum_token_bytes: options.limits.token_bytes,
+            maximum_line_bytes: options.limits.line_bytes,
+            maximum_lookahead_bytes: options.limits.lookahead_bytes,
+            ..tq_toon::DecoderConfig::default()
+        },
+    }
 }
 
 fn raw_documents(
@@ -2540,5 +2747,45 @@ mod tests {
             explain["execution"]["stream_rejection"],
             "the selected input or CLI mode does not expose automatic decoder events"
         );
+    }
+
+    #[test]
+    fn json_lines_records_are_consistent_across_execution_plans() {
+        let input = br#"{"items":[{"x":1},{"x":2}],"values":[1,2]}
+{"items":[{"x":3}],"values":[3]}
+"#;
+        let cases = [
+            (
+                ".",
+                "document",
+                "{\"items\":[{\"x\":1},{\"x\":2}],\"values\":[1,2]}\n{\"items\":[{\"x\":3}],\"values\":[3]}\n",
+            ),
+            (".values[] | numbers", "events", "1\n2\n3\n"),
+            (".items[] | .x", "subtree", "1\n2\n3\n"),
+            (".items | sort | .[].x", "blocking-document", "1\n2\n3\n"),
+        ];
+        for (query, expected_plan, expected_output) in cases {
+            let (status, output, explain) =
+                execute(&["-ijsonl", "-ojsonl", "--explain-json", query], input);
+            assert_eq!(status.unwrap(), ExitStatus::Success, "{query}");
+            assert_eq!(output, expected_output.as_bytes(), "{query}");
+            let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+            assert_eq!(explain["execution"]["plan"], expected_plan, "{query}");
+        }
+
+        let (status, output, explain) = execute(
+            &[
+                "-ijsonl",
+                "-ojsonl",
+                "--slurp",
+                "--explain-json",
+                "map(.items[]) | map(.x)",
+            ],
+            input,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[1,2,3]\n");
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(explain["execution"]["plan"], "whole-input");
     }
 }

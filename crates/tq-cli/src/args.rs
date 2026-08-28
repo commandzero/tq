@@ -268,6 +268,18 @@ struct OptionSpec {
 
 const OPTION_REGISTRY: &[OptionSpec] = &[
     OptionSpec {
+        short: Some('i'),
+        syntax: "-i, --input-format FORMAT",
+        value: true,
+        description: "select auto, TOON, YAML, JSON, JSON Lines, or TOON sequence input",
+    },
+    OptionSpec {
+        short: Some('o'),
+        syntax: "-o, --output-format FORMAT",
+        value: true,
+        description: "select TOON, YAML, JSON, or JSON Lines output",
+    },
+    OptionSpec {
         short: Some('n'),
         syntax: "-n, --null-input",
         value: false,
@@ -472,15 +484,15 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
 #[must_use]
 pub fn generated_help() -> String {
     let mut help = String::from(
-        "tq - jq-compatible queries over TOON, YAML, and JSON\n\n\
-Usage: tq [OPTIONS] FILTER [FILE...]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\nOptions:\n",
+        "tq - jq-compatible queries over TOON, YAML, JSON, and JSON Lines\n\n\
+Usage: tq [OPTIONS] [FILTER [FILE...]]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\nOptions:\n",
     );
     for option in OPTION_REGISTRY {
         let _ = writeln!(help, "  {:<31} {}", option.syntax, option.description);
     }
     help.push_str(
-        "\nFormats: --input-format auto|toon|yaml|json|toon-seq\n\
-         --output-format toon|yaml|json, --toon-sequence-input, --unframed\n\
+        "\nFormats: -i, --input-format auto|toon|yaml|json|jsonl|toon-seq\n\
+         -o, --output-format toon|yaml|json|jsonl, --toon-sequence-input, --unframed\n\
 TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict\n\
 Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE\n\
 Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
@@ -554,8 +566,10 @@ where
     let mut exit_status = false;
     let mut strict = true;
     let mut pretty_json = true;
+    let mut pretty_explicit = false;
     let mut json_indent = JsonIndent::default();
     let mut indent_explicit = false;
+    let mut tab_explicit = false;
     let mut ascii_output = false;
     let mut sort_keys = false;
     let mut color = ColorMode::Auto;
@@ -607,10 +621,10 @@ where
                     ));
                 }
             }
-            "--input-format" => {
+            "-i" | "--input-format" => {
                 input_format = parse_input(&token, next_value(&mut tokens, &token)?)?;
             }
-            "--output-format" => {
+            "-o" | "--output-format" => {
                 output_format = parse_output(&token, next_value(&mut tokens, &token)?)?;
             }
             "--seq" => framing = ToonFraming::Sequence,
@@ -631,7 +645,10 @@ where
             "-S" | "--sort-keys" => sort_keys = true,
             "-C" | "--color-output" => color = ColorMode::Always,
             "-M" | "--monochrome-output" => color = ColorMode::Never,
-            "--tab" => json_indent = JsonIndent::Tabs,
+            "--tab" => {
+                json_indent = JsonIndent::Tabs;
+                tab_explicit = true;
+            }
             "--unbuffered" => unbuffered = true,
             "--allow-environment" => allow_environment = true,
             "--allow-platform" => allow_platform = true,
@@ -647,7 +664,10 @@ where
             "-e" | "--exit-status" => exit_status = true,
             "--non-strict" => strict = false,
             "-c" | "--compact-output" => pretty_json = false,
-            "--pretty-output" => pretty_json = true,
+            "--pretty-output" => {
+                pretty_json = true;
+                pretty_explicit = true;
+            }
             "--indent" => {
                 let value = next_value(&mut tokens, &token)?;
                 let indent: u8 = value.parse().map_err(|_| CliError::InvalidValue {
@@ -782,7 +802,7 @@ where
     let filter = match (inline_filter, filter_file) {
         (Some(filter), None) => FilterSource::Inline(filter),
         (None, Some(path)) => FilterSource::File(path),
-        (None, None) => return Err(CliError::Usage("missing FILTER or --from-file".to_owned())),
+        (None, None) => FilterSource::Inline(".".to_owned()),
         (Some(_), Some(_)) => unreachable!("checked above"),
     };
     if raw_input && input_format != InputFormat::Auto {
@@ -795,25 +815,42 @@ where
             "--stream requires TOON/JSON event input; YAML is document-at-a-time".to_owned(),
         ));
     }
+    if output_format == OutputFormat::JsonLines {
+        if pretty_explicit || indent_explicit || tab_explicit {
+            return Err(CliError::Incompatible(
+                "JSON Lines output is compact and cannot use pretty, indent, or tab controls"
+                    .to_owned(),
+            ));
+        }
+        if raw_output || join_output || color == ColorMode::Always {
+            return Err(CliError::Incompatible(
+                "JSON Lines output cannot use raw, joined, or forced-color output".to_owned(),
+            ));
+        }
+        pretty_json = false;
+        if color == ColorMode::Auto {
+            color = ColorMode::Never;
+        }
+    }
     let mut json_compatible_writer = WriterConfig::default();
     if let JsonIndent::Spaces(indent) = json_indent {
         json_compatible_writer.indent_size = usize::from(indent);
     }
-    if output_format == OutputFormat::Json
+    if matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines)
         && (toon_writer != json_compatible_writer || framing == ToonFraming::Unframed)
     {
         return Err(CliError::Incompatible(
-            "TOON output options cannot be applied to JSON output".to_owned(),
+            "TOON output options cannot be applied to JSON or JSON Lines output".to_owned(),
         ));
     }
-    if output_format != OutputFormat::Json && !pretty_json {
+    if !matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines) && !pretty_json {
         return Err(CliError::Incompatible(
-            "--compact-output applies only to JSON output".to_owned(),
+            "--compact-output applies only to JSON or JSON Lines output".to_owned(),
         ));
     }
-    if output_format != OutputFormat::Json && ascii_output {
+    if !matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines) && ascii_output {
         return Err(CliError::Incompatible(
-            "--ascii-output applies only to JSON output".to_owned(),
+            "--ascii-output applies only to JSON or JSON Lines output".to_owned(),
         ));
     }
     if output_format != OutputFormat::Json && color == ColorMode::Always {
@@ -977,6 +1014,7 @@ fn parse_input(option: &str, value: String) -> Result<InputFormat, CliError> {
         "toon" => Ok(InputFormat::Toon),
         "yaml" | "yml" => Ok(InputFormat::Yaml),
         "json" => Ok(InputFormat::Json),
+        "jsonl" | "ndjson" => Ok(InputFormat::JsonLines),
         "toon-seq" | "toon-sequence" => Ok(InputFormat::ToonSequence),
         _ => Err(CliError::InvalidValue {
             option: option.to_owned(),
@@ -989,6 +1027,7 @@ fn parse_output(option: &str, value: String) -> Result<OutputFormat, CliError> {
     match value.as_str() {
         "toon" => Ok(OutputFormat::Toon),
         "json" => Ok(OutputFormat::Json),
+        "jsonl" | "ndjson" => Ok(OutputFormat::JsonLines),
         "yaml" | "yml" => Ok(OutputFormat::Yaml),
         _ => Err(CliError::InvalidValue {
             option: option.to_owned(),
@@ -1050,6 +1089,12 @@ mod tests {
             panic!("run command")
         };
         assert_eq!(run.filter, FilterSource::File("query.tq".into()));
+
+        let Command::Run(run) = parse_args(Vec::<&str>::new()).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.filter, FilterSource::Inline(".".to_owned()));
+        assert!(run.files.is_empty());
     }
 
     #[test]
@@ -1072,6 +1117,52 @@ mod tests {
         assert_eq!(run.output_format, OutputFormat::Json);
         assert_eq!(run.framing, ToonFraming::Sequence);
         assert!(run.raw_output && run.slurp && run.exit_status);
+    }
+
+    #[test]
+    fn parses_short_format_options_with_separate_or_attached_values() {
+        let Command::Run(run) = parse_args(["-i", "yaml", "-ojson", "."]).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.input_format, InputFormat::Yaml);
+        assert_eq!(run.output_format, OutputFormat::Json);
+
+        for alias in ["jsonl", "ndjson"] {
+            let Command::Run(run) = parse_args(["-i", alias, "-o", alias, "."]).unwrap() else {
+                panic!("run command")
+            };
+            assert_eq!(run.input_format, InputFormat::JsonLines);
+            assert_eq!(run.output_format, OutputFormat::JsonLines);
+            assert!(!run.pretty_json);
+            assert_eq!(run.color, ColorMode::Never);
+        }
+
+        let Command::Run(run) =
+            parse_args(["-ijsonl", "-ondjson", "-acSM", "--unbuffered", "."]).unwrap()
+        else {
+            panic!("run command")
+        };
+        assert_eq!(run.input_format, InputFormat::JsonLines);
+        assert_eq!(run.output_format, OutputFormat::JsonLines);
+        assert!(run.ascii_output && run.sort_keys);
+        assert!(run.unbuffered);
+    }
+
+    #[test]
+    fn json_lines_rejects_output_modes_that_break_record_framing() {
+        for options in [
+            &["-o", "jsonl", "--pretty-output", "."][..],
+            &["--indent", "4", "-o", "jsonl", "."][..],
+            &["-o", "ndjson", "--tab", "."][..],
+            &["-r", "-o", "jsonl", "."][..],
+            &["-o", "jsonl", "-j", "."][..],
+            &["-C", "-o", "jsonl", "."][..],
+        ] {
+            assert!(matches!(
+                parse_args(options),
+                Err(CliError::Incompatible(_))
+            ));
+        }
     }
 
     #[test]

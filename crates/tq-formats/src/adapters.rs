@@ -2,7 +2,7 @@
 
 use std::{
     fmt,
-    io::{self, Cursor, Read},
+    io::{self, BufRead, BufReader, Cursor, Read},
     sync::Arc,
 };
 
@@ -22,6 +22,12 @@ pub struct DecodeOptions {
     pub format: InputFormat,
     /// Maximum bytes accepted for a document-at-a-time source.
     pub maximum_source_bytes: usize,
+    /// Maximum structured nesting depth.
+    pub maximum_depth: usize,
+    /// Maximum bytes in a string, key, or numeric token.
+    pub maximum_token_bytes: usize,
+    /// Maximum bytes in one physical JSON Lines record.
+    pub maximum_line_bytes: usize,
     /// TOON decoder controls.
     pub toon: DecoderConfig,
 }
@@ -63,6 +69,9 @@ impl Default for DecodeOptions {
         Self {
             format: InputFormat::Auto,
             maximum_source_bytes: 2 * 1024 * 1024 * 1024,
+            maximum_depth: 256,
+            maximum_token_bytes: 8 * 1024 * 1024,
+            maximum_line_bytes: 16 * 1024 * 1024,
             toon: DecoderConfig::default(),
         }
     }
@@ -112,6 +121,7 @@ pub fn decode_bytes(
         InputFormat::Toon => decode_toon(bytes, identity, options.toon),
         InputFormat::Yaml => decode_yaml(bytes, identity),
         InputFormat::Json => decode_json(bytes, identity),
+        InputFormat::JsonLines => decode_json_lines(bytes, identity, options),
         InputFormat::ToonSequence => decode_toon_sequence(bytes, identity, options.toon),
         InputFormat::Auto => {
             let report = probe_format(bytes, options.toon.maximum_lookahead_bytes)?;
@@ -119,8 +129,197 @@ pub fn decode_bytes(
                 InputFormat::Toon => decode_toon(bytes, identity, options.toon),
                 InputFormat::Yaml => decode_yaml(bytes, identity),
                 InputFormat::Json => decode_json(bytes, identity),
-                InputFormat::Auto | InputFormat::ToonSequence => unreachable!("probe candidate"),
+                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                    unreachable!("probe candidate")
+                }
             }
+        }
+    }
+}
+
+/// Incremental JSON Lines document source with bounded physical records.
+#[derive(Debug)]
+pub struct JsonLinesDocumentSource<R> {
+    reader: R,
+    identity: String,
+    options: DecodeOptions,
+    physical_line: u64,
+    record_index: u64,
+    line: Vec<u8>,
+}
+
+impl<R: BufRead> JsonLinesDocumentSource<R> {
+    /// Creates a JSON Lines source over a buffered reader.
+    #[must_use]
+    pub fn new(reader: R, identity: impl Into<String>, options: DecodeOptions) -> Self {
+        Self {
+            reader,
+            identity: identity.into(),
+            options,
+            physical_line: 0,
+            record_index: 0,
+            line: Vec::new(),
+        }
+    }
+
+    fn read_line(&mut self) -> Result<bool, FormatError> {
+        self.line.clear();
+        loop {
+            let available = self.reader.fill_buf()?;
+            if available.is_empty() {
+                return Ok(!self.line.is_empty());
+            }
+            let newline = available.iter().position(|byte| *byte == b'\n');
+            let content_bytes = newline.unwrap_or(available.len());
+            if self.line.len().saturating_add(content_bytes) > self.options.maximum_line_bytes {
+                return Err(FormatError::ResourceLine {
+                    identity: self.identity.clone(),
+                    line: self.physical_line.saturating_add(1),
+                    resource: "line-bytes",
+                });
+            }
+            self.line.extend_from_slice(&available[..content_bytes]);
+            let consumed = content_bytes.saturating_add(usize::from(newline.is_some()));
+            self.reader.consume(consumed);
+            if newline.is_some() {
+                return Ok(true);
+            }
+        }
+    }
+
+    /// Returns the next non-empty physical record and its one-based line.
+    ///
+    /// # Errors
+    ///
+    /// Returns bounded line or input I/O failures.
+    pub fn next_record(&mut self) -> Result<Option<(Vec<u8>, u64)>, FormatError> {
+        loop {
+            if !self.read_line()? {
+                return Ok(None);
+            }
+            self.physical_line = self.physical_line.saturating_add(1);
+            if self.line.is_empty() {
+                continue;
+            }
+            return Ok(Some((self.line.clone(), self.physical_line)));
+        }
+    }
+
+    /// Returns the next ordered JSON Lines document.
+    ///
+    /// # Errors
+    ///
+    /// Returns bounded line, JSON syntax, numeric, token, or depth failures.
+    pub fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        let Some((line, physical_line)) = self.next_record()? else {
+            return Ok(None);
+        };
+        let value = decode_json_line(&line, &self.identity, physical_line, self.options)?;
+        let index = self.record_index;
+        self.record_index = self.record_index.saturating_add(1);
+        Ok(Some(Document {
+            value,
+            identity: self.identity.clone(),
+            format: InputFormat::JsonLines,
+            index,
+        }))
+    }
+}
+
+impl<R: BufRead> DocumentSource for JsonLinesDocumentSource<R> {
+    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        Self::next_document(self)
+    }
+}
+
+/// Decodes strict one-value-per-line JSON into ordered documents.
+///
+/// # Errors
+///
+/// Returns line, syntax, numeric, token, or depth failures with physical line context.
+pub fn decode_json_lines(
+    bytes: &[u8],
+    identity: impl Into<String>,
+    options: DecodeOptions,
+) -> Result<Vec<Document>, FormatError> {
+    if bytes.len() > options.maximum_source_bytes {
+        return Err(FormatError::Resource("source-bytes"));
+    }
+    let mut source = JsonLinesDocumentSource::new(BufReader::new(bytes), identity, options);
+    let mut documents = Vec::new();
+    while let Some(document) = source.next_document()? {
+        documents.push(document);
+    }
+    Ok(documents)
+}
+
+fn decode_json_line(
+    bytes: &[u8],
+    identity: &str,
+    physical_line: u64,
+    options: DecodeOptions,
+) -> Result<Value, FormatError> {
+    let json = serde_json::from_slice(bytes).map_err(|error| FormatError::Parse {
+        format: InputFormat::JsonLines,
+        message: format!("{identity}:{physical_line}: {error}"),
+    })?;
+    let value = Value::from_json(json).map_err(|error| FormatError::Parse {
+        format: InputFormat::JsonLines,
+        message: format!("{identity}:{physical_line}: {error}"),
+    })?;
+    validate_json_lines_value(&value, 0, options).map_err(|resource| {
+        FormatError::ResourceLine {
+            identity: identity.to_owned(),
+            line: physical_line,
+            resource,
+        }
+    })?;
+    Ok(value)
+}
+
+fn validate_json_lines_value(
+    value: &Value,
+    depth: usize,
+    options: DecodeOptions,
+) -> Result<(), &'static str> {
+    match value {
+        Value::Null | Value::Bool(_) => Ok(()),
+        Value::Number(number) => {
+            if number.to_string().len() > options.maximum_token_bytes {
+                Err("token-bytes")
+            } else {
+                Ok(())
+            }
+        }
+        Value::String(value) => {
+            if value.len() > options.maximum_token_bytes {
+                Err("token-bytes")
+            } else {
+                Ok(())
+            }
+        }
+        Value::Array(values) => {
+            let next = depth.saturating_add(1);
+            if next > options.maximum_depth {
+                return Err("depth");
+            }
+            for value in values.iter() {
+                validate_json_lines_value(value, next, options)?;
+            }
+            Ok(())
+        }
+        Value::Object(values) => {
+            let next = depth.saturating_add(1);
+            if next > options.maximum_depth {
+                return Err("depth");
+            }
+            for (key, value) in values.iter() {
+                if key.len() > options.maximum_token_bytes {
+                    return Err("token-bytes");
+                }
+                validate_json_lines_value(value, next, options)?;
+            }
+            Ok(())
         }
     }
 }
@@ -496,7 +695,9 @@ mod tests {
 
     use tq_toon::DecoderConfig;
 
-    use super::{DecodeOptions, decode_bytes, decode_toon_sequence, decode_yaml};
+    use super::{
+        DecodeOptions, decode_bytes, decode_json_lines, decode_toon_sequence, decode_yaml,
+    };
     use crate::InputFormat;
 
     #[test]
@@ -580,5 +781,60 @@ mod tests {
         let mut recovered = Vec::new();
         replay.read_to_end(&mut recovered).unwrap();
         assert_eq!(recovered, source);
+    }
+
+    #[test]
+    fn json_lines_preserves_records_lines_and_exact_numbers() {
+        let input = b"{\"n\":9007199254740993}\n\ntrue\n[1,2]";
+        let documents =
+            decode_json_lines(input, "records.jsonl", DecodeOptions::default()).unwrap();
+        assert_eq!(documents.len(), 3);
+        assert_eq!(documents[0].value.to_string(), r#"{"n":9007199254740993}"#);
+        assert_eq!(documents[2].value.to_string(), "[1,2]");
+        assert_eq!(documents[2].format, InputFormat::JsonLines);
+
+        let error = decode_json_lines(b"true\n1 2\n", "bad.jsonl", DecodeOptions::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("bad.jsonl:2"));
+    }
+
+    #[test]
+    fn json_lines_enforces_line_token_and_depth_limits() {
+        let line_error = decode_json_lines(
+            b"{\"long\":true}\n",
+            "line.jsonl",
+            DecodeOptions {
+                maximum_line_bytes: 4,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(line_error.contains("line.jsonl"));
+        assert!(line_error.contains("line 1"));
+
+        assert!(
+            decode_json_lines(
+                b"\"long\"\n",
+                "token.jsonl",
+                DecodeOptions {
+                    maximum_token_bytes: 3,
+                    ..DecodeOptions::default()
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            decode_json_lines(
+                b"[[true]]\n",
+                "depth.jsonl",
+                DecodeOptions {
+                    maximum_depth: 1,
+                    ..DecodeOptions::default()
+                },
+            )
+            .is_err()
+        );
     }
 }
