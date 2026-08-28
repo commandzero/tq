@@ -498,6 +498,47 @@ fn proxy_on_error_preserves_file_order_and_only_proxies_rejected_sources() {
 }
 
 #[test]
+fn proxy_on_error_preserves_unframed_toon_cardinality() {
+    let directory = tempdir().unwrap();
+    let valid = directory.path().join("valid.json");
+    let rejected = directory.path().join("rejected.json");
+    let also_rejected = directory.path().join("also-rejected.json");
+    fs::write(&valid, "{\"id\":1}\n").unwrap();
+    fs::write(&rejected, "not-json\n").unwrap();
+    fs::write(&also_rejected, "still-not-json\n").unwrap();
+
+    let mixed = tq(
+        &[
+            "-x",
+            "-ijson",
+            "--unframed",
+            ".",
+            valid.to_str().unwrap(),
+            rejected.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(mixed.code, 5);
+    assert!(mixed.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&mixed.stderr).contains("multiple"));
+
+    let proxied = tq(
+        &[
+            "-x",
+            "-ijson",
+            "--unframed",
+            ".",
+            rejected.to_str().unwrap(),
+            also_rejected.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(proxied.code, 5);
+    assert_eq!(proxied.stdout, b"not-json\n");
+    assert!(String::from_utf8_lossy(&proxied.stderr).contains("multiple"));
+}
+
+#[test]
 fn proxy_on_error_does_not_mask_resource_or_runtime_errors() {
     let resource = tq(&["-x", "-ijson", "--max-input-bytes", "3"], b"null");
     assert_eq!(resource.code, 5);
