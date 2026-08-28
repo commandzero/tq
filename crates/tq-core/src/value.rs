@@ -353,19 +353,21 @@ impl<'de> Visitor<'de> for ValueVisitor {
         let Some(first_key) = map.next_key::<String>()? else {
             return Ok(Value::object(Object::new()));
         };
-        if first_key == SERDE_JSON_NUMBER_TOKEN {
-            let literal = map.next_value::<String>()?;
-            if map.next_key::<de::IgnoredAny>()?.is_some() {
-                return Err(de::Error::invalid_length(
-                    2,
-                    &"one arbitrary-precision number token",
-                ));
-            }
-            return Self::number(&literal);
+        let first_value = map.next_value::<Value>()?;
+        let second_key = map.next_key::<String>()?;
+        if first_key == SERDE_JSON_NUMBER_TOKEN
+            && second_key.is_none()
+            && let Value::String(literal) = &first_value
+            && let Ok(number) = Number::parse(literal)
+        {
+            return Ok(Value::Number(number));
         }
 
-        let mut values = Object::with_capacity(map.size_hint().unwrap_or(0).saturating_add(1));
-        values.insert(Arc::from(first_key), map.next_value()?);
+        let mut values = Object::with_capacity(map.size_hint().unwrap_or(0).saturating_add(2));
+        values.insert(Arc::from(first_key), first_value);
+        if let Some(key) = second_key {
+            values.insert(Arc::from(key), map.next_value()?);
+        }
         while let Some((key, value)) = map.next_entry::<String, Value>()? {
             values.insert(Arc::from(key), value);
         }
@@ -406,6 +408,23 @@ mod tests {
         assert_eq!(
             value.to_string(),
             r#"{"z":9007199254740993,"a":[false,null,"x"]}"#
+        );
+    }
+
+    #[test]
+    fn number_envelope_falls_back_for_non_number_objects() {
+        let value: Value =
+            serde_json::from_str(r#"{"$serde_json::private::Number":"not-a-number"}"#).unwrap();
+        assert_eq!(
+            value.to_string(),
+            r#"{"$serde_json::private::Number":"not-a-number"}"#
+        );
+
+        let value: Value =
+            serde_json::from_str(r#"{"$serde_json::private::Number":"123","other":true}"#).unwrap();
+        assert_eq!(
+            value.to_string(),
+            r#"{"$serde_json::private::Number":"123","other":true}"#
         );
     }
 
