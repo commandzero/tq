@@ -845,12 +845,12 @@ where
     }
     if !matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines) && !pretty_json {
         return Err(CliError::Incompatible(
-            "--compact-output applies only to JSON output".to_owned(),
+            "--compact-output applies only to JSON or JSON Lines output".to_owned(),
         ));
     }
     if !matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines) && ascii_output {
         return Err(CliError::Incompatible(
-            "--ascii-output applies only to JSON output".to_owned(),
+            "--ascii-output applies only to JSON or JSON Lines output".to_owned(),
         ));
     }
     if output_format != OutputFormat::Json && color == ColorMode::Always {
