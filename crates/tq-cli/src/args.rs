@@ -191,6 +191,8 @@ pub struct RunOptions {
     pub stream: bool,
     /// Turn stream parse failures into values.
     pub stream_errors: bool,
+    /// Pass a source through byte-for-byte when structured parsing rejects it.
+    pub proxy_on_error: bool,
     /// Track jq-compatible last-result status.
     pub exit_status: bool,
     /// TOON strictness.
@@ -388,6 +390,12 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         description: "report stream parse errors as values",
     },
     OptionSpec {
+        short: Some('x'),
+        syntax: "-x, --proxy-on-error",
+        value: false,
+        description: "pass through sources rejected by structured parsing",
+    },
+    OptionSpec {
         short: None,
         syntax: "--seq",
         value: false,
@@ -563,6 +571,7 @@ where
     let mut slurp = false;
     let mut stream = false;
     let mut stream_errors = false;
+    let mut proxy_on_error = false;
     let mut exit_status = false;
     let mut strict = true;
     let mut pretty_json = true;
@@ -661,6 +670,7 @@ where
                 stream = true;
                 stream_errors = true;
             }
+            "-x" | "--proxy-on-error" => proxy_on_error = true,
             "-e" | "--exit-status" => exit_status = true,
             "--non-strict" => strict = false,
             "-c" | "--compact-output" => pretty_json = false,
@@ -815,6 +825,11 @@ where
             "--stream requires TOON/JSON event input; YAML is document-at-a-time".to_owned(),
         ));
     }
+    if proxy_on_error && stream_errors {
+        return Err(CliError::Incompatible(
+            "--proxy-on-error cannot be combined with --stream-errors".to_owned(),
+        ));
+    }
     if output_format == OutputFormat::JsonLines {
         if pretty_explicit || indent_explicit || tab_explicit {
             return Err(CliError::Incompatible(
@@ -919,6 +934,7 @@ where
         slurp,
         stream,
         stream_errors,
+        proxy_on_error,
         exit_status,
         strict,
         pretty_json,
@@ -1108,6 +1124,7 @@ mod tests {
             "-r",
             "-s",
             "-e",
+            "-x",
             ".",
         ])
         .unwrap() else {
@@ -1116,7 +1133,7 @@ mod tests {
         assert_eq!(run.input_format, InputFormat::Yaml);
         assert_eq!(run.output_format, OutputFormat::Json);
         assert_eq!(run.framing, ToonFraming::Sequence);
-        assert!(run.raw_output && run.slurp && run.exit_status);
+        assert!(run.raw_output && run.slurp && run.exit_status && run.proxy_on_error);
     }
 
     #[test]
@@ -1180,6 +1197,7 @@ mod tests {
             Err(CliError::Unsupported(_))
         ));
         assert!(parse_args(["--stream", "--input-format", "yaml", "."]).is_err());
+        assert!(parse_args(["--proxy-on-error", "--stream-errors", "."]).is_err());
         assert!(parse_args(["-c", "."]).is_err());
     }
 
@@ -1204,7 +1222,13 @@ mod tests {
         assert_eq!(run.color, ColorMode::Never);
 
         let help = generated_help();
-        for option in ["--raw-output0", "--slurpfile", "--jsonargs", "--unbuffered"] {
+        for option in [
+            "--raw-output0",
+            "--slurpfile",
+            "--jsonargs",
+            "--unbuffered",
+            "--proxy-on-error",
+        ] {
             assert!(help.contains(option));
         }
     }

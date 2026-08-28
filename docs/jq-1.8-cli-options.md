@@ -21,6 +21,7 @@ otherwise.
 | `--tab`, `--indent N` | adapted | Select JSON indentation; spaces also configure TOON indentation. YAML flow output is fixed. |
 | `--unbuffered` | supported | Flush after every complete output value/frame. |
 | `--stream`, `--stream-errors` | supported | Use bounded JSON/TOON event input; YAML remains document-at-a-time. |
+| `-x`, `--proxy-on-error` | extension | Retain each bounded source and pass its original bytes through when structured parsing rejects it. Resource and execution errors remain failures. |
 | `--seq` | divergent | tq emits TOON Text Sequence; JSON-seq input is not inferred. |
 | `-f`, `--from-file` | supported | Load the filter from one bounded file. |
 | `-L`, `--library-path` | supported | Add a repeatable explicit module root. Paths are canonicalized and imports are confined to those roots. |

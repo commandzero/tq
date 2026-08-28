@@ -19,6 +19,14 @@ select strict one-value-per-line JSON Lines input. Use
 `--input-format toon|yaml|json|jsonl` to select exactly one parser; `ndjson` is
 an alias for `jsonl`.
 
+`-x/--proxy-on-error` retains each bounded structured source before evaluation.
+If its parser rejects the source, `tq` writes the original bytes unchanged and
+treats that source as successful. It does not mask resource, I/O, query,
+runtime, or output failures. Sources are independent except under `--slurp`,
+where any parse rejection proxies the complete ordered source set.
+`--stream-errors` is incompatible because it assigns a different meaning to
+parse failures.
+
 Structured output is a TOON Text Sequence. Each result is `RS`, canonical TOON,
 and `LF`. This differs from jq's newline-delimited JSON. The framing separates
 multiple results and preserves complete records before a late error. Select
