@@ -6,7 +6,8 @@ for wide root objects, nested objects, root arrays, nested arrays, scalar arrays
 and tabular candidates. Every case MUST compare transcode with a forced-document
 baseline and record wall time, CPU time, peak RSS, output bytes, output commitment
 mode, preparation high-water bytes, spool bytes, and time to first output byte
-when output can commit incrementally.
+when output can commit incrementally. Sequence cases MUST also record time to the
+first payload byte so an early framing flush cannot hide delayed conversion.
 
 #### Scenario: Cross-plan correctness gate
 - **WHEN** an identity-transcode case is admitted for timing
@@ -39,3 +40,13 @@ These campaigns SHALL remain reproducible and opt-in rather than required in CI.
 #### Scenario: Document baseline remains visible
 - **WHEN** transcode satisfies its memory objective but is slower than forced-document execution
 - **THEN** the report retains both timings and does not hide the CPU or disk trade-off
+
+### Requirement: Single-pass latency and throughput gate
+The accepted direct-sequence JSON campaign SHALL read each source once without
+whole-source staging or duplicate prevalidation. Reports SHALL compare throughput
+and first-payload latency with both forced document execution and the recorded
+streaming `toon` baseline.
+
+#### Scenario: No whole-source prepass
+- **WHEN** a direct-sequence JSON benchmark completes
+- **THEN** input-stage bytes are zero and first-byte latency does not scale with total source length before decoding begins

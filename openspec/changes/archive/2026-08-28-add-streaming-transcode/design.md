@@ -20,8 +20,8 @@ the same.
 
 - Bound identity-conversion memory without slowing general jq programs by routing
   them through the new path.
-- Keep transcode output byte-for-byte equal to forced document output for valid
-  inputs and keep decoder-specific duplicate behavior.
+- Keep transcode output byte-for-byte equal to forced document output for inputs
+  without duplicate object names.
 - Give every active container one shared preparation budget and one replay source.
 - Make disk cost and partial-output behavior visible beside RSS and CPU results.
 
@@ -86,6 +86,14 @@ arena. The arena owns the aggregate memory ledger, secure spool files, byte
 limits, and high-water observations. Active object and array frames borrow from
 that same ledger, so nesting cannot multiply the configured threshold.
 
+Direct object arrays and root arrays use replay spooling once preparation crosses
+the shared threshold. Duplicate-name indexes use bounded sorted runs with a
+small Bloom filter to avoid scanning spilled runs for most unique names. Current
+composite values that cannot yet transfer into replay remain charged to the same
+arena and fail with a resource diagnostic instead of allocating past the limit.
+Adversarial coverage uses a 1 MiB budget, which forces disk transition without
+treating kilobyte-scale bookkeeping as a user-facing limit.
+
 The replay format will be a private length-framed structural format containing
 keys, exact scalars, and container boundaries. It will not serialize
 `tq_core::Value` to JSON or parse JSON during replay. Each pending element or
@@ -97,32 +105,30 @@ It selects one layout at close and replays the stored events once. It never keep
 pre-rendered primitive, nested, and tabular alternatives at the same time. This
 is where the design intentionally differs from streaming `toon`.
 
-### Respect duplicate-key policy instead of copying direct object output
+### Stream object members and reject late duplicates
 
 Strict TOON rejects duplicate paths. Its object frames may write completed
 members to a direct sequence sink because a later duplicate correctly turns the
 current record into a failed, incomplete record.
 
 JSON document decoding keeps the last value for a duplicate key while retaining
-the key's first insertion position. JSON transcode must therefore prepare each
-object until it closes. The preparation arena records member value ranges and a
-bounded key index. In-memory index chunks spill as sorted runs. At object close,
-a merge chooses each key's last value range and original position, then replays
-survivors in document-model order. Unique wide objects still avoid a DOM, but
-they may use temporary disk.
+the key's first insertion position. A single-pass writer cannot know whether a
+later member will repeat a key, so it cannot provide those semantics after it
+publishes the first value. The transcode plan writes JSON object members in
+encounter order and rejects a repeated name when it arrives. Sequence output may
+contain an incomplete final record. Unframed output remains private and publishes
+nothing on this error. Users who require jq-compatible duplicate normalization
+must select a document plan through an option that makes transcode ineligible.
 
-Emitting JSON members immediately and rejecting a later duplicate was rejected.
-It would make `tq -i json '.'` depend on the selected output plan. Globally
-rejecting duplicate JSON names was also rejected because it would change current
-jq-compatible behavior.
+Whole-source staging and duplicate prevalidation were rejected. They double the
+structural work, delay the first byte until the entire source has been read, and
+turn a streaming plan into a two-pass plan.
 
 ### Make publication depend on framing
 
-TOON Text Sequence mode writes the RS prefix when a result becomes publishable.
-A decoder with rejecting duplicate semantics may then write safe object members
-directly. A normalizing decoder publishes a prepared container only after it
-closes. A later failure may leave the current framed record incomplete, while
-earlier records remain valid.
+TOON Text Sequence mode writes and flushes the RS prefix at document start. The
+consumer then writes completed object members directly. A later failure may
+leave the current framed record incomplete, while earlier records remain valid.
 
 Unframed mode keeps the current atomic behavior. The sink targets a publication
 buffer backed by the same memory ledger and secure spool policy. After input
@@ -155,9 +161,10 @@ override rather than a new public CLI mode.
 
 ## Risks / Trade-offs
 
-- [JSON duplicate normalization causes disk traffic on wide objects] -> Report
-  spool bytes and compare CPU and wall time with forced document execution. Do not
-  present low RSS without the I/O cost.
+- [JSON duplicate names differ from document execution] -> Explain that transcode
+  rejects the repeated name after any earlier sequence bytes have published.
+  Keep duplicate fixtures out of byte-equivalence claims and test the limitation
+  directly.
 - [Nested preparation accidentally multiplies memory] -> Put allocation behind
   one arena ledger and add adversarial nested-array and nested-object tests that
   assert the aggregate high-water mark.
@@ -182,8 +189,9 @@ override rather than a new public CLI mode.
    value-based array output. Exercise memory, spool limits, cleanup, and replay.
 3. Add structural transcode events, typed planning, explain fields, and forced
    differential tests. Keep automatic transcode disabled by one internal switch.
-4. Enable TOON identity transcode, then JSON identity transcode after duplicate
-   normalization and natural-corpus gates pass.
+4. Enable TOON and JSON identity transcode after the natural-corpus gates pass.
+   Document that JSON duplicate names require document execution for jq-compatible
+   normalization.
 5. Remove the internal switch after the accepted benchmark campaign. Rollback
    remains a planner change that selects document mode; no data migration or
    persistent spool format compatibility is required.

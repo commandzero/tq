@@ -11,8 +11,9 @@ VM for filters that actually require a document.
 - Add an output-aware `transcode` plan for semantic identity with JSON or TOON
   input and canonical TOON output.
 - Consume object members incrementally without constructing the root document.
-  Write directly when the decoder's duplicate-key policy permits it; otherwise
-  normalize members through bounded replay storage.
+  JSON duplicate names are unsupported in this plan because last-value
+  normalization requires retaining or replaying the enclosing object. A late
+  duplicate rejects the current record.
 - Prepare unknown-length arrays through one bounded replay store. Move from memory
   to a secure temporary file when the shared preparation budget is exhausted.
 - Preserve the document, whole-input, and blocking plans for filters or output
@@ -30,8 +31,9 @@ VM for filters that actually require a document.
 ### New Capabilities
 
 - `streaming-transcode`: Output-aware identity conversion over structural events,
-  including eligibility, duplicate-key handling, bounded container preparation,
-  output commitment, and exact equivalence with document-mode encoding.
+  including eligibility, the duplicate-key limitation, bounded container
+  preparation, output commitment, and equivalence with document-mode encoding
+  for inputs without duplicate object names.
 
 ### Modified Capabilities
 
