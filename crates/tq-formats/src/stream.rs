@@ -15,6 +15,8 @@ const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
 pub struct StreamOptions {
     /// Maximum active JSON containers.
     pub maximum_depth: usize,
+    /// Maximum decoded bytes in one string, key, or number token.
+    pub maximum_token_bytes: usize,
     /// Emit JSON parse failures as jq-shaped stream error values.
     pub errors_as_values: bool,
 }
@@ -23,6 +25,7 @@ impl Default for StreamOptions {
     fn default() -> Self {
         Self {
             maximum_depth: 256,
+            maximum_token_bytes: 8 * 1024 * 1024,
             errors_as_values: false,
         }
     }
@@ -43,7 +46,11 @@ where
     R: std::io::Read,
     F: FnMut(Value) -> Result<(), String>,
 {
-    let mut projector = Projector::new(options.maximum_depth, &mut emit);
+    let mut projector = Projector::new(
+        options.maximum_depth,
+        options.maximum_token_bytes,
+        &mut emit,
+    );
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
     let decoded = StreamSeed {
         projector: &mut projector,
@@ -52,7 +59,7 @@ where
     .and_then(|()| deserializer.end());
     match decoded {
         Ok(()) => Ok(()),
-        Err(error) if options.errors_as_values => projector
+        Err(error) if options.errors_as_values && !is_resource_error(&error) => projector
             .error_value(jq_stream_error(&error))
             .map_err(|message| FormatError::Parse {
                 format: InputFormat::Json,
@@ -98,7 +105,11 @@ where
 {
     let mut decoder = Decoder::new(reader, SourceId::new(0), config);
     let mut consumer = ToonProjector {
-        projector: Projector::new(options.maximum_depth, &mut emit),
+        projector: Projector::new(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            &mut emit,
+        ),
     };
     decoder.decode_into(&mut consumer).map_err(|error| {
         let message = match error {
@@ -130,6 +141,7 @@ struct Projector<'a, F> {
     frames: Vec<Frame>,
     last_path: Vec<PathComponent>,
     maximum_depth: usize,
+    maximum_token_bytes: usize,
     emit: &'a mut F,
 }
 
@@ -137,11 +149,12 @@ impl<'a, F> Projector<'a, F>
 where
     F: FnMut(Value) -> Result<(), String>,
 {
-    fn new(maximum_depth: usize, emit: &'a mut F) -> Self {
+    fn new(maximum_depth: usize, maximum_token_bytes: usize, emit: &'a mut F) -> Self {
         Self {
             frames: Vec::new(),
             last_path: Vec::new(),
             maximum_depth,
+            maximum_token_bytes,
             emit,
         }
     }
@@ -161,6 +174,7 @@ where
     }
 
     fn key(&mut self, key: String) -> Result<(), String> {
+        self.check_token(key.len())?;
         let frame = self
             .frames
             .last_mut()
@@ -173,8 +187,21 @@ where
     }
 
     fn scalar(&mut self, value: Value) -> Result<(), String> {
+        let token_bytes = match &value {
+            Value::Number(number) => number.to_string().len(),
+            Value::String(value) => value.len(),
+            Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => 0,
+        };
+        self.check_token(token_bytes)?;
         let path = self.take_value_path()?;
         self.emit_pair(path, value)
+    }
+
+    fn check_token(&self, bytes: usize) -> Result<(), String> {
+        if bytes > self.maximum_token_bytes {
+            return Err("input resource limit exceeded: token-bytes".to_owned());
+        }
+        Ok(())
     }
 
     fn end(&mut self, kind: ContainerKind) -> Result<(), String> {
@@ -417,11 +444,18 @@ where
     where
         E: de::Error,
     {
+        self.projector
+            .check_token(literal.len())
+            .map_err(E::custom)?;
         Number::parse(literal)
             .map(Value::Number)
             .map_err(E::custom)
             .and_then(|value| self.projector.scalar(value).map_err(E::custom))
     }
+}
+
+fn is_resource_error(error: &serde_json::Error) -> bool {
+    error.to_string().contains("input resource limit exceeded")
 }
 
 struct ToonProjector<'a, F> {
@@ -514,5 +548,26 @@ mod tests {
         .unwrap();
         assert_eq!(values[0].to_string(), "[[0],1]");
         assert!(values[1].to_string().ends_with(",[1]]"));
+    }
+
+    #[test]
+    fn stream_enforces_token_limits_before_emitting() {
+        let mut values = Vec::new();
+        let error = stream_json(
+            b"12345".as_slice(),
+            StreamOptions {
+                maximum_token_bytes: 3,
+                ..StreamOptions::default()
+            },
+            |value| {
+                values.push(value);
+                Ok(())
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(values.is_empty());
+        assert!(error.contains("token-bytes"));
+        assert!(error.contains("resource limit"));
     }
 }

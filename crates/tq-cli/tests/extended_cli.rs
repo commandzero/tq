@@ -468,6 +468,81 @@ fn json_lines_line_limit_is_a_resource_error_without_record_disclosure() {
 }
 
 #[test]
+fn json_lines_token_limits_apply_to_document_event_and_subtree_plans() {
+    let document = tq(
+        &["-ijsonl", "-ojsonl", "--max-token-bytes", "3", ".id"],
+        b"{\"id\":12345}\n",
+    );
+    assert_eq!(document.code, 5);
+    assert!(document.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&document.stderr).contains("token-bytes"));
+
+    let streamed = tq(
+        &[
+            "--stream",
+            "--stream-errors",
+            "-ijsonl",
+            "-ojsonl",
+            "--max-token-bytes",
+            "3",
+            ".",
+        ],
+        b"12345\n",
+    );
+    assert_eq!(streamed.code, 5);
+    assert!(streamed.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&streamed.stderr).contains("token-bytes"));
+
+    let event = tq(
+        &[
+            "-ijsonl",
+            "-ojsonl",
+            "--max-token-bytes",
+            "3",
+            ".v[] | numbers",
+        ],
+        b"{\"v\":[12345]}\n",
+    );
+    assert_eq!(event.code, 5);
+    assert!(event.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&event.stderr).contains("token-bytes"));
+
+    let subtree = tq(
+        &[
+            "-ijsonl",
+            "-ojsonl",
+            "--max-token-bytes",
+            "3",
+            ".i[] | select(.a) | .v",
+        ],
+        b"{\"i\":[{\"a\":true,\"v\":12345}]}\n",
+    );
+    assert_eq!(subtree.code, 5);
+    assert!(subtree.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&subtree.stderr).contains("token-bytes"));
+}
+
+#[test]
+fn json_lines_automatic_subtree_resets_between_records() {
+    let output = tq(
+        &[
+            "-ijsonl",
+            "-ojsonl",
+            ".items[] | select(.active) | .id",
+        ],
+        b"{\"items\":[{\"id\":1,\"active\":true},{\"id\":2,\"active\":false}]}\n{\"items\":[{\"id\":3,\"active\":true}]}\n",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"1\n3\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn proxy_on_error_preserves_rejected_stdin_and_valid_transformations() {
     let invalid = b"{\"unfinished\":\xff\n";
     let proxied = tq(&["-ex", "-ijson"], invalid);
