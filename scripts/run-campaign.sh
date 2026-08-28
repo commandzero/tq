@@ -11,7 +11,7 @@ if [ -z "$benchmark_archive_root" ]; then
     search_root=$PWD
     while [ "$search_root" != "/" ]; do
         candidate="$search_root/tq-benchmarks"
-        if [ -d "$candidate/.git" ]; then
+        if [ -e "$candidate/.git" ]; then
             benchmark_archive_root=$candidate
             break
         fi

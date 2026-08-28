@@ -11,7 +11,7 @@ const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
 /// Resource bounds for query-independent JSON structural decoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct JsonEventOptions {
-    /// Maximum container nesting below the root value.
+    /// Maximum structured container nesting depth.
     pub maximum_depth: usize,
     /// Maximum decoded bytes in one string, key, or number token.
     pub maximum_token_bytes: usize,
