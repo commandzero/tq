@@ -27,9 +27,9 @@ The CLI SHALL support `tq [OPTIONS] [FILTER [FILE...]]` and a filter file option
 - **THEN** the query is loaded from that file and a positional filter is not required
 
 ### Requirement: Best-effort input detection with strict override
-When `--input-format` is absent, tq SHALL probe each structured input source independently with bounded lookahead and replay. Canonical TOON syntax SHALL remain preferred, JSON object and non-TOON array openers SHALL commit to JSON before YAML, and YAML document, directive, or root-sequence markers SHALL commit to YAML. Once a parser commits, later syntax errors SHALL be reported for that format without restarting detection. If every parser rejects, tq SHALL emit a combined input diagnostic containing bounded, useful failure context from each candidate.
+When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file paths as JSON Lines, `.yaml` and `.yml` paths as YAML, `.json` paths as JSON, and `.toon` paths as TOON before applying bounded syntax probing to sources without a recognized extension. Canonical TOON syntax SHALL remain preferred during probing, JSON object and non-TOON array openers SHALL commit to JSON before YAML, and YAML document, directive, or root-sequence markers SHALL commit to YAML. Once a parser commits, later syntax errors SHALL be reported for that format without restarting detection. If every parser rejects, tq SHALL emit a combined input diagnostic containing bounded, useful failure context from each candidate.
 
-`--input-format toon|yaml|json` SHALL select exactly one parser and disable detection/faildown. TOON SHALL remain the default structured output format, while JSON output is available through `--output-format json`.
+`--input-format toon|yaml|json|jsonl` SHALL select exactly one parser and disable detection or faildown. `ndjson` SHALL be accepted as an alias for `jsonl`. An explicit override SHALL take precedence over a recognized file extension. TOON SHALL remain the default structured output format, while JSON and JSON Lines output are available through `--output-format json|jsonl`, with `ndjson` accepted as an alias for `jsonl`.
 
 #### Scenario: Default format
 - **WHEN** no format option is provided
@@ -55,13 +55,21 @@ When `--input-format` is absent, tq SHALL probe each structured input source ind
 - **WHEN** an eligible query receives a JSON object or array without an input-format override
 - **THEN** bounded detection commits to JSON before planning and execution uses JSON decoder events
 
+#### Scenario: JSON Lines extension
+- **WHEN** automatic input selection receives a file ending in `.jsonl` or `.ndjson`
+- **THEN** tq selects JSON Lines without content probing
+
+#### Scenario: Override beats extension
+- **WHEN** `--input-format json` is supplied for a file ending in `.jsonl`
+- **THEN** tq invokes the JSON document parser and does not select JSON Lines from the extension
+
 #### Scenario: Strict input override
 - **WHEN** `--input-format json` is supplied for bytes that YAML could also parse
 - **THEN** tq invokes only the JSON parser and never probes TOON or YAML
 
 #### Scenario: Mixed-format files
 - **WHEN** multiple files are supplied without an input-format override
-- **THEN** tq detects each file independently and evaluates the resulting documents in file order
+- **THEN** tq selects each recognized extension or probes each remaining file independently and evaluates the resulting documents or records in file order
 
 #### Scenario: Override applies to every source
 - **WHEN** multiple files are supplied with an input-format override
@@ -129,7 +137,7 @@ The CLI SHALL support repeated `--arg name value`, `--argjson name json`, and `-
 - **THEN** the CLI exits with a usage/input diagnostic before processing documents
 
 ### Requirement: Output formatting controls
-TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. JSON output SHALL support pretty/compact formatting options. Incompatible option/format combinations MUST fail explicitly.
+TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. JSON output SHALL support pretty and compact formatting options. JSON Lines output SHALL always be compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, forced color, and raw or joined output modes. `--compact-output`, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible option and format combinations MUST fail before input is consumed.
 
 #### Scenario: Pipe delimiter
 - **WHEN** TOON output selects the pipe delimiter
@@ -138,6 +146,18 @@ TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and s
 #### Scenario: JSON-only compact option
 - **WHEN** a JSON-only compact option is applied to TOON output
 - **THEN** the CLI reports an incompatible-option usage error
+
+#### Scenario: JSON Lines aliases
+- **WHEN** `--output-format jsonl` or `--output-format ndjson` is selected
+- **THEN** tq selects the same compact LF-terminated JSON Lines writer
+
+#### Scenario: Pretty JSON Lines conflict
+- **WHEN** JSON Lines output is combined with `--pretty-output`, `--indent`, or `--tab`
+- **THEN** the CLI reports an incompatible-option usage error before reading input
+
+#### Scenario: Raw JSON Lines conflict
+- **WHEN** JSON Lines output is combined with raw, joined, or forced-color output
+- **THEN** the CLI reports an incompatible-option usage error before reading input
 
 ### Requirement: Strictness
 TOON input SHALL use strict validation by default. A documented non-strict option MAY relax only the TOON rules permitted by the underlying spec and MUST NOT disable resource limits or UTF-8 validation.
