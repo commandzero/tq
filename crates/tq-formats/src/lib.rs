@@ -8,6 +8,7 @@ use tq_core::{Diagnostic, Value};
 mod adapters;
 mod output;
 mod stream;
+mod structural;
 
 pub use adapters::{
     DecodeOptions, JsonLinesDocumentSource, ProbeReport, ReplayReader, VecDocumentSource,
@@ -16,6 +17,10 @@ pub use adapters::{
 };
 pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
 pub use stream::{StreamOptions, stream_json, stream_toon};
+pub use structural::{
+    JsonEventOptions, decode_json_event_stream, decode_json_events,
+    decode_json_events_with_options, json_decoder_capabilities,
+};
 
 /// Supported structured input syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

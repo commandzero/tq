@@ -156,6 +156,17 @@ impl Default for ResourceLimits {
     }
 }
 
+/// Internal execution selection for differential tests and benchmarks.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[doc(hidden)]
+pub enum ExecutionOverride {
+    /// Use analyzed automatic plan selection.
+    #[default]
+    Automatic,
+    /// Force retained document execution for differential tests and benchmarks.
+    Document,
+}
+
 /// Validated run configuration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(
@@ -163,6 +174,9 @@ impl Default for ResourceLimits {
     reason = "independent jq-compatible CLI switches remain observable after validation"
 )]
 pub struct RunOptions {
+    /// Internal differential-test and benchmark plan override.
+    #[doc(hidden)]
+    pub execution_override: ExecutionOverride,
     /// Query source.
     pub filter: FilterSource,
     /// Ordered paths, with `-` denoting stdin.
@@ -920,6 +934,7 @@ where
     }
 
     Ok(Command::Run(Box::new(RunOptions {
+        execution_override: ExecutionOverride::Automatic,
         filter,
         files,
         module_paths,

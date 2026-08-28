@@ -1,6 +1,6 @@
 scenario_id	spec	requirement	scenario	evidence
-benchmark-corpus.refresh-usgs-feeds	benchmark-corpus	Refreshable natural-source corpus	Refresh USGS feeds	manual:benchmarks/2026-08-07.md#Refreshed standard campaign
-benchmark-corpus.refresh-natural-large-input	benchmark-corpus	Refreshable natural-source corpus	Refresh natural large input	manual:benchmarks/2026-08-07.md#Refreshed natural-large campaign
+benchmark-corpus.refresh-usgs-feeds	benchmark-corpus	Refreshable natural-source corpus	Refresh USGS feeds	manual:benchmarks/README.md#Benchmark campaigns
+benchmark-corpus.refresh-natural-large-input	benchmark-corpus	Refreshable natural-source corpus	Refresh natural large input	manual:benchmarks/README.md#Benchmark campaigns
 benchmark-corpus.list-corpus	benchmark-corpus	Initial corpus definitions	List corpus	test:crates/tq-test-support/tests/corpus_inventory.rs#inventory_shows_source_snapshot_sizes_counts_digests_and_validation
 benchmark-corpus.source-naturally-changes-size	benchmark-corpus	Initial corpus definitions	Source naturally changes size	test:crates/tq-test-support/tests/corpus_natural.rs#source_schema_has_no_resizing_or_sampling_controls
 benchmark-corpus.successful-fetch	benchmark-corpus	Snapshot provenance manifest	Successful fetch	test:crates/tq-test-support/tests/corpus_fetch.rs#successful_fetch_records_redirect_and_atomically_replaces_destination
@@ -11,7 +11,7 @@ benchmark-corpus.validate-every-tq-input-path	benchmark-corpus	Cross-format mate
 benchmark-corpus.conversion-is-lossy	benchmark-corpus	Cross-format materialization	Conversion is lossy	test:crates/tq-test-support/tests/corpus_conversion.rs#corrupted_generated_representation_is_rejected
 benchmark-corpus.earthquake-shape-validation	benchmark-corpus	Corpus integrity verification	Earthquake shape validation	test:crates/tq-test-support/tests/corpus_geojson.rs#feature_collection_is_validated_and_counted_without_assumed_size
 benchmark-corpus.corrupt-cache	benchmark-corpus	Corpus integrity verification	Corrupt cache	test:crates/tq-test-support/tests/corpus_campaign.rs#frozen_replay_requires_every_artifact_to_match_manifest
-benchmark-corpus.prepare-large-corpus	benchmark-corpus	External storage policy	Prepare large corpus	manual:benchmarks/2026-08-07.md#Refreshed natural-large campaign
+benchmark-corpus.prepare-large-corpus	benchmark-corpus	External storage policy	Prepare large corpus	manual:benchmarks/README.md#Benchmark campaigns
 benchmark-corpus.run-smoke-tests	benchmark-corpus	External storage policy	Run smoke tests	test:crates/tq-test-support/tests/corpus_smoke.rs#examples_are_validated_and_unambiguously_labeled_smoke
 benchmark-corpus.default-campaign	benchmark-corpus	Recollectable and attributable campaigns	Default campaign	test:crates/tq-test-support/tests/corpus_campaign.rs#campaign_mode_is_refreshed_unless_frozen_manifest_is_explicit
 benchmark-corpus.frozen-diagnostic-replay	benchmark-corpus	Recollectable and attributable campaigns	Frozen diagnostic replay	test:crates/tq-test-support/tests/corpus_campaign.rs#frozen_replay_requires_every_artifact_to_match_manifest
@@ -135,7 +135,7 @@ resource-governance.user-interrupts	resource-governance	Cancellation and pipe be
 resource-governance.error-after-first-result	resource-governance	Partial output transparency	Error after first result	test:crates/tq-cli/src/runner.rs#prior_framed_results_survive_a_later_runtime_error
 resource-governance.step-limit	resource-governance	Resource diagnostics	Step limit	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Critical: resource diagnostic details
 resource-governance.fuzz-regression	resource-governance	Panic-free hostile-input boundary	Fuzz regression	test:tests/fuzz/fuzz_targets/cli_args.rs#fuzz_target
-resource-governance.compare-memory-behavior	resource-governance	Resource observations in reports	Compare memory behavior	manual:benchmarks/2026-08-07.md#Natural-large event-stream gate
+resource-governance.compare-memory-behavior	resource-governance	Resource observations in reports	Compare memory behavior	manual:benchmarks/README.md#Benchmark campaigns
 toon-stream-io.decode-large-input	toon-stream-io	Incremental byte-oriented TOON decoding	Decode large input	test:crates/tq-toon/src/decoder.rs#event_stream_is_invariant_across_reader_chunk_boundaries
 toon-stream-io.invalid-utf-8	toon-stream-io	Incremental byte-oriented TOON decoding	Invalid UTF-8	test:crates/tq-toon/src/decoder.rs#hostile_limits_and_syntax_fail_without_proportional_allocation
 toon-stream-io.tabular-array	toon-stream-io	Unified structural event contract	Tabular array	test:crates/tq-toon/src/decoder.rs#event_contract_covers_object_inline_tabular_and_expanded_arrays

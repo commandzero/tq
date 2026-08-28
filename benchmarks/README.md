@@ -1,9 +1,11 @@
 # Benchmark campaigns
 
-A reviewed benchmark ends as `benchmarks/<timestamp>.md`. Do not commit the
-downloaded corpus, generated formats, or full JSON sample data. The runner
-writes those files to `benchmarks/.work/`, which Git ignores. Create the
-date-named summary only after review.
+The benchmark scripts, catalog, and Rust harness live in this repository.
+Reviewed reports and generated results live in the separate
+`commandzero/tq-benchmarks` repository. Do not commit downloaded corpora,
+generated formats, full JSON sample data, or reviewed reports here. The
+campaign runner discovers a sibling `tq-benchmarks` checkout automatically;
+set `TQ_BENCHMARK_ARCHIVE_ROOT` when the archive lives elsewhere.
 
 The catalog in `cases/workloads.jsonl` runs jq on JSON, yq on JSON and YAML, and
 tq on JSON, YAML, and TOON. It reports native-format views separately. The
@@ -56,9 +58,12 @@ recorded corpus manifest:
 
 ```console
 cargo build --release
+export TQ_BENCHMARK_ARCHIVE_ROOT=/path/to/tq-benchmarks
 TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench -- \
-  run --profile standard --output benchmarks/.work/standard.json \
-  --cache-root benchmarks/.work/corpus --origin frozen --manifest PATH
+  run --profile standard \
+  --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/standard.json" \
+  --cache-root "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/corpus" \
+  --origin frozen --manifest PATH
 ```
 
 Binary discovery prefers `../jq/jq` and `../yq/yq`, then
@@ -73,7 +78,7 @@ workload. A reviewed long-running campaign may also use `--timeout-seconds N`
 and `--rss-limit-bytes N`; these overrides are copied into every report row,
 and an existing stricter per-case RSS limit still wins. The working JSON
 retains host, compiler, tool, corpus, command, limit, and environment data. It
-is for local review only. The versioned result is the concise
+lives in the archive checkout's `.work/` directory beside the concise
 `YYYY-MM-DD.md` Markdown summary.
 
 Correctness normalization uses a file and has a 32 MiB limit. If the reference
@@ -97,3 +102,46 @@ dispersion, time to first result, CPU, records per second, MiB per second, peak
 RSS, output bytes, plan class, and every failure row. On the recorded local
 host, the large explicit-stream release gate requires peak RSS at or below 128
 MiB.
+
+The latest full `tq`/`yq`/`jq` campaign is stored in the archive repository. It
+includes the complete standard matrix and a bounded large-corpus diagnostic.
+
+## Streaming transcode campaign
+
+The identity-transcode campaign compares automatic structural transcode with
+the internal forced-document benchmark override. It checks byte equality before
+timing and records wall time, CPU, RSS, first-byte latency, output bytes,
+first-payload latency, preparation high water, object-index spills, array
+preparations, spool bytes written and replayed, and the final resource outcome.
+It includes wide and
+nested objects, root and nested arrays, scalar arrays, tabular candidates, and
+the accepted natural `segments` and `recovery` documents.
+
+```console
+cargo build --release
+export TQ_BENCHMARK_ARCHIVE_ROOT=/path/to/tq-benchmarks
+benchmarks/cases/generate-streaming-transcode-fixtures.sh \
+  "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/streaming-transcode-inputs"
+# Copy the accepted natural segments.json and recovery.json beside them.
+RUNS=7 benchmarks/cases/streaming-transcode.sh \
+  "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/streaming-transcode-inputs" \
+  target/release/tq \
+  "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/streaming-transcode-results"
+```
+
+The accepted-host release gate applies to direct TOON sequence output and
+requires both natural cases to stay below 64 MiB peak RSS. Missing natural
+inputs are reported and cannot be treated as a passing gate. The forced path is
+enabled only through `TQ_BENCH_FORCE_DOCUMENT=1`; it is not a public CLI mode.
+
+## `toon` faceoff
+
+The three-way faceoff runs `tq`, default `toon`, and `toon` with its
+`json_stream` feature through a shared correctness gate before timing. The
+archive repository holds the reviewed report, charts, exact binary identities,
+and replay data. Run it with:
+
+```console
+RUNS=7 benchmarks/cases/toon-vs-tq.sh \
+  INPUT_DIR target/release/tq TOON_DEFAULT_BIN TOON_STREAM_BIN OUTPUT_DIR
+```

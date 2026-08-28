@@ -1,14 +1,17 @@
 # Performance review policy
 
-Keep corpus files, generated formats, and full sample collections in
-`benchmarks/.work/`. Git ignores that directory. Do not commit these files.
+Keep corpus files, generated formats, full sample collections, and reviewed
+reports in the separate `commandzero/tq-benchmarks` checkout. The campaign
+runner writes to its `.work/` directory there when it discovers the sibling
+checkout. Set `TQ_BENCHMARK_ARCHIVE_ROOT` to select another archive location.
 
-After review, add one concise `YYYY-MM-DD.md` report to `benchmarks/`. Record the
-input size, tool versions, commands, timing, peak RSS, comparison method, and
-important failures. Leave out the full corpus and per-sample data.
+After review, add one concise `YYYY-MM-DD.md` report to the archive checkout.
+Record the input size, tool versions, commands, timing, peak RSS, comparison
+method, and important failures. Leave out the full corpus and per-sample data
+from the report itself.
 
-The current reviewed report is
-[2026-08-06.md](../benchmarks/2026-08-06.md).
+The current reviewed reports are kept in the `commandzero/tq-benchmarks`
+repository alongside their raw campaign outputs.
 
 ## Self-regression policy
 
@@ -18,14 +21,15 @@ The local tq-only defaults are:
 - Peak RSS may increase by at most 20%.
 - A row needs at least five measured samples before it can fail the gate.
 
-Run self-regression checks against an ignored local JSON report. Do not commit
-the report:
+Run self-regression checks against JSON reports in the archive checkout's
+`.work/` directory:
 
 ```console
+export TQ_BENCHMARK_ARCHIVE_ROOT=/path/to/tq-benchmarks
 TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --release -- \
   run --profile standard --origin frozen --manifest PATH \
-  --output benchmarks/.work/candidate.json \
-  --baseline benchmarks/.work/accepted.json \
+  --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/candidate.json" \
+  --baseline "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/accepted.json" \
   --wall-regression-percent 50 --rss-regression-percent 20 \
   --minimum-regression-samples 5
 ```

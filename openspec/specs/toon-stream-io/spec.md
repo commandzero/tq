@@ -48,7 +48,12 @@ The DOM builder SHALL preserve array order, object insertion order, string conte
 - **THEN** document construction and canonical re-encoding preserve encounter order
 
 ### Requirement: Canonical structured output
-The TOON writer SHALL emit valid canonical TOON v3 with LF line endings, no trailing spaces, no document-internal trailing newline, correct quoting, canonical number formatting, declared array lengths, deterministic object order, and configured delimiter/indent/folding options.
+The TOON writer SHALL emit valid canonical TOON v3 to a `Write` sink with LF line
+endings, no trailing spaces, no document-internal trailing newline, correct
+quoting, canonical number formatting, declared array lengths, deterministic
+object order, and configured delimiter, indent, and folding options. It SHALL
+write completed output incrementally where framing permits and MUST NOT require a
+result-sized string as an intermediate representation.
 
 #### Scenario: Canonical round trip
 - **WHEN** a supported runtime value is encoded and decoded in strict mode
@@ -58,12 +63,23 @@ The TOON writer SHALL emit valid canonical TOON v3 with LF line endings, no trai
 - **WHEN** tq applies identity to a noncanonical but valid TOON input
 - **THEN** structured output is canonical and is not required to preserve original whitespace or delimiter choices
 
+#### Scenario: Wide object sink output
+- **WHEN** the writer receives a wide object from a consumer that releases completed members
+- **THEN** it writes completed lines to the sink without collecting the complete output text
+
 ### Requirement: Bounded array preparation and spooling
-When an output array's final length or tabular schema is unknown, the writer SHALL buffer only up to a configurable in-memory threshold and then spool securely to temporary storage. It MUST write the final header before replaying the prepared body and MUST expose whether spooling occurred.
+When an output array's final length or tabular schema is unknown, the writer
+SHALL retain only one replayable representation of pending values. All active
+replay preparations SHALL use one configurable aggregate in-memory threshold and
+then spool securely to temporary storage. Transient composite state that cannot
+yet transfer into replay MUST use that same threshold and fail with a resource
+diagnostic rather than allocate past it. The writer MUST write the final header
+before replaying the prepared body, replay values once in order, and expose
+whether spooling occurred.
 
 #### Scenario: Unknown large array
-- **WHEN** a generated array exceeds the in-memory preparation threshold
-- **THEN** the writer spools excess content, emits the correct final array header, replays the body, and cleans up temporary storage
+- **WHEN** a generated array exceeds the aggregate in-memory preparation threshold
+- **THEN** the writer spools excess content, emits the correct final array header, replays the body once, and cleans up temporary storage
 
 #### Scenario: Spooling forbidden
 - **WHEN** spooling is required but disabled
@@ -72,6 +88,10 @@ When an output array's final length or tabular schema is unknown, the writer SHA
 #### Scenario: Tabular eligibility changes
 - **WHEN** later array elements invalidate the schema inferred from earlier elements
 - **THEN** the prepared output uses a valid non-tabular representation without losing or reordering prior elements
+
+#### Scenario: Nested preparation budget
+- **WHEN** nested arrays are prepared concurrently
+- **THEN** their replay and transient retained bytes do not exceed the configured aggregate threshold apart from bounded bookkeeping and current tokens
 
 ### Requirement: TOON Text Sequence framing
 The structured multi-result transport SHALL encode every result as ASCII RS (`0x1e`), followed by one canonical TOON document, followed by LF. Sequence framing SHALL be distinct from the bytes of a standalone TOON document.
@@ -89,15 +109,23 @@ The structured multi-result transport SHALL encode every result as ASCII RS (`0x
 - **THEN** the output still contains exactly one RS-framed record
 
 ### Requirement: Explicit unframed single output
-The writer SHALL support an unframed mode that produces exactly one standalone canonical TOON document. It MUST report an error if evaluation yields zero or multiple values.
+The writer SHALL support an unframed mode that produces exactly one standalone
+canonical TOON document. It MUST report an error if evaluation yields zero or
+multiple values. Output in this mode MUST remain unpublished until successful
+exactly-one-result cardinality is known, using bounded memory and secure spooling
+when the result exceeds the preparation threshold.
 
 #### Scenario: Exactly one result
-- **WHEN** unframed mode receives one value
+- **WHEN** unframed mode receives one valid value
 - **THEN** stdout contains only that canonical TOON document
 
 #### Scenario: Multiple results
 - **WHEN** unframed mode receives a second value
-- **THEN** execution fails with a cardinality diagnostic and does not claim the stream is a valid single document
+- **THEN** execution fails with a cardinality diagnostic and writes no result bytes
+
+#### Scenario: Late preparation failure
+- **WHEN** encoding or input validation fails before an unframed result is committed
+- **THEN** the writer publishes no partial document and cleans up temporary storage
 
 ### Requirement: Sequence input
 The decoder SHALL support explicit TOON Text Sequence input and MUST treat each framed record as a separate input document. Ordinary mode SHALL treat each file as one TOON document.

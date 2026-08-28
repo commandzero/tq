@@ -42,7 +42,8 @@ pub use path::{Path, PathComponent, PathError};
 pub use phase::{
     Analysis, Analyzed, AutomaticPlan, Blocking, Capabilities, CapabilityCause, Compiled, Document,
     Effect, Events, ModuleInfo, Parsed, Plan, PlanKind, Program, Query, Resolved, StreamProof,
-    Subtree, WholeInput,
+    Subtree, Transcode, TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput,
+    TranscodeLimits, TranscodeProof, WholeInput,
 };
 pub use resolve::{
     AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,

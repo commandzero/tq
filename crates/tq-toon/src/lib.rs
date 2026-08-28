@@ -7,14 +7,21 @@ use tq_core::{Number, SourcePosition, Span};
 
 mod decoder;
 mod dom;
+mod replay;
 mod sequence;
 mod spool;
+mod transcode;
 mod writer;
 
 pub use decoder::{DecodeIntoError, Decoder};
 pub use dom::{DomBuilder, DomDecodeError, DomError, decode_to_value};
 pub use sequence::{CardinalityError, SequenceError, write_sequence, write_unframed};
-pub use spool::{ArrayPreparationConfig, PreparedArray, SpoolError};
+pub use spool::{
+    ArrayPreparationConfig, PreparationArena, PreparationFrame, PreparationLimits,
+    PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PreparedObject,
+    PublicationBuffer, PublicationError, SpoolError,
+};
+pub use transcode::{TranscodeCommitment, TranscodeConsumer, TranscodeError};
 pub use writer::{Delimiter, KeyFolding, WriterConfig, WriterError, encode, write_value};
 
 /// Bounded decoder configuration. Declared collection lengths never directly
@@ -141,6 +148,57 @@ pub trait EventConsumer {
     ///
     /// Returns the consumer's bounded processing failure.
     fn consume(&mut self, event: Event) -> Result<(), Self::Error>;
+}
+
+/// Decoder behavior that controls safe structural transcode commitment.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DecoderCapabilities {
+    /// Object duplicate-key behavior.
+    pub duplicate_keys: DuplicateKeyPolicy,
+    /// Availability of declared array lengths before their elements.
+    pub array_lengths: ArrayLengthCapability,
+    /// Whether syntax failure can follow already emitted structural events.
+    pub late_errors_after_events: bool,
+}
+
+impl DecoderCapabilities {
+    /// Strict TOON decoder behavior.
+    #[must_use]
+    pub const fn strict_toon() -> Self {
+        Self {
+            duplicate_keys: DuplicateKeyPolicy::Reject,
+            array_lengths: ArrayLengthCapability::Required,
+            late_errors_after_events: true,
+        }
+    }
+
+    /// jq-compatible JSON decoder behavior.
+    #[must_use]
+    pub const fn json() -> Self {
+        Self {
+            duplicate_keys: DuplicateKeyPolicy::LastValueFirstPosition,
+            array_lengths: ArrayLengthCapability::Unknown,
+            late_errors_after_events: true,
+        }
+    }
+}
+
+/// Object duplicate handling exposed before semantic decoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DuplicateKeyPolicy {
+    /// Reject a repeated key.
+    Reject,
+    /// Keep the final value at the key's first encounter position.
+    LastValueFirstPosition,
+}
+
+/// Array length information available at the opening event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArrayLengthCapability {
+    /// The decoder cannot declare the final length at array start.
+    Unknown,
+    /// Every accepted array declares its final length.
+    Required,
 }
 
 /// Strict TOON decoder failure.

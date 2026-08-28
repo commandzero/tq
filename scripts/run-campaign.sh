@@ -3,7 +3,25 @@ set -eu
 
 campaign="${1:-}"
 profile="${2:-}"
-work_root="benchmarks/.work"
+
+# Keep benchmark outputs in the sibling archive checkout when it is present.
+# TQ_BENCHMARK_ARCHIVE_ROOT can override discovery for CI and other layouts.
+benchmark_archive_root="${TQ_BENCHMARK_ARCHIVE_ROOT:-}"
+if [ -z "$benchmark_archive_root" ]; then
+    search_root=$PWD
+    while [ "$search_root" != "/" ]; do
+        candidate="$search_root/tq-benchmarks"
+        if [ -e "$candidate/.git" ]; then
+            benchmark_archive_root=$candidate
+            break
+        fi
+        parent=$(dirname "$search_root")
+        [ "$parent" = "$search_root" ] && break
+        search_root=$parent
+    done
+fi
+benchmark_archive_root="${benchmark_archive_root:-benchmarks}"
+work_root="$benchmark_archive_root/.work"
 
 case "$campaign:$profile" in
     compatibility:smoke|compatibility:full)
@@ -54,7 +72,7 @@ case "$campaign:$profile" in
         exec cargo run --quiet -p tq-test-support --bin tq-stack-overflow -- run \
             --scenario-dir tests/stack-overflow \
             --output "$work_root/stack-overflow.json" \
-            --report benchmarks/stack-overflow.md
+            --report "$benchmark_archive_root/stack-overflow.md"
         ;;
     fuzz:default)
         seconds="${TQ_FUZZ_SECONDS:-10}"

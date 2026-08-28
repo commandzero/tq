@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{self, BufReader, IsTerminal, Read, Write},
+    io::{self, BufReader, BufWriter, IsTerminal, Read, Write},
     path::Path,
     sync::{
         Arc, OnceLock,
@@ -14,18 +14,25 @@ use std::{
 use thiserror::Error;
 use tq_core::{
     Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events, Number,
-    PathComponent, Plan, PlanKind, Query, ResolveOptions, Resolved, Value, Vm, VmError, VmLimits,
-    VmObservations, analyze_with_context, parse_bytes, resolve,
+    PathComponent, Plan, PlanKind, Query, ResolveOptions, Resolved, SourceId, Transcode,
+    TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits, TranscodeProof,
+    Value, Vm, VmError, VmLimits, VmObservations, analyze_with_context, parse_bytes, resolve,
 };
 use tq_formats::{
-    DecodeOptions, FormatError, InputFormat, JsonLinesDocumentSource, OutputError, OutputOptions,
-    StreamOptions, ToonFraming, decode_bytes, decode_json, decode_toon, probe_format, probe_reader,
+    DecodeOptions, FormatError, InputFormat, JsonEventOptions, JsonLinesDocumentSource,
+    OutputError, OutputFormat, OutputOptions, ProbeReport, StreamOptions, ToonFraming,
+    decode_bytes, decode_json, decode_json_event_stream, decode_toon, probe_format, probe_reader,
     stream_json, stream_toon, write_results,
+};
+use tq_toon::{
+    ArrayPreparationConfig, DecodeIntoError, Decoder, DuplicateKeyPolicy, KeyFolding,
+    PreparationArena, PreparationLimits, PreparationObservations, PublicationBuffer,
+    PublicationError, SpoolError, TranscodeConsumer, TranscodeError, WriterError,
 };
 
 use crate::{
-    CliError, ColorMode, Command, ExitStatus, ExplainFormat, ExternalArgumentKind, FilterSource,
-    PositionalArgumentKind, RunOptions, generated_help,
+    CliError, ColorMode, Command, ExecutionOverride, ExitStatus, ExplainFormat,
+    ExternalArgumentKind, FilterSource, PositionalArgumentKind, RunOptions, generated_help,
 };
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
@@ -73,6 +80,9 @@ pub enum RunError {
     /// Raw-output encoding failure.
     #[error("raw output failed: {0}")]
     RawOutput(&'static str),
+    /// Unframed structured output did not produce exactly one result.
+    #[error("output cardinality failed: {0}")]
+    Cardinality(&'static str),
     /// A CLI-level input, result, or output envelope was exceeded.
     #[error("resource limit exceeded: {0}")]
     Resource(&'static str),
@@ -111,9 +121,11 @@ impl RunError {
                 ExitStatus::Resource
             }
             Self::Input(_) => ExitStatus::Input,
-            Self::Runtime(_) | Self::Output(_) | Self::Json(_) | Self::RawOutput(_) => {
-                ExitStatus::Runtime
-            }
+            Self::Runtime(_)
+            | Self::Output(_)
+            | Self::Json(_)
+            | Self::RawOutput(_)
+            | Self::Cardinality(_) => ExitStatus::Runtime,
         }
     }
 
@@ -279,6 +291,8 @@ fn run_filter<R: Read, W: Write, E: Write>(
                     resolved,
                     &variables,
                     file_events && stdin_events,
+                    None,
+                    &[],
                     &mut bytes.as_slice(),
                     stdout,
                     stderr,
@@ -289,20 +303,31 @@ fn run_filter<R: Read, W: Write, E: Write>(
                 resolved,
                 &variables,
                 file_events,
+                None,
+                &[],
                 stdin,
                 stdout,
                 stderr,
             );
         }
         let file_events = auto_file_events_available(options)?;
+        let common = auto_file_common_format(options)?;
         if options.files.is_empty() || options.files.iter().any(|path| path == Path::new("-")) {
             let reader = LimitedReader::new(&mut *stdin, options.limits.input_bytes, "<stdin>");
             let (probe, mut replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            let transcode_input = common
+                .selected
+                .filter(|format| *format == probe.selected)
+                .or_else(|| options.files.is_empty().then_some(probe.selected));
+            let mut detections = common.detections;
+            detections.push(DetectionObservation::new("<stdin>", &probe));
             return run_resolved_filter(
                 options,
                 resolved,
                 &variables,
                 file_events && decoder_events_available(probe.selected),
+                transcode_input,
+                &detections,
                 &mut replay,
                 stdout,
                 stderr,
@@ -313,6 +338,8 @@ fn run_filter<R: Read, W: Write, E: Write>(
             resolved,
             &variables,
             file_events,
+            common.selected,
+            &common.detections,
             stdin,
             stdout,
             stderr,
@@ -327,10 +354,69 @@ fn run_filter<R: Read, W: Write, E: Write>(
                 options.input_format,
                 InputFormat::Json | InputFormat::JsonLines | InputFormat::Toon
             ),
+        match options.input_format {
+            InputFormat::Json | InputFormat::Toon => Some(options.input_format),
+            _ => None,
+        },
+        &[],
         stdin,
         stdout,
         stderr,
     )
+}
+
+struct CommonInputFormat {
+    selected: Option<InputFormat>,
+    detections: Vec<DetectionObservation>,
+}
+
+#[derive(Clone, Debug)]
+struct DetectionObservation {
+    identity: String,
+    selected: InputFormat,
+    lookahead_bytes: usize,
+    commitment_bytes: usize,
+    rejections: Vec<(InputFormat, String)>,
+}
+
+impl DetectionObservation {
+    fn new(identity: impl Into<String>, report: &ProbeReport) -> Self {
+        Self {
+            identity: identity.into(),
+            selected: report.selected,
+            lookahead_bytes: report.lookahead_bytes,
+            commitment_bytes: report.commitment_bytes,
+            rejections: report.rejections.clone(),
+        }
+    }
+}
+
+fn auto_file_common_format(options: &RunOptions) -> Result<CommonInputFormat, RunError> {
+    let mut common = None;
+    let mut detections = Vec::new();
+    for path in options.files.iter().filter(|path| *path != Path::new("-")) {
+        let identity = path.display().to_string();
+        let selected = if let Some(format) = format_from_path(path) {
+            format
+        } else {
+            let reader =
+                LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
+            let (report, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            detections.push(DetectionObservation::new(identity, &report));
+            report.selected
+        };
+        if common.is_some_and(|format| format != selected) {
+            return Ok(CommonInputFormat {
+                selected: None,
+                detections,
+            });
+        }
+        common = Some(selected);
+    }
+    Ok(CommonInputFormat {
+        selected: common,
+        detections,
+    })
 }
 
 const fn decoder_events_available(format: InputFormat) -> bool {
@@ -371,6 +457,8 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
     resolved: Query<Resolved>,
     variables: &BTreeMap<Arc<str>, Value>,
     automatic_streaming: bool,
+    transcode_input: Option<InputFormat>,
+    detections: &[DetectionObservation],
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
@@ -383,11 +471,37 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
             automatic_streaming,
         },
     );
-    if let Some(explain) = options.explain {
-        write_explain(explain, options, &analyzed, stderr)?;
+    let mut analysis = analyzed.analysis().clone();
+    if options.execution_override == ExecutionOverride::Document && !options.stream {
+        analysis.selected_plan = PlanKind::Document;
+        analysis.stream_rejection =
+            Some("forced document override for differential run".to_owned());
     }
-    let analysis = analyzed.analysis().clone();
+    if options.execution_override == ExecutionOverride::Document {
+        analysis.transcode_rejection =
+            Some("forced document override for differential run".to_owned());
+    } else {
+        match transcode_proof(options, analyzed.capabilities(), transcode_input) {
+            Ok(proof) => {
+                analysis.selected_plan = PlanKind::Transcode;
+                analysis.transcode_proof = Some(proof);
+                analysis.transcode_rejection = None;
+            }
+            Err(reason) => analysis.transcode_rejection = Some(reason.to_owned()),
+        }
+    }
+    if let Some(explain) = options.explain {
+        write_explain(explain, options, &analyzed, &analysis, stderr)?;
+    }
     let program = analyzed.compile().map_err(RunError::Compile)?;
+
+    if analysis.selected_plan == PlanKind::Transcode {
+        let proof = analysis
+            .transcode_proof
+            .expect("selected transcode analysis carries a proof");
+        let plan = program.transcode_plan(proof).map_err(RunError::Compile)?;
+        return run_transcode_filter(options, &plan, &analysis, detections, stdin, stdout);
+    }
 
     if options.stream {
         let plan = program.event_plan().map_err(RunError::Compile)?;
@@ -503,6 +617,324 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
 enum StructuredInput {
     Value(Value),
     Proxy(Vec<u8>),
+}
+
+fn transcode_proof(
+    options: &RunOptions,
+    capabilities: tq_core::Capabilities,
+    format: Option<InputFormat>,
+) -> Result<TranscodeProof, &'static str> {
+    if !capabilities.semantic_identity {
+        return Err("query is not proven semantic identity");
+    }
+    if options.output_format != OutputFormat::Toon {
+        return Err("selected output is not TOON");
+    }
+    if options.stream
+        || options.slurp
+        || options.raw_input
+        || options.null_input
+        || options.raw_output
+        || options.join_output
+        || options.raw_output0
+        || options.proxy_on_error
+    {
+        return Err("selected CLI mode changes structured identity semantics");
+    }
+    if options.sort_keys {
+        return Err("sorted-key output requires document execution");
+    }
+    if options.toon_writer.key_folding != KeyFolding::Off {
+        return Err("safe key folding requires sibling collision analysis");
+    }
+    let (input, duplicate_policy) = match format {
+        Some(InputFormat::Json) => (TranscodeInput::Json, TranscodeDuplicatePolicy::Reject),
+        Some(InputFormat::Toon) if options.strict => {
+            (TranscodeInput::Toon, TranscodeDuplicatePolicy::Reject)
+        }
+        Some(InputFormat::Toon) => return Err("non-strict TOON requires document execution"),
+        _ => return Err("selected input is not one common JSON or strict TOON syntax"),
+    };
+    Ok(TranscodeProof {
+        input,
+        duplicate_policy,
+        late_errors: true,
+        canonical_toon_writer: true,
+        key_folding_disabled: true,
+        commitment: match options.framing {
+            ToonFraming::Sequence => TranscodeCommitment::DirectSequence,
+            ToonFraming::Unframed => TranscodeCommitment::AtomicUnframed,
+        },
+        limits: TranscodeLimits {
+            maximum_memory_bytes: options.limits.preparation_memory_bytes as u64,
+            maximum_spool_bytes: options.limits.spool_bytes,
+            maximum_output_bytes: options.limits.output_bytes,
+            maximum_depth: options.limits.depth,
+            maximum_token_bytes: options.limits.token_bytes,
+        },
+    })
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "typed proof construction, commitment dispatch, and reporting stay in one lifecycle"
+)]
+fn run_transcode_filter<R: Read, W: Write>(
+    options: &RunOptions,
+    plan: &Plan<Compiled, Transcode>,
+    analysis: &Analysis,
+    detections: &[DetectionObservation],
+    stdin: &mut R,
+    stdout: &mut W,
+) -> Result<ExitStatus, RunError> {
+    let proof = *plan
+        .transcode_proof()
+        .expect("typed transcode plan carries its proof");
+    let format = match proof.input {
+        TranscodeInput::Json => InputFormat::Json,
+        TranscodeInput::Toon => InputFormat::Toon,
+    };
+    let duplicate_keys = match proof.duplicate_policy {
+        TranscodeDuplicatePolicy::Reject => DuplicateKeyPolicy::Reject,
+    };
+    let commitment = match proof.commitment {
+        TranscodeCommitment::DirectSequence => tq_toon::TranscodeCommitment::DirectSequence,
+        TranscodeCommitment::AtomicUnframed => tq_toon::TranscodeCommitment::AtomicUnframed,
+    };
+    let preparation = ArrayPreparationConfig {
+        memory_threshold_bytes: options.limits.preparation_memory_bytes,
+        maximum_spool_bytes: options.limits.spool_bytes,
+        ..ArrayPreparationConfig::default()
+    };
+    let arena = PreparationArena::new(PreparationLimits {
+        memory_bytes: options.limits.preparation_memory_bytes,
+        spool_bytes: options.limits.spool_bytes,
+        output_bytes: options.limits.output_bytes,
+        nesting: options.limits.depth,
+    });
+    let mut output_bytes = 0_u64;
+
+    let (execution, documents, last_truthy) = match proof.commitment {
+        TranscodeCommitment::DirectSequence => {
+            let writer = LimitedWriter::new(stdout, &mut output_bytes, options.limits.output_bytes);
+            let mut consumer = TranscodeConsumer::new(
+                writer,
+                options.toon_writer,
+                preparation,
+                arena.clone(),
+                duplicate_keys,
+                commitment,
+            )
+            .with_document_limit(options.limits.results);
+            if let Some(flag) = cancellation() {
+                consumer = consumer.with_cancellation(flag);
+            }
+            let result = transcode_sources(options, format, stdin, &mut consumer);
+            (result, consumer.documents(), consumer.last_truthy())
+        }
+        TranscodeCommitment::AtomicUnframed => {
+            let publication = BufWriter::with_capacity(
+                64 * 1024,
+                PublicationBuffer::new(preparation.clone(), arena.clone()),
+            );
+            let mut consumer = TranscodeConsumer::new(
+                publication,
+                options.toon_writer,
+                preparation,
+                arena.clone(),
+                duplicate_keys,
+                commitment,
+            )
+            .with_document_limit(options.limits.results);
+            if let Some(flag) = cancellation() {
+                consumer = consumer.with_cancellation(flag);
+            }
+            let decode = transcode_sources(options, format, stdin, &mut consumer);
+            let documents = consumer.documents();
+            let last_truthy = consumer.last_truthy();
+            let publication = consumer.into_inner();
+            let result = decode.and_then(|()| {
+                let mut publication = publication
+                    .into_inner()
+                    .map_err(|error| map_publication_buffer_error(error.into_error()))?;
+                let mut writer =
+                    LimitedWriter::new(stdout, &mut output_bytes, options.limits.output_bytes);
+                publication
+                    .publish_single(&mut writer, documents)
+                    .map_err(map_publication_error)
+            });
+            (result, documents, last_truthy)
+        }
+    };
+
+    if let Some(path) = &options.report_file {
+        write_transcode_report(
+            path,
+            options,
+            analysis,
+            detections,
+            TranscodeReportExecution {
+                documents,
+                output_bytes,
+                observations: arena.observations(),
+                resource_outcome: execution
+                    .as_ref()
+                    .map_or_else(|error| resource_outcome(error), |()| "success"),
+            },
+        )?;
+    }
+    execution?;
+    Ok(if options.exit_status {
+        match last_truthy {
+            None => ExitStatus::NoResult,
+            Some(false) => ExitStatus::FalseOrNull,
+            Some(true) => ExitStatus::Success,
+        }
+    } else {
+        ExitStatus::Success
+    })
+}
+
+fn resource_outcome(error: &RunError) -> &'static str {
+    match error.status() {
+        ExitStatus::Resource => "resource-limit",
+        ExitStatus::Interrupted => "interrupted",
+        ExitStatus::Input => "input-error",
+        ExitStatus::Runtime | ExitStatus::Unsupported => "output-error",
+        ExitStatus::Usage
+        | ExitStatus::Compile
+        | ExitStatus::NoResult
+        | ExitStatus::FalseOrNull => "error",
+        ExitStatus::Success => "success",
+    }
+}
+
+fn transcode_sources<R: Read, W: Write>(
+    options: &RunOptions,
+    format: InputFormat,
+    stdin: &mut R,
+    consumer: &mut TranscodeConsumer<W>,
+) -> Result<(), RunError> {
+    let files = if options.files.is_empty() {
+        vec![Path::new("-").to_owned()]
+    } else {
+        options.files.clone()
+    };
+    for (index, path) in files.into_iter().enumerate() {
+        let source = SourceId::new(u32::try_from(index + 1).unwrap_or(u32::MAX));
+        if path == Path::new("-") {
+            transcode_reader(options, format, &mut *stdin, "<stdin>", source, consumer)?;
+        } else {
+            let identity = path.display().to_string();
+            transcode_reader(
+                options,
+                format,
+                open_path(&path)?,
+                &identity,
+                source,
+                consumer,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn transcode_reader<R: Read, W: Write>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    source: SourceId,
+    consumer: &mut TranscodeConsumer<W>,
+) -> Result<(), RunError> {
+    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+    match format {
+        InputFormat::Json => decode_json_event_stream(
+            BufReader::with_capacity(64 * 1024, reader),
+            source,
+            consumer,
+            JsonEventOptions {
+                maximum_depth: options.limits.depth,
+                maximum_token_bytes: options.limits.token_bytes,
+            },
+        )
+        .map(|_| ())
+        .map_err(|message| map_transcode_message(InputFormat::Json, message)),
+        InputFormat::Toon => {
+            let mut decoder = Decoder::new(
+                BufReader::new(reader),
+                source,
+                decode_options(options, InputFormat::Toon).toon,
+            );
+            decoder.decode_into(consumer).map_err(|error| match error {
+                DecodeIntoError::Decode(error) => RunError::Input(FormatError::Parse {
+                    format: InputFormat::Toon,
+                    message: error.to_string(),
+                }),
+                DecodeIntoError::Consumer(error) => map_transcode_error(error),
+            })
+        }
+        _ => unreachable!("typed transcode proof admits only JSON or TOON"),
+    }
+}
+
+fn map_transcode_message(format: InputFormat, message: String) -> RunError {
+    if message.contains("resource limit")
+        || message.contains("limit exceeded")
+        || message.contains("preparation")
+        || message.contains("spool")
+    {
+        RunError::Resource("transcode-preparation")
+    } else if message.contains("interrupted") || message.contains("cancelled") {
+        RunError::Interrupted
+    } else {
+        RunError::Input(FormatError::Parse { format, message })
+    }
+}
+
+fn map_transcode_error(error: TranscodeError) -> RunError {
+    match error {
+        TranscodeError::ResultLimit => RunError::Resource("result-count"),
+        TranscodeError::Cancelled | TranscodeError::Spool(SpoolError::Cancelled) => {
+            RunError::Interrupted
+        }
+        TranscodeError::Spool(SpoolError::Io(error))
+        | TranscodeError::Writer(WriterError::Io(error))
+        | TranscodeError::Io(error) => {
+            if error.to_string().contains("output resource limit exceeded") {
+                RunError::Resource("output-bytes")
+            } else {
+                RunError::Io(error)
+            }
+        }
+        TranscodeError::Spool(_) => RunError::Resource("transcode-preparation"),
+        TranscodeError::Duplicate(key) => RunError::Input(FormatError::Parse {
+            format: InputFormat::Toon,
+            message: format!("duplicate object key '{key}'"),
+        }),
+        TranscodeError::Structure(message) => RunError::Input(FormatError::Parse {
+            format: InputFormat::Auto,
+            message: message.to_owned(),
+        }),
+    }
+}
+
+fn map_publication_error(error: PublicationError) -> RunError {
+    match error {
+        PublicationError::Cardinality(_) => {
+            RunError::Cardinality("unframed TOON requires exactly one result")
+        }
+        PublicationError::Spool(error) => map_transcode_error(TranscodeError::Spool(error)),
+        PublicationError::Io(error) => RunError::Io(error),
+    }
+}
+
+fn map_publication_buffer_error(error: io::Error) -> RunError {
+    if error.to_string().contains("spool") || error.to_string().contains("resource limit") {
+        RunError::Resource("transcode-preparation")
+    } else {
+        RunError::Io(error)
+    }
 }
 
 fn for_each_structured_input<R: Read, F>(
@@ -625,15 +1057,29 @@ fn validate_capability_policy(options: &RunOptions) -> Result<(), RunError> {
     Ok(())
 }
 
+const JSON_DUPLICATE_LIMITATION: &str = "JSON duplicates reject the current streamed record; use a document plan for last-value normalization";
+
+fn duplicate_key_limitation(proof: Option<TranscodeProof>) -> Option<&'static str> {
+    proof
+        .is_some_and(|proof| proof.input == TranscodeInput::Json)
+        .then_some(JSON_DUPLICATE_LIMITATION)
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "human and JSON plan explanations stay aligned in one function"
+)]
 fn write_explain(
     format: ExplainFormat,
     options: &RunOptions,
     analyzed: &Query<Analyzed>,
+    analysis: &Analysis,
     stderr: &mut impl Write,
 ) -> Result<(), RunError> {
     let capabilities = analyzed.capabilities();
-    let plan = analyzed.analysis().selected_plan;
+    let plan = analysis.selected_plan;
     let retained = match plan {
+        PlanKind::Transcode => "decoder frames plus one shared bounded preparation arena",
         PlanKind::Events if capabilities.fold_state => {
             "decoder frames, current path, one event value, and one fold accumulator"
         }
@@ -651,8 +1097,16 @@ fn write_explain(
             writeln!(stderr, "input-detection: {detection}")?;
             writeln!(stderr, "retained-working-set: {retained}")?;
             writeln!(stderr, "blocking: {}", capabilities.blocking)?;
-            writeln!(stderr, "spool-required: false")?;
-            if let Some(proof) = &analyzed.analysis().stream_proof {
+            writeln!(stderr, "spool-required: {}", plan == PlanKind::Transcode)?;
+            if let Some(proof) = &analysis.transcode_proof {
+                writeln!(stderr, "identity-proof: semantic-identity")?;
+                writeln!(stderr, "duplicate-policy: {:?}", proof.duplicate_policy)?;
+                if let Some(limitation) = duplicate_key_limitation(Some(*proof)) {
+                    writeln!(stderr, "duplicate-key-limitation: {limitation}")?;
+                }
+                writeln!(stderr, "commitment-mode: {:?}", proof.commitment)?;
+            }
+            if let Some(proof) = &analysis.stream_proof {
                 writeln!(
                     stderr,
                     "required-path-prefix: {:?}",
@@ -662,8 +1116,11 @@ fn write_explain(
                 writeln!(stderr, "value-escapes: {}", proof.value_escapes)?;
                 writeln!(stderr, "retention-high-water: available in --report-file")?;
             }
-            if let Some(rejection) = &analyzed.analysis().stream_rejection {
+            if let Some(rejection) = &analysis.stream_rejection {
                 writeln!(stderr, "stream-rejection: {rejection}")?;
+            }
+            if let Some(rejection) = &analysis.transcode_rejection {
+                writeln!(stderr, "transcode-rejection: {rejection}")?;
             }
             writeln!(
                 stderr,
@@ -687,9 +1144,18 @@ fn write_explain(
                 "input_detection": detection,
                 "retained_working_set": retained,
                 "blocking": capabilities.blocking,
-                "spool_required": false,
-                "proof": analyzed.analysis().stream_proof,
-                "stream_rejection": analyzed.analysis().stream_rejection,
+                "spool_required": plan == PlanKind::Transcode,
+                "proof": if plan == PlanKind::Transcode {
+                    serde_json::to_value(analysis.transcode_proof)?
+                } else {
+                    serde_json::to_value(&analysis.stream_proof)?
+                },
+                "stream_rejection": analysis.stream_rejection,
+                "transcode_rejection": analysis.transcode_rejection,
+                "identity_proof": analysis.transcode_proof.map(|_| "semantic-identity"),
+                "duplicate_policy": analysis.transcode_proof.map(|proof| proof.duplicate_policy),
+                "duplicate_key_limitation": duplicate_key_limitation(analysis.transcode_proof),
+                "commitment_mode": analysis.transcode_proof.map(|proof| proof.commitment),
                 "high_water": {
                     "available_in_report": true
                 },
@@ -721,6 +1187,17 @@ const fn input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Json => "override:json",
         InputFormat::JsonLines => "override:jsonl",
         InputFormat::ToonSequence => "override:toon-sequence",
+    }
+}
+
+const fn concrete_input_format_name(format: InputFormat) -> &'static str {
+    match format {
+        InputFormat::Auto => "auto",
+        InputFormat::Toon => "toon",
+        InputFormat::Yaml => "yaml",
+        InputFormat::Json => "json",
+        InputFormat::JsonLines => "jsonl",
+        InputFormat::ToonSequence => "toon-sequence",
     }
 }
 
@@ -912,6 +1389,7 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
 ) -> Result<(), RunError> {
     let stream_options = StreamOptions {
         maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
         errors_as_values: false,
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
@@ -1467,6 +1945,7 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
 ) -> Result<(), RunError> {
     let stream_options = StreamOptions {
         maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
         errors_as_values: options.stream_errors,
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
@@ -2299,6 +2778,7 @@ fn write_report(
             "proof": analysis.stream_proof,
             "stream_rejection": analysis.stream_rejection,
             "retained_working_set": match plan {
+                PlanKind::Transcode => "bounded-structural-preparation",
                 PlanKind::Events => "decoder-events",
                 PlanKind::Subtree => "selected-subtree",
                 PlanKind::Document => "document",
@@ -2337,6 +2817,93 @@ fn write_report(
 }
 
 #[derive(Clone, Copy)]
+struct TranscodeReportExecution<'a> {
+    documents: u64,
+    output_bytes: u64,
+    observations: PreparationObservations,
+    resource_outcome: &'a str,
+}
+
+fn write_transcode_report(
+    path: &Path,
+    options: &RunOptions,
+    analysis: &Analysis,
+    detections: &[DetectionObservation],
+    execution: TranscodeReportExecution<'_>,
+) -> Result<(), RunError> {
+    let TranscodeReportExecution {
+        documents,
+        output_bytes,
+        observations,
+        resource_outcome,
+    } = execution;
+    let proof = analysis
+        .transcode_proof
+        .expect("transcode report carries a selected proof");
+    let detection = detections
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "identity": item.identity,
+                "selected_input_format": concrete_input_format_name(item.selected),
+                "lookahead_bytes": item.lookahead_bytes,
+                "commitment_bytes": item.commitment_bytes,
+                "rejections": item.rejections.iter().map(|(format, reason)| serde_json::json!({
+                    "format": concrete_input_format_name(*format),
+                    "reason": reason,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let report = serde_json::json!({
+        "schema_version": 1,
+        "documents": documents,
+        "results": documents,
+        "output_bytes": output_bytes,
+        "execution": {
+            "plan": "transcode",
+            "selected_input_format": concrete_input_format_name(match proof.input {
+                TranscodeInput::Json => InputFormat::Json,
+                TranscodeInput::Toon => InputFormat::Toon,
+            }),
+            "input_format_source": if options.input_format == InputFormat::Auto { "detected" } else { "override" },
+            "detection": detection,
+            "proof": analysis.transcode_proof,
+            "transcode_rejection": analysis.transcode_rejection,
+            "duplicate_key_limitation": duplicate_key_limitation(analysis.transcode_proof),
+            "retained_working_set": "bounded-structural-preparation",
+            "materialized_root": false,
+            "spooled": observations.spool_bytes_written > 0,
+            "commitment_mode": proof.commitment,
+            "input_stage_bytes_written": 0,
+            "input_stage_bytes_replayed": 0,
+            "preparation_high_water_bytes": observations.memory_high_water_bytes,
+            "preparation_nesting_high_water": observations.nesting_high_water,
+            "object_index_spills": observations.object_index_spills,
+            "array_preparations": observations.array_preparations,
+            "spool_bytes_written": observations.spool_bytes_written,
+            "spool_bytes_replayed": observations.spool_bytes_replayed,
+            "prepared_output_bytes": observations.output_bytes,
+            "resource_outcome": resource_outcome,
+        },
+        "limits": {
+            "input_bytes": options.limits.input_bytes,
+            "depth": options.limits.depth,
+            "token_bytes": options.limits.token_bytes,
+            "line_bytes": options.limits.line_bytes,
+            "lookahead_bytes": options.limits.lookahead_bytes,
+            "results": options.limits.results,
+            "output_bytes": options.limits.output_bytes,
+            "preparation_memory_bytes": options.limits.preparation_memory_bytes,
+            "spool_bytes": options.limits.spool_bytes,
+        },
+        "observations": [],
+    });
+    fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
 struct ReportExecution<'a> {
     analysis: &'a Analysis,
     retention: RetentionObservations,
@@ -2358,11 +2925,11 @@ fn exit_status(enabled: bool, last: Option<&Value>) -> ExitStatus {
 mod tests {
     use std::{
         fs,
-        io::{self, Write},
+        io::{self, Cursor, Read, Write},
     };
 
     use super::run_with_io;
-    use crate::{Command, ExitStatus, parse_args};
+    use crate::{Command, ExecutionOverride, ExitStatus, parse_args};
 
     fn execute(
         arguments: &[&str],
@@ -2374,6 +2941,184 @@ mod tests {
         let mut stderr = Vec::new();
         let status = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
         (status, stdout, stderr)
+    }
+
+    #[test]
+    fn internal_override_forces_document_plan_without_changing_output() {
+        let arguments = [
+            "--input-format",
+            "json",
+            "--output-format",
+            "toon",
+            "--explain-json",
+            ".[]",
+        ];
+        let (_, automatic_output, automatic_explain) = execute(&arguments, b"[1,2]");
+
+        let mut command = parse_args(arguments).unwrap();
+        let Command::Run(options) = &mut command else {
+            panic!("expected run command")
+        };
+        options.execution_override = ExecutionOverride::Document;
+        let mut input = &b"[1,2]"[..];
+        let mut forced_output = Vec::new();
+        let mut forced_explain = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut forced_output, &mut forced_explain).unwrap(),
+            ExitStatus::Success
+        );
+
+        assert_eq!(forced_output, automatic_output);
+        let automatic: serde_json::Value = serde_json::from_slice(&automatic_explain).unwrap();
+        let forced: serde_json::Value = serde_json::from_slice(&forced_explain).unwrap();
+        assert_eq!(automatic["execution"]["plan"], "subtree");
+        assert_eq!(forced["execution"]["plan"], "document");
+        assert_eq!(
+            forced["execution"]["stream_rejection"],
+            "forced document override for differential run"
+        );
+    }
+
+    #[test]
+    fn identity_json_transcode_rejects_a_late_duplicate_after_partial_output() {
+        let (status, output, explain) = execute(
+            &["--input-format", "json", "--explain-json", "."],
+            br#"{"b":1,"a":2,"b":3}"#,
+        );
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
+        assert_eq!(output, b"\x1eb: 1\na: 2");
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(explain["execution"]["plan"], "transcode");
+        assert_eq!(explain["execution"]["duplicate_policy"], "reject");
+        assert_eq!(explain["execution"]["commitment_mode"], "direct-sequence");
+    }
+
+    #[test]
+    fn transcode_streams_ordered_files_and_keeps_unframed_output_atomic() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.json");
+        let second = directory.path().join("second.json");
+        fs::write(&first, b"1").unwrap();
+        fs::write(&second, b"2").unwrap();
+        let command = parse_args([
+            "--input-format",
+            "json",
+            ".",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ])
+        .unwrap();
+        let mut input = &[][..];
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output, b"\x1e1\n\x1e2\n");
+        assert!(error.is_empty());
+
+        let (status, output, error) =
+            execute(&["--input-format", "json", "--unframed", "."], b"1 2");
+        assert!(matches!(status, Err(super::RunError::Cardinality(_))));
+        assert!(output.is_empty());
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn auto_detected_identity_json_uses_transcode_and_reports_observations() {
+        let directory = tempfile::tempdir().unwrap();
+        let report = directory.path().join("transcode.json");
+        let command = parse_args([
+            "--explain-json",
+            "--report-file",
+            report.to_str().unwrap(),
+            ".",
+        ])
+        .unwrap();
+        let mut input = br"[1,2,3]".as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        let explain: serde_json::Value = serde_json::from_slice(&error).unwrap();
+        assert_eq!(explain["execution"]["plan"], "transcode");
+        let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+        assert_eq!(report["execution"]["plan"], "transcode");
+        assert_eq!(report["execution"]["array_preparations"], 1);
+        assert_eq!(report["execution"]["resource_outcome"], "success");
+        assert!(
+            report["execution"]["preparation_high_water_bytes"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(report["execution"]["spool_bytes_written"], 0);
+        assert_eq!(report["execution"]["input_stage_bytes_written"], 0);
+        assert_eq!(report["execution"]["input_stage_bytes_replayed"], 0);
+        assert_eq!(report["execution"]["selected_input_format"], "json");
+        assert_eq!(report["execution"]["input_format_source"], "detected");
+        assert_eq!(report["execution"]["detection"][0]["identity"], "<stdin>");
+        assert!(report["execution"]["detection"][0]["lookahead_bytes"].is_u64());
+        assert!(report["execution"]["detection"][0]["commitment_bytes"].is_u64());
+        assert_eq!(report["execution"]["materialized_root"], false);
+    }
+
+    #[test]
+    fn transcode_reports_resource_failure_and_output_aware_fallbacks() {
+        let directory = tempfile::tempdir().unwrap();
+        let report = directory.path().join("limited.json");
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--prepare-memory-bytes",
+            "0",
+            "--max-spool-bytes",
+            "1",
+            "--report-file",
+            report.to_str().unwrap(),
+            ".",
+        ])
+        .unwrap();
+        let mut input = br#"["too large"]"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error)
+                .unwrap_err()
+                .status(),
+            ExitStatus::Resource
+        );
+        let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
+        assert_eq!(report["execution"]["resource_outcome"], "resource-limit");
+
+        for arguments in [
+            ["--input-format", "json", "--output-format", "json", "."],
+            [
+                "--input-format",
+                "json",
+                "--sort-keys",
+                "--explain-json",
+                ".",
+            ],
+            [
+                "--input-format",
+                "json",
+                "--fold-keys",
+                "--explain-json",
+                ".",
+            ],
+        ] {
+            let (status, _, explain) = execute(&arguments, br#"{"x":1}"#);
+            assert_eq!(status.unwrap(), ExitStatus::Success);
+            if arguments.contains(&"--explain-json") {
+                let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+                assert_eq!(explain["execution"]["plan"], "document");
+                assert!(explain["execution"]["transcode_rejection"].is_string());
+            }
+        }
     }
 
     #[test]
@@ -2441,12 +3186,60 @@ mod tests {
         }
     }
 
+    struct CountingReader {
+        input: Cursor<Vec<u8>>,
+        reads: usize,
+    }
+
+    impl Read for CountingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            self.reads = self.reads.saturating_add(1);
+            self.input.read(buffer)
+        }
+    }
+
     #[test]
     fn identity_uses_toon_sequence_and_keeps_stderr_clean() {
         let (status, stdout, stderr) = execute(&["."], b"name: Ada");
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"\x1ename: Ada\n");
         assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn transcode_flushes_the_sequence_prefix_before_root_payload() {
+        let command = parse_args(["--input-format", "json", "."]).unwrap();
+        let mut input = br#"{"name":"Ada"}"#.as_slice();
+        let mut output = FlushWriter::default();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output.bytes, b"\x1ename: Ada\n");
+        assert_eq!(output.flush_points.first(), Some(&1));
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn json_transcode_buffers_source_reads() {
+        let mut json = Vec::with_capacity(256 * 1024 + 2);
+        json.push(b'"');
+        json.extend(std::iter::repeat_n(b'a', 256 * 1024));
+        json.push(b'"');
+        let mut input = CountingReader {
+            input: Cursor::new(json),
+            reads: 0,
+        };
+        let command = parse_args(["--input-format", "json", "."]).unwrap();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert!(input.reads < 16, "source was read {} times", input.reads);
+        assert!(error.is_empty());
     }
 
     #[test]

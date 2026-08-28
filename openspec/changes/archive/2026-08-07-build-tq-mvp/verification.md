@@ -16,7 +16,7 @@
 - `tests/compatibility/reviews/coverage-v1.json` contains 154 cases and 831 observations for jq 1.8.2, yq 4.53.2, and tq over JSON, YAML, and TOON. Its jq/tq difference allowlist remains executable.
 - `docs/requirements-traceability.tsv` has one row per scenario. Every route now declares a test, report assertion, or manual finding and names a source symbol/heading checked by `requirements_traceability.rs`.
 - Benchmark semantic correctness uses an incremental, format-independent digest. It consumes JSON result texts and TOON Text Sequence records individually instead of retaining the complete normalized result sequence.
-- `benchmarks/2026-08-07.md` retains the refreshed standard and natural-large campaigns, including unfavorable resource and timeout outcomes. The final large event rows remain below the 128 MiB objective.
+- The `commandzero/tq-benchmarks` archive retains the refreshed standard and natural-large campaigns, including unfavorable resource and timeout outcomes. The final large event rows remain below the 128 MiB objective.
 
 ## Critical issues
 
