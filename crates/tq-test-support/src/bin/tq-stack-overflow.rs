@@ -207,8 +207,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut scenario_dir = PathBuf::from("tests/stack-overflow");
-    let mut output = PathBuf::from("benchmarks/.work/stack-overflow.json");
-    let mut report = PathBuf::from("benchmarks/stack-overflow.md");
+    let archive_root = env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("benchmarks"));
+    let mut output = archive_root.join(".work/stack-overflow.json");
+    let mut report = archive_root.join("stack-overflow.md");
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -674,7 +677,7 @@ fn write_findings(output: &mut String, report: &BenchmarkCampaignReport) {
     writeln!(output, "- These are small, single-document inputs, so process startup and fixed runtime overhead dominate; this is a compatibility-shaped smoke benchmark, not a large-data throughput claim.").expect("write report");
     writeln!(
         output,
-        "\nRaw measurements are retained in `benchmarks/.work/stack-overflow.json`."
+        "\nRaw measurements are retained in the archive checkout's `.work/stack-overflow.json`."
     )
     .expect("write report");
 }
