@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="680" viewBox="0 0 1200 680" role="img" aria-labelledby="title desc">
+  <title id="title">tq, toon, and streaming toon median peak resident memory</title>
+  <desc id="desc">Grouped horizontal bars compare median peak resident memory in MiB. Streaming toon uses the least memory in every case.</desc>
+  <rect width="1200" height="680" fill="#0b1020"/>
+  <style>
+    text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #e6edf7; }
+    .title { font-size: 24px; font-weight: 700; }
+    .subtitle { font-size: 13px; fill: #a9b4c7; }
+    .case { font-size: 14px; font-weight: 650; }
+    .tick { font-size: 11px; fill: #8f9bb0; }
+    .value { font-size: 12px; font-weight: 650; }
+    .grid { stroke: #27324a; stroke-width: 1; }
+    .axis { stroke: #52627a; stroke-width: 1.2; }
+  </style>
+  <text x="55" y="42" class="title">Peak resident memory</text>
+  <text x="55" y="67" class="subtitle">Median of seven per-run peaks. Lower is better.</text>
+  <rect x="806" y="31" width="14" height="14" rx="2" fill="#24b8aa"/><text x="828" y="43" class="case">tq</text>
+  <rect x="870" y="31" width="14" height="14" rx="2" fill="#4f8fd8"/><text x="892" y="43" class="case">toon</text>
+  <rect x="956" y="31" width="14" height="14" rx="2" fill="#8074ba"/><text x="978" y="43" class="case">streaming toon</text>
+
+  <line x1="180" y1="110" x2="180" y2="570" class="axis"/><line x1="180" y1="570" x2="1080" y2="570" class="axis"/>
+  <line x1="309" y1="110" x2="309" y2="570" class="grid"/><line x1="437" y1="110" x2="437" y2="570" class="grid"/><line x1="566" y1="110" x2="566" y2="570" class="grid"/><line x1="694" y1="110" x2="694" y2="570" class="grid"/><line x1="823" y1="110" x2="823" y2="570" class="grid"/><line x1="951" y1="110" x2="951" y2="570" class="grid"/><line x1="1080" y1="110" x2="1080" y2="570" class="grid"/>
+  <text x="180" y="592" text-anchor="middle" class="tick">0</text><text x="309" y="592" text-anchor="middle" class="tick">500</text><text x="437" y="592" text-anchor="middle" class="tick">1,000</text><text x="566" y="592" text-anchor="middle" class="tick">1,500</text><text x="694" y="592" text-anchor="middle" class="tick">2,000</text><text x="823" y="592" text-anchor="middle" class="tick">2,500</text><text x="951" y="592" text-anchor="middle" class="tick">3,000</text><text x="1080" y="592" text-anchor="middle" class="tick">3,500 MiB</text>
+
+  <text x="160" y="174" text-anchor="end" class="case">indices</text>
+  <rect x="180" y="132" width="46.0" height="17" rx="3" fill="#24b8aa"/><text x="233" y="145" class="value">178.9</text>
+  <rect x="180" y="155" width="89.8" height="17" rx="3" fill="#4f8fd8"/><text x="277" y="168" class="value">349.3</text>
+  <rect x="180" y="178" width="9.8" height="17" rx="3" fill="#8074ba"/><text x="197" y="191" class="value">38.0</text>
+
+  <text x="160" y="279" text-anchor="end" class="case">segments</text>
+  <rect x="180" y="237" width="256.8" height="17" rx="3" fill="#24b8aa"/><text x="444" y="250" class="value">998.5</text>
+  <rect x="180" y="260" width="429.1" height="17" rx="3" fill="#4f8fd8"/><text x="617" y="273" class="value">1,668.8</text>
+  <rect x="180" y="283" width="13.1" height="17" rx="3" fill="#8074ba"/><text x="200" y="296" class="value">50.8</text>
+
+  <text x="160" y="384" text-anchor="end" class="case">recovery</text>
+  <rect x="180" y="342" width="431.7" height="17" rx="3" fill="#24b8aa"/><text x="619" y="355" class="value">1,678.7</text>
+  <rect x="180" y="365" width="755.5" height="17" rx="3" fill="#4f8fd8"/><text x="943" y="378" class="value">2,938.0</text>
+  <rect x="180" y="388" width="5.4" height="17" rx="3" fill="#8074ba"/><text x="193" y="401" class="value">20.8</text>
+
+  <text x="160" y="489" text-anchor="end" class="case">snapshot</text>
+  <rect x="180" y="447" width="163.1" height="17" rx="3" fill="#24b8aa"/><text x="351" y="460" class="value">634.3</text>
+  <rect x="180" y="470" width="327.5" height="17" rx="3" fill="#4f8fd8"/><text x="515" y="483" class="value">1,273.6</text>
+  <rect x="180" y="493" width="113.8" height="17" rx="3" fill="#8074ba"/><text x="301" y="506" class="value">442.4</text>
+
+  <text x="55" y="648" class="subtitle">MiB uses 1,048,576 bytes. Exact values and observed maxima are listed in the report.</text>
+</svg>
