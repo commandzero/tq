@@ -93,6 +93,14 @@ impl Decoder<'_> {
             STRING => Ok(Value::string(self.text()?.to_owned())),
             ARRAY_START => {
                 let count = self.length()?;
+                let available_values = self
+                    .bytes
+                    .len()
+                    .saturating_sub(self.position)
+                    .saturating_sub(1);
+                if count > available_values {
+                    return Err("truncated structural replay array");
+                }
                 let mut values = Vec::with_capacity(count);
                 for _ in 0..count {
                     values.push(self.value()?);
@@ -104,6 +112,15 @@ impl Decoder<'_> {
             }
             OBJECT_START => {
                 let count = self.length()?;
+                let available_entries = self
+                    .bytes
+                    .len()
+                    .saturating_sub(self.position)
+                    .saturating_sub(1)
+                    / 10;
+                if count > available_entries {
+                    return Err("truncated structural replay object");
+                }
                 let mut values = Object::with_capacity(count);
                 for _ in 0..count {
                     if self.byte()? != KEY {
@@ -164,7 +181,7 @@ impl Decoder<'_> {
 mod tests {
     use tq_core::Value;
 
-    use super::{decode, encode};
+    use super::{ARRAY_START, OBJECT_START, decode, encode};
 
     #[test]
     fn nested_values_round_trip_without_json_records() {
@@ -185,6 +202,20 @@ mod tests {
         assert_eq!(
             decode(&trailing).unwrap_err(),
             "trailing structural replay bytes"
+        );
+
+        let mut huge_array = vec![ARRAY_START];
+        huge_array.extend_from_slice(&u64::try_from(usize::MAX).unwrap().to_le_bytes());
+        assert_eq!(
+            decode(&huge_array).unwrap_err(),
+            "truncated structural replay array"
+        );
+
+        let mut huge_object = vec![OBJECT_START];
+        huge_object.extend_from_slice(&u64::try_from(usize::MAX).unwrap().to_le_bytes());
+        assert_eq!(
+            decode(&huge_object).unwrap_err(),
+            "truncated structural replay object"
         );
     }
 }
