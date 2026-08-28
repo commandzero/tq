@@ -390,6 +390,42 @@ fn ndjson_extension_enables_automatic_event_plan() {
 }
 
 #[test]
+fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
+    let directory = tempdir().unwrap();
+    let records = directory.path().join("records.data");
+    fs::write(&records, "{\"values\":[1,2,3]}\n").unwrap();
+
+    let output = tq(
+        &[
+            "-x",
+            "-ojsonl",
+            "--explain-json",
+            ".values[] | numbers",
+            records.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"1\n2\n3\n");
+    let explain: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(explain["execution"]["plan"], "events");
+
+    let stdin = tq(
+        &["-x", "-ojsonl", "--explain-json", ".values[] | numbers"],
+        b"{\"values\":[4,5]}\n",
+    );
+    assert_eq!(stdin.code, 0, "{}", String::from_utf8_lossy(&stdin.stderr));
+    assert_eq!(stdin.stdout, b"4\n5\n");
+    let explain: serde_json::Value = serde_json::from_slice(&stdin.stderr).unwrap();
+    assert_eq!(explain["execution"]["plan"], "events");
+}
+
+#[test]
 fn json_lines_stream_resets_roots_and_late_errors_keep_prior_output() {
     let streamed = tq(
         &["--stream", "-ijsonl", "-ojsonl", "."],
@@ -429,6 +465,131 @@ fn json_lines_line_limit_is_a_resource_error_without_record_disclosure() {
     assert!(error.contains("line-bytes"));
     assert!(error.contains("line 1"));
     assert!(!error.contains("secret"));
+}
+
+#[test]
+fn proxy_on_error_preserves_rejected_stdin_and_valid_transformations() {
+    let invalid = b"{\"unfinished\":\xff\n";
+    let proxied = tq(&["-ex", "-ijson"], invalid);
+    assert_eq!(proxied.code, 0);
+    assert_eq!(proxied.stdout, invalid);
+    assert!(proxied.stderr.is_empty());
+
+    let invalid_auto = b"\xffunrecognized\n";
+    let auto = tq(&["-x"], invalid_auto);
+    assert_eq!(auto.code, 0);
+    assert_eq!(auto.stdout, invalid_auto);
+    assert!(auto.stderr.is_empty());
+
+    let transformed = tq(&["-x", "-ijson", "-ojsonl", ".value"], b"{\"value\":7}\n");
+    assert_eq!(transformed.code, 0);
+    assert_eq!(transformed.stdout, b"7\n");
+    assert!(transformed.stderr.is_empty());
+}
+
+#[test]
+fn proxy_on_error_is_source_atomic_for_late_json_lines_failures() {
+    let input = b"{\"id\":1}\nnot-json\n{\"id\":3}\n";
+    let output = tq(&["-x", "-ijsonl", "-ojsonl", ".id"], input);
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, input);
+    assert!(output.stderr.is_empty());
+
+    let streamed = tq(&["-x", "--stream", "-ijsonl"], input);
+    assert_eq!(streamed.code, 0);
+    assert_eq!(streamed.stdout, input);
+    assert!(streamed.stderr.is_empty());
+
+    let slurped = tq(&["-x", "-s", "-ijsonl"], input);
+    assert_eq!(slurped.code, 0);
+    assert_eq!(slurped.stdout, input);
+    assert!(slurped.stderr.is_empty());
+}
+
+#[test]
+fn proxy_on_error_preserves_file_order_and_only_proxies_rejected_sources() {
+    let directory = tempdir().unwrap();
+    let first = directory.path().join("first.json");
+    let rejected = directory.path().join("rejected.json");
+    let last = directory.path().join("last.json");
+    fs::write(&first, "{\"id\":1}\n").unwrap();
+    fs::write(&rejected, "not-json\n").unwrap();
+    fs::write(&last, "{\"id\":3}\n").unwrap();
+
+    let output = tq(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            ".id",
+            first.to_str().unwrap(),
+            rejected.to_str().unwrap(),
+            last.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, b"1\nnot-json\n3\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn proxy_on_error_preserves_unframed_toon_cardinality() {
+    let directory = tempdir().unwrap();
+    let valid = directory.path().join("valid.json");
+    let rejected = directory.path().join("rejected.json");
+    let also_rejected = directory.path().join("also-rejected.json");
+    fs::write(&valid, "{\"id\":1}\n").unwrap();
+    fs::write(&rejected, "not-json\n").unwrap();
+    fs::write(&also_rejected, "still-not-json\n").unwrap();
+
+    let mixed = tq(
+        &[
+            "-x",
+            "-ijson",
+            "--unframed",
+            ".",
+            valid.to_str().unwrap(),
+            rejected.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(mixed.code, 5);
+    assert!(mixed.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&mixed.stderr).contains("multiple"));
+
+    let proxied = tq(
+        &[
+            "-x",
+            "-ijson",
+            "--unframed",
+            ".",
+            rejected.to_str().unwrap(),
+            also_rejected.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(proxied.code, 5);
+    assert_eq!(proxied.stdout, b"not-json\n");
+    assert!(String::from_utf8_lossy(&proxied.stderr).contains("multiple"));
+}
+
+#[test]
+fn proxy_on_error_does_not_mask_resource_or_runtime_errors() {
+    let resource = tq(&["-x", "-ijson", "--max-input-bytes", "3"], b"null");
+    assert_eq!(resource.code, 5);
+    assert!(resource.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&resource.stderr).contains("input-bytes"));
+
+    let output_limit = tq(&["-x", "-ijson", "--max-output-bytes", "3"], b"invalid");
+    assert_eq!(output_limit.code, 5);
+    assert!(output_limit.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output_limit.stderr).contains("output-bytes"));
+
+    let runtime = tq(&["-x", "-ijson", "error(\"boom\")"], b"null\n");
+    assert_ne!(runtime.code, 0);
+    assert!(runtime.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&runtime.stderr).contains("boom"));
 }
 
 #[test]
