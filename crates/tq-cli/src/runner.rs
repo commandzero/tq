@@ -19,8 +19,8 @@ use tq_core::{
 };
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, JsonLinesDocumentSource, OutputError, OutputOptions,
-    StreamOptions, ToonFraming, decode_bytes, decode_json, decode_toon, probe_reader, stream_json,
-    stream_toon, write_results,
+    StreamOptions, ToonFraming, decode_bytes, decode_json, decode_toon, probe_format, probe_reader,
+    stream_json, stream_toon, write_results,
 };
 
 use crate::{
@@ -265,6 +265,35 @@ fn run_filter<R: Read, W: Write, E: Write>(
     let automatic_mode =
         !options.stream && !options.slurp && !options.raw_input && !options.null_input;
     if automatic_mode && options.input_format == InputFormat::Auto {
+        if options.proxy_on_error {
+            let file_events = auto_file_events_available(options)?;
+            if options.files.is_empty() || options.files.iter().any(|path| path == Path::new("-")) {
+                let bytes = read_limited(&mut *stdin, options.limits.input_bytes, "<stdin>")?;
+                let stdin_events = match probe_format(&bytes, options.limits.lookahead_bytes) {
+                    Ok(probe) => decoder_events_available(probe.selected),
+                    Err(error) if proxyable_format_error(&error) => false,
+                    Err(error) => return Err(error.into()),
+                };
+                return run_resolved_filter(
+                    options,
+                    resolved,
+                    &variables,
+                    file_events && stdin_events,
+                    &mut bytes.as_slice(),
+                    stdout,
+                    stderr,
+                );
+            }
+            return run_resolved_filter(
+                options,
+                resolved,
+                &variables,
+                file_events,
+                stdin,
+                stdout,
+                stderr,
+            );
+        }
         let file_events = auto_file_events_available(options)?;
         if options.files.is_empty() || options.files.iter().any(|path| path == Path::new("-")) {
             let reader = LimitedReader::new(&mut *stdin, options.limits.input_bytes, "<stdin>");
@@ -320,8 +349,13 @@ fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
         } else {
             let reader =
                 LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
-            let (probe, _) = probe_reader(reader, options.limits.lookahead_bytes)?;
-            available &= decoder_events_available(probe.selected);
+            match probe_reader(reader, options.limits.lookahead_bytes) {
+                Ok((probe, _)) => available &= decoder_events_available(probe.selected),
+                Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
+                    available = false;
+                }
+                Err(error) => return Err(error.into()),
+            }
         }
     }
     Ok(available)
@@ -379,6 +413,13 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
     let mut runtime_error = None;
     {
         let mut evaluate = |input| -> Result<bool, RunError> {
+            let input = match input {
+                StructuredInput::Value(input) => input,
+                StructuredInput::Proxy(bytes) => {
+                    result_output.proxy(&bytes)?;
+                    return Ok(true);
+                }
+            };
             let mut vm =
                 Vm::new_with_variables(&plan, input, vm_limits(options), variables.clone())
                     .with_trace_limit(options.trace_limit);
@@ -409,20 +450,26 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
         };
 
         if options.slurp || options.raw_input {
-            let inputs = load_inputs(options, stdin)?;
-            let values = if options.slurp && !options.raw_input {
-                vec![Value::array(
-                    inputs
-                        .into_iter()
-                        .map(|document| document.value)
-                        .collect::<Vec<_>>(),
-                )]
-            } else {
-                inputs.into_iter().map(|document| document.value).collect()
-            };
-            for input in values {
-                if !evaluate(input)? {
-                    break;
+            match load_inputs(options, stdin)? {
+                LoadedInputs::Proxy(bytes) => {
+                    let _ = evaluate(StructuredInput::Proxy(bytes))?;
+                }
+                LoadedInputs::Documents(inputs) => {
+                    let values = if options.slurp && !options.raw_input {
+                        vec![Value::array(
+                            inputs
+                                .into_iter()
+                                .map(|document| document.value)
+                                .collect::<Vec<_>>(),
+                        )]
+                    } else {
+                        inputs.into_iter().map(|document| document.value).collect()
+                    };
+                    for input in values {
+                        if !evaluate(StructuredInput::Value(input))? {
+                            break;
+                        }
+                    }
                 }
             }
         } else {
@@ -450,7 +497,12 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
     if let Some(error) = runtime_error {
         return Err(RunError::Runtime(error));
     }
-    Ok(exit_status(options.exit_status, last.as_ref()))
+    Ok(result_output.exit_status(options.exit_status, last.as_ref()))
+}
+
+enum StructuredInput {
+    Value(Value),
+    Proxy(Vec<u8>),
 }
 
 fn for_each_structured_input<R: Read, F>(
@@ -459,10 +511,10 @@ fn for_each_structured_input<R: Read, F>(
     emit: &mut F,
 ) -> Result<(), RunError>
 where
-    F: FnMut(Value) -> Result<bool, RunError>,
+    F: FnMut(StructuredInput) -> Result<bool, RunError>,
 {
     if options.null_input {
-        let _ = emit(Value::Null)?;
+        let _ = emit(StructuredInput::Value(Value::Null))?;
         return Ok(());
     }
     let files = if options.files.is_empty() {
@@ -493,8 +545,24 @@ fn for_each_structured_reader<R: Read, F>(
     emit: &mut F,
 ) -> Result<bool, RunError>
 where
-    F: FnMut(Value) -> Result<bool, RunError>,
+    F: FnMut(StructuredInput) -> Result<bool, RunError>,
 {
+    if options.proxy_on_error {
+        let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+        let documents = match decode_bytes(&bytes, identity, decode_options(options, format)) {
+            Ok(documents) => documents,
+            Err(error) if proxyable_format_error(&error) => {
+                return emit(StructuredInput::Proxy(bytes));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        for document in documents {
+            if !emit(StructuredInput::Value(document.value))? {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
     if format == InputFormat::JsonLines {
         let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
         let mut source = JsonLinesDocumentSource::new(
@@ -503,7 +571,7 @@ where
             decode_options(options, format),
         );
         while let Some(document) = source.next_document()? {
-            if !emit(document.value)? {
+            if !emit(StructuredInput::Value(document.value))? {
                 return Ok(false);
             }
         }
@@ -512,7 +580,7 @@ where
 
     let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
     for document in decode_bytes(&bytes, identity, decode_options(options, format))? {
-        if !emit(document.value)? {
+        if !emit(StructuredInput::Value(document.value))? {
             return Ok(false);
         }
     }
@@ -718,7 +786,9 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
             },
         )?;
     }
-    Ok(exit_status(options.exit_status, executor.last.as_ref()))
+    Ok(executor
+        .output
+        .exit_status(options.exit_status, executor.last.as_ref()))
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -800,10 +870,40 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
             },
         )?;
     }
-    Ok(exit_status(options.exit_status, executor.last.as_ref()))
+    Ok(executor
+        .output
+        .exit_status(options.exit_status, executor.last.as_ref()))
 }
 
 fn automatic_reader<R: Read, W: Write, E: Write, M>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    executor: &mut AutomaticExecutor<'_, W, E, M>,
+) -> Result<(), RunError> {
+    if options.proxy_on_error {
+        let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+        match validate_proxy_event_source(&bytes, identity, options, format) {
+            Ok(()) => {
+                return automatic_reader_inner(
+                    options,
+                    format,
+                    bytes.as_slice(),
+                    identity,
+                    executor,
+                );
+            }
+            Err(error) if proxyable_format_error(&error) => {
+                return executor.output.proxy(&bytes);
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    automatic_reader_inner(options, format, reader, identity, executor)
+}
+
+fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
     options: &RunOptions,
     format: InputFormat,
     reader: R,
@@ -1343,6 +1443,28 @@ fn stream_reader<R: Read, W: Write, E: Write>(
     identity: &str,
     executor: &mut StreamExecutor<'_, W, E>,
 ) -> Result<(), RunError> {
+    if options.proxy_on_error {
+        let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+        match validate_proxy_event_source(&bytes, identity, options, format) {
+            Ok(()) => {
+                return stream_reader_inner(options, format, bytes.as_slice(), identity, executor);
+            }
+            Err(error) if proxyable_format_error(&error) => {
+                return executor.output.proxy(&bytes);
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    stream_reader_inner(options, format, reader, identity, executor)
+}
+
+fn stream_reader_inner<R: Read, W: Write, E: Write>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    executor: &mut StreamExecutor<'_, W, E>,
+) -> Result<(), RunError> {
     let stream_options = StreamOptions {
         maximum_depth: options.limits.depth,
         errors_as_values: options.stream_errors,
@@ -1405,6 +1527,33 @@ fn json_lines_record_error(error: RunError, identity: &str, line: u64) -> RunErr
         }
         error => error,
     }
+}
+
+fn proxyable_format_error(error: &FormatError) -> bool {
+    matches!(
+        error,
+        FormatError::Diagnostic(_)
+            | FormatError::Parse { .. }
+            | FormatError::Probe { .. }
+            | FormatError::UnsupportedYaml(_)
+    )
+}
+
+fn validate_proxy_event_source(
+    bytes: &[u8],
+    identity: &str,
+    options: &RunOptions,
+    format: InputFormat,
+) -> Result<(), FormatError> {
+    let documents = decode_bytes(bytes, identity, decode_options(options, format))?;
+    let selected = documents.first().map_or(format, |document| document.format);
+    if selected == InputFormat::Json && documents.len() != 1 {
+        return Err(FormatError::Parse {
+            format: InputFormat::Json,
+            message: format!("{identity} requires exactly one JSON value for event input"),
+        });
+    }
+    Ok(())
 }
 
 fn stream_json_into<R: Read, W: Write, E: Write>(
@@ -1580,6 +1729,7 @@ struct ResultOutput<'a, W> {
     unframed: Option<Value>,
     written: u64,
     emitted: u64,
+    last_was_proxy: bool,
 }
 
 impl<'a, W: Write> ResultOutput<'a, W> {
@@ -1590,6 +1740,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             unframed: None,
             written: 0,
             emitted: 0,
+            last_was_proxy: false,
         }
     }
 
@@ -1597,7 +1748,17 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         if self.emitted >= self.options.limits.results {
             return Err(RunError::Resource("result-count"));
         }
+        if self.options.output_format == tq_formats::OutputFormat::Toon
+            && self.options.framing == ToonFraming::Unframed
+            && self.last_was_proxy
+        {
+            return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
+                tq_toon::CardinalityError::Multiple,
+            ))
+            .into());
+        }
         self.emitted = self.emitted.saturating_add(1);
+        self.last_was_proxy = false;
         let sorted;
         let value = if self.options.sort_keys {
             sorted = sort_value_keys(value);
@@ -1625,6 +1786,12 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         if self.options.output_format == tq_formats::OutputFormat::Toon
             && self.options.framing == ToonFraming::Unframed
         {
+            if self.emitted > 1 {
+                return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
+                    tq_toon::CardinalityError::Multiple,
+                ))
+                .into());
+            }
             if self.unframed.replace(value.clone()).is_some() {
                 return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
                     tq_toon::CardinalityError::Multiple,
@@ -1672,29 +1839,41 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         Ok(())
     }
 
+    fn proxy(&mut self, bytes: &[u8]) -> Result<(), RunError> {
+        if self.options.output_format == tq_formats::OutputFormat::Toon
+            && self.options.framing == ToonFraming::Unframed
+            && (self.emitted != 0 || self.last_was_proxy)
+        {
+            return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
+                tq_toon::CardinalityError::Multiple,
+            ))
+            .into());
+        }
+        let mut writer = LimitedWriter::new(
+            &mut self.writer,
+            &mut self.written,
+            self.options.limits.output_bytes,
+        );
+        writer.write_all(bytes).map_err(OutputError::Io)?;
+        if self.options.unbuffered {
+            writer.flush().map_err(OutputError::Io)?;
+        }
+        self.last_was_proxy = true;
+        Ok(())
+    }
+
     fn finish(&mut self) -> Result<(), RunError> {
         if self.options.output_format == tq_formats::OutputFormat::Toon
             && self.options.framing == ToonFraming::Unframed
         {
-            let mut writer = LimitedWriter::new(
-                &mut self.writer,
-                &mut self.written,
-                self.options.limits.output_bytes,
-            );
-            write_results(
-                &mut writer,
-                self.unframed.iter(),
-                OutputOptions {
-                    format: self.options.output_format,
-                    pretty_json: self.options.pretty_json,
-                    json_indent: self.options.json_indent,
-                    ascii_json: self.options.ascii_output,
-                    color_json: self.options.color == ColorMode::Always,
-                    yaml_document_start: false,
-                    toon_framing: self.options.framing,
-                    toon: self.options.toon_writer,
-                },
-            )?;
+            if self.unframed.is_some() {
+                self.flush_unframed()?;
+            } else if !self.last_was_proxy {
+                return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
+                    tq_toon::CardinalityError::Zero,
+                ))
+                .into());
+            }
         }
         if self.options.unbuffered {
             self.writer.flush()?;
@@ -1704,6 +1883,38 @@ impl<'a, W: Write> ResultOutput<'a, W> {
 
     const fn written(&self) -> u64 {
         self.written
+    }
+
+    fn exit_status(&self, requested: bool, last: Option<&Value>) -> ExitStatus {
+        if self.last_was_proxy {
+            ExitStatus::Success
+        } else {
+            exit_status(requested, last)
+        }
+    }
+
+    fn flush_unframed(&mut self) -> Result<(), RunError> {
+        let value = self.unframed.take().expect("checked unframed output");
+        let mut writer = LimitedWriter::new(
+            &mut self.writer,
+            &mut self.written,
+            self.options.limits.output_bytes,
+        );
+        write_results(
+            &mut writer,
+            [&value],
+            OutputOptions {
+                format: self.options.output_format,
+                pretty_json: self.options.pretty_json,
+                json_indent: self.options.json_indent,
+                ascii_json: self.options.ascii_output,
+                color_json: self.options.color == ColorMode::Always,
+                yaml_document_start: false,
+                toon_framing: self.options.framing,
+                toon: self.options.toon_writer,
+            },
+        )?;
+        Ok(())
     }
 }
 
@@ -1866,17 +2077,19 @@ fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
     Ok(documents.pop().expect("one document").value)
 }
 
-fn load_inputs<R: Read>(
-    options: &RunOptions,
-    stdin: &mut R,
-) -> Result<Vec<tq_formats::Document>, RunError> {
+enum LoadedInputs {
+    Documents(Vec<tq_formats::Document>),
+    Proxy(Vec<u8>),
+}
+
+fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInputs, RunError> {
     if options.null_input {
-        return Ok(vec![tq_formats::Document {
+        return Ok(LoadedInputs::Documents(vec![tq_formats::Document {
             value: Value::Null,
             identity: "<null-input>".to_owned(),
             format: InputFormat::Auto,
             index: 0,
-        }]);
+        }]));
     }
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
@@ -1884,6 +2097,8 @@ fn load_inputs<R: Read>(
         options.files.clone()
     };
     let mut documents = Vec::new();
+    let mut raw_sources = Vec::new();
+    let mut proxy = false;
     for path in files {
         let (identity, bytes) = if path == Path::new("-") {
             (
@@ -1899,10 +2114,25 @@ fn load_inputs<R: Read>(
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
         } else {
             let decode = decode_options(options, selected_input_format(options, &path));
-            documents.extend(decode_bytes(&bytes, identity, decode)?);
+            match decode_bytes(&bytes, identity, decode) {
+                Ok(decoded) => documents.extend(decoded),
+                Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
+                    proxy = true;
+                }
+                Err(error) => return Err(error.into()),
+            }
+            if options.proxy_on_error {
+                raw_sources.push(bytes);
+            }
         }
     }
-    Ok(documents)
+    if proxy {
+        Ok(LoadedInputs::Proxy(
+            raw_sources.into_iter().flatten().collect(),
+        ))
+    } else {
+        Ok(LoadedInputs::Documents(documents))
+    }
 }
 
 fn read_limited(mut reader: impl Read, limit: u64, identity: &str) -> Result<Vec<u8>, RunError> {
