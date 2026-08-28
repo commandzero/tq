@@ -309,6 +309,129 @@ fn yaml_extension_selects_yaml_input_and_short_formats_emit_block_yaml() {
 }
 
 #[test]
+fn json_lines_aliases_preserve_records_blank_lines_and_final_eof() {
+    let output = tq(
+        &["-indjson", "-ojsonl", "."],
+        b"{\"n\":9007199254740993}\n\ntrue\n[1,2]",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"{\"n\":9007199254740993}\ntrue\n[1,2]\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn json_lines_extension_override_and_mixed_files_are_ordered() {
+    let directory = tempdir().unwrap();
+    let records = directory.path().join("records.JSONL");
+    let yaml = directory.path().join("last.yaml");
+    fs::write(&records, "{\"id\":1}\n{\"id\":2}\n").unwrap();
+    fs::write(&yaml, "id: 3\n").unwrap();
+
+    let output = tq(
+        &[
+            "-ojsonl",
+            ".id",
+            records.to_str().unwrap(),
+            yaml.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"1\n2\n3\n");
+
+    let pretty_json = directory.path().join("pretty.jsonl");
+    fs::write(&pretty_json, "{\n  \"id\": 4\n}\n").unwrap();
+    let inferred = tq(&["-ojsonl", ".", pretty_json.to_str().unwrap()], b"");
+    assert_ne!(inferred.code, 0);
+    assert!(String::from_utf8_lossy(&inferred.stderr).contains("pretty.jsonl:1"));
+
+    let overridden = tq(
+        &["-ijson", "-ojsonl", ".id", pretty_json.to_str().unwrap()],
+        b"",
+    );
+    assert_eq!(overridden.code, 0);
+    assert_eq!(overridden.stdout, b"4\n");
+}
+
+#[test]
+fn ndjson_extension_enables_automatic_event_plan() {
+    let directory = tempdir().unwrap();
+    let records = directory.path().join("records.ndjson");
+    fs::write(&records, "{\"values\":[1,2]}\n{\"values\":[3]}\n").unwrap();
+
+    let output = tq(
+        &[
+            "-ojsonl",
+            "--explain-json",
+            ".values[] | numbers",
+            records.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"1\n2\n3\n");
+    let explain: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(explain["execution"]["plan"], "events");
+}
+
+#[test]
+fn json_lines_stream_resets_roots_and_late_errors_keep_prior_output() {
+    let streamed = tq(
+        &["--stream", "-ijsonl", "-ojsonl", "."],
+        b"{\"a\":1}\n{\"b\":2}\n",
+    );
+    assert_eq!(
+        streamed.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&streamed.stderr)
+    );
+    assert_eq!(
+        streamed.stdout,
+        b"[[\"a\"],1]\n[[\"a\"]]\n[[\"b\"],2]\n[[\"b\"]]\n"
+    );
+
+    let failed = tq(
+        &["-ijsonl", "-ojsonl", ".id"],
+        b"{\"id\":1}\nnot-json\n{\"id\":3}\n",
+    );
+    assert_ne!(failed.code, 0);
+    assert_eq!(failed.stdout, b"1\n");
+    let error = String::from_utf8_lossy(&failed.stderr);
+    assert!(error.contains("<stdin>:2"), "{error}");
+    assert!(!error.contains("not-json"));
+}
+
+#[test]
+fn json_lines_line_limit_is_a_resource_error_without_record_disclosure() {
+    let output = tq(
+        &["-ijsonl", "-ojsonl", "--max-line-bytes", "8", "."],
+        b"{\"secret\":123}\n",
+    );
+    assert_eq!(output.code, 5);
+    assert!(output.stdout.is_empty());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("line-bytes"));
+    assert!(error.contains("line 1"));
+    assert!(!error.contains("secret"));
+}
+
+#[test]
 fn generated_help_and_build_configuration_are_stdout_only() {
     for arguments in [&["--help"][..], &["--build-configuration"][..]] {
         let output = tq(arguments, b"");

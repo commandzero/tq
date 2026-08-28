@@ -10,7 +10,7 @@ otherwise.
 | `-n`, `--null-input` | supported | Run once with `null`; do not consume input. |
 | `-R`, `--raw-input` | supported | Read UTF-8 physical lines, or one bounded string with `--slurp`. |
 | `-s`, `--slurp` | supported | Retain ordered inputs and run once. |
-| `-c`, `--compact-output` | adapted | Compact JSON; requires `--output-format json`. |
+| `-c`, `--compact-output` | adapted | Compact JSON; requires JSON or JSON Lines output. JSON Lines is always compact. |
 | `-r`, `--raw-output` | supported | Write strings directly and other values as compact JSON. |
 | `--raw-output0` | supported | Raw output separated by NUL; a string containing NUL is rejected. |
 | `-j`, `--join-output` | supported | Raw output without separators. |
