@@ -239,9 +239,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 )]
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut profile = "smoke".to_owned();
-    let mut output = PathBuf::from("benchmarks/.work/smoke.json");
+    let archive_root = env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("benchmarks"));
+    let mut output = archive_root.join(".work/smoke.json");
     let mut manifests = Vec::new();
-    let mut cache_root = PathBuf::from("benchmarks/.work/corpus");
+    let mut cache_root = archive_root.join(".work/corpus");
     let mut origin = "frozen".to_owned();
     let mut max_samples = None;
     let mut timeout_seconds = None;
