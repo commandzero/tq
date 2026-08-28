@@ -33,7 +33,7 @@ fn explicit_executable_is_canonicalized_hashed_and_versioned() {
 }
 
 #[test]
-fn invalid_explicit_override_is_an_error_while_missing_optional_tq_is_none() {
+fn invalid_explicit_override_is_an_error_and_optional_tq_discovery_is_best_effort() {
     let temp = tempfile::tempdir().expect("temporary directory");
     let config = ExecutableConfig {
         jq: Some(PathBuf::from("does-not-exist")),
