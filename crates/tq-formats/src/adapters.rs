@@ -259,11 +259,7 @@ fn decode_json_line(
     physical_line: u64,
     options: DecodeOptions,
 ) -> Result<Value, FormatError> {
-    let json = serde_json::from_slice(bytes).map_err(|error| FormatError::Parse {
-        format: InputFormat::JsonLines,
-        message: format!("{identity}:{physical_line}: {error}"),
-    })?;
-    let value = Value::from_json(json).map_err(|error| FormatError::Parse {
+    let value = serde_json::from_slice(bytes).map_err(|error| FormatError::Parse {
         format: InputFormat::JsonLines,
         message: format!("{identity}:{physical_line}: {error}"),
     })?;
@@ -472,14 +468,10 @@ pub fn decode_json(
 ) -> Result<Vec<Document>, FormatError> {
     let identity = identity.into();
     serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
+        .into_iter::<Value>()
         .enumerate()
-        .map(|(index, json)| {
-            let json = json.map_err(|error| FormatError::Parse {
-                format: InputFormat::Json,
-                message: error.to_string(),
-            })?;
-            let value = Value::from_json(json).map_err(|error| FormatError::Parse {
+        .map(|(index, value)| {
+            let value = value.map_err(|error| FormatError::Parse {
                 format: InputFormat::Json,
                 message: error.to_string(),
             })?;

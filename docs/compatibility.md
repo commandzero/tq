@@ -10,6 +10,16 @@ intermediate results, and output produced before a later error.
 Run `tq --help` for the current switches. Run `tq --explain-json FILTER` to see
 the plan and what it retains in memory.
 
+Identity JSON or strict TOON input written as canonical TOON may select the
+`transcode` plan. This is an execution optimization, not a language extension:
+bytes must match forced document execution for inputs without duplicate object
+names. Streaming JSON cannot apply jq's last-value/first-position normalization
+after publishing an earlier member. A duplicate therefore rejects the current
+record. Sequence framing may leave that final record incomplete; unframed output
+publishes nothing. Strict TOON also rejects duplicate paths. Safe key folding,
+sorted-key output, explicit jq stream input, slurp, raw/joined output,
+proxy-on-error, non-TOON output, and non-identity filters use the existing plans.
+
 ## Input and output
 
 The format detector reads a bounded prefix. It prefers canonical TOON. A JSON

@@ -3,7 +3,11 @@
 use std::{cmp::Ordering, fmt, sync::Arc};
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    de::{self, MapAccess, SeqAccess, Visitor},
+    ser::{SerializeMap, SerializeSeq},
+};
 
 use crate::{Number, NumberError};
 
@@ -233,9 +237,26 @@ impl Serialize for Value {
     where
         S: serde::Serializer,
     {
-        self.to_json()
-            .map_err(serde::ser::Error::custom)?
-            .serialize(serializer)
+        match self {
+            Self::Null => serializer.serialize_unit(),
+            Self::Bool(value) => serializer.serialize_bool(*value),
+            Self::Number(value) => value.serialize(serializer),
+            Self::String(value) => serializer.serialize_str(value),
+            Self::Array(values) => {
+                let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+                for value in values.iter() {
+                    sequence.serialize_element(value)?;
+                }
+                sequence.end()
+            }
+            Self::Object(values) => {
+                let mut map = serializer.serialize_map(Some(values.len()))?;
+                for (key, value) in values.iter() {
+                    map.serialize_entry(key.as_ref(), value)?;
+                }
+                map.end()
+            }
+        }
     }
 }
 
@@ -244,8 +265,111 @@ impl<'de> Deserialize<'de> for Value {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        Self::from_json(value).map_err(serde::de::Error::custom)
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
+struct ValueVisitor;
+
+impl ValueVisitor {
+    fn number<E: de::Error>(source: &str) -> Result<Value, E> {
+        Number::parse(source).map(Value::Number).map_err(E::custom)
+    }
+}
+
+impl<'de> Visitor<'de> for ValueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON-shaped value")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(Value::Bool(value))
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Self::number(&value.to_string())
+    }
+
+    fn visit_i128<E: de::Error>(self, value: i128) -> Result<Self::Value, E> {
+        Self::number(&value.to_string())
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Self::number(&value.to_string())
+    }
+
+    fn visit_u128<E: de::Error>(self, value: u128) -> Result<Self::Value, E> {
+        Self::number(&value.to_string())
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        Number::from_f64(value)
+            .map(Value::Number)
+            .map_err(E::custom)
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(Value::string(value))
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Ok(Value::string(value))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(self)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let mut values = Vec::with_capacity(sequence.size_hint().unwrap_or(0));
+        while let Some(value) = sequence.next_element()? {
+            values.push(value);
+        }
+        Ok(Value::array(values))
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let Some(first_key) = map.next_key::<String>()? else {
+            return Ok(Value::object(Object::new()));
+        };
+        if first_key == SERDE_JSON_NUMBER_TOKEN {
+            let literal = map.next_value::<String>()?;
+            if map.next_key::<de::IgnoredAny>()?.is_some() {
+                return Err(de::Error::invalid_length(
+                    2,
+                    &"one arbitrary-precision number token",
+                ));
+            }
+            return Self::number(&literal);
+        }
+
+        let mut values = Object::with_capacity(map.size_hint().unwrap_or(0).saturating_add(1));
+        values.insert(Arc::from(first_key), map.next_value()?);
+        while let Some((key, value)) = map.next_entry::<String, Value>()? {
+            values.insert(Arc::from(key), value);
+        }
+        Ok(Value::object(values))
     }
 }
 
@@ -356,5 +480,35 @@ mod tests {
                 assert_eq!(converted.to_string(), value.to_string());
             }
         }
+    }
+
+    #[test]
+    fn direct_serde_round_trip_preserves_order_and_exact_numbers() {
+        let source = r#"{"z":9007199254740993,"a":[1e1000000,-0.0,"x"]}"#;
+        let value: Value = serde_json::from_str(source).unwrap();
+        let Value::Object(object) = &value else {
+            panic!("expected object")
+        };
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+            ["z", "a"]
+        );
+        assert_eq!(
+            serde_json::to_string(&value).unwrap(),
+            r#"{"z":9007199254740993,"a":[1e+1000000,0,"x"]}"#
+        );
+    }
+
+    #[test]
+    fn direct_deserializer_keeps_first_position_and_last_duplicate_value() {
+        let value: Value = serde_json::from_str(r#"{"b":1,"a":2,"b":3}"#).unwrap();
+        let Value::Object(object) = value else {
+            panic!("expected object")
+        };
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+            ["b", "a"]
+        );
+        assert_eq!(object["b"], Value::Number(Number::parse("3").unwrap()));
     }
 }

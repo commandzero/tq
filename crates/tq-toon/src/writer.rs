@@ -5,6 +5,8 @@ use std::io::{self, Write};
 use thiserror::Error;
 use tq_core::{Object, Value};
 
+const INDENT: &[u8; 64] = b"                                                                ";
+
 /// Delimiter used by inline and tabular arrays.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Delimiter {
@@ -78,9 +80,16 @@ pub enum WriterError {
 }
 
 /// Encodes one standalone value with no trailing newline.
+///
+/// # Panics
+///
+/// Panics only if writing UTF-8 TOON bytes to an in-memory `Vec<u8>` fails or
+/// the encoder violates its UTF-8 output invariant.
 #[must_use]
 pub fn encode(value: &Value, config: WriterConfig) -> String {
-    Encoder::new(config).encode(value)
+    let mut output = Vec::new();
+    write_value(&mut output, value, config).expect("writing TOON to memory cannot fail");
+    String::from_utf8(output).expect("TOON output is UTF-8")
 }
 
 /// Writes one standalone value with no trailing newline.
@@ -93,37 +102,47 @@ pub fn write_value<W: Write>(
     value: &Value,
     config: WriterConfig,
 ) -> Result<(), WriterError> {
-    writer.write_all(encode(value, config).as_bytes())?;
-    Ok(())
+    Encoder::new(&mut writer, config).encode(value)
 }
 
-struct Encoder {
+struct Encoder<W> {
     config: WriterConfig,
-    lines: Vec<String>,
+    writer: W,
+    wrote_line: bool,
 }
 
-impl Encoder {
-    fn new(config: WriterConfig) -> Self {
+impl<W: Write> Encoder<W> {
+    fn new(writer: W, config: WriterConfig) -> Self {
         Self {
             config,
-            lines: Vec::new(),
+            writer,
+            wrote_line: false,
         }
     }
 
-    fn encode(mut self, value: &Value) -> String {
+    fn encode(&mut self, value: &Value) -> Result<(), WriterError> {
         match value {
-            Value::Object(object) => self.object(object, 0, true),
-            Value::Array(values) => self.array(None, values, 0, None, 1),
-            _ => self.lines.push(self.scalar(value, ScalarContext::Root)),
+            Value::Object(object) => self.object(object, 0, true)?,
+            Value::Array(values) => self.array(None, values, 0, None, 1)?,
+            _ => {
+                self.start_line(0, None)?;
+                self.write_scalar(value, ScalarContext::Root)?;
+            }
         }
-        self.lines.join("\n")
+        Ok(())
     }
 
-    fn object(&mut self, object: &Object, depth: usize, allow_folding: bool) {
+    fn object(
+        &mut self,
+        object: &Object,
+        depth: usize,
+        allow_folding: bool,
+    ) -> Result<(), WriterError> {
         for (key, value) in object {
             let member_folding = allow_folding && self.fold_allowed(object, key, value);
-            self.member(key, value, depth, None, member_folding);
+            self.member(key, value, depth, None, member_folding)?;
         }
+        Ok(())
     }
 
     fn member(
@@ -133,7 +152,7 @@ impl Encoder {
         depth: usize,
         prefix: Option<&str>,
         allow_folding: bool,
-    ) {
+    ) -> Result<(), WriterError> {
         let (folded_key, folded_value) = if allow_folding {
             self.folded(key, value)
         } else {
@@ -141,26 +160,25 @@ impl Encoder {
         };
         let folded_here = folded_key != key;
         let key = Self::key(&folded_key);
-        let mut head = self.indent(depth);
-        head.push_str(prefix.unwrap_or(""));
         let logical_depth = depth + usize::from(prefix.is_some());
         match folded_value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                head.push_str(&key);
-                head.push_str(": ");
-                head.push_str(&self.scalar(folded_value, ScalarContext::Object));
-                self.lines.push(head);
+                self.start_line(depth, prefix)?;
+                self.writer.write_all(key.as_bytes())?;
+                self.writer.write_all(b": ")?;
+                self.write_scalar(folded_value, ScalarContext::Object)?;
             }
             Value::Object(object) => {
-                head.push_str(&key);
-                head.push(':');
-                self.lines.push(head);
-                self.object(object, logical_depth + 1, allow_folding && !folded_here);
+                self.start_line(depth, prefix)?;
+                self.writer.write_all(key.as_bytes())?;
+                self.writer.write_all(b":")?;
+                self.object(object, logical_depth + 1, allow_folding && !folded_here)?;
             }
             Value::Array(values) => {
-                self.array(Some(&key), values, depth, prefix, logical_depth + 1);
+                self.array(Some(&key), values, depth, prefix, logical_depth + 1)?;
             }
         }
+        Ok(())
     }
 
     fn folded<'a>(&self, first: &str, value: &'a Value) -> (String, &'a Value) {
@@ -201,97 +219,100 @@ impl Encoder {
         depth: usize,
         prefix: Option<&str>,
         content_depth: usize,
-    ) {
-        let mut head = self.indent(depth);
-        head.push_str(prefix.unwrap_or(""));
+    ) -> Result<(), WriterError> {
+        self.start_line(depth, prefix)?;
         if let Some(key) = key {
-            head.push_str(key);
+            self.writer.write_all(key.as_bytes())?;
         }
-        head.push('[');
-        head.push_str(&values.len().to_string());
-        head.push_str(self.config.delimiter.header_suffix());
-        head.push(']');
+        write!(
+            self.writer,
+            "[{}{}]",
+            values.len(),
+            self.config.delimiter.header_suffix()
+        )?;
 
         if values.iter().all(is_scalar) {
-            head.push(':');
+            self.writer.write_all(b":")?;
             if !values.is_empty() {
-                head.push(' ');
-                let delimiter = self.config.delimiter.character().to_string();
-                head.push_str(
-                    &values
-                        .iter()
-                        .map(|value| self.scalar(value, ScalarContext::Array))
-                        .collect::<Vec<_>>()
-                        .join(&delimiter),
-                );
+                self.writer.write_all(b" ")?;
+                for (index, value) in values.iter().enumerate() {
+                    if index != 0 {
+                        write!(self.writer, "{}", self.config.delimiter.character())?;
+                    }
+                    self.write_scalar(value, ScalarContext::Array)?;
+                }
             }
-            self.lines.push(head);
-            return;
+            return Ok(());
         }
 
         if let Some(fields) = tabular_fields(values) {
-            head.push('{');
-            let delimiter = self.config.delimiter.character().to_string();
-            head.push_str(
-                &fields
-                    .iter()
-                    .map(|field| Self::key(field))
-                    .collect::<Vec<_>>()
-                    .join(&delimiter),
-            );
-            head.push_str("}:");
-            self.lines.push(head);
+            self.writer.write_all(b"{")?;
+            for (index, field) in fields.iter().enumerate() {
+                if index != 0 {
+                    write!(self.writer, "{}", self.config.delimiter.character())?;
+                }
+                self.writer.write_all(Self::key(field).as_bytes())?;
+            }
+            self.writer.write_all(b"}:")?;
             for value in values {
                 let Value::Object(object) = value else {
                     unreachable!("tabular eligibility checked")
                 };
-                let mut row = self.indent(content_depth);
-                row.push_str(
-                    &fields
-                        .iter()
-                        .map(|field| self.scalar(&object[*field], ScalarContext::Array))
-                        .collect::<Vec<_>>()
-                        .join(&delimiter),
-                );
-                self.lines.push(row);
+                self.start_line(content_depth, None)?;
+                for (index, field) in fields.iter().enumerate() {
+                    if index != 0 {
+                        write!(self.writer, "{}", self.config.delimiter.character())?;
+                    }
+                    self.write_scalar(&object[*field], ScalarContext::Array)?;
+                }
             }
-            return;
+            return Ok(());
         }
 
-        head.push(':');
-        self.lines.push(head);
+        self.writer.write_all(b":")?;
         for value in values {
             match value {
                 Value::Object(object) if object.is_empty() => {
-                    let mut line = self.indent(content_depth);
-                    line.push('-');
-                    self.lines.push(line);
+                    self.start_line(content_depth, None)?;
+                    self.writer.write_all(b"-")?;
                 }
                 Value::Object(object) => {
                     let mut members = object.iter();
                     let (first, value) = members.next().expect("non-empty object");
                     let allow_folding = self.fold_allowed(object, first, value);
-                    self.member(first, value, content_depth, Some("- "), allow_folding);
+                    self.member(first, value, content_depth, Some("- "), allow_folding)?;
                     for (key, value) in members {
                         let allow_folding = self.fold_allowed(object, key, value);
-                        self.member(key, value, content_depth + 1, None, allow_folding);
+                        self.member(key, value, content_depth + 1, None, allow_folding)?;
                     }
                 }
                 Value::Array(nested) => {
-                    self.array(None, nested, content_depth, Some("- "), content_depth + 1);
+                    self.array(None, nested, content_depth, Some("- "), content_depth + 1)?;
                 }
                 _ => {
-                    let mut line = self.indent(content_depth);
-                    line.push_str("- ");
-                    line.push_str(&self.scalar(value, ScalarContext::Array));
-                    self.lines.push(line);
+                    self.start_line(content_depth, Some("- "))?;
+                    self.write_scalar(value, ScalarContext::Array)?;
                 }
             }
         }
+        Ok(())
     }
 
-    fn indent(&self, depth: usize) -> String {
-        " ".repeat(depth.saturating_mul(self.config.indent_size))
+    fn start_line(&mut self, depth: usize, prefix: Option<&str>) -> Result<(), WriterError> {
+        if self.wrote_line {
+            self.writer.write_all(b"\n")?;
+        }
+        self.wrote_line = true;
+        let mut spaces = depth.saturating_mul(self.config.indent_size);
+        while spaces != 0 {
+            let count = spaces.min(INDENT.len());
+            self.writer.write_all(&INDENT[..count])?;
+            spaces -= count;
+        }
+        if let Some(prefix) = prefix {
+            self.writer.write_all(prefix.as_bytes())?;
+        }
+        Ok(())
     }
 
     fn key(key: &str) -> String {
@@ -316,6 +337,12 @@ impl Encoder {
             }
             Value::Array(_) | Value::Object(_) => unreachable!("scalar context"),
         }
+    }
+
+    fn write_scalar(&mut self, value: &Value, context: ScalarContext) -> Result<(), WriterError> {
+        self.writer
+            .write_all(self.scalar(value, context).as_bytes())?;
+        Ok(())
     }
 }
 
@@ -408,7 +435,7 @@ fn identifier_segment(value: &str) -> bool {
 }
 
 pub(crate) fn encode_array_scalar(value: &Value, config: WriterConfig) -> String {
-    Encoder::new(config).scalar(value, ScalarContext::Array)
+    Encoder::new(io::sink(), config).scalar(value, ScalarContext::Array)
 }
 
 pub(crate) fn encode_tabular_row(
@@ -416,7 +443,7 @@ pub(crate) fn encode_tabular_row(
     fields: &[std::sync::Arc<str>],
     config: WriterConfig,
 ) -> String {
-    let encoder = Encoder::new(config);
+    let encoder = Encoder::new(io::sink(), config);
     let delimiter = config.delimiter.character().to_string();
     fields
         .iter()
@@ -426,29 +453,47 @@ pub(crate) fn encode_tabular_row(
 }
 
 pub(crate) fn encode_list_item(value: &Value, config: WriterConfig) -> String {
-    let mut encoder = Encoder::new(config);
-    match value {
-        Value::Object(object) if object.is_empty() => encoder.lines.push("-".to_owned()),
-        Value::Object(object) => {
-            let mut members = object.iter();
-            let (first, value) = members.next().expect("non-empty object");
-            let allow_folding = encoder.fold_allowed(object, first, value);
-            encoder.member(first, value, 0, Some("- "), allow_folding);
-            for (key, value) in members {
-                let allow_folding = encoder.fold_allowed(object, key, value);
-                encoder.member(key, value, 1, None, allow_folding);
+    let mut output = Vec::new();
+    {
+        let mut encoder = Encoder::new(&mut output, config);
+        match value {
+            Value::Object(object) if object.is_empty() => {
+                encoder
+                    .start_line(0, Some("-"))
+                    .expect("writing TOON to memory cannot fail");
+            }
+            Value::Object(object) => {
+                let mut members = object.iter();
+                let (first, value) = members.next().expect("non-empty object");
+                let allow_folding = encoder.fold_allowed(object, first, value);
+                encoder
+                    .member(first, value, 0, Some("- "), allow_folding)
+                    .expect("writing TOON to memory cannot fail");
+                for (key, value) in members {
+                    let allow_folding = encoder.fold_allowed(object, key, value);
+                    encoder
+                        .member(key, value, 1, None, allow_folding)
+                        .expect("writing TOON to memory cannot fail");
+                }
+            }
+            Value::Array(values) => encoder
+                .array(None, values, 0, Some("- "), 1)
+                .expect("writing TOON to memory cannot fail"),
+            _ => {
+                encoder
+                    .start_line(0, Some("- "))
+                    .expect("writing TOON to memory cannot fail");
+                encoder
+                    .write_scalar(value, ScalarContext::Array)
+                    .expect("writing TOON to memory cannot fail");
             }
         }
-        Value::Array(values) => encoder.array(None, values, 0, Some("- "), 1),
-        _ => encoder
-            .lines
-            .push(format!("- {}", encoder.scalar(value, ScalarContext::Array))),
     }
-    encoder.lines.join("\n")
+    String::from_utf8(output).expect("TOON output is UTF-8")
 }
 
 pub(crate) fn render_key(key: &str) -> String {
-    Encoder::key(key)
+    Encoder::<io::Sink>::key(key)
 }
 
 #[cfg(test)]

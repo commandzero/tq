@@ -4,7 +4,7 @@ use std::{collections::VecDeque, io::BufRead, sync::Arc};
 
 use tq_core::{Number, SourceId, SourcePosition, Span};
 
-use crate::{DecodeError, DecoderConfig, Event, Scalar};
+use crate::{DecodeError, DecoderCapabilities, DecoderConfig, Event, Scalar};
 
 /// Incremental decoder retaining only one physical line, active container
 /// state, tabular schemas, and pending events.
@@ -83,6 +83,12 @@ struct DecodedKey {
 }
 
 impl<R: BufRead> Decoder<R> {
+    /// Structural behavior known before input consumption.
+    #[must_use]
+    pub const fn capabilities() -> DecoderCapabilities {
+        DecoderCapabilities::strict_toon()
+    }
+
     /// Creates a strict bounded decoder over a buffered reader.
     #[must_use]
     pub fn new(reader: R, source: SourceId, config: DecoderConfig) -> Self {

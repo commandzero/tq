@@ -56,6 +56,8 @@ impl QueryPhase for Compiled {
     reason = "orthogonal analysis effects intentionally compose independently"
 )]
 pub struct Capabilities {
+    /// Proven to return each input unchanged exactly once.
+    pub semantic_identity: bool,
     /// Can consume event path/value records.
     pub event_stream: bool,
     /// Requires a complete subtree.
@@ -89,6 +91,8 @@ pub struct CapabilityCause {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Effect {
+    /// Returns each input unchanged exactly once.
+    SemanticIdentity,
     /// Event-stream compatible.
     EventStream,
     /// Retains a subtree.
@@ -119,6 +123,8 @@ pub enum Effect {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanKind {
+    /// Query-independent structural identity transcode.
+    Transcode,
     /// Decoder-event execution without retaining a complete value.
     Events,
     /// One independently bounded subtree at a time.
@@ -135,6 +141,7 @@ pub enum PlanKind {
 impl std::fmt::Display for PlanKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
+            Self::Transcode => "transcode",
             Self::Events => "events",
             Self::Subtree => "subtree",
             Self::Document => "document",
@@ -142,6 +149,68 @@ impl std::fmt::Display for PlanKind {
             Self::Blocking => "blocking-document",
         })
     }
+}
+
+/// Input syntax admitted by a structural transcode proof.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TranscodeInput {
+    /// JSON streamed in encounter order, with duplicate names rejected late.
+    Json,
+    /// Strict TOON with duplicate rejection.
+    Toon,
+}
+
+/// Decoder duplicate behavior carried by a structural transcode plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TranscodeDuplicatePolicy {
+    /// A repeated object path rejects the current document.
+    Reject,
+}
+
+/// Output publication commitment carried by a transcode plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TranscodeCommitment {
+    /// Record-separator framing permits completed records to publish directly.
+    DirectSequence,
+    /// Bytes remain private until exactly one successful result is known.
+    AtomicUnframed,
+}
+
+/// Finite resource proof attached before structural decoding begins.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct TranscodeLimits {
+    /// Aggregate preparation memory.
+    pub maximum_memory_bytes: u64,
+    /// Aggregate temporary spool bytes.
+    pub maximum_spool_bytes: u64,
+    /// Aggregate rendered output bytes.
+    pub maximum_output_bytes: u64,
+    /// Maximum structural nesting.
+    pub maximum_depth: usize,
+    /// Maximum decoded bytes in one scalar or key token.
+    pub maximum_token_bytes: usize,
+}
+
+/// Complete output-aware proof required to bypass jq bytecode execution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct TranscodeProof {
+    /// Proven source syntax and decoder semantics.
+    pub input: TranscodeInput,
+    /// Decoder duplicate-name behavior.
+    pub duplicate_policy: TranscodeDuplicatePolicy,
+    /// Whether structural failure may follow emitted events.
+    pub late_errors: bool,
+    /// Canonical TOON writer is selected.
+    pub canonical_toon_writer: bool,
+    /// Collision-prone key folding is disabled.
+    pub key_folding_disabled: bool,
+    /// Publication behavior selected for the output framing.
+    pub commitment: TranscodeCommitment,
+    /// Configured finite resource bounds.
+    pub limits: TranscodeLimits,
 }
 
 /// Proof attached to an automatic bounded-retention plan.
@@ -174,6 +243,10 @@ pub struct Analysis {
     pub stream_proof: Option<StreamProof>,
     /// Stable reason decoder-backed automatic planning was not selected.
     pub stream_rejection: Option<String>,
+    /// Output-aware structural transcode proof, when selected by the host.
+    pub transcode_proof: Option<TranscodeProof>,
+    /// Stable reason structural identity transcode was not selected.
+    pub transcode_rejection: Option<String>,
 }
 
 /// One canonical module admitted during pre-input resolution.
@@ -393,6 +466,10 @@ impl Program<Compiled> {
     /// be reconstructed or validated.
     pub fn automatic_plan(self) -> Result<AutomaticPlan, Box<Diagnostic>> {
         match self.inner.analysis.selected_plan {
+            PlanKind::Transcode => Err(plan_error(
+                "TQ-CAP-TRANSCODE-002",
+                "transcode selection requires an output-aware proof",
+            )),
             PlanKind::Events | PlanKind::Subtree => {
                 let lowering = automatic_lowering(&self.inner.ast).ok_or_else(|| {
                     plan_error(
@@ -412,6 +489,7 @@ impl Program<Compiled> {
                 let plan = Plan {
                     program: self,
                     automatic: execution,
+                    transcode: None,
                     mode: PhantomData,
                 };
                 Ok(
@@ -421,6 +499,7 @@ impl Program<Compiled> {
                         AutomaticPlan::Subtree(Plan {
                             program: plan.program,
                             automatic: plan.automatic,
+                            transcode: None,
                             mode: PhantomData,
                         })
                     },
@@ -438,6 +517,7 @@ impl Program<Compiled> {
         Plan {
             program: self,
             automatic: None,
+            transcode: None,
             mode: PhantomData,
         }
     }
@@ -459,6 +539,7 @@ impl Program<Compiled> {
         Ok(Plan {
             program: self,
             automatic: None,
+            transcode: None,
             mode: PhantomData,
         })
     }
@@ -480,6 +561,7 @@ impl Program<Compiled> {
         Ok(Plan {
             program: self,
             automatic: None,
+            transcode: None,
             mode: PhantomData,
         })
     }
@@ -499,6 +581,7 @@ impl Program<Compiled> {
         Ok(Plan {
             program: self,
             automatic: None,
+            transcode: None,
             mode: PhantomData,
         })
     }
@@ -519,6 +602,44 @@ impl Program<Compiled> {
         Ok(Plan {
             program: self,
             automatic: None,
+            transcode: None,
+            mode: PhantomData,
+        })
+    }
+
+    /// Constructs an output-aware identity transcode plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pre-input diagnostic unless identity, decoder, writer, framing,
+    /// and finite resource properties have all been proved.
+    pub fn transcode_plan(
+        self,
+        proof: TranscodeProof,
+    ) -> Result<Plan<Compiled, Transcode>, Box<Diagnostic>> {
+        if !self.capabilities().semantic_identity {
+            return Err(plan_error(
+                "TQ-CAP-TRANSCODE-001",
+                "query is not proven to emit its input unchanged exactly once",
+            ));
+        }
+        if !proof.canonical_toon_writer || !proof.key_folding_disabled {
+            return Err(plan_error(
+                "TQ-CAP-TRANSCODE-003",
+                "writer options do not admit canonical structural transcode",
+            ));
+        }
+        let expected_policy = TranscodeDuplicatePolicy::Reject;
+        if proof.duplicate_policy != expected_policy {
+            return Err(plan_error(
+                "TQ-CAP-TRANSCODE-004",
+                "decoder or resource proof is inconsistent",
+            ));
+        }
+        Ok(Plan {
+            program: self,
+            automatic: None,
+            transcode: Some(proof),
             mode: PhantomData,
         })
     }
@@ -540,6 +661,9 @@ pub struct Subtree;
 /// All-documents execution marker.
 #[derive(Clone, Copy, Debug)]
 pub struct WholeInput;
+/// Query-independent structural identity transcode marker.
+#[derive(Clone, Copy, Debug)]
+pub struct Transcode;
 /// Blocking execution wrapper around another input mode.
 #[derive(Clone, Copy, Debug)]
 pub struct Blocking<M>(PhantomData<M>);
@@ -549,6 +673,7 @@ pub struct Blocking<M>(PhantomData<M>);
 pub struct Plan<P: QueryPhase, M> {
     program: Program<P>,
     automatic: Option<AutomaticExecution>,
+    transcode: Option<TranscodeProof>,
     mode: PhantomData<M>,
 }
 
@@ -615,6 +740,12 @@ impl<M> Plan<Compiled, M> {
         self.automatic
             .as_ref()
             .is_some_and(|plan| plan.scalar_events_only)
+    }
+
+    /// Output-aware proof attached to a structural transcode plan.
+    #[must_use]
+    pub const fn transcode_proof(&self) -> Option<&TranscodeProof> {
+        self.transcode.as_ref()
     }
 }
 
@@ -782,7 +913,28 @@ fn scalar_event_filter(expr: &Expr) -> bool {
 mod tests {
     use crate::{AnalysisContext, ResolveOptions, analyze_with_context, parse, resolve};
 
-    use super::{Analysis, AutomaticPlan, Capabilities, PlanKind};
+    use super::{
+        Analysis, AutomaticPlan, Capabilities, PlanKind, TranscodeCommitment,
+        TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits, TranscodeProof,
+    };
+
+    fn json_transcode_proof() -> TranscodeProof {
+        TranscodeProof {
+            input: TranscodeInput::Json,
+            duplicate_policy: TranscodeDuplicatePolicy::Reject,
+            late_errors: true,
+            canonical_toon_writer: true,
+            key_folding_disabled: true,
+            commitment: TranscodeCommitment::DirectSequence,
+            limits: TranscodeLimits {
+                maximum_memory_bytes: 1024,
+                maximum_spool_bytes: 4096,
+                maximum_output_bytes: 4096,
+                maximum_depth: 16,
+                maximum_token_bytes: 1024,
+            },
+        }
+    }
 
     #[test]
     fn document_requirement_rejects_event_plan_before_input() {
@@ -869,5 +1021,29 @@ mod tests {
             whole.compile().unwrap().automatic_plan().unwrap(),
             AutomaticPlan::WholeInput(_)
         ));
+    }
+
+    #[test]
+    fn typed_transcode_requires_identity_and_consistent_io_proofs() {
+        let identity =
+            crate::analyze(resolve(parse(".").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap();
+        let plan = identity.transcode_plan(json_transcode_proof()).unwrap();
+        assert_eq!(plan.transcode_proof(), Some(&json_transcode_proof()));
+
+        let non_identity =
+            crate::analyze(resolve(parse(".x").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap();
+        assert!(non_identity.transcode_plan(json_transcode_proof()).is_err());
+
+        let identity =
+            crate::analyze(resolve(parse(".").unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap();
+        let mut inconsistent = json_transcode_proof();
+        inconsistent.canonical_toon_writer = false;
+        assert!(identity.transcode_plan(inconsistent).is_err());
     }
 }

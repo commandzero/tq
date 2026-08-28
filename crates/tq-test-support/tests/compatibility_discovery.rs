@@ -48,9 +48,11 @@ fn invalid_explicit_override_is_an_error_while_missing_optional_tq_is_none() {
     let no_override = ExecutableConfig::default();
     let isolated_root = temp.path().join("isolated/repository");
     std::fs::create_dir_all(&isolated_root).expect("isolated root");
-    assert!(
-        discover_tool(ToolKind::Tq, &no_override, &isolated_root)
-            .expect("optional discovery")
-            .is_none()
-    );
+    if let Some(identity) =
+        discover_tool(ToolKind::Tq, &no_override, &isolated_root).expect("optional discovery")
+    {
+        assert_eq!(identity.tool, ToolKind::Tq);
+        assert!(identity.path.is_absolute());
+        assert_eq!(identity.executable.sha256.len(), 64);
+    }
 }

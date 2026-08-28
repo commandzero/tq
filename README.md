@@ -65,16 +65,40 @@ tq --stream --input-format json \
 ```
 
 `--explain` and `--explain-json` show the query plan and its memory limits.
-Plans fall into five classes: event, subtree, document, whole-input, and
-blocking. A document plan retains one decoded document, while slurp retains
-every input document. Sorting, uniqueness, and final reductions need blocking
-state. A fold keeps one immutable accumulator plus bounded evaluator state.
+Plans fall into six classes: transcode, event, subtree, document, whole-input,
+and blocking. For the semantic identity query `.` with JSON or strict TOON
+input and canonical TOON output, the output-aware planner selects `transcode`.
+It bypasses jq bytecode and uses one bounded preparation arena. The JSON path
+writes object members as they arrive. If a later member repeats a name, transcode
+rejects the current record instead of applying jq's last-value normalization.
+Sequence output may already contain part of that record; unframed output remains
+empty. Safe key folding, sorted keys, raw or joined output, slurp, explicit jq
+stream mode, non-TOON output, and non-identity queries fall back to their existing
+plans.
+
+A document plan retains one decoded document, while slurp retains every input
+document. Sorting, uniqueness, and final reductions need blocking state. A fold
+keeps one immutable accumulator plus bounded evaluator state. Transcode may
+spill array preparation or atomic unframed publication to private temporary
+files. Sequence output can preserve completed records before a later error;
+unframed output publishes nothing until exactly one successful result is known.
 
 The resource controls are `--max-input-bytes`, `--max-depth`,
 `--max-token-bytes`, `--max-line-bytes`, `--max-lookahead-bytes`,
 `--max-vm-steps`, `--max-results`, `--max-output-bytes`,
 `--prepare-memory-bytes`, and `--max-spool-bytes`. The evaluator checks for
 SIGINT between units of work. A closed downstream pipe exits successfully.
+`--report-file` records transcode preparation high-water bytes, object-index
+spills, array preparations, spool bytes written and replayed, and the final
+resource outcome. `--explain-json` includes the identity proof, decoder
+duplicate policy, commitment mode, retained state, configured limits, and any
+deterministic transcode fallback reason. JSON explanations also state the
+duplicate-key limitation.
+
+Transcode reports record the selected input format, whether selection came from
+an override or detection, each bounded probe's inspected and commitment bytes,
+and rejected probe candidates. Input staging counters are explicitly zero for
+the single-pass transcode plan.
 
 ## Compatibility and benchmarks
 

@@ -6,6 +6,7 @@ use serde_json::Value as JsonValue;
 use tq_core::{SourceId, Value};
 use tq_toon::{
     DecoderConfig, Delimiter, KeyFolding, PathExpansion, WriterConfig, decode_to_value, encode,
+    write_value,
 };
 
 fn fixture_files() -> Vec<PathBuf> {
@@ -50,12 +51,21 @@ fn canonical_writer_matches_every_official_encode_fixture() {
             };
             let value = Value::from_json(test["input"].clone()).unwrap();
             let actual = encode(&value, config);
+            let mut sink_output = Vec::new();
+            write_value(&mut sink_output, &value, config).unwrap();
             assert_eq!(
                 actual,
                 test["expected"].as_str().unwrap(),
                 "{}",
                 test["name"].as_str().unwrap()
             );
+            assert_eq!(
+                sink_output,
+                test["expected"].as_str().unwrap().as_bytes(),
+                "{} sink output",
+                test["name"].as_str().unwrap()
+            );
+            assert!(!sink_output.ends_with(b"\n"));
             let name = test["name"].as_str().unwrap();
             if name == "skips folding on sibling literal-key collision (safe mode)" {
                 exercised += 1;

@@ -4,9 +4,9 @@ mod args;
 mod runner;
 
 pub use args::{
-    CapabilityPolicy, CliError, ColorMode, Command, ExplainFormat, ExternalArgument,
-    ExternalArgumentKind, FilterSource, PositionalArgumentKind, ResourceLimits, RunOptions,
-    generated_help, parse_args, parse_args_with_policy,
+    CapabilityPolicy, CliError, ColorMode, Command, ExecutionOverride, ExplainFormat,
+    ExternalArgument, ExternalArgumentKind, FilterSource, PositionalArgumentKind, ResourceLimits,
+    RunOptions, generated_help, parse_args, parse_args_with_policy,
 };
 pub use runner::{RunError, run, run_with_io};
 pub use tq_formats::JsonIndent;

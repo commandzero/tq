@@ -5,7 +5,7 @@ use std::{borrow::Borrow, io::Write};
 use thiserror::Error;
 use tq_core::Value;
 
-use crate::{WriterConfig, encode};
+use crate::{WriterConfig, WriterError, write_value};
 
 /// Exactly-one output cardinality failure.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
@@ -46,7 +46,7 @@ where
 {
     for value in values {
         writer.write_all(b"\x1e")?;
-        writer.write_all(encode(value.borrow(), config).as_bytes())?;
+        write_value(&mut writer, value.borrow(), config).map_err(|WriterError::Io(error)| error)?;
         writer.write_all(b"\n")?;
     }
     Ok(())
@@ -75,7 +75,7 @@ where
     if values.next().is_some() {
         return Err(CardinalityError::Multiple.into());
     }
-    writer.write_all(encode(first.borrow(), config).as_bytes())?;
+    write_value(&mut writer, first.borrow(), config).map_err(|WriterError::Io(error)| error)?;
     Ok(())
 }
 
