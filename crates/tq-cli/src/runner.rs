@@ -1730,6 +1730,15 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         if self.emitted >= self.options.limits.results {
             return Err(RunError::Resource("result-count"));
         }
+        if self.options.output_format == tq_formats::OutputFormat::Toon
+            && self.options.framing == ToonFraming::Unframed
+            && self.last_was_proxy
+        {
+            return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
+                tq_toon::CardinalityError::Multiple,
+            ))
+            .into());
+        }
         self.emitted = self.emitted.saturating_add(1);
         self.last_was_proxy = false;
         let sorted;
@@ -1813,8 +1822,14 @@ impl<'a, W: Write> ResultOutput<'a, W> {
     }
 
     fn proxy(&mut self, bytes: &[u8]) -> Result<(), RunError> {
-        if self.unframed.is_some() {
-            self.flush_unframed()?;
+        if self.options.output_format == tq_formats::OutputFormat::Toon
+            && self.options.framing == ToonFraming::Unframed
+            && (self.emitted != 0 || self.last_was_proxy)
+        {
+            return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
+                tq_toon::CardinalityError::Multiple,
+            ))
+            .into());
         }
         let mut writer = LimitedWriter::new(
             &mut self.writer,
@@ -2077,9 +2092,6 @@ fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInp
             let bytes = read_limited(open_path(&path)?, options.limits.input_bytes, &identity)?;
             (identity, bytes)
         };
-        if options.proxy_on_error && !options.raw_input {
-            raw_sources.push(bytes.clone());
-        }
         if options.raw_input {
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
         } else {
@@ -2090,6 +2102,9 @@ fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInp
                     proxy = true;
                 }
                 Err(error) => return Err(error.into()),
+            }
+            if options.proxy_on_error {
+                raw_sources.push(bytes);
             }
         }
     }
