@@ -56,6 +56,18 @@ impl StreamSelection {
         Self { prefix, projection }
     }
 
+    /// Returns the statically selected array path.
+    #[must_use]
+    pub fn prefix(&self) -> &[PathComponent] {
+        &self.prefix
+    }
+
+    /// Returns the static element-local projection, when present.
+    #[must_use]
+    pub fn projection(&self) -> Option<&[PathComponent]> {
+        self.projection.as_deref()
+    }
+
     fn keeps(&self, path: &[PathComponent]) -> bool {
         if path.len() <= self.prefix.len() || !path.starts_with(&self.prefix) {
             return false;
@@ -105,6 +117,27 @@ impl StreamRecord {
             value,
             raw: false,
         }
+    }
+
+    pub(crate) fn rebase_array_item(
+        mut self,
+        prefix: &[PathComponent],
+        first_index: usize,
+    ) -> Self {
+        if self.raw || self.path.is_empty() {
+            return self;
+        }
+        let PathComponent::Index(local_index) = self.path[0] else {
+            return self;
+        };
+        let mut path = Vec::with_capacity(prefix.len().saturating_add(self.path.len()));
+        path.extend_from_slice(prefix);
+        path.push(PathComponent::Index(
+            first_index.saturating_add(local_index),
+        ));
+        path.extend(self.path.drain(1..));
+        self.path = path;
+        self
     }
 
     fn raw(value: Value) -> Self {

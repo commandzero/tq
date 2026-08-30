@@ -141,6 +141,14 @@ pub struct ResourceLimits {
     pub hybrid_in_flight_batches: usize,
     /// Maximum estimated hybrid worker bytes simultaneously in flight.
     pub hybrid_in_flight_bytes: usize,
+    /// Maximum elements in one parallel selected-decode batch.
+    pub decode_batch_values: usize,
+    /// Target maximum encoded bytes in one parallel selected-decode batch.
+    pub decode_batch_bytes: usize,
+    /// Maximum selected-decode batches simultaneously in flight.
+    pub decode_in_flight_batches: usize,
+    /// Maximum selected-decode source bytes simultaneously in flight.
+    pub decode_in_flight_bytes: usize,
     /// Maximum disk-backed unknown-array spool bytes.
     pub spool_bytes: u64,
 }
@@ -160,6 +168,10 @@ impl Default for ResourceLimits {
             hybrid_batch_values: 16 * 1024,
             hybrid_in_flight_batches: 4,
             hybrid_in_flight_bytes: 8 * 1024 * 1024,
+            decode_batch_values: 4 * 1024,
+            decode_batch_bytes: 2 * 1024 * 1024,
+            decode_in_flight_batches: 32,
+            decode_in_flight_bytes: 64 * 1024 * 1024,
             spool_bytes: 8 * 1024 * 1024 * 1024,
         }
     }
@@ -530,8 +542,9 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
          --max-line-bytes N, --max-lookahead-bytes N, --max-vm-steps N,\n\
          --max-results N, --max-output-bytes N, --prepare-memory-bytes N,\n\
          --hybrid-batch-values N, --hybrid-in-flight-batches N,\n\
-         --hybrid-in-flight-bytes N,\n\
-         --max-spool-bytes N\n",
+         --hybrid-in-flight-bytes N, --decode-batch-values N,\n\
+         --decode-batch-bytes N, --decode-in-flight-batches N,\n\
+         --decode-in-flight-bytes N, --max-spool-bytes N\n",
     );
     help
 }
@@ -816,6 +829,18 @@ where
             }
             "--hybrid-in-flight-bytes" => {
                 limits.hybrid_in_flight_bytes = parse_limit(&mut tokens, &token)?;
+            }
+            "--decode-batch-values" => {
+                limits.decode_batch_values = parse_limit(&mut tokens, &token)?;
+            }
+            "--decode-batch-bytes" => {
+                limits.decode_batch_bytes = parse_limit(&mut tokens, &token)?;
+            }
+            "--decode-in-flight-batches" => {
+                limits.decode_in_flight_batches = parse_limit(&mut tokens, &token)?;
+            }
+            "--decode-in-flight-bytes" => {
+                limits.decode_in_flight_bytes = parse_limit(&mut tokens, &token)?;
             }
             "--max-spool-bytes" => limits.spool_bytes = parse_limit(&mut tokens, &token)?,
             "-" => positional(

@@ -22,9 +22,10 @@ use tq_core::{
 };
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, JsonEventOptions, JsonLinesDocumentSource,
-    OutputError, OutputFormat, OutputOptions, ProbeReport, StreamOptions, StreamRecord,
-    StreamSelection, ToonFraming, decode_bytes, decode_json, decode_json_event_stream, decode_toon,
-    probe_format, probe_reader, stream_json, stream_json_selected_records, stream_toon,
+    OutputError, OutputFormat, OutputOptions, ParallelJsonObservations, ParallelJsonOptions,
+    ProbeReport, StreamOptions, StreamRecord, StreamSelection, ToonFraming, decode_bytes,
+    decode_json, decode_json_event_stream, decode_toon, probe_format, probe_reader, stream_json,
+    stream_json_selected_records, stream_json_selected_records_parallel, stream_toon,
     stream_toon_selected_records, write_results,
 };
 use tq_toon::{
@@ -1141,6 +1142,16 @@ fn write_explain(
                     proof.blocking_cause.start, proof.blocking_cause.end
                 )?;
                 writeln!(stderr, "hybrid-preparation: {:?}", proof.preparation)?;
+                let (eligible, reason) = parallel_selected_decode_explain(options, analysis);
+                writeln!(
+                    stderr,
+                    "parallel-selected-decode: {} ({reason})",
+                    if eligible {
+                        "eligible"
+                    } else {
+                        "serial-fallback"
+                    }
+                )?;
             }
             for rewrite in &analysis.optimizer_rewrites {
                 writeln!(
@@ -1157,7 +1168,7 @@ fn write_explain(
             }
             writeln!(
                 stderr,
-                "limits: input={} depth={} token={} line={} lookahead={} vm-steps={} results={} output={} prepare-memory={} hybrid-batch-values={} hybrid-in-flight-batches={} hybrid-in-flight-bytes={} spool={}",
+                "limits: input={} depth={} token={} line={} lookahead={} vm-steps={} results={} output={} prepare-memory={} hybrid-batch-values={} hybrid-in-flight-batches={} hybrid-in-flight-bytes={} decode-batch-values={} decode-batch-bytes={} decode-in-flight-batches={} decode-in-flight-bytes={} spool={}",
                 options.limits.input_bytes,
                 options.limits.depth,
                 options.limits.token_bytes,
@@ -1170,6 +1181,10 @@ fn write_explain(
                 options.limits.hybrid_batch_values,
                 options.limits.hybrid_in_flight_batches,
                 options.limits.hybrid_in_flight_bytes,
+                options.limits.decode_batch_values,
+                options.limits.decode_batch_bytes,
+                options.limits.decode_in_flight_batches,
+                options.limits.decode_in_flight_bytes,
                 options.limits.spool_bytes,
             )?;
         }
@@ -1188,6 +1203,11 @@ fn write_explain(
                 },
                 "stream_rejection": analysis.stream_rejection,
                 "hybrid_proof": analysis.hybrid_proof,
+                "parallel_selected_decode": {
+                    "eligible": parallel_selected_decode_explain(options, analysis).0,
+                    "reason": parallel_selected_decode_explain(options, analysis).1,
+                    "worker_count": parallel_worker_count(),
+                },
                 "optimizer_rewrites": analysis.optimizer_rewrites,
                 "transcode_rejection": analysis.transcode_rejection,
                 "identity_proof": analysis.transcode_proof.map(|_| "semantic-identity"),
@@ -1210,6 +1230,10 @@ fn write_explain(
                     "hybrid_batch_values": options.limits.hybrid_batch_values,
                     "hybrid_in_flight_batches": options.limits.hybrid_in_flight_batches,
                     "hybrid_in_flight_bytes": options.limits.hybrid_in_flight_bytes,
+                    "decode_batch_values": options.limits.decode_batch_values,
+                    "decode_batch_bytes": options.limits.decode_batch_bytes,
+                    "decode_in_flight_batches": options.limits.decode_in_flight_batches,
+                    "decode_in_flight_bytes": options.limits.decode_in_flight_bytes,
                     "spool_bytes": options.limits.spool_bytes,
                 }
             });
@@ -1218,6 +1242,30 @@ fn write_explain(
         }
     }
     Ok(())
+}
+
+fn parallel_selected_decode_explain(
+    options: &RunOptions,
+    analysis: &Analysis,
+) -> (bool, &'static str) {
+    if analysis.selected_plan != PlanKind::HybridBlocking {
+        return (false, "plan-is-not-hybrid-blocking");
+    }
+    if parallel_worker_count() <= 1 {
+        return (false, "one-worker-configured");
+    }
+    if !matches!(options.input_format, InputFormat::Auto | InputFormat::Json) {
+        return (false, "input-format-is-not-json-document");
+    }
+    if !analysis.hybrid_proof.as_ref().is_some_and(|proof| {
+        matches!(
+            proof.producer.required_path_prefix.as_slice(),
+            [PathComponent::Key(_)]
+        )
+    }) {
+        return (false, "selection-is-not-one-root-object-array");
+    }
+    (true, "static-root-object-array")
 }
 
 const fn input_format_name(format: InputFormat) -> &'static str {
@@ -1317,6 +1365,10 @@ struct RetentionObservations {
     sort_runs: usize,
     in_flight_batches_high_water: usize,
     in_flight_bytes_high_water: usize,
+    decode_batches: usize,
+    decode_in_flight_batches_high_water: usize,
+    decode_in_flight_bytes_high_water: usize,
+    decode_reordered_batches_high_water: usize,
 }
 
 fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
@@ -1518,7 +1570,7 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     match format {
         InputFormat::Json => {
-            automatic_json_into(buffered_input(reader), stream_options, executor)?;
+            automatic_json_into(buffered_input(reader), stream_options, true, executor)?;
             executor.finish_source()
         }
         InputFormat::JsonLines => {
@@ -1532,7 +1584,7 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
             let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
             match report.selected {
                 InputFormat::Json => {
-                    automatic_json_into(buffered_input(replay), stream_options, executor)?;
+                    automatic_json_into(buffered_input(replay), stream_options, true, executor)?;
                     executor.finish_source()
                 }
                 InputFormat::Toon => {
@@ -1566,33 +1618,75 @@ fn automatic_json_lines_into<R: Read, W: Write, E: Write, M>(
         decode_options(options, InputFormat::JsonLines),
     );
     while let Some((record, line)) = source.next_record()? {
-        automatic_json_into(record.as_slice(), stream_options, executor)
+        automatic_json_into(record.as_slice(), stream_options, false, executor)
             .map_err(|error| json_lines_record_error(error, identity, line))?;
         executor.finish_source()?;
     }
     Ok(())
 }
 
-fn automatic_json_into<R: Read, W: Write, E: Write, M>(
+fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
     reader: R,
     options: StreamOptions,
+    parallel_allowed: bool,
     executor: &mut AutomaticExecutor<'_, W, E, M>,
 ) -> Result<(), RunError> {
     let mut execution_error = None;
     let selection = executor.stream_selection();
-    let decoded = stream_json_selected_records(reader, options, selection, |record| match executor
-        .accept(record)
-    {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            execution_error = Some(error);
-            Err("automatic stream consumer stopped".to_owned())
+    let parallel = parallel_allowed
+        && executor.hybrid_suffix.is_some()
+        && parallel_worker_count() > 1
+        && matches!(selection.prefix(), [PathComponent::Key(_)]);
+    let parallel_options = ParallelJsonOptions {
+        batch_values: executor.output.options.limits.decode_batch_values,
+        batch_bytes: executor.output.options.limits.decode_batch_bytes,
+        in_flight_batches: executor.output.options.limits.decode_in_flight_batches,
+        in_flight_bytes: executor.output.options.limits.decode_in_flight_bytes,
+    };
+    let decoded = {
+        let mut accept = |record| match executor.accept(record) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                execution_error = Some(error);
+                Err("automatic stream consumer stopped".to_owned())
+            }
+        };
+        if parallel {
+            stream_json_selected_records_parallel(
+                reader,
+                options,
+                selection,
+                parallel_options,
+                cancellation(),
+                &mut accept,
+            )
+        } else {
+            stream_json_selected_records(reader, options, selection, &mut accept)
+                .map(|()| ParallelJsonObservations::default())
         }
-    });
+    };
+    if let Ok(observations) = decoded.as_ref() {
+        executor.retention.decode_batches = executor
+            .retention
+            .decode_batches
+            .saturating_add(observations.batches);
+        executor.retention.decode_in_flight_batches_high_water = executor
+            .retention
+            .decode_in_flight_batches_high_water
+            .max(observations.in_flight_batches_high_water);
+        executor.retention.decode_in_flight_bytes_high_water = executor
+            .retention
+            .decode_in_flight_bytes_high_water
+            .max(observations.in_flight_bytes_high_water);
+        executor.retention.decode_reordered_batches_high_water = executor
+            .retention
+            .decode_reordered_batches_high_water
+            .max(observations.reordered_batches_high_water);
+    }
     if let Some(error) = execution_error {
         return Err(error);
     }
-    decoded.map_err(RunError::Input)
+    decoded.map(|_| ()).map_err(RunError::Input)
 }
 
 fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
@@ -3068,6 +3162,11 @@ fn write_report(
                 "in_flight_batches": retention.in_flight_batches_high_water,
                 "in_flight_bytes": retention.in_flight_bytes_high_water,
                 "worker_count": parallel_worker_count(),
+                "parallel_decode_batches": retention.decode_batches,
+                "parallel_decode_in_flight_batches": retention.decode_in_flight_batches_high_water,
+                "parallel_decode_in_flight_bytes": retention.decode_in_flight_bytes_high_water,
+                "parallel_decode_reordered_batches": retention.decode_reordered_batches_high_water,
+                "parallel_decode_active": retention.decode_batches > 0,
                 "root_materialized": !matches!(plan, PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking | PlanKind::Transcode),
             },
         },
@@ -3084,6 +3183,10 @@ fn write_report(
             "hybrid_batch_values": options.limits.hybrid_batch_values,
             "hybrid_in_flight_batches": options.limits.hybrid_in_flight_batches,
             "hybrid_in_flight_bytes": options.limits.hybrid_in_flight_bytes,
+            "decode_batch_values": options.limits.decode_batch_values,
+            "decode_batch_bytes": options.limits.decode_batch_bytes,
+            "decode_in_flight_batches": options.limits.decode_in_flight_batches,
+            "decode_in_flight_bytes": options.limits.decode_in_flight_bytes,
             "spool_bytes": options.limits.spool_bytes,
         },
         "observations": observations.iter().map(|item| serde_json::json!({
@@ -3181,6 +3284,10 @@ fn write_transcode_report(
             "hybrid_batch_values": options.limits.hybrid_batch_values,
             "hybrid_in_flight_batches": options.limits.hybrid_in_flight_batches,
             "hybrid_in_flight_bytes": options.limits.hybrid_in_flight_bytes,
+            "decode_batch_values": options.limits.decode_batch_values,
+            "decode_batch_bytes": options.limits.decode_batch_bytes,
+            "decode_in_flight_batches": options.limits.decode_in_flight_batches,
+            "decode_in_flight_bytes": options.limits.decode_in_flight_bytes,
             "spool_bytes": options.limits.spool_bytes,
         },
         "observations": [],
@@ -3216,6 +3323,7 @@ mod tests {
 
     use super::run_with_io;
     use crate::{Command, ExecutionOverride, ExitStatus, parse_args};
+    use tq_core::parallel_worker_count;
 
     fn execute(
         arguments: &[&str],
@@ -4244,6 +4352,15 @@ mod tests {
             assert!(hybrid.2.is_empty());
             assert!(document.2.is_empty());
         }
+
+        let input = br#"{"items":{"value":1}}"#;
+        let hybrid = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&arguments, input, ExecutionOverride::Document);
+        assert_eq!(
+            hybrid.0.unwrap_err().status(),
+            document.0.unwrap_err().status()
+        );
+        assert_eq!(hybrid.1, document.1);
     }
 
     #[test]
@@ -4269,6 +4386,10 @@ mod tests {
         );
         let explain: serde_json::Value = serde_json::from_slice(&error).unwrap();
         assert_eq!(explain["execution"]["plan"], "hybrid-streaming-blocking");
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["eligible"],
+            parallel_worker_count() > 1
+        );
         let report: serde_json::Value =
             serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
         assert_eq!(report["execution"]["plan"], "hybrid-streaming-blocking");
@@ -4278,6 +4399,10 @@ mod tests {
         );
         assert!(report["execution"]["retention_high_water"]["sort_runs"].is_u64());
         assert!(report["execution"]["retention_high_water"]["worker_count"].is_u64());
+        assert_eq!(
+            report["execution"]["retention_high_water"]["parallel_decode_active"],
+            parallel_worker_count() > 1
+        );
 
         let (status, _, explain) = execute(
             &[

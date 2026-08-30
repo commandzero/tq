@@ -7,6 +7,7 @@ use tq_core::{Diagnostic, Value};
 
 mod adapters;
 mod output;
+mod parallel_json;
 mod stream;
 mod structural;
 
@@ -16,6 +17,9 @@ pub use adapters::{
     probe_format, probe_reader,
 };
 pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
+pub use parallel_json::{
+    ParallelJsonObservations, ParallelJsonOptions, stream_json_selected_records_parallel,
+};
 pub use stream::{
     StreamOptions, StreamRecord, StreamSelection, stream_json, stream_json_records,
     stream_json_selected_records, stream_toon, stream_toon_records, stream_toon_selected_records,
