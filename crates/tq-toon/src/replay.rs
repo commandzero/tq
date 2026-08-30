@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use tq_core::{Number, Object, Value};
 
+use crate::ScalarToken;
+
 const NULL: u8 = 0;
 const FALSE: u8 = 1;
 const TRUE: u8 = 2;
@@ -19,6 +21,40 @@ pub(crate) fn encode(value: &Value) -> Vec<u8> {
     let mut output = Vec::new();
     encode_into(value, &mut output);
     output
+}
+
+pub(crate) fn encode_scalar(value: ScalarToken<'_>) -> Vec<u8> {
+    let mut output = Vec::new();
+    match value {
+        ScalarToken::Null => output.push(NULL),
+        ScalarToken::Bool(false) => output.push(FALSE),
+        ScalarToken::Bool(true) => output.push(TRUE),
+        ScalarToken::Number(value) => {
+            output.push(NUMBER);
+            write_bytes(value.as_bytes(), &mut output);
+        }
+        ScalarToken::String(value) => {
+            output.push(STRING);
+            write_bytes(value.as_bytes(), &mut output);
+        }
+    }
+    output
+}
+
+pub(crate) fn decode_scalar(bytes: &[u8]) -> Result<ScalarToken<'_>, &'static str> {
+    let mut decoder = Decoder { bytes, position: 0 };
+    let value = match decoder.byte()? {
+        NULL => ScalarToken::Null,
+        FALSE => ScalarToken::Bool(false),
+        TRUE => ScalarToken::Bool(true),
+        NUMBER => ScalarToken::Number(decoder.text()?),
+        STRING => ScalarToken::String(decoder.text()?),
+        _ => return Err("replay value is not a scalar"),
+    };
+    if decoder.position != bytes.len() {
+        return Err("trailing structural replay bytes");
+    }
+    Ok(value)
 }
 
 pub(crate) fn decode(bytes: &[u8]) -> Result<Value, &'static str> {
@@ -78,7 +114,7 @@ struct Decoder<'a> {
     position: usize,
 }
 
-impl Decoder<'_> {
+impl<'a> Decoder<'a> {
     fn value(&mut self) -> Result<Value, &'static str> {
         match self.byte()? {
             NULL => Ok(Value::Null),
@@ -162,7 +198,7 @@ impl Decoder<'_> {
         usize::try_from(u64::from_le_bytes(bytes)).map_err(|_| "structural replay length overflow")
     }
 
-    fn text(&mut self) -> Result<&str, &'static str> {
+    fn text(&mut self) -> Result<&'a str, &'static str> {
         let length = self.length()?;
         let end = self
             .position

@@ -85,6 +85,16 @@ impl Number {
         Self::parse_with_limits(source, NumberLimits::default())
     }
 
+    /// Canonicalizes a finite JSON numeric literal without constructing a
+    /// runtime number.
+    ///
+    /// # Errors
+    ///
+    /// Returns a grammar, range, or resource error for an inadmissible token.
+    pub fn canonicalize_literal(source: &str) -> Result<String, NumberError> {
+        Self::canonicalize_literal_with_limits(source, NumberLimits::default())
+    }
+
     /// Validates a JSON numeric literal without retaining its canonical value.
     ///
     /// This applies the same grammar and resource envelope as [`Self::parse`]
@@ -104,6 +114,23 @@ impl Number {
     ///
     /// Returns a grammar, range, or resource error for an inadmissible token.
     pub fn parse_with_limits(source: &str, limits: NumberLimits) -> Result<Self, NumberError> {
+        let literal = Self::canonicalize_literal_with_limits(source, limits)?;
+        Ok(Self {
+            binary64: OnceLock::new(),
+            literal: Some(literal.into()),
+        })
+    }
+
+    /// Canonicalizes a finite JSON numeric literal under explicit limits
+    /// without constructing a runtime number.
+    ///
+    /// # Errors
+    ///
+    /// Returns a grammar, range, or resource error for an inadmissible token.
+    pub fn canonicalize_literal_with_limits(
+        source: &str,
+        limits: NumberLimits,
+    ) -> Result<String, NumberError> {
         let parts = DecimalParts::parse(source)?;
         if parts.coefficient_digits > limits.coefficient_digits {
             return Err(NumberError::CoefficientDigits {
@@ -115,11 +142,7 @@ impl Number {
                 limit: limits.absolute_exponent,
             });
         }
-        let literal = parts.canonical(limits)?;
-        Ok(Self {
-            binary64: OnceLock::new(),
-            literal: Some(literal.into()),
-        })
+        parts.canonical(limits)
     }
 
     /// Constructs an arithmetic-domain number and rejects NaN/infinity.

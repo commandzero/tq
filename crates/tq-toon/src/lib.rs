@@ -1,6 +1,6 @@
 //! Incremental TOON input and canonical output support for `tq`.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use thiserror::Error;
 use tq_core::{Number, SourcePosition, Span};
@@ -81,6 +81,14 @@ pub enum Scalar {
     String(Arc<str>),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ScalarToken<'a> {
+    Null,
+    Bool(bool),
+    Number(&'a str),
+    String(&'a str),
+}
+
 /// Source-spanned structural decoder event.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Event {
@@ -148,6 +156,91 @@ pub trait EventConsumer {
     ///
     /// Returns the consumer's bounded processing failure.
     fn consume(&mut self, event: Event) -> Result<(), Self::Error>;
+
+    /// Consumes a decoded object key before the decoder converts it to shared
+    /// event storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns the consumer failure as text.
+    fn consume_text_key(&mut self, span: Span, value: String, quoted: bool) -> Result<(), String>
+    where
+        Self::Error: fmt::Display,
+    {
+        self.consume(Event::Key {
+            span,
+            value: Arc::from(value),
+            quoted,
+        })
+        .map_err(|error| error.to_string())
+    }
+
+    /// Consumes null without constructing a scalar event.
+    ///
+    /// # Errors
+    ///
+    /// Returns the consumer failure as text.
+    fn consume_null(&mut self, span: Span) -> Result<(), String>
+    where
+        Self::Error: fmt::Display,
+    {
+        self.consume(Event::Scalar {
+            span,
+            value: Scalar::Null,
+        })
+        .map_err(|error| error.to_string())
+    }
+
+    /// Consumes a Boolean without constructing a scalar event.
+    ///
+    /// # Errors
+    ///
+    /// Returns the consumer failure as text.
+    fn consume_bool(&mut self, span: Span, value: bool) -> Result<(), String>
+    where
+        Self::Error: fmt::Display,
+    {
+        self.consume(Event::Scalar {
+            span,
+            value: Scalar::Bool(value),
+        })
+        .map_err(|error| error.to_string())
+    }
+
+    /// Consumes decoded string text before the decoder converts it to shared
+    /// event storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns the consumer failure as text.
+    fn consume_text_string(&mut self, span: Span, value: String) -> Result<(), String>
+    where
+        Self::Error: fmt::Display,
+    {
+        self.consume(Event::Scalar {
+            span,
+            value: Scalar::String(Arc::from(value)),
+        })
+        .map_err(|error| error.to_string())
+    }
+
+    /// Consumes a JSON numeric literal before the decoder constructs a runtime
+    /// number. The default adapter preserves the owned-event contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns numeric admission or consumer failure as text.
+    fn consume_number_literal(&mut self, span: Span, literal: String) -> Result<(), String>
+    where
+        Self::Error: fmt::Display,
+    {
+        let value = Number::parse(&literal).map_err(|error| error.to_string())?;
+        self.consume(Event::Scalar {
+            span,
+            value: Scalar::Number(value),
+        })
+        .map_err(|error| error.to_string())
+    }
 }
 
 /// Decoder behavior that controls safe structural transcode commitment.

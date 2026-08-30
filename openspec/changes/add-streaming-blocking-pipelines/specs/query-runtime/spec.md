@@ -55,6 +55,26 @@ limit, cancellation, and late-error behavior.
 - **WHEN** an unselected subtree contains malformed JSON or exceeds a configured decoder resource limit
 - **THEN** hybrid execution returns the same failure class as the non-discarding structural decoder and publishes no blocking result
 
+### Requirement: Lightweight identity-transcode tokens
+The JSON structural decoder MAY deliver keys, strings, and numeric literals to
+an identity-transcode consumer without constructing owned structural events or
+runtime values. Numeric literals MUST use the same canonical form and resource
+envelope as `Number`, strings MUST use the selected TOON writer's quoting
+rules, and consumers that require owned events MUST retain the existing event
+contract.
+
+#### Scenario: Scalar-heavy identity transcode
+- **WHEN** JSON identity transcode consumes root scalars, direct object scalar members, or scalar-array elements
+- **THEN** the decoder and transcode consumer publish canonical TOON without constructing an intermediate tq scalar event or value for those tokens
+
+#### Scenario: Lightweight numeric failure
+- **WHEN** a numeric token exceeds tq's coefficient, exponent, or rendered-token envelope
+- **THEN** lightweight transcode returns the same input failure class as owned structural decoding and does not publish a completed unframed result
+
+#### Scenario: Owned-event consumer compatibility
+- **WHEN** an event consumer does not implement lightweight token handling
+- **THEN** the decoder adapts token text into the existing key and scalar events with unchanged order and values
+
 ### Requirement: Semantics-preserving blocking rewrites
 The compiler MAY remove a blocking operator only when resolved query structure and input-type proof establish that the operator cannot change the result sequence, values, ordering, or jq-visible errors. Explain output MUST identify each applied rewrite.
 

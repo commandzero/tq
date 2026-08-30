@@ -3525,6 +3525,25 @@ mod tests {
     }
 
     #[test]
+    fn lightweight_json_transcode_matches_document_scalar_rendering() {
+        for input in [
+            br"1e2".as_slice(),
+            br#"[1e2,"true",false,null,9007199254740993]"#.as_slice(),
+            br#"{"plain":"null","number":1e2,"bool":true,"nil":null,"array":[1e2,"true",false,null]}"#.as_slice(),
+        ] {
+            let arguments = ["-ijson", "-otoon", "."];
+            let automatic =
+                execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+            let document = execute_with_override(&arguments, input, ExecutionOverride::Document);
+            assert_eq!(automatic.0.unwrap(), ExitStatus::Success);
+            assert_eq!(document.0.unwrap(), ExitStatus::Success);
+            assert_eq!(automatic.1, document.1);
+            assert!(automatic.2.is_empty());
+            assert!(document.2.is_empty());
+        }
+    }
+
+    #[test]
     fn json_transcode_buffers_source_reads() {
         let mut json = Vec::with_capacity(256 * 1024 + 2);
         json.push(b'"');

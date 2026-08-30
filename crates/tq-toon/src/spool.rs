@@ -15,7 +15,7 @@ use std::{
 use thiserror::Error;
 use tq_core::Value;
 
-use crate::{WriterConfig, replay, writer};
+use crate::{ScalarToken, WriterConfig, replay, writer};
 
 static NEXT_SPOOL: AtomicU64 = AtomicU64::new(0);
 
@@ -1051,8 +1051,20 @@ impl PreparedArray {
     ///
     /// Returns temporary-file, disabled-spool, or limit errors.
     pub fn push(&mut self, value: &Value) -> Result<(), SpoolError> {
+        let layout = self.next_layout(value);
+        self.push_encoded(replay::encode(value), layout)
+    }
+
+    pub(crate) fn push_scalar(&mut self, value: ScalarToken<'_>) -> Result<(), SpoolError> {
+        let layout = match self.layout {
+            Layout::Empty | Layout::Scalars => Layout::Scalars,
+            Layout::Expanded | Layout::Tabular(_) => Layout::Expanded,
+        };
+        self.push_encoded(replay::encode_scalar(value), layout)
+    }
+
+    fn push_encoded(&mut self, encoded: Vec<u8>, layout: Layout) -> Result<(), SpoolError> {
         self.check_cancelled()?;
-        let encoded = replay::encode(value);
         let framed_usize = encoded.len().saturating_add(8);
         let framed = u64::try_from(encoded.len())
             .unwrap_or(u64::MAX)
@@ -1077,7 +1089,7 @@ impl PreparedArray {
             self.memory_bytes = self.memory_bytes.saturating_add(framed_usize);
             self.memory.push(encoded);
         }
-        self.update_layout(value);
+        self.layout = layout;
         self.count = self.count.saturating_add(1);
         self.framed_bytes = self.framed_bytes.saturating_add(framed);
         Ok(())
@@ -1129,12 +1141,14 @@ impl PreparedArray {
             Layout::Scalars => {
                 output.write_all(b": ")?;
                 let mut index = 0_usize;
-                self.for_each_value(|value| {
+                self.for_each_record(|record| {
                     if index != 0 {
                         write!(output, "{}", delimiter_character(writer_config))?;
                     }
-                    output
-                        .write_all(writer::encode_array_scalar(value, writer_config).as_bytes())?;
+                    let value = replay::decode_scalar(record).map_err(SpoolError::Decode)?;
+                    output.write_all(
+                        writer::encode_array_scalar_token(value, writer_config).as_bytes(),
+                    )?;
                     index += 1;
                     Ok(())
                 })?;
@@ -1179,15 +1193,15 @@ impl PreparedArray {
         Ok(())
     }
 
-    fn update_layout(&mut self, value: &Value) {
-        self.layout = match &self.layout {
+    fn next_layout(&self, value: &Value) -> Layout {
+        match &self.layout {
             Layout::Empty | Layout::Scalars if scalar(value) => Layout::Scalars,
             Layout::Empty => tabular_schema(value).map_or(Layout::Expanded, Layout::Tabular),
             Layout::Tabular(fields) if matches_schema(value, fields) => {
                 Layout::Tabular(fields.clone())
             }
             Layout::Expanded | Layout::Scalars | Layout::Tabular(_) => Layout::Expanded,
-        };
+        }
     }
 
     fn transition_to_disk(&mut self) -> Result<(), SpoolError> {
@@ -1216,6 +1230,16 @@ impl PreparedArray {
         &mut self,
         mut consume: impl FnMut(&Value) -> Result<(), SpoolError>,
     ) -> Result<(), SpoolError> {
+        self.for_each_record(|bytes| {
+            let value = replay::decode(bytes).map_err(SpoolError::Decode)?;
+            consume(&value)
+        })
+    }
+
+    fn for_each_record(
+        &mut self,
+        mut consume: impl FnMut(&[u8]) -> Result<(), SpoolError>,
+    ) -> Result<(), SpoolError> {
         let cancellation = self.cancellation.clone();
         if let Some(spool) = &mut self.spool {
             spool.file.flush()?;
@@ -1231,15 +1255,13 @@ impl PreparedArray {
                     usize::try_from(u64::from_le_bytes(length)).map_err(|_| SpoolError::Limit)?;
                 let mut bytes = vec![0; length];
                 spool.file.read_exact(&mut bytes)?;
-                let value = replay::decode(&bytes).map_err(SpoolError::Decode)?;
-                consume(&value)?;
+                consume(&bytes)?;
             }
             self.arena.replayed_spool(self.framed_bytes);
         } else {
             for bytes in &self.memory {
                 self.check_cancelled()?;
-                let value = replay::decode(bytes).map_err(SpoolError::Decode)?;
-                consume(&value)?;
+                consume(bytes)?;
             }
         }
         Ok(())

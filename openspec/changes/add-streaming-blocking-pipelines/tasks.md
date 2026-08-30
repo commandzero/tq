@@ -52,3 +52,10 @@
 - [x] 7.1 Add a validation-only JSON seed for statically rejected subtrees that avoids structural events, jq values, paths, and exact-number construction while preserving decoder limits and errors
 - [x] 7.2 Differential-test selected decoding against the structural path for values, malformed input, late errors, depth, token, numeric-envelope, missing members, and duplicate keys
 - [x] 7.3 Benchmark commit `5f9c8fa` and the fast-discard implementation on the largest catalogue input with identical correctness, worker, timing, CPU, and memory controls
+
+## 8. Remove avoidable identity-transcode construction
+
+- [x] 8.1 Add default lightweight key, string, and numeric-literal callbacks to the structural consumer contract and preserve owned-event compatibility
+- [x] 8.2 Route JSON identity transcode through canonical token text without constructing intermediate `Number`, `Scalar`, `Event`, or `Value` instances for eligible scalars
+- [x] 8.3 Store and publish scalar-array replay records without rebuilding tq values, while preserving limits, cancellation, output bytes, and TOON quoting
+- [x] 8.4 Differential-test lightweight and forced-document output, run workspace validation, and benchmark the accepted transcode cases against commit `983879e`

@@ -57,6 +57,22 @@ through the ordinary value-producing visitor. This optimization is confined
 to the selected automatic JSON path; explicit `--stream` and query-independent
 transcoding keep their complete event contracts.
 
+Identity JSON-to-TOON transcode uses lightweight token callbacks on the same
+consumer contract. JSON keys and strings remain owned token text, and numbers
+are canonicalized once into owned text without first constructing `Number`,
+`Scalar`, `Event`, or `Value`. Consumers that do not implement the callbacks
+keep the existing owned-event behavior through default adapters. The TOON
+decoder also keeps its owned-event path because it has already interpreted its
+source tokens.
+
+`TranscodeConsumer` publishes lightweight root and direct-object scalars
+immediately. Unknown-length scalar arrays store private scalar replay records
+and render them directly during publication, without rebuilding tq values.
+Nested containers that require TOON layout or duplicate-key preparation may
+still materialize values until their preparation representation becomes fully
+structural. This is an allocation reduction, not subtree discard: identity
+transcode continues to consume and publish every input value.
+
 Alternative considered: generate jq `[path, value]` records and send them through `AutomaticExecutor`. It would be simpler, but it allocates and evaluates records for millions of irrelevant geometry scalars.
 
 ### Use a bounded producer and preparation handoff
@@ -113,6 +129,10 @@ The large benchmark has separate jq, forced single-thread tq, and configured mul
 - [A discard shortcut could hide malformed or over-limit input] -> Traverse
   every rejected value with a validation-only seed and differential-test
   syntax, depth, string/key token, numeric-envelope, and late-error behavior.
+- [Lightweight transcode tokens could bypass canonical output rules] ->
+  canonicalize every JSON number under the same `NumberLimits`, apply the
+  existing TOON string quoting rules, and byte-compare lightweight transcode
+  with forced document execution.
 - [Chunked stable sorting can diverge at equal values] -> Carry encounter ordinals through run sorting and merge, and add differential cases with equal-comparing values that have distinguishable representations.
 - [A broad split rule could change jq error timing] -> Admit only the narrow proven collection shape and keep fallible item evaluation serial and ordered.
 - [The projected collection can still be large] -> Label it as cardinality-proportional blocking state, enforce existing result limits, expose retained-byte observations, and never advertise fixed memory.
