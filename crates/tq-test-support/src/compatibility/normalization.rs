@@ -155,8 +155,18 @@ pub fn normalize_yq(outcome: &ProcessOutcome) -> Result<NormalizedObservation, N
 pub fn normalize_toon_sequence(
     outcome: &ProcessOutcome,
 ) -> Result<NormalizedObservation, NormalizationError> {
+    let complete_stdout =
+        if outcome.exit_code.is_some_and(|code| code != 0) && !outcome.stdout.ends_with(b"\n") {
+            outcome
+                .stdout
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(&[][..], |index| &outcome.stdout[..=index])
+        } else {
+            outcome.stdout.as_slice()
+        };
     let results = tq_formats::decode_toon_sequence(
-        &outcome.stdout,
+        complete_stdout,
         "<tq-compatibility-output>",
         tq_toon::DecoderConfig::default(),
     )
@@ -299,5 +309,42 @@ fn observation(
         exit_code: outcome.exit_code,
         error_class: classify_process(tool, outcome),
         notes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProcessOutcome, ProcessStatus, normalize_toon_sequence};
+
+    #[test]
+    fn failed_tq_process_ignores_only_its_incomplete_final_frame() {
+        let outcome = ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(5),
+            signal: None,
+            stdout: b"\x1e1\n\x1e".to_vec(),
+            stderr: b"tq: JSON input rejected".to_vec(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        };
+
+        let normalized = normalize_toon_sequence(&outcome).unwrap();
+        assert_eq!(normalized.results, [serde_json::json!(1)]);
+        assert!(normalized.error_class.is_some());
+    }
+
+    #[test]
+    fn successful_tq_process_rejects_an_incomplete_final_frame() {
+        let outcome = ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(0),
+            signal: None,
+            stdout: b"\x1e".to_vec(),
+            stderr: Vec::new(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        };
+
+        assert!(normalize_toon_sequence(&outcome).is_err());
     }
 }

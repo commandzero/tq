@@ -48,7 +48,7 @@ for ((warmup = 1; warmup <= warmups; warmup++)); do
   run_mode "$workers"
 done
 
-echo 'mode,workers,run,wall_seconds,user_seconds,system_seconds,cpu_seconds,peak_rss_bytes' \
+echo 'mode,workers,run,wall_seconds,user_seconds,system_seconds,cpu_seconds,peak_rss_bytes,output_sha256' \
   > "$output_dir/samples.csv"
 
 measure() {
@@ -58,12 +58,12 @@ measure() {
   /usr/bin/time -lp env RAYON_NUM_THREADS="$threads" "$tq" \
     -i json -o json -c --max-vm-steps 1000000000 "$query" "$input" \
     > /dev/null 2> "$timing"
-  awk -v mode="$mode" -v workers="$threads" -v run="$run" '
+  awk -v mode="$mode" -v workers="$threads" -v run="$run" -v output_sha="$correctness_sha" '
     /^real / { wall=$2 }
     /^user / { user=$2 }
     /^sys / { sys_time=$2 }
     /maximum resident set size/ { rss=$1 }
-    END { printf "%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%s\n", mode, workers, run, wall, user, sys_time, user+sys_time, rss }
+    END { printf "%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%s,%s\n", mode, workers, run, wall, user, sys_time, user+sys_time, rss, output_sha }
   ' "$timing" >> "$output_dir/samples.csv"
 }
 

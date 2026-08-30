@@ -1,6 +1,14 @@
 //! Incremental jq path/value stream projection for JSON and TOON.
 
-use std::{fmt, io::BufRead, sync::Arc};
+use std::{
+    cell::Cell,
+    fmt,
+    io::{BufRead, Read},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use serde::de::{self, DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use tq_core::{Number, Object, PathComponent, SourceId, Value};
@@ -19,6 +27,13 @@ pub struct StreamOptions {
     pub maximum_token_bytes: usize,
     /// Emit JSON parse failures as jq-shaped stream error values.
     pub errors_as_values: bool,
+}
+
+/// Work observations from one selected structural decode.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SelectedStreamObservations {
+    /// Largest number of simultaneously active source containers.
+    pub depth_high_water: usize,
 }
 
 impl Default for StreamOptions {
@@ -239,25 +254,82 @@ pub fn stream_json_selected_records<R, F>(
     reader: R,
     options: StreamOptions,
     selection: StreamSelection,
-    mut emit: F,
+    emit: F,
 ) -> Result<(), FormatError>
 where
     R: std::io::Read,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    let mut observations = SelectedStreamObservations::default();
+    stream_json_selected_records_with_control(
+        reader,
+        options,
+        selection,
+        None,
+        &mut observations,
+        emit,
+    )
+}
+
+/// Streams selected JSON records with cooperative cancellation and observations.
+///
+/// Cancellation is checked once per 16 KiB read window, including while serde
+/// validates a discarded subtree.
+///
+/// # Errors
+///
+/// Returns JSON syntax, numeric-envelope, depth, token, cancellation, or callback failures.
+pub fn stream_json_selected_records_with_control<R, F>(
+    reader: R,
+    options: StreamOptions,
+    selection: StreamSelection,
+    cancellation: Option<Arc<AtomicBool>>,
+    observations: &mut SelectedStreamObservations,
+    mut emit: F,
+) -> Result<(), FormatError>
+where
+    R: Read,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    decode_selected_json(
+        reader,
+        options,
+        selection,
+        cancellation,
+        observations,
+        &mut emit,
+    )
+}
+
+fn decode_selected_json<R, F>(
+    reader: R,
+    options: StreamOptions,
+    selection: StreamSelection,
+    cancellation: Option<Arc<AtomicBool>>,
+    observations: &mut SelectedStreamObservations,
+    emit: &mut F,
+) -> Result<(), FormatError>
+where
+    R: Read,
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
     let mut projector = Projector::selected(
         options.maximum_depth,
         options.maximum_token_bytes,
         selection,
-        &mut emit,
+        emit,
     );
+    projector.cancellation = cancellation;
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
-    StreamSeed {
+    let result = StreamSeed {
         projector: &mut projector,
     }
     .deserialize(&mut deserializer)
-    .and_then(|()| deserializer.end())
-    .map_err(|error| FormatError::Parse {
+    .and_then(|()| deserializer.end());
+    observations.depth_high_water = observations
+        .depth_high_water
+        .max(projector.depth_high_water.get());
+    result.map_err(|error| FormatError::Parse {
         format: InputFormat::Json,
         message: error.to_string(),
     })
@@ -360,6 +432,36 @@ pub fn stream_toon_selected_records<R, F>(
     config: tq_toon::DecoderConfig,
     options: StreamOptions,
     selection: StreamSelection,
+    emit: F,
+) -> Result<(), FormatError>
+where
+    R: BufRead,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    let mut observations = SelectedStreamObservations::default();
+    stream_toon_selected_records_with_control(
+        reader,
+        config,
+        options,
+        selection,
+        None,
+        &mut observations,
+        emit,
+    )
+}
+
+/// Streams selected TOON records with cooperative cancellation and observations.
+///
+/// # Errors
+///
+/// Returns strict decoding, resource, structural, cancellation, or callback failures.
+pub fn stream_toon_selected_records_with_control<R, F>(
+    reader: R,
+    config: tq_toon::DecoderConfig,
+    options: StreamOptions,
+    selection: StreamSelection,
+    cancellation: Option<Arc<AtomicBool>>,
+    observations: &mut SelectedStreamObservations,
     mut emit: F,
 ) -> Result<(), FormatError>
 where
@@ -367,15 +469,19 @@ where
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
     let mut decoder = Decoder::new(reader, SourceId::new(0), config);
-    let mut consumer = EventProjector {
-        projector: Projector::selected(
-            options.maximum_depth,
-            options.maximum_token_bytes,
-            selection,
-            &mut emit,
-        ),
-    };
-    decoder.decode_into(&mut consumer).map_err(|error| {
+    let mut projector = Projector::selected(
+        options.maximum_depth,
+        options.maximum_token_bytes,
+        selection,
+        &mut emit,
+    );
+    projector.cancellation = cancellation;
+    let mut consumer = EventProjector { projector };
+    let result = decoder.decode_into(&mut consumer);
+    observations.depth_high_water = observations
+        .depth_high_water
+        .max(consumer.projector.depth_high_water.get());
+    result.map_err(|error| {
         let message = match error {
             DecodeIntoError::Decode(error) => error.to_string(),
             DecodeIntoError::Consumer(error) => error,
@@ -407,6 +513,9 @@ struct Projector<'a, F> {
     maximum_depth: usize,
     maximum_token_bytes: usize,
     selection: Option<StreamSelection>,
+    depth_high_water: Cell<usize>,
+    cancellation: Option<Arc<AtomicBool>>,
+    values_until_cancellation_check: Cell<usize>,
     emit: &'a mut F,
 }
 
@@ -421,6 +530,9 @@ where
             maximum_depth,
             maximum_token_bytes,
             selection: None,
+            depth_high_water: Cell::new(0),
+            cancellation: None,
+            values_until_cancellation_check: Cell::new(0),
             emit,
         }
     }
@@ -437,6 +549,9 @@ where
             maximum_depth,
             maximum_token_bytes,
             selection: Some(selection),
+            depth_high_water: Cell::new(0),
+            cancellation: None,
+            values_until_cancellation_check: Cell::new(0),
             emit,
         }
     }
@@ -452,6 +567,26 @@ where
             children: 0,
             pending_key: None,
         });
+        self.depth_high_water
+            .set(self.depth_high_water.get().max(self.frames.len()));
+        Ok(())
+    }
+
+    fn check_cancellation(&self) -> Result<(), String> {
+        let remaining = self.values_until_cancellation_check.get();
+        if remaining != 0 {
+            self.values_until_cancellation_check
+                .set(remaining.saturating_sub(1));
+            return Ok(());
+        }
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            return Err("selected decoding interrupted".to_owned());
+        }
+        self.values_until_cancellation_check.set(4096);
         Ok(())
     }
 
@@ -631,26 +766,42 @@ fn path_value(path: &[PathComponent]) -> Value {
 }
 
 #[derive(Clone, Copy)]
-struct DiscardSeed {
+struct DiscardSeed<'a> {
     depth: usize,
     maximum_depth: usize,
     maximum_token_bytes: usize,
+    depth_high_water: &'a Cell<usize>,
+    cancellation: Option<&'a AtomicBool>,
+    values_until_cancellation_check: &'a Cell<usize>,
 }
 
-impl<'de> DeserializeSeed<'de> for DiscardSeed {
+impl<'de> DeserializeSeed<'de> for DiscardSeed<'_> {
     type Value = ();
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
+        let remaining = self.values_until_cancellation_check.get();
+        if remaining == 0 {
+            if self
+                .cancellation
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return Err(D::Error::custom("selected decoding interrupted"));
+            }
+            self.values_until_cancellation_check.set(4096);
+        } else {
+            self.values_until_cancellation_check
+                .set(remaining.saturating_sub(1));
+        }
         deserializer.deserialize_any(DiscardVisitor(self))
     }
 }
 
-struct DiscardVisitor(DiscardSeed);
+struct DiscardVisitor<'a>(DiscardSeed<'a>);
 
-impl DiscardVisitor {
+impl DiscardVisitor<'_> {
     fn check_token<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
         if bytes > self.0.maximum_token_bytes {
             return Err(E::custom("input resource limit exceeded: token-bytes"));
@@ -658,7 +809,7 @@ impl DiscardVisitor {
         Ok(())
     }
 
-    fn child_seed<E: de::Error>(&self) -> Result<DiscardSeed, E> {
+    fn child_seed<E: de::Error>(&self) -> Result<DiscardSeed<'_>, E> {
         if self.0.depth >= self.0.maximum_depth {
             return Err(E::custom("stream depth limit exceeded"));
         }
@@ -668,13 +819,22 @@ impl DiscardVisitor {
         })
     }
 
+    fn observe_container(&self) {
+        self.0.depth_high_water.set(
+            self.0
+                .depth_high_water
+                .get()
+                .max(self.0.depth.saturating_add(1)),
+        );
+    }
+
     fn validate_number<E: de::Error>(&self, literal: &str) -> Result<(), E> {
         self.check_token(literal.len())?;
         Number::validate_literal(literal).map_err(E::custom)
     }
 }
 
-impl<'de> Visitor<'de> for DiscardVisitor {
+impl<'de> Visitor<'de> for DiscardVisitor<'_> {
     type Value = ();
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -732,6 +892,7 @@ impl<'de> Visitor<'de> for DiscardVisitor {
     where
         A: SeqAccess<'de>,
     {
+        self.observe_container();
         let child = self.child_seed::<A::Error>()?;
         while sequence.next_element_seed(child)?.is_some() {}
         Ok(())
@@ -741,6 +902,7 @@ impl<'de> Visitor<'de> for DiscardVisitor {
     where
         A: MapAccess<'de>,
     {
+        self.observe_container();
         let child = self.child_seed::<A::Error>()?;
         let Some(first) = map.next_key::<String>()? else {
             return Ok(());
@@ -789,12 +951,18 @@ where
     where
         D: serde::Deserializer<'de>,
     {
+        self.projector
+            .check_cancellation()
+            .map_err(D::Error::custom)?;
         if self.projector.rejects_next_value() {
             self.projector.take_value_path().map_err(D::Error::custom)?;
             DiscardSeed {
                 depth: self.projector.frames.len(),
                 maximum_depth: self.projector.maximum_depth,
                 maximum_token_bytes: self.projector.maximum_token_bytes,
+                depth_high_water: &self.projector.depth_high_water,
+                cancellation: self.projector.cancellation.as_deref(),
+                values_until_cancellation_check: &self.projector.values_until_cancellation_check,
             }
             .deserialize(deserializer)
         } else {
@@ -966,6 +1134,7 @@ where
     type Error = String;
 
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
+        self.projector.check_cancellation()?;
         match event {
             Event::DocumentStart { .. } | Event::DocumentEnd { .. } => Ok(()),
             Event::ObjectStart { .. } => self.projector.begin(ContainerKind::Object),
@@ -980,17 +1149,22 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufReader, Cursor};
-
-    use std::sync::Arc;
+    use std::{
+        io::{BufReader, Cursor, Read},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
 
     use tq_core::{PathComponent, SourceId};
 
     use crate::{JsonEventOptions, decode_json_events_with_options};
 
     use super::{
-        EventProjector, Projector, StreamOptions, StreamRecord, StreamSelection, stream_json,
-        stream_json_records, stream_json_selected_records, stream_toon,
+        EventProjector, Projector, SelectedStreamObservations, StreamOptions, StreamRecord,
+        StreamSelection, stream_json, stream_json_records, stream_json_selected_records,
+        stream_json_selected_records_with_control, stream_toon,
     };
 
     fn json_lines(values: &[tq_core::Value]) -> Vec<String> {
@@ -1240,5 +1414,50 @@ mod tests {
             assert!(fast.1.is_err(), "fast path accepted {label}");
             assert!(structural.1.is_err(), "structural path accepted {label}");
         }
+    }
+
+    #[test]
+    fn selected_fast_discard_observes_cancellation_inside_a_large_subtree() {
+        struct CancelAfter {
+            input: Cursor<Vec<u8>>,
+            cancellation: Arc<AtomicBool>,
+            trigger: u64,
+        }
+
+        impl Read for CancelAfter {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                if self.input.position() >= self.trigger {
+                    self.cancellation.store(true, Ordering::Relaxed);
+                }
+                let length = output.len().min(1024);
+                self.input.read(&mut output[..length])
+            }
+        }
+
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let input = format!(
+            "{{\"discarded\":[{}],\"features\":[{{\"properties\":{{\"release\":1}}}}]}}",
+            std::iter::repeat_n("0", 8192).collect::<Vec<_>>().join(",")
+        )
+        .into_bytes();
+        let reader = CancelAfter {
+            input: Cursor::new(input),
+            cancellation: Arc::clone(&cancellation),
+            trigger: 1024,
+        };
+        let mut observations = SelectedStreamObservations::default();
+        let error = stream_json_selected_records_with_control(
+            BufReader::new(reader),
+            StreamOptions::default(),
+            release_selection(),
+            Some(Arc::clone(&cancellation)),
+            &mut observations,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("selected decoding interrupted"));
+        assert!(cancellation.load(Ordering::Relaxed));
+        assert_eq!(observations.depth_high_water, 2);
     }
 }

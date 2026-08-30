@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    io::BufRead,
+    io::{self, BufRead, Read},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -11,8 +11,8 @@ use std::{
 use tq_core::{Number, PathComponent};
 
 use crate::{
-    FormatError, InputFormat, StreamOptions, StreamRecord, StreamSelection,
-    stream_json_selected_records,
+    FormatError, InputFormat, SelectedStreamObservations, StreamOptions, StreamRecord,
+    StreamSelection, stream_json_selected_records_with_control,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,6 +42,8 @@ impl Default for ParallelJsonOptions {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 /// High-water observations from one parallel JSON document.
 pub struct ParallelJsonObservations {
+    /// Largest number of simultaneously active source containers.
+    pub depth_high_water: usize,
     /// Worker batches submitted.
     pub batches: usize,
     /// Largest number of submitted, undelivered batches.
@@ -56,6 +58,15 @@ struct Work {
     ordinal: usize,
     first_index: Option<usize>,
     bytes: Vec<u8>,
+    source: BatchSource,
+}
+
+#[derive(Clone, Copy)]
+struct BatchSource {
+    byte_offset: u64,
+    line: usize,
+    column: usize,
+    synthetic_prefix_bytes: usize,
 }
 
 struct Completion {
@@ -67,6 +78,7 @@ struct Completion {
 struct BatchOutcome {
     records: Vec<StreamRecord>,
     error: Option<FormatError>,
+    depth_high_water: usize,
 }
 
 struct Scheduler {
@@ -114,6 +126,7 @@ impl Scheduler {
         &mut self,
         first_index: Option<usize>,
         bytes: Vec<u8>,
+        source: BatchSource,
         emit: &mut F,
     ) -> Result<(), FormatError>
     where
@@ -137,6 +150,7 @@ impl Scheduler {
             ordinal: self.next_ordinal,
             first_index,
             bytes,
+            source,
         };
         self.next_ordinal = self.next_ordinal.saturating_add(1);
         self.outstanding.push_back((work.ordinal, retained_bytes));
@@ -165,9 +179,18 @@ impl Scheduler {
                 BatchOutcome {
                     records: Vec::new(),
                     error: Some(cancelled_error()),
+                    depth_high_water: 0,
                 }
             } else {
-                decode_work(&work.bytes, stream_options, &selection, work.first_index)
+                decode_work(
+                    &work.bytes,
+                    stream_options,
+                    &selection,
+                    work.first_index,
+                    work.source,
+                    cancellation,
+                    external_cancellation,
+                )
             };
             let _ = sender.send(Completion {
                 ordinal: work.ordinal,
@@ -248,6 +271,10 @@ impl Scheduler {
             }
             self.outstanding_bytes = self.outstanding_bytes.saturating_sub(retained_bytes);
             self.next_delivery = self.next_delivery.saturating_add(1);
+            self.observations.depth_high_water = self
+                .observations
+                .depth_high_water
+                .max(completion.outcome.depth_high_water);
             for record in completion.outcome.records {
                 if let Err(message) = emit(record) {
                     self.cancellation.store(true, Ordering::Relaxed);
@@ -276,16 +303,36 @@ fn decode_work(
     options: StreamOptions,
     selection: &StreamSelection,
     first_index: Option<usize>,
+    source: BatchSource,
+    cancellation: Arc<AtomicBool>,
+    external_cancellation: Option<Arc<AtomicBool>>,
 ) -> BatchOutcome {
+    let reader = CancellationReader {
+        bytes,
+        cancellation,
+        external_cancellation,
+        bytes_until_check: 0,
+    };
     let Some(first_index) = first_index else {
         let mut records = Vec::new();
-        let result = stream_json_selected_records(bytes, options, selection.clone(), |record| {
-            records.push(record);
-            Ok(())
-        });
+        let mut observations = SelectedStreamObservations::default();
+        let result = stream_json_selected_records_with_control(
+            reader,
+            options,
+            selection.clone(),
+            None,
+            &mut observations,
+            |record| {
+                records.push(record);
+                Ok(())
+            },
+        );
         return BatchOutcome {
             records,
-            error: result.err(),
+            error: result
+                .err()
+                .map(|error| translate_worker_error(error, source)),
+            depth_high_water: observations.depth_high_water,
         };
     };
     let relative = StreamSelection::new(
@@ -293,21 +340,108 @@ fn decode_work(
         selection.projection().map(<[PathComponent]>::to_vec),
     );
     let options = StreamOptions {
-        maximum_depth: options.maximum_depth.saturating_sub(1),
+        maximum_depth: options
+            .maximum_depth
+            .saturating_sub(selection.prefix().len()),
         ..options
     };
     let mut records = Vec::new();
-    let result = stream_json_selected_records(bytes, options, relative, |record| {
-        records.push(record.rebase_array_item(selection.prefix(), first_index));
-        Ok(())
-    });
+    let mut observations = SelectedStreamObservations::default();
+    let result = stream_json_selected_records_with_control(
+        reader,
+        options,
+        relative,
+        None,
+        &mut observations,
+        |record| {
+            records.push(record.rebase_array_item(selection.prefix(), first_index));
+            Ok(())
+        },
+    );
     BatchOutcome {
         records,
-        error: result.err(),
+        error: result
+            .err()
+            .map(|error| translate_worker_error(error, source)),
+        depth_high_water: observations
+            .depth_high_water
+            .saturating_add(selection.prefix().len()),
     }
 }
 
-/// Frames one proven root-object array and decodes its element batches on the
+struct CancellationReader<'a> {
+    bytes: &'a [u8],
+    cancellation: Arc<AtomicBool>,
+    external_cancellation: Option<Arc<AtomicBool>>,
+    bytes_until_check: usize,
+}
+
+impl Read for CancellationReader<'_> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        if self.bytes_until_check == 0 {
+            if self.cancellation.load(Ordering::Relaxed)
+                || self
+                    .external_cancellation
+                    .as_ref()
+                    .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                // serde_json retries `Interrupted` reads indefinitely.
+                return Err(io::Error::other("parallel JSON decoding interrupted"));
+            }
+            self.bytes_until_check = 16 * 1024;
+        }
+        let length = output
+            .len()
+            .min(self.bytes.len())
+            .min(self.bytes_until_check);
+        output[..length].copy_from_slice(&self.bytes[..length]);
+        self.bytes = &self.bytes[length..];
+        self.bytes_until_check = self.bytes_until_check.saturating_sub(length);
+        Ok(length)
+    }
+}
+
+fn translate_worker_error(error: FormatError, source: BatchSource) -> FormatError {
+    let FormatError::Parse {
+        format: InputFormat::Json,
+        message,
+    } = error
+    else {
+        return error;
+    };
+    FormatError::Parse {
+        format: InputFormat::Json,
+        message: translate_json_position(&message, source),
+    }
+}
+
+fn translate_json_position(message: &str, source: BatchSource) -> String {
+    let Some((prefix, position)) = message.rsplit_once(" at line ") else {
+        return message.to_owned();
+    };
+    let Some((line, column)) = position.split_once(" column ") else {
+        return message.to_owned();
+    };
+    let (Ok(line), Ok(column)) = (line.parse::<usize>(), column.parse::<usize>()) else {
+        return message.to_owned();
+    };
+    let (line, column) = if line == 1 {
+        (
+            source.line,
+            source
+                .column
+                .saturating_add(column.saturating_sub(source.synthetic_prefix_bytes + 1)),
+        )
+    } else {
+        (source.line.saturating_add(line - 1), column)
+    };
+    let _absolute_byte = source
+        .byte_offset
+        .saturating_add(u64::try_from(column).unwrap_or(u64::MAX));
+    format!("{prefix} at line {line} column {column}")
+}
+
+/// Frames one statically selected array and decodes its element batches on the
 /// shared Rayon pool while delivering records in source order.
 ///
 /// # Errors
@@ -326,22 +460,13 @@ where
     R: BufRead,
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
-    let [PathComponent::Key(selected_key)] = selection.prefix() else {
-        stream_json_selected_records(reader, stream_options, selection, emit)?;
-        return Ok(ParallelJsonObservations::default());
-    };
-    let selected_key = Arc::clone(selected_key);
-    let mut framer = Framer::new(&mut reader, stream_options);
+    let mut framer = Framer::new(&mut reader, stream_options, cancellation.clone());
     framer.skip_ws()?;
-    if framer.peek()? != Some(b'{') {
-        drop(framer);
-        stream_json_selected_records(reader, stream_options, selection, emit)?;
-        return Ok(ParallelJsonObservations::default());
-    }
 
+    let prefix = selection.prefix().to_vec();
     let mut scheduler = Scheduler::new(selection, stream_options, parallel_options, cancellation);
-    let framing = framer.parse_root_object(&selected_key, parallel_options, &mut |index, bytes| {
-        scheduler.submit(index, bytes, &mut emit)
+    let framing = framer.parse_document(&prefix, parallel_options, &mut |index, bytes, source| {
+        scheduler.submit(index, bytes, source, &mut emit)
     });
     drop(framer);
     let worker_result = scheduler.finish(&mut emit);
@@ -356,79 +481,155 @@ struct Framer<'a, R> {
     reader: &'a mut R,
     options: StreamOptions,
     capture: Option<Vec<u8>>,
+    byte_offset: u64,
+    line: usize,
+    column: usize,
+    cancellation: Option<Arc<AtomicBool>>,
+    bytes_until_cancellation_check: usize,
 }
 
 impl<'a, R: BufRead> Framer<'a, R> {
-    fn new(reader: &'a mut R, options: StreamOptions) -> Self {
+    fn new(
+        reader: &'a mut R,
+        options: StreamOptions,
+        cancellation: Option<Arc<AtomicBool>>,
+    ) -> Self {
         Self {
             reader,
             options,
             capture: None,
+            byte_offset: 0,
+            line: 1,
+            column: 1,
+            cancellation,
+            bytes_until_cancellation_check: 0,
         }
     }
 
-    fn parse_root_object<F>(
+    fn parse_document<F>(
         &mut self,
-        selected_key: &str,
+        prefix: &[PathComponent],
         parallel: ParallelJsonOptions,
         submit: &mut F,
     ) -> Result<(), FormatError>
     where
-        F: FnMut(Option<usize>, Vec<u8>) -> Result<(), FormatError>,
+        F: FnMut(Option<usize>, Vec<u8>, BatchSource) -> Result<(), FormatError>,
     {
-        if self.options.maximum_depth == 0 {
-            return Err(parse_error("stream depth limit exceeded"));
-        }
-        self.expect(b'{')?;
-        self.skip_ws()?;
-        if self.take_if(b'}')? {
-            return self.finish_document();
-        }
-        loop {
-            let key = self.read_string()?;
-            self.skip_ws()?;
-            self.expect(b':')?;
-            self.skip_ws()?;
-            if key == selected_key {
-                self.parse_selected_value(selected_key, parallel, submit)?;
-            } else {
-                self.scan_value(1)?;
-            }
-            self.skip_ws()?;
-            if self.take_if(b'}')? {
-                break;
-            }
-            self.expect(b',')?;
-            self.skip_ws()?;
-        }
+        self.check_cancellation()?;
+        self.parse_prefix_value(prefix, prefix, 0, parallel, submit)?;
         self.finish_document()
+    }
+
+    fn parse_prefix_value<F>(
+        &mut self,
+        remaining: &[PathComponent],
+        full_prefix: &[PathComponent],
+        depth: usize,
+        parallel: ParallelJsonOptions,
+        submit: &mut F,
+    ) -> Result<(), FormatError>
+    where
+        F: FnMut(Option<usize>, Vec<u8>, BatchSource) -> Result<(), FormatError>,
+    {
+        let Some((component, rest)) = remaining.split_first() else {
+            return self.parse_selected_value(full_prefix, depth, parallel, submit);
+        };
+        match component {
+            PathComponent::Key(selected_key) => {
+                if self.peek()? != Some(b'{') {
+                    return self.scan_value(depth);
+                }
+                self.check_container_depth(depth)?;
+                self.expect(b'{')?;
+                self.skip_ws()?;
+                if self.take_if(b'}')? {
+                    return Ok(());
+                }
+                loop {
+                    let key = self.read_string()?;
+                    self.skip_ws()?;
+                    self.expect(b':')?;
+                    self.skip_ws()?;
+                    if key == selected_key.as_ref() {
+                        self.parse_prefix_value(
+                            rest,
+                            full_prefix,
+                            depth.saturating_add(1),
+                            parallel,
+                            submit,
+                        )?;
+                    } else {
+                        self.scan_value(depth.saturating_add(1))?;
+                    }
+                    self.skip_ws()?;
+                    if self.take_if(b'}')? {
+                        return Ok(());
+                    }
+                    self.expect(b',')?;
+                    self.skip_ws()?;
+                }
+            }
+            PathComponent::Index(selected_index) => {
+                if self.peek()? != Some(b'[') {
+                    return self.scan_value(depth);
+                }
+                self.check_container_depth(depth)?;
+                self.expect(b'[')?;
+                self.skip_ws()?;
+                if self.take_if(b']')? {
+                    return Ok(());
+                }
+                let mut index = 0usize;
+                loop {
+                    if index == *selected_index {
+                        self.parse_prefix_value(
+                            rest,
+                            full_prefix,
+                            depth.saturating_add(1),
+                            parallel,
+                            submit,
+                        )?;
+                    } else {
+                        self.scan_value(depth.saturating_add(1))?;
+                    }
+                    self.skip_ws()?;
+                    if self.take_if(b']')? {
+                        return Ok(());
+                    }
+                    self.expect(b',')?;
+                    self.skip_ws()?;
+                    index = index.saturating_add(1);
+                }
+            }
+        }
     }
 
     fn parse_selected_value<F>(
         &mut self,
-        selected_key: &str,
+        prefix: &[PathComponent],
+        depth: usize,
         parallel: ParallelJsonOptions,
         submit: &mut F,
     ) -> Result<(), FormatError>
     where
-        F: FnMut(Option<usize>, Vec<u8>) -> Result<(), FormatError>,
+        F: FnMut(Option<usize>, Vec<u8>, BatchSource) -> Result<(), FormatError>,
     {
         if self.peek()? != Some(b'[') {
-            let mut wrapper = Vec::new();
-            wrapper.push(b'{');
-            wrapper.extend_from_slice(
-                serde_json::to_string(selected_key)
-                    .map_err(|error| json_error(&error))?
-                    .as_bytes(),
+            let position = self.position();
+            self.capture = Some(Vec::new());
+            self.scan_value(depth)?;
+            let value = self.capture.take().expect("target capture is active");
+            let (wrapper, synthetic_prefix_bytes) = wrap_selected_value(prefix, value)?;
+            return submit(
+                None,
+                wrapper,
+                BatchSource {
+                    synthetic_prefix_bytes,
+                    ..position
+                },
             );
-            wrapper.push(b':');
-            self.capture = Some(wrapper);
-            self.scan_value(1)?;
-            let mut wrapper = self.capture.take().expect("target capture is active");
-            wrapper.push(b'}');
-            return submit(None, wrapper);
         }
-        self.check_container_depth(1)?;
+        self.check_container_depth(depth)?;
         self.expect(b'[')?;
         self.skip_ws()?;
         if self.take_if(b']')? {
@@ -439,22 +640,22 @@ impl<'a, R: BufRead> Framer<'a, R> {
         let mut count = 0usize;
         let mut batch = Vec::with_capacity(parallel.batch_bytes.clamp(2, 8 * 1024 * 1024));
         batch.push(b'[');
+        let mut batch_source = BatchSource {
+            synthetic_prefix_bytes: 1,
+            ..self.position()
+        };
         loop {
-            if count > 0 {
-                batch.push(b',');
-            }
             self.capture = Some(batch);
             self.scan_raw_array_element()?;
             batch = self.capture.take().expect("element capture is active");
             count = count.saturating_add(1);
-            self.skip_ws()?;
             let ended = self.peek()? == Some(b']');
-            if count >= parallel.batch_values.max(1)
+            let flush = count >= parallel.batch_values.max(1)
                 || batch.len() >= parallel.batch_bytes.max(1)
-                || ended
-            {
+                || ended;
+            if flush {
                 batch.push(b']');
-                submit(Some(first_index), batch)?;
+                submit(Some(first_index), batch, batch_source)?;
                 first_index = first_index.saturating_add(count);
                 count = 0;
                 batch = Vec::with_capacity(parallel.batch_bytes.clamp(2, 8 * 1024 * 1024));
@@ -463,10 +664,30 @@ impl<'a, R: BufRead> Framer<'a, R> {
             if self.take_if(b']')? {
                 break;
             }
-            self.expect(b',')?;
-            self.skip_ws()?;
+            if flush {
+                self.expect(b',')?;
+                self.skip_ws()?;
+                batch_source = BatchSource {
+                    synthetic_prefix_bytes: 1,
+                    ..self.position()
+                };
+            } else {
+                self.capture = Some(batch);
+                self.expect(b',')?;
+                self.skip_ws()?;
+                batch = self.capture.take().expect("batch capture is active");
+            }
         }
         Ok(())
+    }
+
+    fn position(&self) -> BatchSource {
+        BatchSource {
+            byte_offset: self.byte_offset,
+            line: self.line,
+            column: self.column,
+            synthetic_prefix_bytes: 0,
+        }
     }
 
     fn scan_raw_array_element(&mut self) -> Result<(), FormatError> {
@@ -739,6 +960,10 @@ impl<'a, R: BufRead> Framer<'a, R> {
     }
 
     fn consume_slice(&mut self, length: usize) -> Result<(), FormatError> {
+        if self.bytes_until_cancellation_check == 0 {
+            self.check_cancellation()?;
+            self.bytes_until_cancellation_check = 16 * 1024;
+        }
         let available = self.reader.fill_buf()?;
         if length > available.len() {
             return Err(parse_error("internal JSON framing boundary error"));
@@ -746,9 +971,74 @@ impl<'a, R: BufRead> Framer<'a, R> {
         if let Some(capture) = self.capture.as_mut() {
             capture.extend_from_slice(&available[..length]);
         }
+        let consumed = &available[..length];
+        let mut newline_count = 0usize;
+        let mut last_newline = None;
+        for index in memchr::memchr_iter(b'\n', consumed) {
+            newline_count = newline_count.saturating_add(1);
+            last_newline = Some(index);
+        }
+        self.byte_offset = self
+            .byte_offset
+            .saturating_add(u64::try_from(length).unwrap_or(u64::MAX));
+        if let Some(last_newline) = last_newline {
+            self.line = self.line.saturating_add(newline_count);
+            self.column = length.saturating_sub(last_newline);
+        } else {
+            self.column = self.column.saturating_add(length);
+        }
         self.reader.consume(length);
+        self.bytes_until_cancellation_check =
+            self.bytes_until_cancellation_check.saturating_sub(length);
         Ok(())
     }
+
+    fn check_cancellation(&self) -> Result<(), FormatError> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            Err(cancelled_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn wrap_selected_value(
+    prefix: &[PathComponent],
+    mut value: Vec<u8>,
+) -> Result<(Vec<u8>, usize), FormatError> {
+    let mut value_offset = 0usize;
+    for component in prefix.iter().rev() {
+        let mut wrapper = Vec::new();
+        match component {
+            PathComponent::Key(key) => {
+                wrapper.push(b'{');
+                wrapper.extend_from_slice(
+                    serde_json::to_string(key.as_ref())
+                        .map_err(|error| json_error(&error))?
+                        .as_bytes(),
+                );
+                wrapper.push(b':');
+            }
+            PathComponent::Index(index) => {
+                wrapper.push(b'[');
+                for _ in 0..*index {
+                    wrapper.extend_from_slice(b"null,");
+                }
+            }
+        }
+        value_offset = value_offset.saturating_add(wrapper.len());
+        wrapper.append(&mut value);
+        wrapper.push(match component {
+            PathComponent::Key(_) => b'}',
+            PathComponent::Index(_) => b']',
+        });
+        value = wrapper;
+    }
+    Ok((value, value_offset))
 }
 
 fn parse_error(message: impl Into<String>) -> FormatError {
@@ -769,7 +1059,7 @@ fn cancelled_error() -> FormatError {
 #[cfg(test)]
 mod tests {
     use std::{
-        io::BufReader,
+        io::{BufReader, Read},
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -778,9 +1068,11 @@ mod tests {
 
     use tq_core::PathComponent;
 
+    use crate::stream_json_selected_records;
+
     use super::{
-        ParallelJsonOptions, StreamOptions, StreamRecord, StreamSelection,
-        stream_json_selected_records, stream_json_selected_records_parallel,
+        BatchOutcome, CancellationReader, Completion, ParallelJsonOptions, Scheduler,
+        StreamOptions, StreamRecord, StreamSelection, stream_json_selected_records_parallel,
     };
 
     fn selection() -> StreamSelection {
@@ -803,11 +1095,19 @@ mod tests {
     }
 
     fn parallel(input: &[u8], options: StreamOptions) -> (Vec<StreamRecord>, bool) {
+        parallel_with_selection(input, options, selection())
+    }
+
+    fn parallel_with_selection(
+        input: &[u8],
+        options: StreamOptions,
+        selection: StreamSelection,
+    ) -> (Vec<StreamRecord>, bool) {
         let mut records = Vec::new();
         let result = stream_json_selected_records_parallel(
             BufReader::with_capacity(7, input),
             options,
-            selection(),
+            selection,
             ParallelJsonOptions {
                 batch_values: 1,
                 batch_bytes: 32,
@@ -820,6 +1120,19 @@ mod tests {
                 Ok(())
             },
         );
+        (records, result.is_ok())
+    }
+
+    fn serial_with_selection(
+        input: &[u8],
+        options: StreamOptions,
+        selection: StreamSelection,
+    ) -> (Vec<StreamRecord>, bool) {
+        let mut records = Vec::new();
+        let result = stream_json_selected_records(input, options, selection, |record| {
+            records.push(record);
+            Ok(())
+        });
         (records, result.is_ok())
     }
 
@@ -839,6 +1152,83 @@ mod tests {
             parallel(input, StreamOptions::default()),
             serial(input, StreamOptions::default())
         );
+    }
+
+    #[test]
+    fn parallel_nested_key_and_index_prefixes_match_serial() {
+        let cases = [
+            (br#"[{"value":2},{"value":1}]"#.as_slice(), Vec::new()),
+            (
+                br#"{"root":{"features":[{"value":2},{"value":1}]}}"#.as_slice(),
+                vec![
+                    PathComponent::Key(Arc::from("root")),
+                    PathComponent::Key(Arc::from("features")),
+                ],
+            ),
+            (
+                br#"{"roots":[{"skip":true},{"features":[{"value":2},{"value":1}]}]}"#.as_slice(),
+                vec![
+                    PathComponent::Key(Arc::from("roots")),
+                    PathComponent::Index(1),
+                    PathComponent::Key(Arc::from("features")),
+                ],
+            ),
+        ];
+        for (input, prefix) in cases {
+            let selected =
+                StreamSelection::new(prefix, Some(vec![PathComponent::Key(Arc::from("value"))]));
+            assert_eq!(
+                parallel_with_selection(input, StreamOptions::default(), selected.clone()),
+                serial_with_selection(input, StreamOptions::default(), selected)
+            );
+        }
+
+        let non_array = br#"{"roots":[null,{"features":{"value":2}}]}"#;
+        let selected = StreamSelection::new(
+            vec![
+                PathComponent::Key(Arc::from("roots")),
+                PathComponent::Index(1),
+                PathComponent::Key(Arc::from("features")),
+            ],
+            Some(vec![PathComponent::Key(Arc::from("value"))]),
+        );
+        assert_eq!(
+            parallel_with_selection(non_array, StreamOptions::default(), selected.clone()),
+            serial_with_selection(non_array, StreamOptions::default(), selected)
+        );
+    }
+
+    #[test]
+    fn worker_diagnostics_are_rebased_to_document_lines_and_columns() {
+        let input = b"{\n  \"features\": [\n    {\"properties\": {\"release\": 1}},\n    {\"properties\": {\"release\": truX}}\n  ]\n}";
+        let serial = stream_json_selected_records(
+            input.as_slice(),
+            StreamOptions::default(),
+            selection(),
+            |_| Ok(()),
+        )
+        .unwrap_err()
+        .to_string();
+        let parallel = stream_json_selected_records_parallel(
+            BufReader::with_capacity(7, input.as_slice()),
+            StreamOptions::default(),
+            selection(),
+            ParallelJsonOptions::default(),
+            None,
+            |_| Ok(()),
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(parallel, serial);
+    }
+
+    #[test]
+    fn parallel_worker_enforces_the_numeric_envelope() {
+        let input = br#"{"features":[{"properties":{"release":1e1000001}}]}"#;
+        let serial = serial(input, StreamOptions::default());
+        let parallel = parallel(input, StreamOptions::default());
+        assert!(!serial.1);
+        assert_eq!(parallel, serial);
     }
 
     #[test]
@@ -905,5 +1295,62 @@ mod tests {
                 .to_string()
                 .contains("parallel-decode-in-flight-bytes")
         );
+    }
+
+    #[test]
+    fn cancellation_reader_stops_an_active_decode() {
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let bytes = vec![0; 32 * 1024];
+        let mut reader = CancellationReader {
+            bytes: &bytes,
+            cancellation: Arc::clone(&cancellation),
+            external_cancellation: None,
+            bytes_until_check: 0,
+        };
+        let mut output = [0; 16 * 1024];
+        assert_eq!(reader.read(&mut output).unwrap(), output.len());
+        cancellation.store(true, Ordering::Relaxed);
+        assert_eq!(
+            reader.read(&mut output).unwrap_err().kind(),
+            std::io::ErrorKind::Other
+        );
+    }
+
+    #[test]
+    fn scheduler_delivers_the_earliest_failure_and_bounds_reordering() {
+        let mut scheduler = Scheduler::new(
+            selection(),
+            StreamOptions::default(),
+            ParallelJsonOptions::default(),
+            None,
+        );
+        scheduler.outstanding.push_back((0, 4));
+        scheduler.outstanding.push_back((1, 4));
+        scheduler.outstanding_bytes = 8;
+        scheduler.store(Completion {
+            ordinal: 1,
+            retained_bytes: 4,
+            outcome: BatchOutcome {
+                records: Vec::new(),
+                error: Some(super::parse_error("later failure")),
+                depth_high_water: 0,
+            },
+        });
+        let mut emit = |_| Ok(());
+        scheduler.deliver_ready(&mut emit).unwrap();
+        assert_eq!(scheduler.completed.len(), 1);
+        assert_eq!(scheduler.observations.reordered_batches_high_water, 1);
+
+        scheduler.store(Completion {
+            ordinal: 0,
+            retained_bytes: 4,
+            outcome: BatchOutcome {
+                records: Vec::new(),
+                error: Some(super::parse_error("earliest failure")),
+                depth_high_water: 0,
+            },
+        });
+        let error = scheduler.deliver_ready(&mut emit).unwrap_err();
+        assert!(error.to_string().contains("earliest failure"));
     }
 }

@@ -3623,8 +3623,8 @@ pub struct StableSortPipeline {
     in_flight_batches: usize,
     in_flight_bytes: usize,
     next_ordinal: usize,
-    sender: Sender<(usize, usize, Vec<Value>)>,
-    receiver: Receiver<(usize, usize, Vec<Value>)>,
+    sender: Sender<(usize, usize, Vec<Value>, bool)>,
+    receiver: Receiver<(usize, usize, Vec<Value>, bool)>,
     runs: BTreeMap<usize, Vec<Value>>,
     observations: StableSortPipelineObservations,
     cancellation: Option<Arc<AtomicBool>>,
@@ -3703,7 +3703,10 @@ impl StableSortPipeline {
             self.receive_one()?;
         }
         let runs = self.runs.into_values().collect::<Vec<_>>();
-        Ok((merge_sorted_runs(runs), self.observations))
+        Ok((
+            merge_sorted_runs(runs, self.cancellation.as_ref())?,
+            self.observations,
+        ))
     }
 
     fn dispatch(&mut self) -> Result<(), &'static str> {
@@ -3731,7 +3734,10 @@ impl StableSortPipeline {
             {
                 stable_sort_values(&mut values);
             }
-            let _ = sender.send((ordinal, bytes, values));
+            let cancelled = cancellation
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed));
+            let _ = sender.send((ordinal, bytes, values, cancelled));
         });
         self.in_flight_batches = self.in_flight_batches.saturating_add(1);
         self.in_flight_bytes = self.in_flight_bytes.saturating_add(bytes);
@@ -3747,7 +3753,11 @@ impl StableSortPipeline {
 
     fn receive_one(&mut self) -> Result<(), &'static str> {
         self.check_cancellation()?;
-        let (ordinal, bytes, values) = self.receiver.recv().map_err(|_| "hybrid-sort-worker")?;
+        let (ordinal, bytes, values, worker_cancelled) =
+            self.receiver.recv().map_err(|_| "hybrid-sort-worker")?;
+        if worker_cancelled {
+            return Err("interrupted");
+        }
         self.check_cancellation()?;
         self.in_flight_batches = self.in_flight_batches.saturating_sub(1);
         self.in_flight_bytes = self.in_flight_bytes.saturating_sub(bytes);
@@ -3768,22 +3778,66 @@ impl StableSortPipeline {
     }
 }
 
-fn merge_sorted_runs(mut runs: Vec<Vec<Value>>) -> Vec<Value> {
+fn merge_sorted_runs(
+    mut runs: Vec<Vec<Value>>,
+    cancellation: Option<&Arc<AtomicBool>>,
+) -> Result<Vec<Value>, &'static str> {
     while runs.len() > 1 {
+        if cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err("interrupted");
+        }
         let mut pairs = Vec::with_capacity(runs.len().div_ceil(2));
         let mut iterator = runs.into_iter();
         while let Some(left) = iterator.next() {
             pairs.push((left, iterator.next()));
         }
-        runs = pairs
-            .into_par_iter()
-            .map(|(left, right)| match right {
-                Some(right) => stable_merge(left, right),
-                None => left,
-            })
-            .collect();
+        runs = if let Some(cancellation) = cancellation {
+            pairs
+                .into_par_iter()
+                .map(|(left, right)| match right {
+                    Some(right) => stable_merge_cancellable(left, right, cancellation),
+                    None => Ok(left),
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            pairs
+                .into_par_iter()
+                .map(|(left, right)| match right {
+                    Some(right) => stable_merge(left, right),
+                    None => left,
+                })
+                .collect()
+        };
     }
-    runs.pop().unwrap_or_default()
+    Ok(runs.pop().unwrap_or_default())
+}
+
+fn stable_merge_cancellable(
+    left: Vec<Value>,
+    right: Vec<Value>,
+    cancellation: &AtomicBool,
+) -> Result<Vec<Value>, &'static str> {
+    let mut merged = Vec::with_capacity(left.len().saturating_add(right.len()));
+    let mut left = left.into_iter().peekable();
+    let mut right = right.into_iter().peekable();
+    let mut comparisons_until_check = 0usize;
+    while let (Some(left_value), Some(right_value)) = (left.peek(), right.peek()) {
+        if comparisons_until_check == 0 {
+            if cancellation.load(Ordering::Relaxed) {
+                return Err("interrupted");
+            }
+            comparisons_until_check = 16 * 1024;
+        }
+        comparisons_until_check = comparisons_until_check.saturating_sub(1);
+        if left_value <= right_value {
+            merged.push(left.next().expect("left value was peeked"));
+        } else {
+            merged.push(right.next().expect("right value was peeked"));
+        }
+    }
+    merged.extend(left);
+    merged.extend(right);
+    Ok(merged)
 }
 
 fn stable_merge(left: Vec<Value>, right: Vec<Value>) -> Vec<Value> {

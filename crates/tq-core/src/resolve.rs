@@ -882,7 +882,7 @@ pub fn analyze_with_context(
             analysis.selected_plan = PlanKind::Blocking;
             analysis.stream_rejection = Some(
                 if context.automatic_streaming {
-                    "blocking query lacks a sound streaming producer and suffix split"
+                    "blocking query dependency is not statically partitionable into a sound streaming producer and suffix"
                 } else {
                     "blocking operator requires complete input state"
                 }

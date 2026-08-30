@@ -25,10 +25,22 @@ if [[ $plan != hybrid-streaming-blocking || $preparation != stable-sort-runs || 
 fi
 
 "$jq_bin" -c "$query" "$input" > "$output_dir/jq.correctness"
-RAYON_NUM_THREADS=1 "$tq_bin" -i json -o json -c "$query" "$input" \
-  > "$output_dir/tq.correctness"
-cmp "$output_dir/jq.correctness" "$output_dir/tq.correctness"
-correctness_sha=$(shasum -a 256 "$output_dir/jq.correctness" | awk '{print $1}')
+TQ_BENCH_FORCE_DOCUMENT=1 RAYON_NUM_THREADS=1 \
+  "$tq_bin" -i json -o json -c --max-vm-steps 1000000000 "$query" "$input" \
+  > "$output_dir/tq-document.correctness"
+RAYON_NUM_THREADS=1 \
+  "$tq_bin" -i json -o json -c --max-vm-steps 1000000000 "$query" "$input" \
+  > "$output_dir/tq-hybrid-single.correctness"
+RAYON_NUM_THREADS="$workers" \
+  "$tq_bin" -i json -o json -c --max-vm-steps 1000000000 "$query" "$input" \
+  > "$output_dir/tq-hybrid-multi.correctness"
+for candidate in tq-document tq-hybrid-single tq-hybrid-multi; do
+  cmp "$output_dir/jq.correctness" "$output_dir/$candidate.correctness"
+done
+jq_correctness_sha=$(shasum -a 256 "$output_dir/jq.correctness" | awk '{print $1}')
+document_correctness_sha=$(shasum -a 256 "$output_dir/tq-document.correctness" | awk '{print $1}')
+single_correctness_sha=$(shasum -a 256 "$output_dir/tq-hybrid-single.correctness" | awk '{print $1}')
+multi_correctness_sha=$(shasum -a 256 "$output_dir/tq-hybrid-multi.correctness" | awk '{print $1}')
 input_sha=$(shasum -a 256 "$input" | awk '{print $1}')
 input_bytes=$(stat -f %z "$input")
 
@@ -74,7 +86,10 @@ done
   echo "input=$input"
   echo "input_bytes=$input_bytes"
   echo "input_sha256=$input_sha"
-  echo "correctness_sha256=$correctness_sha"
+  echo "jq_correctness_sha256=$jq_correctness_sha"
+  echo "tq_document_correctness_sha256=$document_correctness_sha"
+  echo "tq_hybrid_single_correctness_sha256=$single_correctness_sha"
+  echo "tq_hybrid_multi_correctness_sha256=$multi_correctness_sha"
   echo "query=$query"
   echo "plan=$plan"
   echo "preparation=$preparation"

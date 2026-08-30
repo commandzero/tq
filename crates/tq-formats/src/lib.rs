@@ -21,8 +21,10 @@ pub use parallel_json::{
     ParallelJsonObservations, ParallelJsonOptions, stream_json_selected_records_parallel,
 };
 pub use stream::{
-    StreamOptions, StreamRecord, StreamSelection, stream_json, stream_json_records,
-    stream_json_selected_records, stream_toon, stream_toon_records, stream_toon_selected_records,
+    SelectedStreamObservations, StreamOptions, StreamRecord, StreamSelection, stream_json,
+    stream_json_records, stream_json_selected_records, stream_json_selected_records_with_control,
+    stream_toon, stream_toon_records, stream_toon_selected_records,
+    stream_toon_selected_records_with_control,
 };
 pub use structural::{
     JsonEventOptions, decode_json_event_stream, decode_json_events,

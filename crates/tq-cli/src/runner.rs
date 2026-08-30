@@ -23,10 +23,11 @@ use tq_core::{
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, JsonEventOptions, JsonLinesDocumentSource,
     OutputError, OutputFormat, OutputOptions, ParallelJsonObservations, ParallelJsonOptions,
-    ProbeReport, StreamOptions, StreamRecord, StreamSelection, ToonFraming, decode_bytes,
-    decode_json, decode_json_event_stream, decode_toon, probe_format, probe_reader, stream_json,
-    stream_json_selected_records, stream_json_selected_records_parallel, stream_toon,
-    stream_toon_selected_records, write_results,
+    ProbeReport, SelectedStreamObservations, StreamOptions, StreamRecord, StreamSelection,
+    ToonFraming, decode_bytes, decode_json, decode_json_event_stream, decode_toon, probe_format,
+    probe_reader, stream_json, stream_json_selected_records_parallel,
+    stream_json_selected_records_with_control, stream_toon,
+    stream_toon_selected_records_with_control, write_results,
 };
 use tq_toon::{
     ArrayPreparationConfig, DecodeIntoError, Decoder, DuplicateKeyPolicy, KeyFolding,
@@ -616,6 +617,7 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
             ReportExecution {
                 analysis: &analysis,
                 retention: RetentionObservations::default(),
+                resource_outcome: "success",
             },
         )?;
     }
@@ -1244,12 +1246,18 @@ fn write_explain(
     Ok(())
 }
 
-fn parallel_selected_decode_explain(
+fn parallel_selected_decode_explain<'a>(
     options: &RunOptions,
-    analysis: &Analysis,
-) -> (bool, &'static str) {
+    analysis: &'a Analysis,
+) -> (bool, &'a str) {
     if analysis.selected_plan != PlanKind::HybridBlocking {
-        return (false, "plan-is-not-hybrid-blocking");
+        return (
+            false,
+            analysis
+                .stream_rejection
+                .as_deref()
+                .unwrap_or("plan-is-not-hybrid-blocking"),
+        );
     }
     if parallel_worker_count() <= 1 {
         return (false, "one-worker-configured");
@@ -1257,15 +1265,10 @@ fn parallel_selected_decode_explain(
     if !matches!(options.input_format, InputFormat::Auto | InputFormat::Json) {
         return (false, "input-format-is-not-json-document");
     }
-    if !analysis.hybrid_proof.as_ref().is_some_and(|proof| {
-        matches!(
-            proof.producer.required_path_prefix.as_slice(),
-            [PathComponent::Key(_)]
-        )
-    }) {
-        return (false, "selection-is-not-one-root-object-array");
+    if analysis.hybrid_proof.is_none() {
+        return (false, "hybrid-plan-has-no-static-prefix-proof");
     }
-    (true, "static-root-object-array")
+    (true, "static-array-prefix")
 }
 
 const fn input_format_name(format: InputFormat) -> &'static str {
@@ -1349,6 +1352,7 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
             ReportExecution {
                 analysis,
                 retention: RetentionObservations::default(),
+                resource_outcome: "success",
             },
         )?;
     }
@@ -1361,7 +1365,10 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
 struct RetentionObservations {
     bytes_high_water: usize,
     depth_high_water: usize,
+    decoder_depth_high_water: usize,
     completed_subtrees: u64,
+    retained_results_high_water: usize,
+    retained_bytes_high_water: usize,
     sort_runs: usize,
     in_flight_batches_high_water: usize,
     in_flight_bytes_high_water: usize,
@@ -1400,6 +1407,8 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
         hybrid_suffix: None,
         last: None,
         results: 0,
+        current_retained_results: 0,
+        current_retained_bytes: 0,
     };
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
@@ -1441,6 +1450,7 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
             ReportExecution {
                 analysis,
                 retention: executor.retention,
+                resource_outcome: "success",
             },
         )?;
     }
@@ -1478,36 +1488,43 @@ fn run_hybrid_filter<R: Read, W: Write, E: Write>(
         hybrid_suffix: Some(plan),
         last: None,
         results: 0,
+        current_retained_results: 0,
+        current_retained_bytes: 0,
     };
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
     } else {
         options.files.clone()
     };
-    for path in files {
-        if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-            return Err(RunError::Interrupted);
+    let execution = (|| {
+        for path in files {
+            if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                return Err(RunError::Interrupted);
+            }
+            if path == Path::new("-") {
+                automatic_reader(
+                    options,
+                    selected_input_format(options, &path),
+                    &mut *stdin,
+                    "<stdin>",
+                    &mut executor,
+                )?;
+            } else {
+                let identity = path.display().to_string();
+                automatic_reader(
+                    options,
+                    selected_input_format(options, &path),
+                    open_path(&path)?,
+                    &identity,
+                    &mut executor,
+                )?;
+            }
         }
-        if path == Path::new("-") {
-            automatic_reader(
-                options,
-                selected_input_format(options, &path),
-                &mut *stdin,
-                "<stdin>",
-                &mut executor,
-            )?;
-        } else {
-            let identity = path.display().to_string();
-            automatic_reader(
-                options,
-                selected_input_format(options, &path),
-                open_path(&path)?,
-                &identity,
-                &mut executor,
-            )?;
-        }
-    }
-    executor.output.finish()?;
+        executor.output.finish()?;
+        Ok(executor
+            .output
+            .exit_status(options.exit_status, executor.last.as_ref()))
+    })();
     if let Some(path) = &options.report_file {
         write_report(
             path,
@@ -1519,12 +1536,13 @@ fn run_hybrid_filter<R: Read, W: Write, E: Write>(
             ReportExecution {
                 analysis,
                 retention: executor.retention,
+                resource_outcome: execution
+                    .as_ref()
+                    .map_or_else(|error| resource_outcome(error), |_| "success"),
             },
         )?;
     }
-    Ok(executor
-        .output
-        .exit_status(options.exit_status, executor.last.as_ref()))
+    execution
 }
 
 fn automatic_reader<R: Read, W: Write, E: Write, M>(
@@ -1633,10 +1651,8 @@ fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
 ) -> Result<(), RunError> {
     let mut execution_error = None;
     let selection = executor.stream_selection();
-    let parallel = parallel_allowed
-        && executor.hybrid_suffix.is_some()
-        && parallel_worker_count() > 1
-        && matches!(selection.prefix(), [PathComponent::Key(_)]);
+    let parallel =
+        parallel_allowed && executor.hybrid_suffix.is_some() && parallel_worker_count() > 1;
     let parallel_options = ParallelJsonOptions {
         batch_values: executor.output.options.limits.decode_batch_values,
         batch_bytes: executor.output.options.limits.decode_batch_bytes,
@@ -1661,8 +1677,20 @@ fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
                 &mut accept,
             )
         } else {
-            stream_json_selected_records(reader, options, selection, &mut accept)
-                .map(|()| ParallelJsonObservations::default())
+            let mut selected = SelectedStreamObservations::default();
+            let result = stream_json_selected_records_with_control(
+                reader,
+                options,
+                selection,
+                cancellation(),
+                &mut selected,
+                &mut accept,
+            );
+            executor.retention.decoder_depth_high_water = executor
+                .retention
+                .decoder_depth_high_water
+                .max(selected.depth_high_water);
+            result.map(|()| ParallelJsonObservations::default())
         }
     };
     if let Ok(observations) = decoded.as_ref() {
@@ -1670,6 +1698,10 @@ fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
             .retention
             .decode_batches
             .saturating_add(observations.batches);
+        executor.retention.decoder_depth_high_water = executor
+            .retention
+            .decoder_depth_high_water
+            .max(observations.depth_high_water);
         executor.retention.decode_in_flight_batches_high_water = executor
             .retention
             .decode_in_flight_batches_high_water
@@ -1686,6 +1718,9 @@ fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
     if let Some(error) = execution_error {
         return Err(error);
     }
+    if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(RunError::Interrupted);
+    }
     decoded.map(|_| ()).map_err(RunError::Input)
 }
 
@@ -1697,7 +1732,8 @@ fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
 ) -> Result<(), RunError> {
     let mut execution_error = None;
     let selection = executor.stream_selection();
-    let decoded = stream_toon_selected_records(
+    let mut selected = SelectedStreamObservations::default();
+    let decoded = stream_toon_selected_records_with_control(
         BufReader::new(reader),
         tq_toon::DecoderConfig {
             strict: options.strict,
@@ -1709,6 +1745,8 @@ fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
         },
         stream_options,
         selection,
+        cancellation(),
+        &mut selected,
         |record| match executor.accept(record) {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -1717,8 +1755,15 @@ fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
             }
         },
     );
+    executor.retention.decoder_depth_high_water = executor
+        .retention
+        .decoder_depth_high_water
+        .max(selected.depth_high_water);
     if let Some(error) = execution_error {
         return Err(error);
+    }
+    if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(RunError::Interrupted);
     }
     decoded.map_err(RunError::Input)
 }
@@ -1820,6 +1865,8 @@ struct AutomaticExecutor<'a, W, E, M> {
     hybrid_suffix: Option<&'a Plan<Compiled, HybridBlocking>>,
     last: Option<Value>,
     results: usize,
+    current_retained_results: usize,
+    current_retained_bytes: usize,
 }
 
 impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
@@ -2017,6 +2064,9 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
     }
 
     fn emit_direct(&mut self, value: Value) -> Result<(), RunError> {
+        if self.collected.is_some() {
+            self.observe_retained_value(&value);
+        }
         if let Some(collected) = self.collected.as_mut() {
             return collected.push(value);
         }
@@ -2046,20 +2096,11 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
     }
 
     fn evaluate(&mut self, input: Value, base: bool) -> Result<(), RunError> {
+        let limits = self.remaining_vm_limits();
         let mut vm = if base {
-            Vm::new_automatic_base(
-                self.plan,
-                input,
-                vm_limits(self.output.options),
-                self.variables.clone(),
-            )
+            Vm::new_automatic_base(self.plan, input, limits, self.variables.clone())
         } else {
-            Vm::new_automatic_item(
-                self.plan,
-                input,
-                vm_limits(self.output.options),
-                self.variables.clone(),
-            )
+            Vm::new_automatic_item(self.plan, input, limits, self.variables.clone())
         }
         .with_trace_limit(self.trace_remaining);
         if let Some(flag) = cancellation() {
@@ -2067,6 +2108,9 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
         }
         let mut output_error = None;
         let evaluated = vm.for_each_result(|value| {
+            if self.collected.is_some() {
+                self.observe_retained_value(&value);
+            }
             if let Some(collected) = self.collected.as_mut() {
                 if let Err(error) = collected.push(value) {
                     output_error = Some(error);
@@ -2082,6 +2126,7 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             self.results = self.results.saturating_add(1);
             true
         });
+        merge_observations(&mut self.observations, vm.observations());
         if let Some(error) = output_error {
             return Err(error);
         }
@@ -2092,7 +2137,6 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             }
             self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
         }
-        merge_observations(&mut self.observations, vm.observations());
         Ok(())
     }
 
@@ -2117,7 +2161,7 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
         let mut vm = Vm::new_hybrid_suffix(
             plan,
             Value::array(values),
-            vm_limits(self.output.options),
+            self.remaining_vm_limits(),
             self.variables.clone(),
         )
         .with_trace_limit(self.trace_remaining);
@@ -2134,6 +2178,9 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             self.results = self.results.saturating_add(1);
             true
         });
+        merge_observations(&mut self.observations, vm.observations());
+        self.current_retained_results = 0;
+        self.current_retained_bytes = 0;
         if let Some(error) = output_error {
             return Err(error);
         }
@@ -2144,8 +2191,28 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             }
             self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
         }
-        merge_observations(&mut self.observations, vm.observations());
         Ok(())
+    }
+
+    fn remaining_vm_limits(&self) -> VmLimits {
+        let mut limits = vm_limits(self.output.options);
+        limits.steps = limits.steps.saturating_sub(self.observations.steps);
+        limits
+    }
+
+    fn observe_retained_value(&mut self, value: &Value) {
+        self.current_retained_results = self.current_retained_results.saturating_add(1);
+        self.current_retained_bytes = self
+            .current_retained_bytes
+            .saturating_add(estimate_value_bytes(value).saturating_add(32));
+        self.retention.retained_results_high_water = self
+            .retention
+            .retained_results_high_water
+            .max(self.current_retained_results);
+        self.retention.retained_bytes_high_water = self
+            .retention
+            .retained_bytes_high_water
+            .max(self.current_retained_bytes);
     }
 }
 
@@ -3133,6 +3200,7 @@ fn write_report(
     let ReportExecution {
         analysis,
         retention,
+        resource_outcome,
     } = execution;
     let report = serde_json::json!({
         "schema_version": 1,
@@ -3157,7 +3225,11 @@ fn write_report(
             "retention_high_water": {
                 "bytes": retention.bytes_high_water,
                 "depth": retention.depth_high_water,
+                "decoder_depth": retention.decoder_depth_high_water,
                 "completed_subtrees": retention.completed_subtrees,
+                "retained_result_count": retention.retained_results_high_water,
+                "retained_estimated_bytes": retention.retained_bytes_high_water,
+                "blocking_state": if plan == PlanKind::HybridBlocking { "projected-collection-and-blocking-suffix" } else { "none" },
                 "sort_runs": retention.sort_runs,
                 "in_flight_batches": retention.in_flight_batches_high_water,
                 "in_flight_bytes": retention.in_flight_bytes_high_water,
@@ -3169,6 +3241,7 @@ fn write_report(
                 "parallel_decode_active": retention.decode_batches > 0,
                 "root_materialized": !matches!(plan, PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking | PlanKind::Transcode),
             },
+            "resource_outcome": resource_outcome,
         },
         "limits": {
             "input_bytes": options.limits.input_bytes,
@@ -3300,6 +3373,7 @@ fn write_transcode_report(
 struct ReportExecution<'a> {
     analysis: &'a Analysis,
     retention: RetentionObservations,
+    resource_outcome: &'a str,
 }
 
 fn exit_status(enabled: bool, last: Option<&Value>) -> ExitStatus {
@@ -4336,6 +4410,8 @@ mod tests {
             "-c",
             "--hybrid-batch-values",
             "1",
+            "--decode-batch-values",
+            "1",
             "[.items[].value] | sort",
         ];
         for input in [
@@ -4361,6 +4437,119 @@ mod tests {
             document.0.unwrap_err().status()
         );
         assert_eq!(hybrid.1, document.1);
+    }
+
+    #[test]
+    fn hybrid_vm_step_limit_is_shared_across_document_suffixes() {
+        let arguments = [
+            "-ijsonl",
+            "-ojsonl",
+            "--max-vm-steps",
+            "1",
+            "[.items[].value] | sort",
+        ];
+        let input = br#"{"items":[{"value":2},{"value":1}]}
+{"items":[{"value":4},{"value":3}]}
+"#;
+        let hybrid = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+
+        assert_eq!(hybrid.0.unwrap_err().status(), ExitStatus::Resource);
+        assert_eq!(hybrid.1, b"[1,2]\n");
+    }
+
+    #[test]
+    fn parallel_decode_preserves_cross_batch_stability_and_downstream_errors() {
+        let stable_arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--decode-batch-values",
+            "1",
+            "--hybrid-batch-values",
+            "1",
+            "[.items[]] | sort_by(.key)",
+        ];
+        let input =
+            br#"{"items":[{"key":1,"id":"first"},{"key":0,"id":"zero"},{"key":1,"id":"second"}]}"#;
+        let automatic =
+            execute_with_override(&stable_arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&stable_arguments, input, ExecutionOverride::Document);
+        assert_eq!(automatic.0.unwrap(), document.0.unwrap());
+        assert_eq!(automatic.1, document.1);
+        assert_eq!(automatic.1, b"[{\"key\":0,\"id\":\"zero\"},{\"key\":1,\"id\":\"first\"},{\"key\":1,\"id\":\"second\"}]\n");
+
+        let fallible_arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--decode-batch-values",
+            "1",
+            "[.items[].value] | map(if . == 2 then error(\"boom\") else . end) | sort",
+        ];
+        let input = br#"{"items":[{"value":3},{"value":2},{"value":1}]}"#;
+        let automatic =
+            execute_with_override(&fallible_arguments, input, ExecutionOverride::Automatic);
+        let document =
+            execute_with_override(&fallible_arguments, input, ExecutionOverride::Document);
+        assert_eq!(
+            automatic.0.unwrap_err().status(),
+            document.0.unwrap_err().status()
+        );
+        assert_eq!(automatic.1, document.1);
+    }
+
+    #[test]
+    fn nested_static_prefix_is_parallel_eligible_and_dynamic_dependency_is_explained() {
+        let (status, output, explain) = execute(
+            &[
+                "-ijson",
+                "-ojson",
+                "-c",
+                "--explain-json",
+                "--decode-batch-values",
+                "1",
+                "[.root.features[].value] | sort",
+            ],
+            br#"{"root":{"features":[{"value":2},{"value":1}]}}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[1,2]\n");
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["eligible"],
+            parallel_worker_count() > 1
+        );
+        if parallel_worker_count() > 1 {
+            assert_eq!(
+                explain["execution"]["parallel_selected_decode"]["reason"],
+                "static-array-prefix"
+            );
+        }
+
+        let (status, _, explain) = execute(
+            &[
+                "-ijson",
+                "-ojson",
+                "-c",
+                "--arg",
+                "key",
+                "items",
+                "--explain-json",
+                "[.[$key][]] | sort",
+            ],
+            br#"{"items":[2,1]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["eligible"],
+            false
+        );
+        assert!(
+            explain["execution"]["parallel_selected_decode"]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("not statically partitionable"))
+        );
     }
 
     #[test]
@@ -4400,6 +4589,25 @@ mod tests {
         assert!(report["execution"]["retention_high_water"]["sort_runs"].is_u64());
         assert!(report["execution"]["retention_high_water"]["worker_count"].is_u64());
         assert_eq!(
+            report["execution"]["retention_high_water"]["retained_result_count"],
+            2
+        );
+        assert!(
+            report["execution"]["retention_high_water"]["retained_estimated_bytes"]
+                .as_u64()
+                .is_some_and(|bytes| bytes > 0)
+        );
+        assert!(
+            report["execution"]["retention_high_water"]["decoder_depth"]
+                .as_u64()
+                .is_some_and(|depth| depth >= 3)
+        );
+        assert_eq!(
+            report["execution"]["retention_high_water"]["blocking_state"],
+            "projected-collection-and-blocking-suffix"
+        );
+        assert_eq!(report["execution"]["resource_outcome"], "success");
+        assert_eq!(
             report["execution"]["retention_high_water"]["parallel_decode_active"],
             parallel_worker_count() > 1
         );
@@ -4423,6 +4631,44 @@ mod tests {
         assert_eq!(
             explain["execution"]["hybrid_proof"]["preparation"],
             "collect"
+        );
+    }
+
+    #[test]
+    fn hybrid_report_records_resource_failure_outcome() {
+        let directory = tempfile::tempdir().unwrap();
+        let failed_report_path = directory.path().join("hybrid-failed.json");
+        let command = parse_args([
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--hybrid-in-flight-bytes",
+            "1",
+            "--report-file",
+            failed_report_path.to_str().unwrap(),
+            "[.items[].value] | sort",
+        ])
+        .unwrap();
+        let mut input = br#"{"items":[{"value":2},{"value":1}]}"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error)
+                .unwrap_err()
+                .status(),
+            ExitStatus::Resource
+        );
+        assert!(output.is_empty());
+        let failed_report: serde_json::Value =
+            serde_json::from_slice(&fs::read(failed_report_path).unwrap()).unwrap();
+        assert_eq!(
+            failed_report["execution"]["resource_outcome"],
+            "resource-limit"
+        );
+        assert!(
+            failed_report["execution"]["retention_high_water"]["retained_result_count"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
         );
     }
 }
