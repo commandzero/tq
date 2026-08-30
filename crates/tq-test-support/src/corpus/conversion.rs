@@ -2,8 +2,9 @@
 
 use std::{
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::Path,
+    process::{Command, Stdio},
 };
 
 use serde_json::Value;
@@ -67,6 +68,237 @@ pub enum ConversionError {
     /// A verified temporary output could not be installed.
     #[error("could not atomically install generated artifact: {0}")]
     Persist(#[from] tempfile::PersistError),
+    /// The external tq corpus generator failed.
+    #[error("tq corpus conversion failed for {format}: {message}")]
+    Tq {
+        /// Input or output format involved in the failed command.
+        format: String,
+        /// Exit status and bounded stderr text.
+        message: String,
+    },
+    /// tq produced a representation with a different canonical JSON stream.
+    #[error("tq-generated {format} changed corpus semantics: expected {expected}, got {actual}")]
+    TqSemantic {
+        /// Generated representation format.
+        format: String,
+        /// Canonical JSON SHA-256 of the natural source.
+        expected: String,
+        /// Canonical JSON SHA-256 after decoding the representation.
+        actual: String,
+    },
+}
+
+/// Generates YAML and TOON with the selected tq executable, then validates
+/// both through bounded-memory canonical JSON streams.
+///
+/// # Errors
+///
+/// Returns process, I/O, semantic, or atomic-install errors.
+pub fn generate_representations_with_tq(
+    tq: &Path,
+    source_json: &Path,
+    yaml_output: &Path,
+    toon_output: &Path,
+    yaml_manifest_path: &str,
+    toon_manifest_path: &str,
+) -> Result<GeneratedArtifacts, ConversionError> {
+    let toon = tq_generate(tq, source_json, "toon", toon_output, toon_manifest_path)?;
+    let yaml = tq_generate(tq, source_json, "yaml", yaml_output, yaml_manifest_path)?;
+    validate_generated_representations_with_tq(tq, source_json, yaml_output, toon_output)?;
+    Ok(GeneratedArtifacts { yaml, toon })
+}
+
+/// Validates existing YAML and TOON with bounded-memory tq canonical streams
+/// and calculates their raw artifact identities.
+///
+/// # Errors
+///
+/// Returns process, I/O, semantic, or hashing errors.
+pub fn finalize_generated_representations_with_tq(
+    tq: &Path,
+    source_json: &Path,
+    yaml_input: &Path,
+    toon_input: &Path,
+    yaml_manifest_path: &str,
+    toon_manifest_path: &str,
+) -> Result<GeneratedArtifacts, ConversionError> {
+    validate_generated_representations_with_tq(tq, source_json, yaml_input, toon_input)?;
+    Ok(GeneratedArtifacts {
+        yaml: identify_existing(yaml_input, yaml_manifest_path)?,
+        toon: identify_existing(toon_input, toon_manifest_path)?,
+    })
+}
+
+/// Compares tq's compact JSON stream for the natural JSON, YAML, and TOON
+/// representations without materializing the complete document in memory.
+///
+/// # Errors
+///
+/// Returns process, I/O, or canonical-stream mismatch errors.
+pub fn validate_generated_representations_with_tq(
+    tq: &Path,
+    source_json: &Path,
+    yaml_input: &Path,
+    toon_input: &Path,
+) -> Result<(), ConversionError> {
+    let source = tq_canonical_digest(tq, source_json, "json")?;
+    for (format, input) in [("yaml", yaml_input), ("toon", toon_input)] {
+        let actual = tq_canonical_digest(tq, input, format)?;
+        if actual != source {
+            return Err(ConversionError::TqSemantic {
+                format: format.to_owned(),
+                expected: source.clone(),
+                actual,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn tq_generate(
+    tq: &Path,
+    source_json: &Path,
+    format: &str,
+    destination: &Path,
+    manifest_path: &str,
+) -> Result<ArtifactIdentity, ConversionError> {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut temporary = NamedTempFile::new_in(parent)?;
+    let stderr = NamedTempFile::new()?;
+    let mut command = Command::new(tq);
+    // JSON is the lossless YAML 1.2 profile for natural sources whose decimal
+    // values cannot survive the YAML library's public number model exactly.
+    // Keeping this representation compact also avoids doubling large corpora.
+    let output_format = if format == "yaml" { "json" } else { format };
+    command
+        .arg("-i")
+        .arg("json")
+        .arg("-o")
+        .arg(output_format)
+        .arg("--max-input-bytes")
+        .arg(fs::metadata(source_json)?.len().to_string());
+    if format == "toon" {
+        command.arg("--unframed");
+    } else if format == "yaml" {
+        command.arg("--compact-output");
+    }
+    let mut child = command
+        .arg(".")
+        .arg(source_json)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr.reopen()?))
+        .spawn()
+        .map_err(|error| ConversionError::Tq {
+            format: format.to_owned(),
+            message: error.to_string(),
+        })?;
+    let mut stdout = child.stdout.take().ok_or_else(|| ConversionError::Tq {
+        format: format.to_owned(),
+        message: "tq stdout was not captured".to_owned(),
+    })?;
+    let mut hasher = Sha256::new();
+    let mut bytes = 0_u64;
+    let mut buffer = vec![0_u8; 1024 * 1024].into_boxed_slice();
+    loop {
+        let read = stdout.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        temporary.write_all(&buffer[..read])?;
+        hasher.update(&buffer[..read]);
+        bytes =
+            bytes
+                .checked_add(u64::try_from(read).map_err(|_| {
+                    io::Error::other("generated artifact length does not fit in u64")
+                })?)
+                .ok_or_else(|| io::Error::other("generated artifact length overflow"))?;
+    }
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(ConversionError::Tq {
+            format: format.to_owned(),
+            message: tq_failure(status.code(), stderr.path())?,
+        });
+    }
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(destination)?;
+    Ok(ArtifactIdentity {
+        path: manifest_path.to_owned(),
+        bytes,
+        sha256: encode_hex(&hasher.finalize()),
+    })
+}
+
+fn tq_canonical_digest(
+    tq: &Path,
+    input: &Path,
+    input_format: &str,
+) -> Result<String, ConversionError> {
+    let stderr = NamedTempFile::new()?;
+    let input_bytes = fs::metadata(input)?.len();
+    let mut child = Command::new(tq)
+        .arg("-i")
+        .arg(input_format)
+        .arg("-o")
+        .arg("json")
+        .arg("-c")
+        .arg("--max-input-bytes")
+        .arg(input_bytes.to_string())
+        .arg(".")
+        .arg(input)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr.reopen()?))
+        .spawn()
+        .map_err(|error| ConversionError::Tq {
+            format: input_format.to_owned(),
+            message: error.to_string(),
+        })?;
+    let mut stdout = child.stdout.take().ok_or_else(|| ConversionError::Tq {
+        format: input_format.to_owned(),
+        message: "tq stdout was not captured".to_owned(),
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024].into_boxed_slice();
+    loop {
+        let read = stdout.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let status = child.wait()?;
+    if !status.success() {
+        return Err(ConversionError::Tq {
+            format: input_format.to_owned(),
+            message: tq_failure(status.code(), stderr.path())?,
+        });
+    }
+    Ok(encode_hex(&hasher.finalize()))
+}
+
+fn tq_failure(status: Option<i32>, stderr: &Path) -> Result<String, io::Error> {
+    let mut message = fs::read_to_string(stderr)?;
+    if message.len() > 4096 {
+        let mut boundary = 4096;
+        while !message.is_char_boundary(boundary) {
+            boundary = boundary.saturating_sub(1);
+        }
+        message.truncate(boundary);
+    }
+    let message = message.trim();
+    Ok(if message.is_empty() {
+        format!(
+            "exit status {}",
+            status.map_or_else(|| "signal".to_owned(), |value| value.to_string())
+        )
+    } else {
+        format!(
+            "exit status {}: {message}",
+            status.map_or_else(|| "signal".to_owned(), |value| value.to_string())
+        )
+    })
 }
 
 /// Generates YAML and TOON representations from natural source JSON.

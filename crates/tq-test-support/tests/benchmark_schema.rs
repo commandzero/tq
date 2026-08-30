@@ -17,6 +17,13 @@ fn benchmark_schemas_are_valid_and_campaign_shape_is_versioned() {
         &fs::read(root.join("schemas/benchmark-campaign-v1.schema.json")).expect("campaign schema"),
     )
     .expect("campaign schema JSON");
+    assert!(
+        campaign_schema["properties"]["profile"]["enum"]
+            .as_array()
+            .expect("profile enum")
+            .iter()
+            .any(|profile| profile == "rapid")
+    );
     let validator = jsonschema::Validator::new(&campaign_schema).expect("valid campaign schema");
     assert!(validator.is_valid(&json!({
         "schema_version": 1,

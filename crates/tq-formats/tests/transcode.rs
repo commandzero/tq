@@ -316,6 +316,39 @@ fn one_mib_budget_spools_a_direct_nested_array() {
 }
 
 #[test]
+fn composite_array_spills_before_it_starves_the_next_element() {
+    const MEMORY: usize = 1024;
+    let mut input = String::from("{\"items\":[");
+    for index in 0..32_u64 {
+        if index != 0 {
+            input.push(',');
+        }
+        input.push_str("{\"value\":\"");
+        input.push_str(&"x".repeat(128));
+        input.push_str("\"}");
+    }
+    input.push_str("]}");
+
+    let (preparation, arena) = preparation(MEMORY, 1024 * 1024);
+    let mut consumer = TranscodeConsumer::new(
+        Vec::new(),
+        WriterConfig::default(),
+        preparation,
+        arena.clone(),
+        DuplicateKeyPolicy::Reject,
+        TranscodeCommitment::DirectSequence,
+    );
+    decode_json_events(input.as_bytes(), SourceId::new(1), &mut consumer).unwrap();
+
+    assert_eq!(
+        consumer.into_inner(),
+        document_json(input.as_bytes(), WriterConfig::default(), false)
+    );
+    assert!(arena.observations().spool_bytes_written > 0);
+    assert!(arena.observations().memory_high_water_bytes <= MEMORY);
+}
+
+#[test]
 fn one_mib_budget_spills_wide_object_keys_and_still_rejects_duplicates() {
     const MEMORY: usize = 1024 * 1024;
     let mut input = String::from("{");

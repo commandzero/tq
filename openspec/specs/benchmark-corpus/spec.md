@@ -82,11 +82,11 @@ Large source artifacts, generated YAML/TOON artifacts, temporary conversions, an
 - **THEN** smoke tests may use checked-in `examples/` snapshots and label the campaign as `smoke`, not `refreshed` or `release`
 
 ### Requirement: Recollectable and attributable campaigns
-The benchmark system SHALL support refreshed campaigns as the default and explicit frozen replay of an already recorded snapshot for investigation. Every result MUST identify the exact snapshot manifests it consumed.
+The benchmark system SHALL reuse the newest validated machine-local corpus by default, support explicit refresh campaigns, and support frozen replay of an already recorded snapshot for investigation. Every result MUST identify the exact snapshot manifests it consumed.
 
 #### Scenario: Default campaign
 - **WHEN** a user starts a standard benchmark campaign without a frozen snapshot option
-- **THEN** the corpus manager attempts to recollect the configured natural datasets before benchmarking
+- **THEN** the corpus manager reuses each configured dataset's newest validated local snapshot and prepares only datasets missing from the machine cache
 
 #### Scenario: Frozen diagnostic replay
 - **WHEN** a user explicitly selects an existing snapshot manifest

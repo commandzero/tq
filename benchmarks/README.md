@@ -12,15 +12,19 @@ tq on JSON, YAML, and TOON. It reports native-format views separately. The
 runner checks ordered values before it times a row.
 
 Profiles keep their natural source sizes. Smoke uses checked-in examples.
-Standard uses refreshed USGS feeds. Large uses the roughly 1 GB Microsoft US
-building-footprint archive. The runner extracts archives, generates formats,
-and checks JSON, YAML, and TOON equivalence before timing.
+Rapid uses the cached `usgs-all-month` USGS snapshot with the five high-signal
+cases and one measured sample per row. Standard uses cached USGS feeds. Large
+uses the roughly 1 GB Microsoft US building-footprint archive. The first run on
+a machine downloads missing sources, then uses the release `tq` binary to
+generate and validate a compact,
+lossless YAML 1.2 JSON-subset representation and TOON. Later runs reuse the
+admitted snapshot without network access, conversion, or full-file hashing.
 
 If a refresh stops after installing generated files but before admitting the
 manifest, resume validation without regenerating the files:
 
 ```console
-cargo run -p tq-test-support --bin tq-corpus -- \
+cargo run --release -p tq-test-support --bin tq-corpus -- \
   finalize CACHE_ROOT CACHE_ROOT/campaigns/ID/SOURCE/manifest.json
 ```
 
@@ -28,14 +32,41 @@ You can rerun `finalize` on a manifest that already passed cross-format
 validation. It validates the existing representations, then records their byte
 counts and SHA-256 identities in one atomic update.
 
-The Make targets refresh or replay the selected corpus and write local reports:
+Preparation is idempotent and normally happens through the Make target. To
+prepare without running benchmarks, build `tq` and invoke the release corpus
+helper directly:
 
 ```console
+cargo build --release -p tq-cli
+TQ_BIN="$PWD/target/release/tq" cargo run --release -p tq-test-support --bin tq-corpus -- \
+  prepare tests/corpus/sources /path/to/tq-benchmarks/.work/corpus standard
+```
+
+Use `large` for the building-footprint snapshot. `prepare` reuses the newest
+admitted source and resumes an interrupted snapshot. Use `refresh` instead of
+`prepare` only when you intend to download current upstream data. Use `verify`
+for an explicit full SHA-256 and cross-format audit. Normal benchmark runs use
+the machine-local verification cache and check file metadata before replay.
+
+The Make targets prepare or replay the selected corpus and write local reports:
+
+```console
+make benchmark
+make benchmark-rapid
 make benchmark-smoke
 make benchmark-standard
 make benchmark-large
 make benchmark-stack-overflow
 ```
+
+The standard and large targets reuse the machine-local corpus. The explicit
+`benchmark-refresh-rapid`, `benchmark-refresh-standard`, and
+`benchmark-refresh-large` acquire new upstream snapshots before running.
+
+`make benchmark` is the default rapid run. It is equivalent to
+`make benchmark-rapid`. The direct campaign runner also defaults to rapid when
+called as `./scripts/run-campaign.sh benchmark`, and `tq-bench` defaults to the
+same profile when no profile is supplied.
 
 That target runs the checked-in Stack Overflow scenarios through the shared
 Rust correctness and measurement code.
@@ -59,7 +90,7 @@ recorded corpus manifest:
 ```console
 cargo build --release
 export TQ_BENCHMARK_ARCHIVE_ROOT=/path/to/tq-benchmarks
-TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench -- \
+TQ_BIN="$PWD/target/release/tq" cargo run --release -p tq-test-support --bin tq-bench -- \
   run --profile standard \
   --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/standard.json" \
   --cache-root "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/corpus" \

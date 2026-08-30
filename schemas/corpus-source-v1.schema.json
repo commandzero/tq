@@ -35,6 +35,7 @@
       "uniqueItems": true,
       "items": {
         "enum": [
+          "rapid",
           "standard",
           "large"
         ]

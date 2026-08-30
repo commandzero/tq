@@ -3,18 +3,19 @@
 use std::path::PathBuf;
 
 use tq_test_support::corpus::{
-    CampaignError, CampaignMode, SourceSnapshotInput, build_source_snapshot, load_frozen_snapshot,
+    CampaignError, CampaignMode, GeneratedArtifacts, SnapshotState, SourceSnapshotInput,
+    build_source_snapshot, discover_latest_validated_manifests, load_frozen_snapshot,
     write_snapshot_manifest,
 };
 
 mod support;
 
 #[test]
-fn campaign_mode_is_refreshed_unless_frozen_manifest_is_explicit() {
-    assert_eq!(CampaignMode::default(), CampaignMode::Refreshed);
+fn campaign_mode_reuses_prepared_corpus_unless_frozen_manifest_is_explicit() {
+    assert_eq!(CampaignMode::default(), CampaignMode::Prepared);
     assert_eq!(
         CampaignMode::from_frozen_manifest(None),
-        CampaignMode::Refreshed
+        CampaignMode::Prepared
     );
     assert_eq!(
         CampaignMode::from_frozen_manifest(Some(PathBuf::from("snapshot.json"))),
@@ -46,6 +47,7 @@ fn frozen_replay_requires_every_artifact_to_match_manifest() {
 
     let frozen = load_frozen_snapshot(&manifest_path, temp.path()).expect("verified replay");
     assert_eq!(frozen.manifest.source_id, "usgs-all-hour");
+    assert!(temp.path().join("verification-cache-v1.json").is_file());
 
     std::fs::write(&source_path, b"same size but wrong bytes..............")
         .expect("corrupt source");
@@ -53,6 +55,49 @@ fn frozen_replay_requires_every_artifact_to_match_manifest() {
         load_frozen_snapshot(&manifest_path, temp.path()),
         Err(CampaignError::SizeMismatch { .. } | CampaignError::DigestMismatch { .. })
     ));
+}
+
+#[test]
+fn discovery_reuses_latest_admitted_snapshot_and_ignores_incomplete_refresh() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let source = temp.path().join("source.json");
+    std::fs::write(&source, br#"{"type":"FeatureCollection","features":[]}"#).expect("source JSON");
+    let mut ready = build_source_snapshot(support::snapshot_input(source)).expect("manifest");
+    ready.state = SnapshotState::CrossFormatValidated;
+    ready.artifacts.generated = Some(GeneratedArtifacts {
+        yaml: support::artifact("campaigns/ready/usgs-all-hour/source.yaml", &{
+            let path = temp.path().join("yaml");
+            std::fs::write(&path, b"yaml").expect("yaml");
+            path
+        }),
+        toon: support::artifact("campaigns/ready/usgs-all-hour/source.toon", &{
+            let path = temp.path().join("toon");
+            std::fs::write(&path, b"toon").expect("toon");
+            path
+        }),
+    });
+    ready.validation.yaml_equivalent = Some(true);
+    ready.validation.toon_equivalent = Some(true);
+    let ready_path = temp
+        .path()
+        .join("campaigns/ready/usgs-all-hour/manifest.json");
+    write_snapshot_manifest(&ready_path, &ready).expect("ready manifest");
+
+    let mut incomplete = ready;
+    incomplete.retrieved_at = "2026-08-30T12:00:00Z".to_owned();
+    incomplete.state = SnapshotState::SourceValidated;
+    incomplete.artifacts.generated = None;
+    incomplete.validation.yaml_equivalent = None;
+    incomplete.validation.toon_equivalent = None;
+    let incomplete_path = temp
+        .path()
+        .join("campaigns/incomplete/usgs-all-hour/manifest.json");
+    write_snapshot_manifest(&incomplete_path, &incomplete).expect("incomplete manifest");
+
+    assert_eq!(
+        discover_latest_validated_manifests(temp.path()).expect("discovery"),
+        vec![ready_path]
+    );
 }
 
 #[test]

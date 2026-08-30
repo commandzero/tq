@@ -2,7 +2,11 @@
 set -eu
 
 campaign="${1:-}"
-profile="${2:-}"
+if [ "$campaign" = benchmark ]; then
+    profile="${2:-rapid}"
+else
+    profile="${2:-}"
+fi
 
 # Keep benchmark outputs in the sibling archive checkout when it is present.
 # TQ_BENCHMARK_ARCHIVE_ROOT can override discovery for CI and other layouts.
@@ -42,24 +46,30 @@ case "$campaign:$profile" in
             --case benchmark.startup --case benchmark.parse-discard \
             --case benchmark.scalar-extraction --case benchmark.event-stream
         ;;
-    benchmark:standard|benchmark:large)
+    benchmark:rapid|benchmark:standard|benchmark:large)
         mkdir -p "$work_root"
         cache_root="${TQ_CORPUS_CACHE:-$work_root/corpus}"
-        corpus_origin="${TQ_CORPUS_ORIGIN:-refreshed}"
-        if [ "$corpus_origin" = refreshed ]; then
+        corpus_origin="${TQ_CORPUS_ORIGIN:-frozen}"
+        corpus_profile="$profile"
+        cargo build --quiet --release -p tq-cli
+        TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
+        export TQ_BIN
+        if [ -z "${TQ_BENCH_MANIFESTS:-}" ]; then
             refresh_json="$(mktemp "${TMPDIR:-/tmp}/tq-corpus.XXXXXX")"
             trap 'rm -f "$refresh_json"' EXIT HUP INT TERM
-            cargo run --quiet -p tq-test-support --bin tq-corpus -- \
-                refresh tests/corpus/sources "$cache_root" "$profile" >"$refresh_json"
+            if [ "$corpus_origin" = refreshed ]; then
+                corpus_command=refresh
+            else
+                corpus_command=prepare
+            fi
+            cargo run --quiet --release -p tq-test-support --bin tq-corpus -- \
+                "$corpus_command" tests/corpus/sources "$cache_root" "$corpus_profile" >"$refresh_json"
             TQ_BENCH_MANIFESTS="$(jq -r '.manifests | join(":")' "$refresh_json")"
             export TQ_BENCH_MANIFESTS
             rm -f "$refresh_json"
             trap - EXIT HUP INT TERM
         fi
-        cargo build --quiet --release -p tq-cli
-        TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
-        export TQ_BIN
-        exec cargo run --quiet -p tq-test-support --bin tq-bench -- run \
+        exec cargo run --quiet --release -p tq-test-support --bin tq-bench -- run \
             --profile "$profile" --output "$work_root/$profile.json" \
             --cache-root "$cache_root" \
             --origin "$corpus_origin"

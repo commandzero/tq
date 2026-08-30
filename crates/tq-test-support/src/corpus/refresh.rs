@@ -1,7 +1,8 @@
 //! End-to-end natural source refresh and cross-format preparation.
 
 use std::{
-    fs, io,
+    fs,
+    io::{self, Read as _},
     path::{Path, PathBuf},
 };
 
@@ -11,8 +12,8 @@ use thiserror::Error;
 use super::{
     ArchiveIdentity, ArtifactIdentity, FetchError, FetchOutcome, FetchRequest, ManifestError,
     Provenance, RequestIdentity, ReqwestTransport, SnapshotState, SourceSnapshotInput,
-    build_source_snapshot, extract_zip_member, fetch, generate_representations,
-    validate_generated_representations, write_snapshot_manifest,
+    build_source_snapshot, extract_zip_member, fetch, finalize_generated_representations_with_tq,
+    generate_representations_with_tq, remember_verified_snapshot, write_snapshot_manifest,
 };
 
 /// Completed refreshed campaign.
@@ -92,6 +93,7 @@ pub fn refresh_campaign(
     source_directory: &Path,
     cache_root: &Path,
     campaign: &str,
+    tq: &Path,
 ) -> Result<RefreshCampaign, RefreshError> {
     let timestamp = jiff::Timestamp::now();
     let campaign_id = timestamp.to_string().replace(':', "-");
@@ -104,10 +106,58 @@ pub fn refresh_campaign(
             &campaign_id,
             timestamp.to_string(),
             &definition,
+            tq,
         )?);
     }
     Ok(RefreshCampaign {
         campaign_id,
+        manifests,
+    })
+}
+
+/// Reuses the newest admitted snapshot for every configured source, resumes an
+/// interrupted local snapshot, and downloads only sources absent from the cache.
+///
+/// # Errors
+///
+/// Returns registry, network, archive, validation, conversion, or manifest
+/// errors while preparing a missing source.
+pub fn prepare_campaign(
+    source_directory: &Path,
+    cache_root: &Path,
+    campaign: &str,
+    tq: &Path,
+) -> Result<RefreshCampaign, RefreshError> {
+    let mut definitions = source_definitions(source_directory)?;
+    definitions.retain(|definition| definition.campaigns.iter().any(|value| value == campaign));
+    let timestamp = jiff::Timestamp::now();
+    let campaign_id = timestamp.to_string().replace(':', "-");
+    let mut manifests = Vec::new();
+    for definition in definitions {
+        let manifest = match latest_manifest(cache_root, &definition.id)? {
+            Some(path) => {
+                let existing: super::SnapshotManifest =
+                    serde_json::from_reader(fs::File::open(&path)?)?;
+                if existing.state == SnapshotState::CrossFormatValidated
+                    && existing.artifacts.generated.is_some()
+                {
+                    path
+                } else {
+                    resume_snapshot(cache_root, &path, existing, tq)?
+                }
+            }
+            None => refresh_source(
+                cache_root,
+                &campaign_id,
+                timestamp.to_string(),
+                &definition,
+                tq,
+            )?,
+        };
+        manifests.push(manifest);
+    }
+    Ok(RefreshCampaign {
+        campaign_id: "machine-cache".to_owned(),
         manifests,
     })
 }
@@ -129,6 +179,7 @@ fn refresh_source(
     campaign_id: &str,
     retrieved_at: String,
     definition: &SourceDefinition,
+    tq: &Path,
 ) -> Result<PathBuf, RefreshError> {
     let relative_root = PathBuf::from("campaigns")
         .join(campaign_id)
@@ -211,24 +262,128 @@ fn refresh_source(
     write_snapshot_manifest(&manifest_path, &manifest)?;
     let yaml_relative = relative_root.join("source.yaml");
     let toon_relative = relative_root.join("source.toon");
-    let generated = generate_representations(
+    let generated = generate_representations_with_tq(
+        tq,
         &source_file,
         &cache_root.join(&yaml_relative),
         &cache_root.join(&toon_relative),
         &relative_string(&yaml_relative)?,
         &relative_string(&toon_relative)?,
     )?;
-    validate_generated_representations(
-        &source_file,
-        &cache_root.join(&yaml_relative),
-        &cache_root.join(&toon_relative),
-    )?;
     manifest.artifacts.generated = Some(generated);
     manifest.validation.yaml_equivalent = Some(true);
     manifest.validation.toon_equivalent = Some(true);
     manifest.state = SnapshotState::CrossFormatValidated;
     write_snapshot_manifest(&manifest_path, &manifest)?;
+    remember_verified_snapshot(cache_root, &manifest)
+        .map_err(|error| io::Error::other(error.to_string()))?;
     Ok(manifest_path)
+}
+
+fn latest_manifest(cache_root: &Path, source_id: &str) -> Result<Option<PathBuf>, RefreshError> {
+    let campaigns = cache_root.join("campaigns");
+    if !campaigns.is_dir() {
+        return Ok(None);
+    }
+    let mut latest = None::<(String, PathBuf)>;
+    for campaign in fs::read_dir(campaigns)? {
+        let path = campaign?.path().join(source_id).join("manifest.json");
+        if !path.is_file() {
+            continue;
+        }
+        let manifest: super::SnapshotManifest = serde_json::from_reader(fs::File::open(&path)?)?;
+        let replace = latest
+            .as_ref()
+            .is_none_or(|(retrieved_at, _)| manifest.retrieved_at > *retrieved_at);
+        if replace {
+            latest = Some((manifest.retrieved_at, path));
+        }
+    }
+    Ok(latest.map(|(_, path)| path))
+}
+
+fn resume_snapshot(
+    cache_root: &Path,
+    manifest_path: &Path,
+    mut manifest: super::SnapshotManifest,
+    tq: &Path,
+) -> Result<PathBuf, RefreshError> {
+    let source_relative = safe_relative(&manifest.artifacts.source_json.path)?;
+    let artifact_root = source_relative
+        .parent()
+        .ok_or_else(|| io::Error::other("source artifact path has no parent"))?;
+    let yaml_relative = artifact_root.join("source.yaml");
+    let toon_relative = artifact_root.join("source.toon");
+    let yaml_path = cache_root.join(&yaml_relative);
+    let toon_path = cache_root.join(&toon_relative);
+    let yaml_manifest_path = relative_string(&yaml_relative)?;
+    let toon_manifest_path = relative_string(&toon_relative)?;
+    let source_path = cache_root.join(source_relative);
+    let generated =
+        if yaml_path.is_file() && toon_path.is_file() && is_lossless_yaml_profile(&yaml_path)? {
+            match finalize_generated_representations_with_tq(
+                tq,
+                &source_path,
+                &yaml_path,
+                &toon_path,
+                &yaml_manifest_path,
+                &toon_manifest_path,
+            ) {
+                Ok(generated) => generated,
+                Err(_) => generate_representations_with_tq(
+                    tq,
+                    &source_path,
+                    &yaml_path,
+                    &toon_path,
+                    &yaml_manifest_path,
+                    &toon_manifest_path,
+                )?,
+            }
+        } else {
+            generate_representations_with_tq(
+                tq,
+                &source_path,
+                &yaml_path,
+                &toon_path,
+                &yaml_manifest_path,
+                &toon_manifest_path,
+            )?
+        };
+    manifest.artifacts.generated = Some(generated);
+    manifest.validation.yaml_equivalent = Some(true);
+    manifest.validation.toon_equivalent = Some(true);
+    manifest.state = SnapshotState::CrossFormatValidated;
+    write_snapshot_manifest(manifest_path, &manifest)?;
+    remember_verified_snapshot(cache_root, &manifest)
+        .map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(manifest_path.to_owned())
+}
+
+fn is_lossless_yaml_profile(path: &Path) -> Result<bool, io::Error> {
+    let mut file = fs::File::open(path)?;
+    let mut prefix = [0_u8; 64];
+    let read = file.read(&mut prefix)?;
+    Ok(prefix[..read]
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace())
+        .is_some_and(|byte| matches!(byte, b'{' | b'[')))
+}
+
+fn safe_relative(path: &str) -> Result<&Path, RefreshError> {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty()
+        || !path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(io::Error::other(format!(
+            "unsafe cache-relative artifact path: {}",
+            path.display()
+        ))
+        .into());
+    }
+    Ok(path)
 }
 
 fn relative_string(path: &Path) -> Result<String, io::Error> {

@@ -20,11 +20,15 @@ mod manifest;
 mod refresh;
 mod smoke;
 
-pub use campaign::{CampaignError, CampaignMode, FrozenSnapshot, load_frozen_snapshot};
+pub use campaign::{
+    CampaignError, CampaignMode, FrozenSnapshot, discover_latest_validated_manifests,
+    load_frozen_snapshot, remember_verified_snapshot, verify_frozen_snapshot,
+};
 pub use conversion::{
     ConversionError, DifferenceKind, SemanticDifference, compare_ordered,
-    finalize_generated_representations, generate_representations,
-    validate_generated_representations,
+    finalize_generated_representations, finalize_generated_representations_with_tq,
+    generate_representations, generate_representations_with_tq, validate_generated_representations,
+    validate_generated_representations_with_tq,
 };
 pub(crate) use conversion::{encode_toon_exact, json_to_yaml};
 pub use geojson::{GeoJsonError, GeoJsonMetadata, validate_geojson};
@@ -34,7 +38,7 @@ pub use manifest::{
     LicenseIdentity, ManifestError, Provenance, RequestIdentity, SnapshotManifest, SnapshotState,
     SourceSnapshotInput, ValidationIdentity, build_source_snapshot, write_snapshot_manifest,
 };
-pub use refresh::{RefreshCampaign, RefreshError, refresh_campaign};
+pub use refresh::{RefreshCampaign, RefreshError, prepare_campaign, refresh_campaign};
 pub use smoke::{CorpusOrigin, SmokeCorpus, SmokeError, SmokeSnapshot, discover_smoke_corpus};
 
 /// A source download request, including cache validators and integrity policy.
