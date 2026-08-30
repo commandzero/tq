@@ -48,6 +48,15 @@ This path does not use `TranscodeConsumer`. That consumer solves canonical TOON 
 
 The existing JSON jq-stream projector remains for explicit `--stream`. Hybrid execution consumes structural events directly so it does not allocate path arrays and wrapper values for every coordinate in a geometry-heavy document.
 
+For a JSON path that the static proof rejects, the selected decoder uses a
+validation-only visitor. It still consumes the complete subtree and enforces
+JSON syntax, nesting depth, token length, and tq's numeric envelope, but it
+does not canonicalize discarded numbers or construct structural events, jq
+values, reference-counted keys, or projector paths. Tracked paths continue
+through the ordinary value-producing visitor. This optimization is confined
+to the selected automatic JSON path; explicit `--stream` and query-independent
+transcoding keep their complete event contracts.
+
 Alternative considered: generate jq `[path, value]` records and send them through `AutomaticExecutor`. It would be simpler, but it allocates and evaluates records for millions of irrelevant geometry scalars.
 
 ### Use a bounded producer and preparation handoff
@@ -101,6 +110,9 @@ The large benchmark has separate jq, forced single-thread tq, and configured mul
 
 - [JSON tokenization remains single-threaded] -> Report decoder and worker phases separately. Treat parallel parsing of independently framed or indexed input as later work.
 - [Structural events still visit irrelevant geometry scalars] -> Avoid path-record and root allocations now, then use profiles to decide whether the decoder needs a validation-only scalar path.
+- [A discard shortcut could hide malformed or over-limit input] -> Traverse
+  every rejected value with a validation-only seed and differential-test
+  syntax, depth, string/key token, numeric-envelope, and late-error behavior.
 - [Chunked stable sorting can diverge at equal values] -> Carry encounter ordinals through run sorting and merge, and add differential cases with equal-comparing values that have distinguishable representations.
 - [A broad split rule could change jq error timing] -> Admit only the narrow proven collection shape and keep fallible item evaluation serial and ordered.
 - [The projected collection can still be large] -> Label it as cardinality-proportional blocking state, enforce existing result limits, expose retained-byte observations, and never advertise fixed memory.

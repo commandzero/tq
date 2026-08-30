@@ -40,6 +40,21 @@ A compiled hybrid plan SHALL represent its streaming producer, collection bounda
 - **WHEN** equal-comparing values enter parallel sort preparation in different batches
 - **THEN** their encounter order is preserved wherever the accepted jq baseline makes that order observable
 
+### Requirement: Validation-only selected JSON discard
+When a static automatic projection proves that a JSON subtree cannot
+contribute a result, the decoder MAY discard that subtree without constructing
+structural events or runtime values. It MUST still consume the entire subtree
+and preserve JSON syntax, nesting-depth, token-length, numeric-envelope, input
+limit, cancellation, and late-error behavior.
+
+#### Scenario: Irrelevant geometry numbers
+- **WHEN** a projected metadata query encounters numeric coordinates outside its selected path
+- **THEN** the decoder validates their JSON tokens and numeric resource envelope without constructing jq numbers or projector records
+
+#### Scenario: Invalid discarded subtree
+- **WHEN** an unselected subtree contains malformed JSON or exceeds a configured decoder resource limit
+- **THEN** hybrid execution returns the same failure class as the non-discarding structural decoder and publishes no blocking result
+
 ### Requirement: Semantics-preserving blocking rewrites
 The compiler MAY remove a blocking operator only when resolved query structure and input-type proof establish that the operator cannot change the result sequence, values, ordering, or jq-visible errors. Explain output MUST identify each applied rewrite.
 

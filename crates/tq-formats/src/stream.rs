@@ -212,26 +212,21 @@ where
     R: std::io::Read,
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
-    let mut consumer = EventProjector {
-        projector: Projector::selected(
-            options.maximum_depth,
-            options.maximum_token_bytes,
-            selection,
-            &mut emit,
-        ),
-    };
-    decode_json_events_with_options(
-        reader,
-        SourceId::new(0),
-        &mut consumer,
-        JsonEventOptions {
-            maximum_depth: options.maximum_depth,
-            maximum_token_bytes: options.maximum_token_bytes,
-        },
-    )
-    .map_err(|message| FormatError::Parse {
+    let mut projector = Projector::selected(
+        options.maximum_depth,
+        options.maximum_token_bytes,
+        selection,
+        &mut emit,
+    );
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    StreamSeed {
+        projector: &mut projector,
+    }
+    .deserialize(&mut deserializer)
+    .and_then(|()| deserializer.end())
+    .map_err(|error| FormatError::Parse {
         format: InputFormat::Json,
-        message,
+        message: error.to_string(),
     })
 }
 
@@ -559,6 +554,12 @@ where
         path
     }
 
+    fn rejects_next_value(&self) -> bool {
+        self.selection
+            .as_ref()
+            .is_some_and(|selection| !selection.tracks(&self.expected_path()))
+    }
+
     fn emit_pair(&mut self, path: Vec<PathComponent>, value: Value) -> Result<(), String> {
         if self
             .selection
@@ -596,6 +597,151 @@ fn path_value(path: &[PathComponent]) -> Value {
     )
 }
 
+#[derive(Clone, Copy)]
+struct DiscardSeed {
+    depth: usize,
+    maximum_depth: usize,
+    maximum_token_bytes: usize,
+}
+
+impl<'de> DeserializeSeed<'de> for DiscardSeed {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(DiscardVisitor(self))
+    }
+}
+
+struct DiscardVisitor(DiscardSeed);
+
+impl DiscardVisitor {
+    fn check_token<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
+        if bytes > self.0.maximum_token_bytes {
+            return Err(E::custom("input resource limit exceeded: token-bytes"));
+        }
+        Ok(())
+    }
+
+    fn child_seed<E: de::Error>(&self) -> Result<DiscardSeed, E> {
+        if self.0.depth >= self.0.maximum_depth {
+            return Err(E::custom("stream depth limit exceeded"));
+        }
+        Ok(DiscardSeed {
+            depth: self.0.depth.saturating_add(1),
+            ..self.0
+        })
+    }
+
+    fn validate_number<E: de::Error>(&self, literal: &str) -> Result<(), E> {
+        self.check_token(literal.len())?;
+        Number::validate_literal(literal).map_err(E::custom)
+    }
+}
+
+impl<'de> Visitor<'de> for DiscardVisitor {
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a discarded JSON value")
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        self.0.deserialize(deserializer)
+    }
+
+    fn visit_bool<E: de::Error>(self, _value: bool) -> Result<Self::Value, E> {
+        Ok(())
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        self.check_token(decimal_i128_bytes(i128::from(value)))
+    }
+
+    fn visit_i128<E: de::Error>(self, value: i128) -> Result<Self::Value, E> {
+        self.check_token(decimal_i128_bytes(value))
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        self.check_token(decimal_u128_bytes(u128::from(value)))
+    }
+
+    fn visit_u128<E: de::Error>(self, value: u128) -> Result<Self::Value, E> {
+        self.check_token(decimal_u128_bytes(value))
+    }
+
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        self.validate_number(&value.to_string())
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        self.check_token(value.len())
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        self.check_token(value.len())
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let child = self.child_seed::<A::Error>()?;
+        while sequence.next_element_seed(child)?.is_some() {}
+        Ok(())
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let child = self.child_seed::<A::Error>()?;
+        let Some(first) = map.next_key::<String>()? else {
+            return Ok(());
+        };
+        if first == SERDE_JSON_NUMBER_TOKEN {
+            let literal = map.next_value::<String>()?;
+            self.validate_number::<A::Error>(&literal)?;
+            if map.next_key::<IgnoredAny>()?.is_some() {
+                return Err(A::Error::custom("invalid arbitrary-precision number"));
+            }
+            return Ok(());
+        }
+        self.check_token::<A::Error>(first.len())?;
+        map.next_value_seed(child)?;
+        while let Some(key) = map.next_key::<String>()? {
+            self.check_token::<A::Error>(key.len())?;
+            map.next_value_seed(child)?;
+        }
+        Ok(())
+    }
+}
+
+fn decimal_i128_bytes(value: i128) -> usize {
+    decimal_u128_bytes(value.unsigned_abs()).saturating_add(usize::from(value < 0))
+}
+
+fn decimal_u128_bytes(value: u128) -> usize {
+    if value == 0 {
+        1
+    } else {
+        usize::try_from(value.ilog10()).unwrap_or(usize::MAX) + 1
+    }
+}
+
 struct StreamSeed<'a, 'b, F> {
     projector: &'a mut Projector<'b, F>,
 }
@@ -610,9 +756,19 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_any(StreamVisitor {
-            projector: self.projector,
-        })
+        if self.projector.rejects_next_value() {
+            self.projector.take_value_path().map_err(D::Error::custom)?;
+            DiscardSeed {
+                depth: self.projector.frames.len(),
+                maximum_depth: self.projector.maximum_depth,
+                maximum_token_bytes: self.projector.maximum_token_bytes,
+            }
+            .deserialize(deserializer)
+        } else {
+            deserializer.deserialize_any(StreamVisitor {
+                projector: self.projector,
+            })
+        }
     }
 }
 
@@ -795,15 +951,73 @@ mod tests {
 
     use std::sync::Arc;
 
-    use tq_core::PathComponent;
+    use tq_core::{PathComponent, SourceId};
+
+    use crate::{JsonEventOptions, decode_json_events_with_options};
 
     use super::{
-        StreamOptions, StreamSelection, stream_json, stream_json_records,
-        stream_json_selected_records, stream_toon,
+        EventProjector, Projector, StreamOptions, StreamRecord, StreamSelection, stream_json,
+        stream_json_records, stream_json_selected_records, stream_toon,
     };
 
     fn json_lines(values: &[tq_core::Value]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()
+    }
+
+    fn selected_outcome(
+        input: &[u8],
+        options: StreamOptions,
+        selection: StreamSelection,
+    ) -> (Vec<StreamRecord>, Result<(), String>) {
+        let mut records = Vec::new();
+        let result = stream_json_selected_records(input, options, selection, |record| {
+            records.push(record);
+            Ok(())
+        })
+        .map_err(|error| error.to_string());
+        (records, result)
+    }
+
+    fn structural_selected_outcome(
+        input: &[u8],
+        options: StreamOptions,
+        selection: StreamSelection,
+    ) -> (Vec<StreamRecord>, Result<(), String>) {
+        let mut records = Vec::new();
+        let result = {
+            let mut emit = |record| {
+                records.push(record);
+                Ok(())
+            };
+            let mut consumer = EventProjector {
+                projector: Projector::selected(
+                    options.maximum_depth,
+                    options.maximum_token_bytes,
+                    selection,
+                    &mut emit,
+                ),
+            };
+            decode_json_events_with_options(
+                input,
+                SourceId::new(0),
+                &mut consumer,
+                JsonEventOptions {
+                    maximum_depth: options.maximum_depth,
+                    maximum_token_bytes: options.maximum_token_bytes,
+                },
+            )
+        };
+        (records, result)
+    }
+
+    fn release_selection() -> StreamSelection {
+        StreamSelection::new(
+            vec![PathComponent::Key(Arc::from("features"))],
+            Some(vec![
+                PathComponent::Key(Arc::from("properties")),
+                PathComponent::Key(Arc::from("release")),
+            ]),
+        )
     }
 
     #[test]
@@ -935,5 +1149,63 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn selected_fast_discard_matches_structural_projection() {
+        let input = br#"{"features":[{"geometry":{"coordinates":[1,-2.50e3],"label":"discard"},"properties":{"release":3,"other":4,"release":5}},{"geometry":{"coordinates":[]},"properties":{}},{"geometry":null}]}"#;
+        let fast = selected_outcome(input, StreamOptions::default(), release_selection());
+        let structural =
+            structural_selected_outcome(input, StreamOptions::default(), release_selection());
+        assert_eq!(fast, structural);
+    }
+
+    #[test]
+    fn selected_fast_discard_preserves_discarded_subtree_failures() {
+        let default = StreamOptions::default();
+        let depth_limited = StreamOptions {
+            maximum_depth: 6,
+            ..default
+        };
+        let token_limited = StreamOptions {
+            maximum_token_bytes: 10,
+            ..default
+        };
+        let oversized_coefficient = format!(
+            "{{\"features\":[{{\"geometry\":[{}],\"properties\":{{\"release\":1}}}}]}}",
+            "1".repeat(4097)
+        );
+        let cases = [
+            (
+                br#"{"features":[{"properties":{"release":1},"geometry":[1,]}]}"#.to_vec(),
+                default,
+                "malformed",
+            ),
+            (
+                br#"{"features":[{"properties":{"release":1},"geometry":[[[[[[0]]]]]]}]}"#.to_vec(),
+                depth_limited,
+                "depth",
+            ),
+            (
+                br#"{"features":[{"properties":{"release":1},"geometry":{"coordinates":1}}]}"#
+                    .to_vec(),
+                token_limited,
+                "token",
+            ),
+            (
+                br#"{"features":[{"properties":{"release":1},"geometry":[1e1000001]}]}"#.to_vec(),
+                default,
+                "exponent",
+            ),
+            (oversized_coefficient.into_bytes(), default, "coefficient"),
+        ];
+
+        for (input, options, label) in cases {
+            let fast = selected_outcome(&input, options, release_selection());
+            let structural = structural_selected_outcome(&input, options, release_selection());
+            assert_eq!(fast.0, structural.0, "records for {label}");
+            assert!(fast.1.is_err(), "fast path accepted {label}");
+            assert!(structural.1.is_err(), "structural path accepted {label}");
+        }
     }
 }

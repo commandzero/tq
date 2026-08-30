@@ -46,3 +46,9 @@
 - [x] 6.4 Capture wall, user, system, and total CPU time, peak RSS, worker count, exact commands, corpus identity, plan classification, and correctness digests
 - [x] 6.5 Store the benchmark report and raw samples under `~/Development/commandzero/tq-benchmarks` and compare hybrid wall time and memory with the accepted document baseline
 - [x] 6.6 Run workspace formatting, checks, clippy, unit tests, compatibility tests, OpenSpec strict validation, and the relevant benchmark smoke tests
+
+## 7. Remove discarded-subtree construction
+
+- [x] 7.1 Add a validation-only JSON seed for statically rejected subtrees that avoids structural events, jq values, paths, and exact-number construction while preserving decoder limits and errors
+- [x] 7.2 Differential-test selected decoding against the structural path for values, malformed input, late errors, depth, token, numeric-envelope, missing members, and duplicate keys
+- [x] 7.3 Benchmark commit `5f9c8fa` and the fast-discard implementation on the largest catalogue input with identical correctness, worker, timing, CPU, and memory controls
