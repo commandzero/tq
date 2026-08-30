@@ -8,8 +8,9 @@ use std::{
 };
 
 use tq_test_support::corpus::{
-    CorpusOrigin, SnapshotManifest, SnapshotState, finalize_generated_representations,
-    generate_representations, inventory_snapshots, refresh_campaign, write_snapshot_manifest,
+    CorpusOrigin, SnapshotManifest, SnapshotState, finalize_generated_representations_with_tq,
+    generate_representations_with_tq, inventory_snapshots, prepare_campaign, refresh_campaign,
+    validate_generated_representations_with_tq, verify_frozen_snapshot, write_snapshot_manifest,
 };
 
 fn main() {
@@ -28,7 +29,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         "generate" => generate(arguments),
         "finalize" => finalize(arguments),
         "inventory" => inventory(arguments),
+        "prepare" => prepare(arguments),
         "refresh" => refresh(arguments),
+        "verify" => verify(arguments),
         _ => Err(format!("unsupported corpus command: {command}\n{}", usage()).into()),
     }
 }
@@ -56,7 +59,8 @@ fn finalize(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let toon_relative = artifact_root.join("source.toon");
     let yaml_manifest_path = relative_string(&yaml_relative)?;
     let toon_manifest_path = relative_string(&toon_relative)?;
-    let generated = finalize_generated_representations(
+    let generated = finalize_generated_representations_with_tq(
+        &tq_binary()?,
         &cache.join(source_relative),
         &cache.join(&yaml_relative),
         &cache.join(&toon_relative),
@@ -77,12 +81,36 @@ fn refresh(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let [sources, cache, campaign] = arguments else {
         return Err(usage().into());
     };
-    let refreshed = refresh_campaign(Path::new(sources), Path::new(cache), campaign)?;
+    let refreshed = refresh_campaign(
+        Path::new(sources),
+        Path::new(cache),
+        campaign,
+        &tq_binary()?,
+    )?;
+    print_campaign(&refreshed)
+}
+
+fn prepare(arguments: &[String]) -> Result<(), Box<dyn Error>> {
+    let [sources, cache, campaign] = arguments else {
+        return Err(usage().into());
+    };
+    let prepared = prepare_campaign(
+        Path::new(sources),
+        Path::new(cache),
+        campaign,
+        &tq_binary()?,
+    )?;
+    print_campaign(&prepared)
+}
+
+fn print_campaign(
+    campaign: &tq_test_support::corpus::RefreshCampaign,
+) -> Result<(), Box<dyn Error>> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "campaign_id": refreshed.campaign_id,
-            "manifests": refreshed.manifests,
+            "campaign_id": campaign.campaign_id,
+            "manifests": campaign.manifests,
         }))?
     );
     Ok(())
@@ -94,7 +122,8 @@ fn generate(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     };
     let yaml_path = PathBuf::from(yaml);
     let toon_path = PathBuf::from(toon);
-    let generated = generate_representations(
+    let generated = generate_representations_with_tq(
+        &tq_binary()?,
         Path::new(source),
         &yaml_path,
         &toon_path,
@@ -102,6 +131,28 @@ fn generate(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         file_name(&toon_path)?,
     )?;
     println!("{}", serde_json::to_string_pretty(&generated)?);
+    Ok(())
+}
+
+fn verify(arguments: &[String]) -> Result<(), Box<dyn Error>> {
+    let [cache, manifest_path] = arguments else {
+        return Err(usage().into());
+    };
+    let cache = Path::new(cache);
+    let frozen = verify_frozen_snapshot(Path::new(manifest_path), cache)?;
+    let generated = frozen
+        .manifest
+        .artifacts
+        .generated
+        .as_ref()
+        .ok_or("snapshot has no generated representations")?;
+    validate_generated_representations_with_tq(
+        &tq_binary()?,
+        &cache.join(&frozen.manifest.artifacts.source_json.path),
+        &cache.join(&generated.yaml.path),
+        &cache.join(&generated.toon.path),
+    )?;
+    println!("{}", serde_json::to_string_pretty(&frozen.manifest)?);
     Ok(())
 }
 
@@ -125,7 +176,22 @@ fn inventory(arguments: &[String]) -> Result<(), Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT standard|large\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus finalize CACHE_ROOT MANIFEST.json\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
+    "usage:\n  tq-corpus prepare SOURCES_DIR CACHE_ROOT rapid|standard|large\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT rapid|standard|large\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus finalize CACHE_ROOT MANIFEST.json\n  tq-corpus verify CACHE_ROOT MANIFEST.json\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
+}
+
+fn tq_binary() -> Result<PathBuf, Box<dyn Error>> {
+    let path = env::var_os("TQ_BIN").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/release/tq"),
+        PathBuf::from,
+    );
+    if !path.is_file() {
+        return Err(format!(
+            "release tq corpus generator is missing at {}; build tq-cli --release or set TQ_BIN",
+            path.display()
+        )
+        .into());
+    }
+    Ok(path)
 }
 
 fn safe_relative(path: &str) -> Result<&Path, Box<dyn Error>> {

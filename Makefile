@@ -9,7 +9,9 @@ OPENSPEC ?= openspec
 .PHONY: help fmt fmt-check check lint test openspec-validate \
 	preflight-infra preflight engine-gate \
 	compatibility-smoke compatibility-full \
-	benchmark-smoke benchmark-standard benchmark-large benchmark-stack-overflow fuzz
+	benchmark benchmark-rapid benchmark-smoke benchmark-standard benchmark-large \
+	benchmark-refresh-rapid benchmark-refresh-standard benchmark-refresh-large \
+	benchmark-stack-overflow fuzz
 
 help:
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "%-24s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -48,11 +50,25 @@ compatibility-full: ## Run the complete compatibility suite
 benchmark-smoke: ## Run checked-in smoke-corpus benchmarks
 	@./scripts/run-campaign.sh benchmark smoke
 
-benchmark-standard: ## Run refreshed standard-size benchmarks
+benchmark: benchmark-rapid ## Run the default rapid benchmark matrix
+
+benchmark-rapid: ## Run the rapid usgs-all-month benchmark matrix
+	@./scripts/run-campaign.sh benchmark rapid
+
+benchmark-standard: ## Run standard benchmarks with the machine-local corpus
 	@./scripts/run-campaign.sh benchmark standard
 
-benchmark-large: ## Run refreshed natural large-file benchmarks
+benchmark-large: ## Run large benchmarks with the machine-local corpus
 	@./scripts/run-campaign.sh benchmark large
+
+benchmark-refresh-standard: ## Refresh upstream standard sources, then benchmark
+	@TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark standard
+
+benchmark-refresh-rapid: ## Refresh usgs-all-month, then run the rapid matrix
+	@TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark rapid
+
+benchmark-refresh-large: ## Refresh the upstream large source, then benchmark
+	@TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark large
 
 benchmark-stack-overflow: ## Run the checked-in Stack Overflow jq benchmark
 	@./scripts/run-campaign.sh benchmark stack-overflow

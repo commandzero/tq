@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "campaign_id": {"type": "string", "minLength": 1},
-    "profile": {"enum": ["smoke", "standard", "large"]},
+    "profile": {"enum": ["smoke", "rapid", "standard", "large"]},
     "environment": {
       "type": "object",
       "additionalProperties": true,

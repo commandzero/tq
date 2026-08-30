@@ -4,6 +4,7 @@
   "kind": "geojson",
   "format": "json",
   "campaigns": [
+    "rapid",
     "standard"
   ],
   "fetch": {

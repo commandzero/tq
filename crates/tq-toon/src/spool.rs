@@ -1072,6 +1072,16 @@ impl PreparedArray {
         if self.framed_bytes.saturating_add(framed) > self.config.maximum_spool_bytes {
             return Err(SpoolError::Limit);
         }
+        // Composite elements need transient arena memory while they are decoded.
+        // Spool them as soon as the first complete element is available so the
+        // parent array cannot consume the entire shared budget and starve the
+        // next element before it has a chance to spill.
+        if self.spool.is_none()
+            && self.config.allow_spool
+            && matches!(layout, Layout::Tabular(_) | Layout::Expanded)
+        {
+            self.transition_to_disk()?;
+        }
         let local_memory_available =
             self.memory_bytes.saturating_add(framed_usize) <= self.config.memory_threshold_bytes;
         if self.spool.is_none()

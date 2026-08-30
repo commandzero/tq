@@ -297,6 +297,8 @@ fn measured_command(invocation: &BenchmarkInvocation, resource_path: &std::path:
     {
         let mut command = Command::new("/usr/bin/time");
         command.arg("-p");
+        #[cfg(target_os = "macos")]
+        command.arg("-l");
         #[cfg(all(unix, not(target_os = "macos")))]
         command.arg("-v");
         command

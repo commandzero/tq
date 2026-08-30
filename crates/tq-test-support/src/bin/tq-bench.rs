@@ -22,10 +22,19 @@ use tq_test_support::{
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
     corpus::{
-        ArtifactIdentity, SmokeSnapshot, discover_smoke_corpus, generate_representations,
-        load_frozen_snapshot,
+        ArtifactIdentity, SmokeSnapshot, SnapshotManifest, discover_latest_validated_manifests,
+        discover_smoke_corpus, generate_representations, load_frozen_snapshot,
     },
 };
+
+const RAPID_CASES: &[&str] = &[
+    "benchmark.identity-reencode",
+    "benchmark.parse-discard",
+    "benchmark.scalar-extraction",
+    "benchmark.path-update",
+    "benchmark.event-stream",
+];
+const RAPID_SOURCE: &str = "usgs-all-month";
 
 fn main() -> ExitCode {
     match run() {
@@ -238,10 +247,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     reason = "the command-line grammar stays intentionally explicit and dependency-free"
 )]
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
-    let mut profile = "smoke".to_owned();
+    let mut profile = "rapid".to_owned();
     let archive_root = env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
         .map_or_else(|| PathBuf::from("benchmarks"), PathBuf::from);
-    let mut output = archive_root.join(".work/smoke.json");
+    let mut output = archive_root.join(".work/rapid.json");
     let mut manifests = Vec::new();
     let mut cache_root = archive_root.join(".work/corpus");
     let mut origin = "frozen".to_owned();
@@ -316,34 +325,33 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench run --profile smoke|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
+                    "Usage: tq-bench run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
                 );
                 std::process::exit(0);
             }
             value => return Err(format!("unknown argument: {value}").into()),
         }
     }
-    if !matches!(profile.as_str(), "smoke" | "standard" | "large") {
+    if !matches!(profile.as_str(), "smoke" | "rapid" | "standard" | "large") {
         return Err(format!("invalid profile: {profile}").into());
+    }
+    if profile == "rapid" {
+        if max_samples.is_none() {
+            max_samples = Some(1);
+        }
+        if selected_cases.is_empty() {
+            selected_cases.extend(RAPID_CASES.iter().map(|case| (*case).to_owned()));
+        }
     }
     if profile != "smoke" && manifests.is_empty() {
         if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
             manifests.extend(env::split_paths(&paths));
         } else {
-            let directory = cache_root.join("manifests");
-            if directory.is_dir() {
-                manifests.extend(
-                    fs::read_dir(directory)?
-                        .filter_map(Result::ok)
-                        .map(|entry| entry.path())
-                        .filter(|path| path.extension().is_some_and(|value| value == "json")),
-                );
-                manifests.sort();
-            }
+            manifests = discover_latest_validated_manifests(&cache_root)?;
         }
     }
     if profile != "smoke" && manifests.is_empty() {
-        return Err("standard/large campaigns require prepared snapshot manifests via --manifest, TQ_BENCH_MANIFESTS, or CACHE_ROOT/manifests".into());
+        return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
     }
     if !matches!(origin.as_str(), "refreshed" | "frozen") {
         return Err(format!("invalid origin: {origin}").into());
@@ -464,6 +472,15 @@ fn prepare_smoke_snapshot(
 fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std::error::Error>> {
     let mut datasets = Vec::new();
     for path in &options.manifests {
+        let manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(path)?)?;
+        let tier = source_tier(&manifest.source_id);
+        if (options.profile == "rapid" && manifest.source_id != RAPID_SOURCE)
+            || ((options.profile == "standard" || options.profile == "rapid")
+                && tier == DatasetTier::Large)
+            || (options.profile == "large" && tier != DatasetTier::Large)
+        {
+            continue;
+        }
         let frozen = load_frozen_snapshot(path, &options.cache_root)?;
         let generated = frozen
             .manifest
@@ -495,12 +512,6 @@ fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std:
                 generated.toon.clone(),
             ),
         );
-        let tier = source_tier(&frozen.manifest.source_id);
-        if (options.profile == "standard" && tier == DatasetTier::Large)
-            || (options.profile == "large" && tier != DatasetTier::Large)
-        {
-            continue;
-        }
         datasets.push(PreparedDataset {
             source_id: frozen.manifest.source_id.clone(),
             tier,
@@ -509,6 +520,9 @@ fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std:
             origin: options.origin.clone(),
             formats,
         });
+    }
+    if options.profile == "rapid" && datasets.is_empty() {
+        return Err(format!("rapid profile requires a {RAPID_SOURCE} snapshot").into());
     }
     Ok(PreparedCampaign {
         _temporary: None,
@@ -545,6 +559,10 @@ fn invocation(
         .ok_or("missing format")?
         .0;
     let mut args = adapter.args.clone();
+    if adapter.tool == BenchmarkTool::Tq {
+        args.push("--max-input-bytes".to_owned());
+        args.push(fs::metadata(path)?.len().to_string());
+    }
     args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
     args.push(path.display().to_string());
     Ok(BenchmarkInvocation {
