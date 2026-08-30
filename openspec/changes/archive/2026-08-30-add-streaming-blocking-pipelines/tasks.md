@@ -26,7 +26,7 @@
 
 - [x] 4.1 Add finite configuration and defaults for batch values, in-flight batch count, and in-flight estimated bytes
 - [x] 4.2 Implement owned result batching with backpressure, ordered collection, cooperative cancellation, and high-water observations
-- [x] 4.3 Implement stable Rayon sort-run preparation using encounter ordinals and the existing serial-versus-parallel thresholds
+- [x] 4.3 Implement stable Rayon sort-run preparation with ordered batch ordinals and the existing serial-versus-parallel thresholds
 - [x] 4.4 Implement deterministic stable run merge and hand the completed array to the remaining suffix bytecode
 - [x] 4.5 Keep a generic collect-only path for suffixes without an incremental preparation proof
 - [x] 4.6 Test queue saturation, cancellation with workers active, worker-count limits, threshold behavior, stable equal values across batches, and deterministic repeated output
@@ -59,3 +59,13 @@
 - [x] 8.2 Route JSON identity transcode through canonical token text without constructing intermediate `Number`, `Scalar`, `Event`, or `Value` instances for eligible scalars
 - [x] 8.3 Store and publish scalar-array replay records without rebuilding tq values, while preserving limits, cancellation, output bytes, and TOON quoting
 - [x] 8.4 Differential-test lightweight and forced-document output, run workspace validation, and benchmark the accepted transcode cases against commit `983879e`
+
+## 9. Resolve verification findings
+
+- [x] 9.1 Enforce the VM-step limit across the complete hybrid invocation and add a multi-document reset regression
+- [x] 9.2 Record truthful hybrid decoder, retention, blocking, worker, and final resource observations on success and failure
+- [x] 9.3 Make selected-subtree discard and in-flight sort preparation observe cooperative cancellation without adding hot-loop synchronization
+- [x] 9.4 Apply identical correctness gates to jq, forced-document tq, single-thread hybrid tq, and multi-thread hybrid tq benchmark rows
+- [x] 9.5 Align the stable-order design and task wording with the implemented stable batch-order merge
+- [x] 9.6 Make compatibility smoke distinguish expected semantic differences from malformed harness output and repair the incomplete-frame normalization drift
+- [x] 9.7 Run formatting, checks, clippy, unit and compatibility tests, strict OpenSpec validation, benchmark smoke, and focused performance comparisons

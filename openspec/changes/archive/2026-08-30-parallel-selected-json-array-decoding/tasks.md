@@ -21,3 +21,11 @@
 - [x] 4.1 Build the release candidate and correctness-gate it on the largest catalogued JSON file
 - [x] 4.2 Record one-worker and fourteen-worker wall, CPU, peak-RSS, worker-count, and output-digest results in `~/Development/commandzero/tq-benchmarks`
 - [x] 4.3 Compare the candidate with the accepted serial fast-discard baseline and document whether the wall-time gate is met
+
+## 5. Verification remediation
+
+- [x] 5.1 Support arbitrary static key/index selection prefixes and report precise dynamic-dependency fallback causes
+- [x] 5.2 Preserve source diagnostics across batches and make active worker decoding cooperatively cancellable
+- [x] 5.3 Add deterministic coverage for ordered failures, reorder bounds, cancellation, numeric limits, downstream failures, and cross-batch stability
+- [x] 5.4 Include output digests on every benchmark row and refresh the candidate benchmark evidence
+- [x] 5.5 Re-run formatting, linting, workspace tests, and strict OpenSpec validation

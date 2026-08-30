@@ -81,10 +81,10 @@ Producer evaluation remains on the decoder thread because the VM uses thread-loc
 
 The generic strategy appends completed batches to the collection in encounter order. Operators with a sound preparation strategy may use Rayon while decoding continues. The first strategy is stable sort-run preparation:
 
-1. Assign every projected value a monotonic encounter ordinal.
-2. Stable-sort each full batch by jq value order, using the ordinal to make equal-value behavior explicit.
-3. Keep completed runs in batch order.
-4. Perform a stable parallel or k-way merge after the producer closes.
+1. Preserve encounter order within each batch with a stable jq-value sort.
+2. Assign each completed batch a monotonic batch ordinal.
+3. Keep completed runs in batch order even when workers finish out of order.
+4. Perform a left-biased stable parallel merge after the producer closes.
 5. Run the remaining suffix bytecode against the completed array.
 
 All semantic evaluation that may fail stays in encounter order on the producer thread. Sort comparison is total and infallible for runtime values. Worker failures are limited to cancellation or resource failures, so they cannot reorder jq errors. No suffix output is published before producer completion.
@@ -133,7 +133,7 @@ The large benchmark has separate jq, forced single-thread tq, and configured mul
   canonicalize every JSON number under the same `NumberLimits`, apply the
   existing TOON string quoting rules, and byte-compare lightweight transcode
   with forced document execution.
-- [Chunked stable sorting can diverge at equal values] -> Carry encounter ordinals through run sorting and merge, and add differential cases with equal-comparing values that have distinguishable representations.
+- [Chunked stable sorting can diverge at equal values] -> Use stable in-run sorting, preserve batch ordinals, prefer the left run during equal-value merges, and add differential cases with equal-comparing values that have distinguishable representations.
 - [A broad split rule could change jq error timing] -> Admit only the narrow proven collection shape and keep fallible item evaluation serial and ordered.
 - [The projected collection can still be large] -> Label it as cardinality-proportional blocking state, enforce existing result limits, expose retained-byte observations, and never advertise fixed memory.
 - [The streaming-transcode branch and Rayon edits currently have different bases] -> Integrate the completed transcode branch first, then reapply and test the Rayon changes before implementing the hybrid plan.
