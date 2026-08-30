@@ -395,14 +395,18 @@ where
 
     fn check_token<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
         if bytes > self.options.maximum_token_bytes {
-            return Err(E::custom("JSON token byte limit exceeded"));
+            return Err(E::custom(
+                "JSON token byte limit exceeded: input resource limit exceeded: token-bytes",
+            ));
         }
         Ok(())
     }
 
     fn child_depth<E: de::Error>(&self) -> Result<usize, E> {
         if self.depth >= self.options.maximum_depth {
-            return Err(E::custom("JSON nesting depth limit exceeded"));
+            return Err(E::custom(
+                "JSON nesting depth limit exceeded: input resource limit exceeded: depth",
+            ));
         }
         Ok(self.depth + 1)
     }

@@ -16,7 +16,10 @@ pub use adapters::{
     probe_format, probe_reader,
 };
 pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
-pub use stream::{StreamOptions, stream_json, stream_toon};
+pub use stream::{
+    StreamOptions, StreamRecord, StreamSelection, stream_json, stream_json_records,
+    stream_json_selected_records, stream_toon, stream_toon_records, stream_toon_selected_records,
+};
 pub use structural::{
     JsonEventOptions, decode_json_event_stream, decode_json_events,
     decode_json_events_with_options, json_decoder_capabilities,

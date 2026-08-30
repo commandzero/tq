@@ -129,6 +129,8 @@ pub enum PlanKind {
     Events,
     /// One independently bounded subtree at a time.
     Subtree,
+    /// Decoder-backed collection feeding one blocking suffix.
+    HybridBlocking,
     /// One complete input document.
     #[default]
     Document,
@@ -144,6 +146,7 @@ impl std::fmt::Display for PlanKind {
             Self::Transcode => "transcode",
             Self::Events => "events",
             Self::Subtree => "subtree",
+            Self::HybridBlocking => "hybrid-streaming-blocking",
             Self::Document => "document",
             Self::WholeInput => "whole-input",
             Self::Blocking => "blocking-document",
@@ -230,6 +233,41 @@ pub struct StreamProof {
     pub item_hir: String,
 }
 
+/// Preparation that a hybrid blocking plan may perform while decoding.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HybridPreparation {
+    /// Preserve producer encounter order and run the complete suffix later.
+    #[default]
+    Collect,
+    /// Stable-sort bounded runs while the producer continues.
+    StableSortRuns,
+}
+
+/// Proof attached to a decoder-backed collection and blocking suffix.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct HybridProof {
+    /// Bounded producer proof reused from automatic stream planning.
+    pub producer: StreamProof,
+    /// Source span of the array collection boundary.
+    pub collection: Span,
+    /// Source span that causes blocking retention.
+    pub blocking_cause: Span,
+    /// Stable HIR executed once over the completed collection.
+    pub suffix_hir: String,
+    /// Parallel preparation admitted before suffix execution.
+    pub preparation: HybridPreparation,
+}
+
+/// One semantics-preserving optimizer rewrite.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct OptimizerRewrite {
+    /// Stable rewrite identifier.
+    pub name: &'static str,
+    /// Source span of the removed or replaced operation.
+    pub span: Span,
+}
+
 /// Complete pre-input analysis report.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct Analysis {
@@ -243,6 +281,10 @@ pub struct Analysis {
     pub stream_proof: Option<StreamProof>,
     /// Stable reason decoder-backed automatic planning was not selected.
     pub stream_rejection: Option<String>,
+    /// Hybrid producer and suffix proof, when selected.
+    pub hybrid_proof: Option<HybridProof>,
+    /// Semantics-preserving rewrites applied before capability analysis.
+    pub optimizer_rewrites: Vec<OptimizerRewrite>,
     /// Output-aware structural transcode proof, when selected by the host.
     pub transcode_proof: Option<TranscodeProof>,
     /// Stable reason structural identity transcode was not selected.
@@ -305,6 +347,11 @@ impl Query<Parsed> {
 }
 
 impl Query<Resolved> {
+    pub(crate) fn ast_mut(&mut self) -> &mut Expr {
+        let inner = Arc::make_mut(&mut self.inner);
+        Arc::make_mut(&mut inner.ast)
+    }
+
     pub(crate) fn with_analysis(mut self, analysis: Analysis) -> Query<Analyzed> {
         Arc::make_mut(&mut self.inner).analysis = analysis;
         self.change_phase()
@@ -485,6 +532,8 @@ impl Program<Compiled> {
                     item_bytecode,
                     base_bytecode,
                     scalar_events_only: self.inner.analysis.selected_plan == PlanKind::Events,
+                    suffix_bytecode: None,
+                    preparation: HybridPreparation::Collect,
                 });
                 let plan = Plan {
                     program: self,
@@ -504,6 +553,31 @@ impl Program<Compiled> {
                         })
                     },
                 )
+            }
+            PlanKind::HybridBlocking => {
+                let lowering = hybrid_lowering(&self.inner.ast).ok_or_else(|| {
+                    plan_error(
+                        "TQ-CAP-HYBRID-001",
+                        "hybrid stream proof could not be lowered",
+                    )
+                })?;
+                let item_bytecode = Arc::new(Bytecode::compile(&lowering.producer.item, &[])?);
+                let base_bytecode = Arc::new(Bytecode::compile(&lowering.producer.base, &[])?);
+                let suffix_bytecode = Arc::new(Bytecode::compile(&lowering.suffix, &[])?);
+                Ok(AutomaticPlan::HybridBlocking(Plan {
+                    program: self,
+                    automatic: Some(AutomaticExecution {
+                        prefix: lowering.producer.prefix,
+                        projection: lowering.producer.projection,
+                        item_bytecode,
+                        base_bytecode,
+                        scalar_events_only: lowering.producer.scalar_events_only,
+                        suffix_bytecode: Some(suffix_bytecode),
+                        preparation: lowering.preparation,
+                    }),
+                    transcode: None,
+                    mode: PhantomData,
+                }))
             }
             PlanKind::WholeInput => self.whole_input_plan().map(AutomaticPlan::WholeInput),
             PlanKind::Blocking => self.blocking_plan().map(AutomaticPlan::Blocking),
@@ -664,6 +738,9 @@ pub struct WholeInput;
 /// Query-independent structural identity transcode marker.
 #[derive(Clone, Copy, Debug)]
 pub struct Transcode;
+/// Decoder-backed producer and blocking suffix marker.
+#[derive(Clone, Copy, Debug)]
+pub struct HybridBlocking;
 /// Blocking execution wrapper around another input mode.
 #[derive(Clone, Copy, Debug)]
 pub struct Blocking<M>(PhantomData<M>);
@@ -684,6 +761,8 @@ struct AutomaticExecution {
     item_bytecode: Arc<Bytecode>,
     base_bytecode: Arc<Bytecode>,
     scalar_events_only: bool,
+    suffix_bytecode: Option<Arc<Bytecode>>,
+    preparation: HybridPreparation,
 }
 
 /// One of the typed plans selected by automatic analysis.
@@ -693,6 +772,8 @@ pub enum AutomaticPlan {
     Events(Plan<Compiled, Events>),
     /// Independently bounded subtree plan.
     Subtree(Plan<Compiled, Subtree>),
+    /// Decoder-backed producer feeding one blocking suffix.
+    HybridBlocking(Plan<Compiled, HybridBlocking>),
     /// Eager document plan.
     Document(Plan<Compiled, Document>),
     /// All-input plan.
@@ -742,6 +823,20 @@ impl<M> Plan<Compiled, M> {
             .is_some_and(|plan| plan.scalar_events_only)
     }
 
+    pub(crate) fn hybrid_suffix_bytecode(&self) -> Option<Arc<Bytecode>> {
+        self.automatic
+            .as_ref()
+            .and_then(|plan| plan.suffix_bytecode.as_ref().map(Arc::clone))
+    }
+
+    /// Parallel preparation admitted by a hybrid plan.
+    #[must_use]
+    pub fn hybrid_preparation(&self) -> HybridPreparation {
+        self.automatic
+            .as_ref()
+            .map_or(HybridPreparation::Collect, |plan| plan.preparation)
+    }
+
     /// Output-aware proof attached to a structural transcode plan.
     #[must_use]
     pub const fn transcode_proof(&self) -> Option<&TranscodeProof> {
@@ -756,6 +851,92 @@ struct AutomaticLowering {
     item: Expr,
     base: Expr,
     scalar_events_only: bool,
+}
+
+#[derive(Clone)]
+struct HybridLowering {
+    producer: AutomaticLowering,
+    suffix: Expr,
+    collection: Span,
+    blocking_cause: Span,
+    preparation: HybridPreparation,
+}
+
+pub(crate) fn hybrid_stream_proof(expr: &Expr) -> Option<HybridProof> {
+    let lowering = hybrid_lowering(expr)?;
+    let producer_kind = if lowering.producer.scalar_events_only {
+        PlanKind::Events
+    } else {
+        PlanKind::Subtree
+    };
+    Some(HybridProof {
+        producer: StreamProof {
+            required_path_prefix: lowering.producer.prefix,
+            projected_path: lowering.producer.projection,
+            subtree_complete: producer_kind == PlanKind::Subtree,
+            value_escapes: true,
+            cause: expr.span,
+            item_hir: ast::display(&lowering.producer.item),
+        },
+        collection: lowering.collection,
+        blocking_cause: lowering.blocking_cause,
+        suffix_hir: ast::display(&lowering.suffix),
+        preparation: lowering.preparation,
+    })
+}
+
+fn hybrid_lowering(expr: &Expr) -> Option<HybridLowering> {
+    let mut stages = Vec::new();
+    flatten_pipe(expr, &mut stages);
+    let ExprKind::Array(producer) = &stages.first()?.kind else {
+        return None;
+    };
+    let producer = automatic_lowering(producer)?;
+    producer.projection.as_ref()?;
+    let collection = stages[0].span;
+    let mut suffix_stages = &stages[1..];
+    let (preparation, blocking_cause) = if suffix_stages
+        .first()
+        .is_some_and(|stage| is_builtin_call(stage, "sort", 0))
+    {
+        let span = suffix_stages[0].span;
+        suffix_stages = &suffix_stages[1..];
+        (HybridPreparation::StableSortRuns, span)
+    } else {
+        (HybridPreparation::Collect, collection)
+    };
+    let suffix = pipe_from_stages(suffix_stages, collection);
+    Some(HybridLowering {
+        producer,
+        suffix,
+        collection,
+        blocking_cause,
+        preparation,
+    })
+}
+
+fn is_builtin_call(expr: &Expr, expected: &str, arity: usize) -> bool {
+    matches!(
+        &expr.kind,
+        ExprKind::Call {
+            name,
+            arguments,
+            target: Some(ast::CallTarget::Builtin),
+        } if &**name == expected && arguments.len() == arity
+    )
+}
+
+fn pipe_from_stages(stages: &[&Expr], fallback_span: Span) -> Expr {
+    let Some((first, tail)) = stages.split_first() else {
+        return Expr::new(ExprKind::Identity, fallback_span);
+    };
+    tail.iter().fold((*first).clone(), |left, right| {
+        let span = Span::new(left.span.source, left.span.start, right.span.end);
+        Expr::new(
+            ExprKind::Pipe(Box::new(left), Box::new((*right).clone())),
+            span,
+        )
+    })
 }
 
 pub(crate) fn automatic_stream_proof(expr: &Expr) -> Option<(StreamProof, PlanKind)> {
@@ -1008,6 +1189,15 @@ mod tests {
         ));
         assert!(matches!(automatic("."), AutomaticPlan::Document(_)));
         assert!(matches!(automatic("sort"), AutomaticPlan::Blocking(_)));
+        let hybrid = automatic("[.items[].value] | sort");
+        let AutomaticPlan::HybridBlocking(plan) = hybrid else {
+            panic!("expected typed hybrid plan");
+        };
+        assert_eq!(
+            plan.hybrid_preparation(),
+            super::HybridPreparation::StableSortRuns
+        );
+        assert!(plan.hybrid_suffix_bytecode().is_some());
 
         let whole = analyze_with_context(
             resolve(parse(".").unwrap(), &ResolveOptions::default()).unwrap(),

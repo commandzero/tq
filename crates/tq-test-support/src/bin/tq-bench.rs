@@ -240,8 +240,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut profile = "smoke".to_owned();
     let archive_root = env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("benchmarks"));
+        .map_or_else(|| PathBuf::from("benchmarks"), PathBuf::from);
     let mut output = archive_root.join(".work/smoke.json");
     let mut manifests = Vec::new();
     let mut cache_root = archive_root.join(".work/corpus");

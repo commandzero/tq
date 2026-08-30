@@ -208,8 +208,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut scenario_dir = PathBuf::from("tests/stack-overflow");
     let archive_root = env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("benchmarks"));
+        .map_or_else(|| PathBuf::from("benchmarks"), PathBuf::from);
     let mut output = archive_root.join(".work/stack-overflow.json");
     let mut report = archive_root.join("stack-overflow.md");
     let mut arguments = env::args().skip(1);

@@ -3,6 +3,10 @@
 ### Requirement: Execution capability analysis
 Analysis SHALL classify a program's input and working-set requirements as transcode, event-stream, subtree, hybrid streaming-blocking, document, whole-input, and/or blocking-document. The resulting metadata MUST be available before input consumption and included in the compiled program.
 
+#### Scenario: Semantic identity
+- **WHEN** the resolved program returns each input value unchanged exactly once
+- **THEN** analysis records semantic identity so output-aware planning may consider transcode
+
 #### Scenario: Simple event consumer
 - **WHEN** a program consumes jq-style stream path/value events without document operators
 - **THEN** analysis permits an event execution plan

@@ -6,7 +6,7 @@ use serde::de::{self, DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAcc
 use tq_core::{Number, Object, PathComponent, SourceId, Value};
 use tq_toon::{DecodeIntoError, Decoder, Event, EventConsumer, Scalar};
 
-use crate::{FormatError, InputFormat};
+use crate::{FormatError, InputFormat, JsonEventOptions, decode_json_events_with_options};
 
 const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
@@ -31,6 +31,91 @@ impl Default for StreamOptions {
     }
 }
 
+/// One decoded jq stream record before wrapper-value allocation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamRecord {
+    /// Ordered key and index path.
+    pub path: Vec<PathComponent>,
+    /// Leaf or empty-container value. `None` marks a completed non-empty container.
+    pub value: Option<Value>,
+    raw: bool,
+}
+
+/// Static decoder path admitted by an automatic projection proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamSelection {
+    prefix: Vec<PathComponent>,
+    projection: Option<Vec<PathComponent>>,
+}
+
+impl StreamSelection {
+    /// Creates a selection for direct children below `prefix` and an optional
+    /// path projected from each child.
+    #[must_use]
+    pub fn new(prefix: Vec<PathComponent>, projection: Option<Vec<PathComponent>>) -> Self {
+        Self { prefix, projection }
+    }
+
+    fn keeps(&self, path: &[PathComponent]) -> bool {
+        if path.len() <= self.prefix.len() || !path.starts_with(&self.prefix) {
+            return false;
+        }
+        let relative = &path[self.prefix.len()..];
+        if relative.len() == 1 {
+            return true;
+        }
+        let Some(projection) = self.projection.as_deref() else {
+            return true;
+        };
+        let item_relative = &relative[1..];
+        projection.starts_with(item_relative)
+            || item_relative.starts_with(projection)
+            || path_kind_mismatch(item_relative, projection)
+    }
+
+    fn tracks(&self, path: &[PathComponent]) -> bool {
+        if path.len() <= self.prefix.len() {
+            return self.prefix.starts_with(path);
+        }
+        self.keeps(path)
+    }
+}
+
+impl StreamRecord {
+    /// Decomposes a normal structural record into its path and optional value.
+    #[must_use]
+    pub fn into_parts(self) -> (Vec<PathComponent>, Option<Value>) {
+        (self.path, self.value)
+    }
+
+    fn into_value(self) -> Value {
+        if self.raw {
+            return self.value.unwrap_or(Value::Null);
+        }
+        let mut parts = vec![path_value(&self.path)];
+        if let Some(value) = self.value {
+            parts.push(value);
+        }
+        Value::array(parts)
+    }
+
+    fn path(path: Vec<PathComponent>, value: Option<Value>) -> Self {
+        Self {
+            path,
+            value,
+            raw: false,
+        }
+    }
+
+    fn raw(value: Value) -> Self {
+        Self {
+            path: Vec::new(),
+            value: Some(value),
+            raw: true,
+        }
+    }
+}
+
 /// Streams one JSON document as jq-compatible `[path,value]` leaf records and
 /// `[path]` container-end records without constructing its DOM.
 ///
@@ -46,10 +131,11 @@ where
     R: std::io::Read,
     F: FnMut(Value) -> Result<(), String>,
 {
+    let mut emit_record = |record: StreamRecord| emit(record.into_value());
     let mut projector = Projector::new(
         options.maximum_depth,
         options.maximum_token_bytes,
-        &mut emit,
+        &mut emit_record,
     );
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
     let decoded = StreamSeed {
@@ -70,6 +156,83 @@ where
             message: error.to_string(),
         }),
     }
+}
+
+/// Streams JSON through the shared structural decoder without constructing jq
+/// `[path, value]` wrapper values.
+///
+/// # Errors
+///
+/// Returns JSON syntax, numeric-envelope, depth, token, or callback failures.
+pub fn stream_json_records<R, F>(
+    reader: R,
+    options: StreamOptions,
+    mut emit: F,
+) -> Result<(), FormatError>
+where
+    R: std::io::Read,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    let mut consumer = EventProjector {
+        projector: Projector::new(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            &mut emit,
+        ),
+    };
+    decode_json_events_with_options(
+        reader,
+        SourceId::new(0),
+        &mut consumer,
+        JsonEventOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+    )
+    .map_err(|message| FormatError::Parse {
+        format: InputFormat::Json,
+        message,
+    })
+}
+
+/// Streams only records needed by a proven static automatic projection.
+/// Discarded values are still fully decoded so syntax and resource failures
+/// remain observable.
+///
+/// # Errors
+///
+/// Returns JSON syntax, numeric-envelope, depth, token, or callback failures.
+pub fn stream_json_selected_records<R, F>(
+    reader: R,
+    options: StreamOptions,
+    selection: StreamSelection,
+    mut emit: F,
+) -> Result<(), FormatError>
+where
+    R: std::io::Read,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    let mut consumer = EventProjector {
+        projector: Projector::selected(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            selection,
+            &mut emit,
+        ),
+    };
+    decode_json_events_with_options(
+        reader,
+        SourceId::new(0),
+        &mut consumer,
+        JsonEventOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+    )
+    .map_err(|message| FormatError::Parse {
+        format: InputFormat::Json,
+        message,
+    })
 }
 
 fn jq_stream_error(error: &serde_json::Error) -> String {
@@ -103,11 +266,84 @@ where
     R: BufRead,
     F: FnMut(Value) -> Result<(), String>,
 {
+    let mut emit_record = |record: StreamRecord| emit(record.into_value());
     let mut decoder = Decoder::new(reader, SourceId::new(0), config);
-    let mut consumer = ToonProjector {
+    let mut consumer = EventProjector {
         projector: Projector::new(
             options.maximum_depth,
             options.maximum_token_bytes,
+            &mut emit_record,
+        ),
+    };
+    decoder.decode_into(&mut consumer).map_err(|error| {
+        let message = match error {
+            DecodeIntoError::Decode(error) => error.to_string(),
+            DecodeIntoError::Consumer(error) => error,
+        };
+        FormatError::Parse {
+            format: InputFormat::Toon,
+            message,
+        }
+    })
+}
+
+/// Streams TOON structural events without constructing jq wrapper values.
+///
+/// # Errors
+///
+/// Returns strict decoding, resource, structural, or callback failures.
+pub fn stream_toon_records<R, F>(
+    reader: R,
+    config: tq_toon::DecoderConfig,
+    options: StreamOptions,
+    mut emit: F,
+) -> Result<(), FormatError>
+where
+    R: BufRead,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    let mut decoder = Decoder::new(reader, SourceId::new(0), config);
+    let mut consumer = EventProjector {
+        projector: Projector::new(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            &mut emit,
+        ),
+    };
+    decoder.decode_into(&mut consumer).map_err(|error| {
+        let message = match error {
+            DecodeIntoError::Decode(error) => error.to_string(),
+            DecodeIntoError::Consumer(error) => error,
+        };
+        FormatError::Parse {
+            format: InputFormat::Toon,
+            message,
+        }
+    })
+}
+
+/// Streams only TOON records needed by a proven static automatic projection.
+///
+/// # Errors
+///
+/// Returns strict decoding, resource, structural, or callback failures.
+pub fn stream_toon_selected_records<R, F>(
+    reader: R,
+    config: tq_toon::DecoderConfig,
+    options: StreamOptions,
+    selection: StreamSelection,
+    mut emit: F,
+) -> Result<(), FormatError>
+where
+    R: BufRead,
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    let mut decoder = Decoder::new(reader, SourceId::new(0), config);
+    let mut consumer = EventProjector {
+        projector: Projector::selected(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            selection,
             &mut emit,
         ),
     };
@@ -132,7 +368,7 @@ enum ContainerKind {
 #[derive(Debug)]
 struct Frame {
     kind: ContainerKind,
-    path: Vec<PathComponent>,
+    path: Option<Vec<PathComponent>>,
     children: usize,
     pending_key: Option<Arc<str>>,
 }
@@ -142,12 +378,13 @@ struct Projector<'a, F> {
     last_path: Vec<PathComponent>,
     maximum_depth: usize,
     maximum_token_bytes: usize,
+    selection: Option<StreamSelection>,
     emit: &'a mut F,
 }
 
 impl<'a, F> Projector<'a, F>
 where
-    F: FnMut(Value) -> Result<(), String>,
+    F: FnMut(StreamRecord) -> Result<(), String>,
 {
     fn new(maximum_depth: usize, maximum_token_bytes: usize, emit: &'a mut F) -> Self {
         Self {
@@ -155,6 +392,23 @@ where
             last_path: Vec::new(),
             maximum_depth,
             maximum_token_bytes,
+            selection: None,
+            emit,
+        }
+    }
+
+    fn selected(
+        maximum_depth: usize,
+        maximum_token_bytes: usize,
+        selection: StreamSelection,
+        emit: &'a mut F,
+    ) -> Self {
+        Self {
+            frames: Vec::new(),
+            last_path: Vec::new(),
+            maximum_depth,
+            maximum_token_bytes,
+            selection: Some(selection),
             emit,
         }
     }
@@ -193,8 +447,25 @@ where
             Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => 0,
         };
         self.check_token(token_bytes)?;
-        let path = self.take_value_path()?;
+        let Some(path) = self.take_value_path()? else {
+            return Ok(());
+        };
         self.emit_pair(path, value)
+    }
+
+    fn structural_scalar(&mut self, value: Scalar) -> Result<(), String> {
+        let Some(path) = self.take_value_path()? else {
+            return Ok(());
+        };
+        self.emit_pair(
+            path,
+            match value {
+                Scalar::Null => Value::Null,
+                Scalar::Bool(value) => Value::Bool(value),
+                Scalar::Number(value) => Value::Number(value),
+                Scalar::String(value) => Value::string(value),
+            },
+        )
     }
 
     fn check_token(&self, bytes: usize) -> Result<(), String> {
@@ -212,51 +483,71 @@ where
         if frame.kind != kind || frame.pending_key.is_some() {
             return Err("mismatched container event".to_owned());
         }
+        let Some(path) = frame.path else {
+            return Ok(());
+        };
         if frame.children == 0 {
             let empty = match kind {
                 ContainerKind::Array => Value::array(Vec::new()),
                 ContainerKind::Object => Value::object(Object::new()),
             };
-            self.emit_pair(frame.path, empty)
+            self.emit_pair(path, empty)
+        } else if let Some(selection) = &self.selection {
+            if selection.keeps(&path) {
+                (self.emit)(StreamRecord::path(path.clone(), None))?;
+            }
+            self.last_path = path;
+            Ok(())
         } else {
-            let path = self.last_path.clone();
-            (self.emit)(Value::array(vec![path_value(&path)]))?;
-            self.last_path = frame.path;
+            let end_path = self.last_path.clone();
+            (self.emit)(StreamRecord::path(end_path, None))?;
+            self.last_path = path;
             Ok(())
         }
     }
 
     fn error_value(&mut self, message: String) -> Result<(), String> {
         let path = self.expected_path();
-        (self.emit)(Value::array(vec![
-            Value::string(message),
-            path_value(&path),
-        ]))
+        let value = Value::array(vec![Value::string(message), path_value(&path)]);
+        (self.emit)(StreamRecord::raw(value))
     }
 
-    fn take_value_path(&mut self) -> Result<Vec<PathComponent>, String> {
+    fn take_value_path(&mut self) -> Result<Option<Vec<PathComponent>>, String> {
         let Some(frame) = self.frames.last_mut() else {
-            return Ok(Vec::new());
+            return Ok(Some(Vec::new()));
         };
-        let mut path = frame.path.clone();
-        match frame.kind {
-            ContainerKind::Array => path.push(PathComponent::Index(frame.children)),
-            ContainerKind::Object => path.push(PathComponent::Key(
+        let component = match frame.kind {
+            ContainerKind::Array => PathComponent::Index(frame.children),
+            ContainerKind::Object => PathComponent::Key(
                 frame
                     .pending_key
                     .take()
                     .ok_or_else(|| "object value has no key".to_owned())?,
-            )),
-        }
+            ),
+        };
         frame.children = frame.children.saturating_add(1);
-        Ok(path)
+        let Some(parent) = frame.path.as_ref() else {
+            return Ok(None);
+        };
+        let mut path = parent.clone();
+        path.push(component);
+        if self
+            .selection
+            .as_ref()
+            .is_some_and(|selection| !selection.tracks(&path))
+        {
+            return Ok(None);
+        }
+        Ok(Some(path))
     }
 
     fn expected_path(&self) -> Vec<PathComponent> {
         let Some(frame) = self.frames.last() else {
             return Vec::new();
         };
-        let mut path = frame.path.clone();
+        let Some(mut path) = frame.path.clone() else {
+            return Vec::new();
+        };
         match frame.kind {
             ContainerKind::Array => path.push(PathComponent::Index(frame.children)),
             ContainerKind::Object => {
@@ -269,10 +560,27 @@ where
     }
 
     fn emit_pair(&mut self, path: Vec<PathComponent>, value: Value) -> Result<(), String> {
-        (self.emit)(Value::array(vec![path_value(&path), value]))?;
+        if self
+            .selection
+            .as_ref()
+            .is_none_or(|selection| selection.keeps(&path))
+        {
+            (self.emit)(StreamRecord::path(path.clone(), Some(value)))?;
+        }
         self.last_path = path;
         Ok(())
     }
+}
+
+fn path_kind_mismatch(actual: &[PathComponent], expected: &[PathComponent]) -> bool {
+    for (actual, expected) in actual.iter().zip(expected) {
+        if actual == expected {
+            continue;
+        }
+        return matches!(actual, PathComponent::Key(_))
+            != matches!(expected, PathComponent::Key(_));
+    }
+    false
 }
 
 fn path_value(path: &[PathComponent]) -> Value {
@@ -294,7 +602,7 @@ struct StreamSeed<'a, 'b, F> {
 
 impl<'de, F> DeserializeSeed<'de> for StreamSeed<'_, '_, F>
 where
-    F: FnMut(Value) -> Result<(), String>,
+    F: FnMut(StreamRecord) -> Result<(), String>,
 {
     type Value = ();
 
@@ -314,7 +622,7 @@ struct StreamVisitor<'a, 'b, F> {
 
 impl<'de, F> Visitor<'de> for StreamVisitor<'_, '_, F>
 where
-    F: FnMut(Value) -> Result<(), String>,
+    F: FnMut(StreamRecord) -> Result<(), String>,
 {
     type Value = ();
 
@@ -438,7 +746,7 @@ where
 
 impl<F> StreamVisitor<'_, '_, F>
 where
-    F: FnMut(Value) -> Result<(), String>,
+    F: FnMut(StreamRecord) -> Result<(), String>,
 {
     fn number<E>(self, literal: &str) -> Result<(), E>
     where
@@ -458,13 +766,13 @@ fn is_resource_error(error: &serde_json::Error) -> bool {
     error.to_string().contains("input resource limit exceeded")
 }
 
-struct ToonProjector<'a, F> {
+struct EventProjector<'a, F> {
     projector: Projector<'a, F>,
 }
 
-impl<F> EventConsumer for ToonProjector<'_, F>
+impl<F> EventConsumer for EventProjector<'_, F>
 where
-    F: FnMut(Value) -> Result<(), String>,
+    F: FnMut(StreamRecord) -> Result<(), String>,
 {
     type Error = String;
 
@@ -476,12 +784,7 @@ where
             Event::ArrayStart { .. } => self.projector.begin(ContainerKind::Array),
             Event::ArrayEnd { .. } => self.projector.end(ContainerKind::Array),
             Event::Key { value, .. } => self.projector.key(value.to_string()),
-            Event::Scalar { value, .. } => self.projector.scalar(match value {
-                Scalar::Null => Value::Null,
-                Scalar::Bool(value) => Value::Bool(value),
-                Scalar::Number(value) => Value::Number(value),
-                Scalar::String(value) => Value::string(value),
-            }),
+            Event::Scalar { value, .. } => self.projector.structural_scalar(value),
         }
     }
 }
@@ -490,7 +793,14 @@ where
 mod tests {
     use std::io::{BufReader, Cursor};
 
-    use super::{StreamOptions, stream_json, stream_toon};
+    use std::sync::Arc;
+
+    use tq_core::PathComponent;
+
+    use super::{
+        StreamOptions, StreamSelection, stream_json, stream_json_records,
+        stream_json_selected_records, stream_toon,
+    };
 
     fn json_lines(values: &[tq_core::Value]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()
@@ -569,5 +879,61 @@ mod tests {
         assert!(values.is_empty());
         assert!(error.contains("token-bytes"));
         assert!(error.contains("resource limit"));
+    }
+
+    #[test]
+    fn structural_json_records_avoid_jq_wrapper_values_and_keep_duplicates() {
+        let mut records = Vec::new();
+        stream_json_records(
+            br#"{"items":[{"x":1,"x":2}]}"#.as_slice(),
+            StreamOptions::default(),
+            |record| {
+                records.push(record.into_parts());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(records.len(), 5);
+        assert_eq!(records[0].0.len(), 3);
+        assert_eq!(records[0].1.as_ref().unwrap().to_string(), "1");
+        assert_eq!(records[1].1.as_ref().unwrap().to_string(), "2");
+    }
+
+    #[test]
+    fn selected_records_discard_unrelated_object_members_but_keep_item_boundaries() {
+        let mut records = Vec::new();
+        stream_json_selected_records(
+            br#"{"features":[{"geometry":{"coordinates":[1,2]},"properties":{"release":3,"other":4}},{"geometry":{"coordinates":[5,6]}}]}"#.as_slice(),
+            StreamOptions::default(),
+            StreamSelection::new(
+                vec![PathComponent::Key(Arc::from("features"))],
+                Some(vec![
+                    PathComponent::Key(Arc::from("properties")),
+                    PathComponent::Key(Arc::from("release")),
+                ]),
+            ),
+            |record| {
+                records.push(record.into_parts());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(records.iter().all(|(path, _)| {
+            !path
+                .iter()
+                .any(|component| matches!(component, PathComponent::Key(key) if &**key == "geometry" || &**key == "other"))
+        }));
+        assert!(records.iter().any(|(path, value)| {
+            path.last().is_some_and(
+                |component| matches!(component, PathComponent::Key(key) if &**key == "release"),
+            ) && value.as_ref().is_some_and(|value| value.to_string() == "3")
+        }));
+        assert_eq!(
+            records
+                .iter()
+                .filter(|(path, value)| path.len() == 2 && value.is_none())
+                .count(),
+            2
+        );
     }
 }

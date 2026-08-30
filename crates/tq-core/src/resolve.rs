@@ -10,14 +10,14 @@ use std::{
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, ModuleInfo, Parsed,
-    PlanKind, Query, Resolved, SourceId, Span, Value,
+    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, ModuleInfo,
+    OptimizerRewrite, Parsed, PlanKind, Query, Resolved, SourceId, Span, Value,
     ast::{
         Access, CallTarget, Definition, Expr, ExprKind, InterpolationSegment, ObjectKey,
         ParameterKind,
     },
     parser::parse_module_ast,
-    phase::automatic_stream_proof,
+    phase::{automatic_stream_proof, hybrid_stream_proof},
 };
 
 /// One versioned built-in signature.
@@ -830,8 +830,12 @@ pub fn analyze(query: Query<Resolved>) -> Query<Analyzed> {
 
 /// Analyzes execution effects with input-mode context.
 #[must_use]
-pub fn analyze_with_context(query: Query<Resolved>, context: AnalysisContext) -> Query<Analyzed> {
+pub fn analyze_with_context(
+    mut query: Query<Resolved>,
+    context: AnalysisContext,
+) -> Query<Analyzed> {
     let mut analysis = Analysis::default();
+    optimize_resolved(query.ast_mut(), &mut analysis.optimizer_rewrites);
     if matches!(query.ast().kind, ExprKind::Identity) {
         add_effect(&mut analysis, Effect::SemanticIdentity, query.ast().span);
     }
@@ -856,10 +860,35 @@ pub fn analyze_with_context(query: Query<Resolved>, context: AnalysisContext) ->
                 .to_owned(),
         );
     } else if analysis.capabilities.blocking {
-        add_effect(&mut analysis, Effect::Document, query.ast().span);
-        analysis.selected_plan = PlanKind::Blocking;
-        analysis.stream_rejection =
-            Some("blocking operator requires complete input state".to_owned());
+        if context.automatic_streaming
+            && !analysis.capabilities.mutation
+            && let Some(proof) = hybrid_stream_proof(query.ast())
+        {
+            add_effect(&mut analysis, Effect::PathPrefix, proof.producer.cause);
+            if proof.producer.subtree_complete {
+                add_effect(&mut analysis, Effect::SubtreeComplete, proof.producer.cause);
+                add_effect(&mut analysis, Effect::Subtree, proof.producer.cause);
+            } else {
+                add_effect(&mut analysis, Effect::EventStream, proof.producer.cause);
+            }
+            if proof.producer.value_escapes {
+                add_effect(&mut analysis, Effect::Escape, proof.producer.cause);
+            }
+            analysis.selected_plan = PlanKind::HybridBlocking;
+            analysis.stream_proof = Some(proof.producer.clone());
+            analysis.hybrid_proof = Some(proof);
+        } else {
+            add_effect(&mut analysis, Effect::Document, query.ast().span);
+            analysis.selected_plan = PlanKind::Blocking;
+            analysis.stream_rejection = Some(
+                if context.automatic_streaming {
+                    "blocking query lacks a sound streaming producer and suffix split"
+                } else {
+                    "blocking operator requires complete input state"
+                }
+                .to_owned(),
+            );
+        }
     } else if analysis.capabilities.mutation {
         add_effect(&mut analysis, Effect::Document, query.ast().span);
         analysis.selected_plan = PlanKind::Document;
@@ -890,6 +919,39 @@ pub fn analyze_with_context(query: Query<Resolved>, context: AnalysisContext) ->
         );
     }
     query.with_analysis(analysis)
+}
+
+fn optimize_resolved(expr: &mut Expr, rewrites: &mut Vec<OptimizerRewrite>) {
+    walk_expr_mut(expr, |child| optimize_resolved(child, rewrites));
+    let replacement = match &expr.kind {
+        ExprKind::Pipe(left, length) if builtin_call(length, "length", 0) => match &left.kind {
+            ExprKind::Pipe(array, sort)
+                if matches!(array.kind, ExprKind::Array(_)) && builtin_call(sort, "sort", 0) =>
+            {
+                Some(((**array).clone(), sort.span, (**length).clone()))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some((array, span, length)) = replacement {
+        expr.kind = ExprKind::Pipe(Box::new(array), Box::new(length));
+        rewrites.push(OptimizerRewrite {
+            name: "array-sort-before-length",
+            span,
+        });
+    }
+}
+
+fn builtin_call(expr: &Expr, expected: &str, arity: usize) -> bool {
+    matches!(
+        &expr.kind,
+        ExprKind::Call {
+            name,
+            arguments,
+            target: Some(CallTarget::Builtin),
+        } if &**name == expected && arguments.len() == arity
+    )
 }
 
 struct Resolver {
@@ -1620,6 +1682,74 @@ mod tests {
         assert_eq!(machine["phase"], "analyzed");
         assert_eq!(machine["span"]["start"], 0);
         assert_eq!(machine["analysis"]["capabilities"]["blocking"], true);
+    }
+
+    #[test]
+    fn optimizer_removes_only_proven_array_sort_before_length() {
+        let optimized = analyze(
+            resolve(
+                parse("[.features[].properties.release] | sort | length").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(optimized.analysis().optimizer_rewrites.len(), 1);
+        assert_eq!(
+            optimized.analysis().optimizer_rewrites[0].name,
+            "array-sort-before-length"
+        );
+        assert!(!optimized.hir().contains("call(sort)"));
+        assert_eq!(
+            optimized.analysis().selected_plan,
+            crate::PlanKind::HybridBlocking
+        );
+
+        for query in [
+            ". | sort | length",
+            "[.] | sort_by(.) | length",
+            "def sort: .; [.] | sort | length",
+            "[.] | (sort, .) | length",
+        ] {
+            let analyzed =
+                analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap());
+            assert!(
+                analyzed.analysis().optimizer_rewrites.is_empty(),
+                "unexpected rewrite for {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn hybrid_analysis_is_narrow_and_records_its_split() {
+        let analyzed = analyze(
+            resolve(
+                parse("[.features[].properties.release] | sort").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            analyzed.analysis().selected_plan,
+            crate::PlanKind::HybridBlocking
+        );
+        let proof = analyzed.analysis().hybrid_proof.as_ref().unwrap();
+        assert_eq!(proof.producer.required_path_prefix.len(), 1);
+        assert_eq!(proof.producer.projected_path.as_ref().unwrap().len(), 2);
+        assert_eq!(proof.preparation, crate::HybridPreparation::StableSortRuns);
+
+        for query in [
+            "[.features[] | .[.key]] | sort",
+            "[.features[] | .properties.release] |= sort",
+            "reduce .features[] as $item ([]; . + [$item])",
+        ] {
+            let analyzed =
+                analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap());
+            assert_ne!(
+                analyzed.analysis().selected_plan,
+                crate::PlanKind::HybridBlocking,
+                "unexpected hybrid plan for {query}"
+            );
+        }
     }
 
     #[test]

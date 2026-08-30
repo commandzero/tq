@@ -135,6 +135,12 @@ pub struct ResourceLimits {
     pub output_bytes: u64,
     /// Maximum in-memory unknown-array preparation bytes.
     pub preparation_memory_bytes: usize,
+    /// Maximum values in one hybrid preparation batch.
+    pub hybrid_batch_values: usize,
+    /// Maximum hybrid worker batches simultaneously in flight.
+    pub hybrid_in_flight_batches: usize,
+    /// Maximum estimated hybrid worker bytes simultaneously in flight.
+    pub hybrid_in_flight_bytes: usize,
     /// Maximum disk-backed unknown-array spool bytes.
     pub spool_bytes: u64,
 }
@@ -151,6 +157,9 @@ impl Default for ResourceLimits {
             results: 100_000_000,
             output_bytes: 8 * 1024 * 1024 * 1024,
             preparation_memory_bytes: 8 * 1024 * 1024,
+            hybrid_batch_values: 16 * 1024,
+            hybrid_in_flight_batches: 4,
+            hybrid_in_flight_bytes: 8 * 1024 * 1024,
             spool_bytes: 8 * 1024 * 1024 * 1024,
         }
     }
@@ -520,6 +529,8 @@ Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE
 Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
          --max-line-bytes N, --max-lookahead-bytes N, --max-vm-steps N,\n\
          --max-results N, --max-output-bytes N, --prepare-memory-bytes N,\n\
+         --hybrid-batch-values N, --hybrid-in-flight-batches N,\n\
+         --hybrid-in-flight-bytes N,\n\
          --max-spool-bytes N\n",
     );
     help
@@ -796,6 +807,15 @@ where
             "--max-output-bytes" => limits.output_bytes = parse_limit(&mut tokens, &token)?,
             "--prepare-memory-bytes" => {
                 limits.preparation_memory_bytes = parse_limit(&mut tokens, &token)?;
+            }
+            "--hybrid-batch-values" => {
+                limits.hybrid_batch_values = parse_limit(&mut tokens, &token)?;
+            }
+            "--hybrid-in-flight-batches" => {
+                limits.hybrid_in_flight_batches = parse_limit(&mut tokens, &token)?;
+            }
+            "--hybrid-in-flight-bytes" => {
+                limits.hybrid_in_flight_bytes = parse_limit(&mut tokens, &token)?;
             }
             "--max-spool-bytes" => limits.spool_bytes = parse_limit(&mut tokens, &token)?,
             "-" => positional(

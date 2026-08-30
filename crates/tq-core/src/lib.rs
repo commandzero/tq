@@ -36,14 +36,18 @@ pub use bytecode::{Bytecode, BytecodeError};
 pub use diagnostic::{
     Diagnostic, DiagnosticClass, Label, SourceFile, SourceId, SourcePosition, Span,
 };
+pub use eval::{
+    StableSortPipeline, StableSortPipelineObservations, parallel_worker_count, stable_sort_values,
+};
 pub use number::{Number, NumberError, NumberLimits};
 pub use parser::{parse, parse_bytes};
 pub use path::{Path, PathComponent, PathError};
 pub use phase::{
     Analysis, Analyzed, AutomaticPlan, Blocking, Capabilities, CapabilityCause, Compiled, Document,
-    Effect, Events, ModuleInfo, Parsed, Plan, PlanKind, Program, Query, Resolved, StreamProof,
-    Subtree, Transcode, TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput,
-    TranscodeLimits, TranscodeProof, WholeInput,
+    Effect, Events, HybridBlocking, HybridPreparation, HybridProof, ModuleInfo, OptimizerRewrite,
+    Parsed, Plan, PlanKind, Program, Query, Resolved, StreamProof, Subtree, Transcode,
+    TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits, TranscodeProof,
+    WholeInput,
 };
 pub use resolve::{
     AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,

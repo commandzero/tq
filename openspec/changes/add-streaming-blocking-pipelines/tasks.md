@@ -1,48 +1,48 @@
 ## 1. Align the implementation base
 
-- [ ] 1.1 Integrate the completed `add-streaming-transcode` implementation and archived specs into this worktree without losing the current Rayon changes
-- [ ] 1.2 Resolve dependency and source conflicts, then run formatting, workspace checks, and the existing test suite to establish a clean baseline
-- [ ] 1.3 Add planner and benchmark fixtures for an order-sensitive projected sort and for `[.features[].properties.release] | sort | length`
+- [x] 1.1 Integrate the completed `add-streaming-transcode` implementation and archived specs into this worktree without losing the current Rayon changes
+- [x] 1.2 Resolve dependency and source conflicts, then run formatting, workspace checks, and the existing test suite to establish a clean baseline
+- [x] 1.3 Add planner and benchmark fixtures for an order-sensitive projected sort and for `[.features[].properties.release] | sort | length`
 
 ## 2. Add optimizer and typed planning support
 
-- [ ] 2.1 Add a resolved-HIR rewrite pass with source-spanned rewrite observations
-- [ ] 2.2 Implement the proven-array built-in `sort | length` rewrite and negative cases for unknown inputs, `sort_by`, user functions, errors, and multi-result expressions
-- [ ] 2.3 Define the hybrid producer, collection boundary, blocking suffix proof, and `hybrid-streaming-blocking` plan kind in the typed phase model
-- [ ] 2.4 Decompose the initial array-constructor-over-streamable-generator query shape before blocking-document fallback
-- [ ] 2.5 Compile and validate separate producer and suffix bytecode while preserving existing event, subtree, document, whole-input, and transcode plans
-- [ ] 2.6 Add analysis tests for eligible static projections and pre-input fallback for dynamic paths, mutation, cross-item dependencies, slurp, YAML, and explicit event input
+- [x] 2.1 Add a resolved-HIR rewrite pass with source-spanned rewrite observations
+- [x] 2.2 Implement the proven-array built-in `sort | length` rewrite and negative cases for unknown inputs, `sort_by`, user functions, errors, and multi-result expressions
+- [x] 2.3 Define the hybrid producer, collection boundary, blocking suffix proof, and `hybrid-streaming-blocking` plan kind in the typed phase model
+- [x] 2.4 Decompose the initial array-constructor-over-streamable-generator query shape before blocking-document fallback
+- [x] 2.5 Compile and validate separate producer and suffix bytecode while preserving existing event, subtree, document, whole-input, and transcode plans
+- [x] 2.6 Add analysis tests for eligible static projections and pre-input fallback for dynamic paths, mutation, cross-item dependencies, slurp, YAML, and explicit event input
 
 ## 3. Execute hybrid plans from structural events
 
-- [ ] 3.1 Refactor the automatic projection and capture rules so a structural-event consumer can reuse them without jq `[path, value]` wrapper allocation
-- [ ] 3.2 Implement JSON and TOON container tracking, static-prefix selection, per-item closure, projected-member absence, and proven subtree capture
-- [ ] 3.3 Enforce duplicate-key, depth, token, input-byte, result, VM-step, and cancellation policies across selected and discarded subtrees
-- [ ] 3.4 Add the CLI hybrid executor that evaluates producer bytecode in encounter order and invokes suffix bytecode once after successful decoder completion
-- [ ] 3.5 Preserve multi-document ordering, late syntax-error behavior, and the rule that a blocking suffix publishes no result before producer completion
-- [ ] 3.6 Differential-test hybrid and forced document execution for empty inputs, missing members, mixed values, equal-comparing objects, multiple documents, duplicate keys, malformed late input, limits, and cancellation
+- [x] 3.1 Refactor the automatic projection and capture rules so a structural-event consumer can reuse them without jq `[path, value]` wrapper allocation
+- [x] 3.2 Implement JSON and TOON container tracking, static-prefix selection, per-item closure, projected-member absence, and proven subtree capture
+- [x] 3.3 Enforce duplicate-key, depth, token, input-byte, result, VM-step, and cancellation policies across selected and discarded subtrees
+- [x] 3.4 Add the CLI hybrid executor that evaluates producer bytecode in encounter order and invokes suffix bytecode once after successful decoder completion
+- [x] 3.5 Preserve multi-document ordering, late syntax-error behavior, and the rule that a blocking suffix publishes no result before producer completion
+- [x] 3.6 Differential-test hybrid and forced document execution for empty inputs, missing members, mixed values, equal-comparing objects, multiple documents, duplicate keys, malformed late input, limits, and cancellation
 
 ## 4. Add bounded parallel preparation
 
-- [ ] 4.1 Add finite configuration and defaults for batch values, in-flight batch count, and in-flight estimated bytes
-- [ ] 4.2 Implement owned result batching with backpressure, ordered collection, cooperative cancellation, and high-water observations
-- [ ] 4.3 Implement stable Rayon sort-run preparation using encounter ordinals and the existing serial-versus-parallel thresholds
-- [ ] 4.4 Implement deterministic stable run merge and hand the completed array to the remaining suffix bytecode
-- [ ] 4.5 Keep a generic collect-only path for suffixes without an incremental preparation proof
-- [ ] 4.6 Test queue saturation, cancellation with workers active, worker-count limits, threshold behavior, stable equal values across batches, and deterministic repeated output
+- [x] 4.1 Add finite configuration and defaults for batch values, in-flight batch count, and in-flight estimated bytes
+- [x] 4.2 Implement owned result batching with backpressure, ordered collection, cooperative cancellation, and high-water observations
+- [x] 4.3 Implement stable Rayon sort-run preparation using encounter ordinals and the existing serial-versus-parallel thresholds
+- [x] 4.4 Implement deterministic stable run merge and hand the completed array to the remaining suffix bytecode
+- [x] 4.5 Keep a generic collect-only path for suffixes without an incremental preparation proof
+- [x] 4.6 Test queue saturation, cancellation with workers active, worker-count limits, threshold behavior, stable equal values across batches, and deterministic repeated output
 
 ## 5. Expose plan and resource behavior
 
-- [ ] 5.1 Extend human and JSON explain output with the hybrid producer proof, collection boundary, blocking cause, fallback reason, and optimizer rewrites
-- [ ] 5.2 Extend execution reports with root-materialization status, decoder depth, batch and byte high-water marks, retained result estimates, sort runs, worker count, and final resource outcome
-- [ ] 5.3 Document that hybrid plans retain cardinality-proportional projected and blocking state and do not satisfy fixed-memory event guarantees
-- [ ] 5.4 Add report-schema and CLI tests for hybrid execution, dead-sort elimination, fallback, interruption, and resource-limit failures
+- [x] 5.1 Extend human and JSON explain output with the hybrid producer proof, collection boundary, blocking cause, fallback reason, and optimizer rewrites
+- [x] 5.2 Extend execution reports with root-materialization status, decoder depth, batch and byte high-water marks, retained result estimates, sort runs, worker count, and final resource outcome
+- [x] 5.3 Document that hybrid plans retain cardinality-proportional projected and blocking state and do not satisfy fixed-memory event guarantees
+- [x] 5.4 Add report-schema and CLI tests for hybrid execution, dead-sort elimination, fallback, interruption, and resource-limit failures
 
 ## 6. Validate performance and compatibility
 
-- [ ] 6.1 Add an optimizer-resistant projected-sort benchmark whose correctness digest depends on sorted content
-- [ ] 6.2 Make the harness reject or relabel a blocking benchmark when machine-readable explain output says the measured operator was removed
-- [ ] 6.3 Run jq, the document-plan tq baseline, single-thread hybrid tq, and multi-thread hybrid tq against the largest catalogue input with identical correctness gates
-- [ ] 6.4 Capture wall, user, system, and total CPU time, peak RSS, worker count, exact commands, corpus identity, plan classification, and correctness digests
-- [ ] 6.5 Store the benchmark report and raw samples under `~/Development/commandzero/tq-benchmarks` and compare hybrid wall time and memory with the accepted document baseline
-- [ ] 6.6 Run workspace formatting, checks, clippy, unit tests, compatibility tests, OpenSpec strict validation, and the relevant benchmark smoke tests
+- [x] 6.1 Add an optimizer-resistant projected-sort benchmark whose correctness digest depends on sorted content
+- [x] 6.2 Make the harness reject or relabel a blocking benchmark when machine-readable explain output says the measured operator was removed
+- [x] 6.3 Run jq, the document-plan tq baseline, single-thread hybrid tq, and multi-thread hybrid tq against the largest catalogue input with identical correctness gates
+- [x] 6.4 Capture wall, user, system, and total CPU time, peak RSS, worker count, exact commands, corpus identity, plan classification, and correctness digests
+- [x] 6.5 Store the benchmark report and raw samples under `~/Development/commandzero/tq-benchmarks` and compare hybrid wall time and memory with the accepted document baseline
+- [x] 6.6 Run workspace formatting, checks, clippy, unit tests, compatibility tests, OpenSpec strict validation, and the relevant benchmark smoke tests
