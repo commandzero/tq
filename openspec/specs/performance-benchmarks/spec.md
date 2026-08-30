@@ -196,3 +196,36 @@ streaming `toon` baseline.
 #### Scenario: No whole-source prepass
 - **WHEN** a direct-sequence JSON benchmark completes
 - **THEN** input-stage bytes are zero and first-byte latency does not scale with total source length before decoding begins
+
+### Requirement: Parallel selected-decoding campaign
+The benchmark suite SHALL compare one-worker and multi-worker tq execution for a correctness-approved blocking projection over the largest catalogued JSON input. Each row MUST record wall time, user CPU, system CPU, total CPU, peak RSS, effective worker count, and output digest.
+
+#### Scenario: Multi-worker comparison
+- **WHEN** the parallel selected decoder is benchmarked with one and fourteen effective workers on the recorded host
+- **THEN** the report presents both measurements and their wall-time, CPU-time, and memory ratios
+
+#### Scenario: Parallel candidate regresses
+- **WHEN** multi-worker execution does not materially improve wall time or violates correctness or memory bounds
+- **THEN** the report preserves the result and the optimization does not silently replace the serial path for that workload
+
+### Requirement: Hybrid blocking benchmark coverage
+The benchmark catalogue SHALL include correctness-gated workloads in which a small projection from a large structured document feeds an order-sensitive blocking operator. Reports MUST distinguish document, single-thread hybrid, and configured multi-thread hybrid execution and capture wall time, user CPU, system CPU, total CPU, peak resident memory, and effective worker count.
+
+#### Scenario: Large GeoJSON projected sort
+- **WHEN** the large GeoJSON campaign evaluates a sort over projected feature metadata
+- **THEN** jq, single-thread tq, and multi-thread tq run against the same source and result contract, and the report records each required timing and memory metric
+
+#### Scenario: Compare hybrid with document baseline
+- **WHEN** both hybrid and document execution are available for the same tq query
+- **THEN** the report labels their retained-state guarantees and presents wall-time, CPU-time, and peak-memory differences without treating the hybrid plan as bounded-memory event execution
+
+### Requirement: Optimizer-resistant performance cases
+A benchmark intended to measure a blocking operator MUST make that operator's result observable under its correctness contract. The harness MUST record optimizer rewrites and MUST reject or relabel a sample when the measured operator was removed before execution.
+
+#### Scenario: Cardinality ignores sorted order
+- **WHEN** a candidate benchmark ends in `sort | length` and array length is its only observable result
+- **THEN** the harness does not label it a blocking-sort measurement if explain output reports dead-sort elimination
+
+#### Scenario: Sorted content is observed
+- **WHEN** a blocking-sort benchmark passes its correctness gate
+- **THEN** the expected result depends on sorted content and explain output confirms that the sort remained in the executed plan

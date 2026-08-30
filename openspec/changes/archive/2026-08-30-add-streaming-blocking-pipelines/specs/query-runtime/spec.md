@@ -1,0 +1,91 @@
+## MODIFIED Requirements
+
+### Requirement: Execution capability analysis
+Analysis SHALL classify a program's input and working-set requirements as transcode, event-stream, subtree, hybrid streaming-blocking, document, whole-input, and/or blocking-document. The resulting metadata MUST be available before input consumption and included in the compiled program.
+
+#### Scenario: Semantic identity
+- **WHEN** the resolved program returns each input value unchanged exactly once
+- **THEN** analysis records semantic identity so output-aware planning may consider transcode
+
+#### Scenario: Simple event consumer
+- **WHEN** a program consumes jq-style stream path/value events without document operators
+- **THEN** analysis permits an event execution plan
+
+#### Scenario: Sort over a streamable collection
+- **WHEN** a program constructs an array from an independently streamable projection and applies an order-sensitive `sort` suffix
+- **THEN** analysis permits a hybrid streaming-blocking plan whose retained state is the projected collection rather than the complete source document
+
+#### Scenario: Sort
+- **WHEN** a program applies `sort` to a value whose production requires the complete input document
+- **THEN** analysis marks it blocking-document and materializes the document as applicable
+
+#### Scenario: Slurp
+- **WHEN** CLI slurp mode is combined with a query
+- **THEN** the execution plan is classified whole-input
+
+## ADDED Requirements
+
+### Requirement: Mode-safe hybrid execution
+A compiled hybrid plan SHALL represent its streaming producer, collection boundary, and blocking suffix as validated typed components. Execution MUST evaluate producer results in jq encounter order, pass only completed owned values across the boundary, and invoke the suffix exactly once with the same collected value document execution would construct.
+
+#### Scenario: Mixed projected values
+- **WHEN** a hybrid producer emits nulls, booleans, numbers, strings, arrays, and objects
+- **THEN** the blocking suffix receives the same ordered array of values as document execution
+
+#### Scenario: Producer error after completed items
+- **WHEN** item evaluation fails after earlier items have entered the blocking collection
+- **THEN** execution returns the jq-compatible error without publishing a result from the blocking suffix
+
+#### Scenario: Stable equal-value sort
+- **WHEN** equal-comparing values enter parallel sort preparation in different batches
+- **THEN** their encounter order is preserved wherever the accepted jq baseline makes that order observable
+
+### Requirement: Validation-only selected JSON discard
+When a static automatic projection proves that a JSON subtree cannot
+contribute a result, the decoder MAY discard that subtree without constructing
+structural events or runtime values. It MUST still consume the entire subtree
+and preserve JSON syntax, nesting-depth, token-length, numeric-envelope, input
+limit, cancellation, and late-error behavior.
+
+#### Scenario: Irrelevant geometry numbers
+- **WHEN** a projected metadata query encounters numeric coordinates outside its selected path
+- **THEN** the decoder validates their JSON tokens and numeric resource envelope without constructing jq numbers or projector records
+
+#### Scenario: Invalid discarded subtree
+- **WHEN** an unselected subtree contains malformed JSON or exceeds a configured decoder resource limit
+- **THEN** hybrid execution returns the same failure class as the non-discarding structural decoder and publishes no blocking result
+
+### Requirement: Lightweight identity-transcode tokens
+The JSON structural decoder MAY deliver keys, strings, and numeric literals to
+an identity-transcode consumer without constructing owned structural events or
+runtime values. Numeric literals MUST use the same canonical form and resource
+envelope as `Number`, strings MUST use the selected TOON writer's quoting
+rules, and consumers that require owned events MUST retain the existing event
+contract.
+
+#### Scenario: Scalar-heavy identity transcode
+- **WHEN** JSON identity transcode consumes root scalars, direct object scalar members, or scalar-array elements
+- **THEN** the decoder and transcode consumer publish canonical TOON without constructing an intermediate tq scalar event or value for those tokens
+
+#### Scenario: Lightweight numeric failure
+- **WHEN** a numeric token exceeds tq's coefficient, exponent, or rendered-token envelope
+- **THEN** lightweight transcode returns the same input failure class as owned structural decoding and does not publish a completed unframed result
+
+#### Scenario: Owned-event consumer compatibility
+- **WHEN** an event consumer does not implement lightweight token handling
+- **THEN** the decoder adapts token text into the existing key and scalar events with unchanged order and values
+
+### Requirement: Semantics-preserving blocking rewrites
+The compiler MAY remove a blocking operator only when resolved query structure and input-type proof establish that the operator cannot change the result sequence, values, ordering, or jq-visible errors. Explain output MUST identify each applied rewrite.
+
+#### Scenario: Array sort followed by length
+- **WHEN** a resolved query applies the built-in `sort` and then `length` to a value proven to be an array
+- **THEN** the compiler may evaluate `length` without sorting and reports the removed blocking operation in explain output
+
+#### Scenario: Sort input is not proven array
+- **WHEN** the input to `sort | length` is not statically proven to be an array
+- **THEN** the compiler retains `sort` so its jq-compatible type error remains observable
+
+#### Scenario: Sort key can fail
+- **WHEN** a sort-like operation evaluates a user expression or otherwise has jq-visible evaluation effects
+- **THEN** the compiler retains that operation unless it separately proves those effects unobservable

@@ -85,12 +85,52 @@ impl Number {
         Self::parse_with_limits(source, NumberLimits::default())
     }
 
+    /// Canonicalizes a finite JSON numeric literal without constructing a
+    /// runtime number.
+    ///
+    /// # Errors
+    ///
+    /// Returns a grammar, range, or resource error for an inadmissible token.
+    pub fn canonicalize_literal(source: &str) -> Result<String, NumberError> {
+        Self::canonicalize_literal_with_limits(source, NumberLimits::default())
+    }
+
+    /// Validates a JSON numeric literal without retaining its canonical value.
+    ///
+    /// This applies the same grammar and resource envelope as [`Self::parse`]
+    /// while avoiding canonical-string allocation for values a caller will
+    /// discard.
+    ///
+    /// # Errors
+    ///
+    /// Returns a grammar, range, or resource error for an inadmissible token.
+    pub fn validate_literal(source: &str) -> Result<(), NumberError> {
+        validate_literal_with_limits(source, NumberLimits::default())
+    }
+
     /// Parses with explicit numeric resource limits.
     ///
     /// # Errors
     ///
     /// Returns a grammar, range, or resource error for an inadmissible token.
     pub fn parse_with_limits(source: &str, limits: NumberLimits) -> Result<Self, NumberError> {
+        let literal = Self::canonicalize_literal_with_limits(source, limits)?;
+        Ok(Self {
+            binary64: OnceLock::new(),
+            literal: Some(literal.into()),
+        })
+    }
+
+    /// Canonicalizes a finite JSON numeric literal under explicit limits
+    /// without constructing a runtime number.
+    ///
+    /// # Errors
+    ///
+    /// Returns a grammar, range, or resource error for an inadmissible token.
+    pub fn canonicalize_literal_with_limits(
+        source: &str,
+        limits: NumberLimits,
+    ) -> Result<String, NumberError> {
         let parts = DecimalParts::parse(source)?;
         if parts.coefficient_digits > limits.coefficient_digits {
             return Err(NumberError::CoefficientDigits {
@@ -102,11 +142,7 @@ impl Number {
                 limit: limits.absolute_exponent,
             });
         }
-        let literal = parts.canonical(limits)?;
-        Ok(Self {
-            binary64: OnceLock::new(),
-            literal: Some(literal.into()),
-        })
+        parts.canonical(limits)
     }
 
     /// Constructs an arithmetic-domain number and rejects NaN/infinity.
@@ -217,6 +253,176 @@ impl Number {
         }
         self.as_f64().total_cmp(&other.as_f64())
     }
+}
+
+struct LiteralEnvelope<'a> {
+    negative: bool,
+    integer: &'a [u8],
+    fraction: &'a [u8],
+    exponent: i64,
+}
+
+fn parse_literal_envelope(source: &str) -> Result<LiteralEnvelope<'_>, NumberError> {
+    let bytes = source.as_bytes();
+    let mut index = usize::from(bytes.first() == Some(&b'-'));
+    let negative = index == 1;
+    if index >= bytes.len() {
+        return Err(NumberError::Invalid);
+    }
+
+    let integer_start = index;
+    if bytes[index] == b'0' {
+        index += 1;
+        if bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            return Err(NumberError::Invalid);
+        }
+    } else if bytes[index].is_ascii_digit() && bytes[index] != b'0' {
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+    } else {
+        return Err(NumberError::Invalid);
+    }
+    let integer_end = index;
+
+    let mut fraction_start = index;
+    let mut fraction_end = index;
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        fraction_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        fraction_end = index;
+        if fraction_start == fraction_end {
+            return Err(NumberError::Invalid);
+        }
+    }
+
+    let mut exponent = 0_i64;
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index += 1;
+        let exponent_negative = bytes.get(index) == Some(&b'-');
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            exponent = exponent
+                .saturating_mul(10)
+                .saturating_add(i64::from(bytes[index] - b'0'));
+            index += 1;
+        }
+        if start == index {
+            return Err(NumberError::Invalid);
+        }
+        if exponent_negative {
+            exponent = -exponent;
+        }
+    }
+    if index != bytes.len() {
+        return Err(NumberError::Invalid);
+    }
+
+    Ok(LiteralEnvelope {
+        negative,
+        integer: &bytes[integer_start..integer_end],
+        fraction: &bytes[fraction_start..fraction_end],
+        exponent,
+    })
+}
+
+fn validate_literal_with_limits(source: &str, limits: NumberLimits) -> Result<(), NumberError> {
+    let LiteralEnvelope {
+        negative,
+        integer,
+        fraction,
+        exponent,
+    } = parse_literal_envelope(source)?;
+    let total_digits = integer.len().saturating_add(fraction.len());
+    let leading_zeroes = integer
+        .iter()
+        .chain(fraction)
+        .take_while(|digit| **digit == b'0')
+        .count();
+    let coefficient_digits = total_digits.saturating_sub(leading_zeroes).max(1);
+    if coefficient_digits > limits.coefficient_digits {
+        return Err(NumberError::CoefficientDigits {
+            limit: limits.coefficient_digits,
+        });
+    }
+    if exponent.unsigned_abs() > limits.absolute_exponent {
+        return Err(NumberError::Exponent {
+            limit: limits.absolute_exponent,
+        });
+    }
+    if leading_zeroes == total_digits {
+        return Ok(());
+    }
+
+    let trailing_zeroes = fraction
+        .iter()
+        .rev()
+        .chain(integer.iter().rev())
+        .take_while(|digit| **digit == b'0')
+        .count();
+    let digits = total_digits
+        .saturating_sub(leading_zeroes)
+        .saturating_sub(trailing_zeroes);
+    let fraction_digits = i64::try_from(fraction.len()).unwrap_or(i64::MAX);
+    let scale = exponent
+        .saturating_sub(fraction_digits)
+        .saturating_add(i64::try_from(trailing_zeroes).unwrap_or(i64::MAX));
+    let plain_length = if scale >= 0 {
+        digits.saturating_add(usize::try_from(scale).unwrap_or(usize::MAX))
+    } else {
+        digits.max(usize::try_from(-scale).unwrap_or(usize::MAX))
+    };
+    let sign = usize::from(negative);
+    let rendered = if plain_length <= limits.plain_expansion_digits {
+        if scale >= 0 {
+            sign.saturating_add(plain_length)
+        } else {
+            let point = i64::try_from(digits)
+                .unwrap_or(i64::MAX)
+                .saturating_add(scale);
+            if point > 0 {
+                sign.saturating_add(digits).saturating_add(1)
+            } else {
+                sign.saturating_add(2)
+                    .saturating_add(usize::try_from(-point).unwrap_or(usize::MAX))
+                    .saturating_add(digits)
+            }
+        }
+    } else {
+        let scientific_exponent = scale
+            .saturating_add(i64::try_from(digits).unwrap_or(i64::MAX))
+            .saturating_sub(1);
+        let exponent_bytes = decimal_i64_bytes(scientific_exponent);
+        if digits == 1 {
+            sign.saturating_add(2).saturating_add(exponent_bytes)
+        } else {
+            sign.saturating_add(digits)
+                .saturating_add(2)
+                .saturating_add(exponent_bytes)
+        }
+    };
+    if rendered > limits.rendered_bytes {
+        return Err(NumberError::RenderedBytes {
+            limit: limits.rendered_bytes,
+        });
+    }
+    Ok(())
+}
+
+fn decimal_i64_bytes(value: i64) -> usize {
+    let magnitude = value.unsigned_abs();
+    let digits = if magnitude == 0 {
+        1
+    } else {
+        usize::try_from(magnitude.ilog10()).unwrap_or(usize::MAX) + 1
+    };
+    digits.saturating_add(usize::from(value < 0))
 }
 
 impl PartialEq for Number {
@@ -524,6 +730,34 @@ mod tests {
             Number::parse_with_limits("1e3", limits),
             Err(NumberError::Exponent { .. })
         ));
+    }
+
+    #[test]
+    fn validation_only_literals_match_retained_number_admission() {
+        for literal in [
+            "0",
+            "-0.0e99",
+            "12.3400",
+            "9007199254740993",
+            "1e1000000",
+            "1e-1000000",
+            "01",
+            "1.",
+            "1e",
+            "1e1000001",
+        ] {
+            assert_eq!(
+                Number::validate_literal(literal),
+                Number::parse(literal).map(|_| ()),
+                "literal {literal}"
+            );
+        }
+
+        let oversized = "1".repeat(NumberLimits::default().coefficient_digits + 1);
+        assert_eq!(
+            Number::validate_literal(&oversized),
+            Number::parse(&oversized).map(|_| ())
+        );
     }
 
     #[test]

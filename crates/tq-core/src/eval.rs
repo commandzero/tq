@@ -8,10 +8,17 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
     },
 };
 
 use indexmap::IndexMap;
+use rayon::{
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    },
+    slice::ParallelSliceMut,
+};
 
 use crate::{
     Bytecode, Number, Object, Path, PathComponent, Value, VmError, VmLimits, VmObservations,
@@ -28,6 +35,10 @@ pub(crate) const INPUT_LINE_NUMBER: &str = "__tq_input_line_number";
 type Environment = BTreeMap<Arc<str>, Value>;
 type Outcomes = Vec<Result<Value, VmError>>;
 type UserFrames = Arc<[UserFrame]>;
+
+// Below this size, thread-pool startup and scheduling cost more than the work.
+const PARALLEL_SORT_THRESHOLD: usize = 16 * 1024;
+const PARALLEL_REDUCTION_THRESHOLD: usize = 64 * 1024;
 
 #[derive(Clone)]
 struct FilterArgument {
@@ -2949,7 +2960,7 @@ impl Evaluator<'_> {
                 Err(error) => return one_error(error),
             }
         }
-        keyed.sort_by(|left, right| left.0.cmp(&right.0));
+        sort_by_cached_key(&mut keyed);
         if unique {
             keyed.dedup_by(|left, right| left.0 == right.0);
         }
@@ -3470,7 +3481,7 @@ fn keys(value: &Value, sorted: bool) -> Result<Value, VmError> {
         value => return Err(type_error("keys", value)),
     };
     if sorted {
-        keys.sort();
+        stable_sort_values(&mut keys);
     }
     Ok(Value::array(keys))
 }
@@ -3534,7 +3545,21 @@ fn extrema(input: &Value, maximum: bool) -> Outcomes {
     let Value::Array(values) = input else {
         return one_error(type_error(if maximum { "max" } else { "min" }, input));
     };
-    let selected = if maximum {
+    let selected = if values.len() >= PARALLEL_REDUCTION_THRESHOLD {
+        if maximum {
+            values
+                .par_iter()
+                .enumerate()
+                .max_by(|left, right| left.1.cmp(right.1).then_with(|| left.0.cmp(&right.0)))
+                .map(|(_, value)| value)
+        } else {
+            values
+                .par_iter()
+                .enumerate()
+                .min_by(|left, right| left.1.cmp(right.1).then_with(|| left.0.cmp(&right.0)))
+                .map(|(_, value)| value)
+        }
+    } else if maximum {
         values.iter().max()
     } else {
         values.iter().min()
@@ -3547,7 +3572,7 @@ fn sort_values(input: &Value) -> Outcomes {
         return one_error(type_error("sort", input));
     };
     let mut values = values.to_vec();
-    values.sort();
+    stable_sort_values(&mut values);
     vec![Ok(Value::array(values))]
 }
 
@@ -3556,9 +3581,287 @@ fn unique_values(input: &Value) -> Outcomes {
         return one_error(type_error("unique", input));
     };
     let mut values = values.to_vec();
-    values.sort();
+    stable_sort_values(&mut values);
     values.dedup();
     vec![Ok(Value::array(values))]
+}
+
+/// Stably orders values using the shared thresholded parallel sort policy.
+pub fn stable_sort_values(values: &mut [Value]) {
+    if values.len() >= PARALLEL_SORT_THRESHOLD {
+        values.par_sort();
+    } else {
+        values.sort();
+    }
+}
+
+/// Number of workers in the shared Rayon execution pool.
+#[must_use]
+pub fn parallel_worker_count() -> usize {
+    rayon::current_num_threads()
+}
+
+/// High-water observations from an overlapping stable-sort preparation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StableSortPipelineObservations {
+    /// Number of independently sorted input runs.
+    pub batches: usize,
+    /// Maximum worker batches simultaneously in flight.
+    pub in_flight_batches: usize,
+    /// Maximum estimated bytes simultaneously in flight.
+    pub in_flight_bytes: usize,
+}
+
+/// Bounded producer for stable sorted runs backed by the shared Rayon pool.
+pub struct StableSortPipeline {
+    batch: Vec<Value>,
+    batch_bytes: usize,
+    batch_values_limit: usize,
+    batch_bytes_limit: usize,
+    in_flight_batches_limit: usize,
+    in_flight_bytes_limit: usize,
+    in_flight_batches: usize,
+    in_flight_bytes: usize,
+    next_ordinal: usize,
+    sender: Sender<(usize, usize, Vec<Value>, bool)>,
+    receiver: Receiver<(usize, usize, Vec<Value>, bool)>,
+    runs: BTreeMap<usize, Vec<Value>>,
+    observations: StableSortPipelineObservations,
+    cancellation: Option<Arc<AtomicBool>>,
+}
+
+impl StableSortPipeline {
+    /// Creates a finite run queue. Every limit must be non-zero.
+    #[must_use]
+    pub fn new(
+        batch_values_limit: usize,
+        batch_bytes_limit: usize,
+        in_flight_batches_limit: usize,
+        in_flight_bytes_limit: usize,
+    ) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            batch: Vec::with_capacity(batch_values_limit.max(1)),
+            batch_bytes: 0,
+            batch_values_limit: batch_values_limit.max(1),
+            batch_bytes_limit: batch_bytes_limit.max(1),
+            in_flight_batches_limit: in_flight_batches_limit.max(1),
+            in_flight_bytes_limit: in_flight_bytes_limit.max(1),
+            in_flight_batches: 0,
+            in_flight_bytes: 0,
+            next_ordinal: 0,
+            sender,
+            receiver,
+            runs: BTreeMap::new(),
+            observations: StableSortPipelineObservations::default(),
+            cancellation: None,
+        }
+    }
+
+    /// Adds cooperative cancellation shared with decoding and evaluation.
+    #[must_use]
+    pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
+        self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Adds one producer result, blocking only when the finite worker queue is full.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable resource name when one value exceeds the byte envelope or
+    /// a worker disconnects.
+    pub fn push(&mut self, value: Value, estimated_bytes: usize) -> Result<(), &'static str> {
+        self.check_cancellation()?;
+        if estimated_bytes > self.in_flight_bytes_limit {
+            return Err("hybrid-in-flight-bytes");
+        }
+        if !self.batch.is_empty()
+            && (self.batch.len() >= self.batch_values_limit
+                || self.batch_bytes.saturating_add(estimated_bytes) > self.batch_bytes_limit)
+        {
+            self.dispatch()?;
+        }
+        self.batch.push(value);
+        self.batch_bytes = self.batch_bytes.saturating_add(estimated_bytes);
+        if self.batch.len() >= self.batch_values_limit || self.batch_bytes >= self.batch_bytes_limit
+        {
+            self.dispatch()?;
+        }
+        Ok(())
+    }
+
+    /// Drains every run and performs deterministic pairwise stable merges.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable resource name if a worker disconnects.
+    pub fn finish(mut self) -> Result<(Vec<Value>, StableSortPipelineObservations), &'static str> {
+        self.check_cancellation()?;
+        self.dispatch()?;
+        while self.in_flight_batches != 0 {
+            self.receive_one()?;
+        }
+        let runs = self.runs.into_values().collect::<Vec<_>>();
+        Ok((
+            merge_sorted_runs(runs, self.cancellation.as_ref())?,
+            self.observations,
+        ))
+    }
+
+    fn dispatch(&mut self) -> Result<(), &'static str> {
+        self.check_cancellation()?;
+        if self.batch.is_empty() {
+            return Ok(());
+        }
+        let bytes = self.batch_bytes;
+        while self.in_flight_batches >= self.in_flight_batches_limit
+            || self.in_flight_bytes.saturating_add(bytes) > self.in_flight_bytes_limit
+        {
+            self.receive_one()?;
+        }
+        let ordinal = self.next_ordinal;
+        self.next_ordinal = self.next_ordinal.saturating_add(1);
+        let mut values =
+            std::mem::replace(&mut self.batch, Vec::with_capacity(self.batch_values_limit));
+        self.batch_bytes = 0;
+        let sender = self.sender.clone();
+        let cancellation = self.cancellation.clone();
+        rayon::spawn_fifo(move || {
+            if !cancellation
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                stable_sort_values(&mut values);
+            }
+            let cancelled = cancellation
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed));
+            let _ = sender.send((ordinal, bytes, values, cancelled));
+        });
+        self.in_flight_batches = self.in_flight_batches.saturating_add(1);
+        self.in_flight_bytes = self.in_flight_bytes.saturating_add(bytes);
+        self.observations.batches = self.observations.batches.saturating_add(1);
+        self.observations.in_flight_batches = self
+            .observations
+            .in_flight_batches
+            .max(self.in_flight_batches);
+        self.observations.in_flight_bytes =
+            self.observations.in_flight_bytes.max(self.in_flight_bytes);
+        Ok(())
+    }
+
+    fn receive_one(&mut self) -> Result<(), &'static str> {
+        self.check_cancellation()?;
+        let (ordinal, bytes, values, worker_cancelled) =
+            self.receiver.recv().map_err(|_| "hybrid-sort-worker")?;
+        if worker_cancelled {
+            return Err("interrupted");
+        }
+        self.check_cancellation()?;
+        self.in_flight_batches = self.in_flight_batches.saturating_sub(1);
+        self.in_flight_bytes = self.in_flight_bytes.saturating_sub(bytes);
+        self.runs.insert(ordinal, values);
+        Ok(())
+    }
+
+    fn check_cancellation(&self) -> Result<(), &'static str> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            Err("interrupted")
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn merge_sorted_runs(
+    mut runs: Vec<Vec<Value>>,
+    cancellation: Option<&Arc<AtomicBool>>,
+) -> Result<Vec<Value>, &'static str> {
+    while runs.len() > 1 {
+        if cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err("interrupted");
+        }
+        let mut pairs = Vec::with_capacity(runs.len().div_ceil(2));
+        let mut iterator = runs.into_iter();
+        while let Some(left) = iterator.next() {
+            pairs.push((left, iterator.next()));
+        }
+        runs = if let Some(cancellation) = cancellation {
+            pairs
+                .into_par_iter()
+                .map(|(left, right)| match right {
+                    Some(right) => stable_merge_cancellable(left, right, cancellation),
+                    None => Ok(left),
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        } else {
+            pairs
+                .into_par_iter()
+                .map(|(left, right)| match right {
+                    Some(right) => stable_merge(left, right),
+                    None => left,
+                })
+                .collect()
+        };
+    }
+    Ok(runs.pop().unwrap_or_default())
+}
+
+fn stable_merge_cancellable(
+    left: Vec<Value>,
+    right: Vec<Value>,
+    cancellation: &AtomicBool,
+) -> Result<Vec<Value>, &'static str> {
+    let mut merged = Vec::with_capacity(left.len().saturating_add(right.len()));
+    let mut left = left.into_iter().peekable();
+    let mut right = right.into_iter().peekable();
+    let mut comparisons_until_check = 0usize;
+    while let (Some(left_value), Some(right_value)) = (left.peek(), right.peek()) {
+        if comparisons_until_check == 0 {
+            if cancellation.load(Ordering::Relaxed) {
+                return Err("interrupted");
+            }
+            comparisons_until_check = 16 * 1024;
+        }
+        comparisons_until_check = comparisons_until_check.saturating_sub(1);
+        if left_value <= right_value {
+            merged.push(left.next().expect("left value was peeked"));
+        } else {
+            merged.push(right.next().expect("right value was peeked"));
+        }
+    }
+    merged.extend(left);
+    merged.extend(right);
+    Ok(merged)
+}
+
+fn stable_merge(left: Vec<Value>, right: Vec<Value>) -> Vec<Value> {
+    let mut merged = Vec::with_capacity(left.len().saturating_add(right.len()));
+    let mut left = left.into_iter().peekable();
+    let mut right = right.into_iter().peekable();
+    while let (Some(left_value), Some(right_value)) = (left.peek(), right.peek()) {
+        if left_value <= right_value {
+            merged.push(left.next().expect("left value was peeked"));
+        } else {
+            merged.push(right.next().expect("right value was peeked"));
+        }
+    }
+    merged.extend(left);
+    merged.extend(right);
+    merged
+}
+
+fn sort_by_cached_key(values: &mut [(Value, Value)]) {
+    if values.len() >= PARALLEL_SORT_THRESHOLD {
+        values.par_sort_by(|left, right| left.0.cmp(&right.0));
+    } else {
+        values.sort_by(|left, right| left.0.cmp(&right.0));
+    }
 }
 
 fn reverse(input: &Value) -> Outcomes {
@@ -3696,7 +3999,10 @@ mod tests {
 
     use indexmap::IndexMap;
 
-    use super::Value;
+    use super::{
+        PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline, Value, extrema,
+        sort_by_cached_key, stable_sort_values,
+    };
     use crate::{ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
 
     fn run(query: &str, input: &str) -> Vec<Result<Value, String>> {
@@ -3935,6 +4241,42 @@ mod tests {
             json(run("(.a, .b) += 10", r#"{"a":1,"b":2,"c":[3]}"#)),
             [r#"{"a":11,"b":12,"c":[3]}"#]
         );
+    }
+
+    #[test]
+    fn parallel_collections_preserve_order_and_extrema_ties() {
+        let count = PARALLEL_SORT_THRESHOLD + 1;
+        let original = (0..count)
+            .map(|index| Value::string(format!("{index:05}")))
+            .collect::<Vec<_>>();
+
+        let mut values = original.iter().rev().cloned().collect::<Vec<_>>();
+        stable_sort_values(&mut values);
+        assert_eq!(values, original);
+
+        let mut keyed = original
+            .iter()
+            .cloned()
+            .map(|value| (Value::Null, value))
+            .collect::<Vec<_>>();
+        sort_by_cached_key(&mut keyed);
+        assert!(keyed.iter().map(|(_, value)| value).eq(original.iter()));
+
+        let first_equal = Value::object(IndexMap::from([
+            (Arc::from("a"), Value::Null),
+            (Arc::from("b"), Value::Null),
+        ]));
+        let last_equal = Value::object(IndexMap::from([
+            (Arc::from("b"), Value::Null),
+            (Arc::from("a"), Value::Null),
+        ]));
+        let mut equal_values = vec![first_equal.clone(); PARALLEL_REDUCTION_THRESHOLD];
+        equal_values.push(last_equal.clone());
+        let equal_values = Value::array(equal_values);
+        let minimum = extrema(&equal_values, false).pop().unwrap().unwrap();
+        let maximum = extrema(&equal_values, true).pop().unwrap().unwrap();
+        assert!(minimum.shares_node_with(&first_equal));
+        assert!(maximum.shares_node_with(&last_equal));
     }
 
     #[test]
@@ -4198,5 +4540,61 @@ mod tests {
                 resource: "output-bytes"
             })
         ));
+    }
+
+    #[test]
+    fn stable_sort_pipeline_bounds_runs_and_merges_deterministically() {
+        let mut pipeline = StableSortPipeline::new(2, 256, 2, 512);
+        for value in [3, 1, 2, 1, 3, 2] {
+            pipeline
+                .push(serde_json::from_str(&value.to_string()).unwrap(), 32)
+                .unwrap();
+        }
+        let (values, observations) = pipeline.finish().unwrap();
+        assert_eq!(
+            values,
+            [1, 1, 2, 2, 3, 3]
+                .map(|value| serde_json::from_str(&value.to_string()).unwrap())
+                .to_vec()
+        );
+        assert_eq!(observations.batches, 3);
+        assert!(observations.in_flight_batches <= 2);
+        assert!(observations.in_flight_bytes <= 512);
+    }
+
+    #[test]
+    fn stable_sort_pipeline_cancels_with_workers_active() {
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut pipeline =
+            StableSortPipeline::new(1, 64, 2, 128).with_cancellation(Arc::clone(&cancellation));
+        pipeline
+            .push(serde_json::from_str("2").unwrap(), 32)
+            .unwrap();
+        cancellation.store(true, Ordering::Relaxed);
+        assert_eq!(pipeline.finish().unwrap_err(), "interrupted");
+    }
+
+    #[test]
+    fn stable_sort_pipeline_preserves_equal_object_order_across_runs() {
+        let first: Value = serde_json::from_str(r#"{"a":1,"b":2}"#).unwrap();
+        let second: Value = serde_json::from_str(r#"{"b":2,"a":1}"#).unwrap();
+        assert_eq!(first.cmp(&second), std::cmp::Ordering::Equal);
+        assert_ne!(first.to_string(), second.to_string());
+
+        let run = || {
+            let mut pipeline = StableSortPipeline::new(1, 256, 2, 512);
+            pipeline.push(first.clone(), 64).unwrap();
+            pipeline.push(second.clone(), 64).unwrap();
+            pipeline
+                .finish()
+                .unwrap()
+                .0
+                .into_iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+        };
+        let expected = vec![first.to_string(), second.to_string()];
+        assert_eq!(run(), expected);
+        assert_eq!(run(), expected);
     }
 }

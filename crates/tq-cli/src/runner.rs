@@ -13,16 +13,21 @@ use std::{
 
 use thiserror::Error;
 use tq_core::{
-    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events, Number,
-    PathComponent, Plan, PlanKind, Query, ResolveOptions, Resolved, SourceId, Transcode,
-    TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits, TranscodeProof,
-    Value, Vm, VmError, VmLimits, VmObservations, analyze_with_context, parse_bytes, resolve,
+    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
+    HybridBlocking, HybridPreparation, Number, PathComponent, Plan, PlanKind, Query,
+    ResolveOptions, Resolved, SourceId, StableSortPipeline, StableSortPipelineObservations,
+    Transcode, TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits,
+    TranscodeProof, Value, Vm, VmError, VmLimits, VmObservations, analyze_with_context,
+    parallel_worker_count, parse_bytes, resolve,
 };
 use tq_formats::{
     DecodeOptions, FormatError, InputFormat, JsonEventOptions, JsonLinesDocumentSource,
-    OutputError, OutputFormat, OutputOptions, ProbeReport, StreamOptions, ToonFraming,
-    decode_bytes, decode_json, decode_json_event_stream, decode_toon, probe_format, probe_reader,
-    stream_json, stream_toon, write_results,
+    OutputError, OutputFormat, OutputOptions, ParallelJsonObservations, ParallelJsonOptions,
+    ProbeReport, SelectedStreamObservations, StreamOptions, StreamRecord, StreamSelection,
+    ToonFraming, decode_bytes, decode_json, decode_json_event_stream, decode_toon, probe_format,
+    probe_reader, stream_json, stream_json_selected_records_parallel,
+    stream_json_selected_records_with_control, stream_toon,
+    stream_toon_selected_records_with_control, write_results,
 };
 use tq_toon::{
     ArrayPreparationConfig, DecodeIntoError, Decoder, DuplicateKeyPolicy, KeyFolding,
@@ -36,6 +41,7 @@ use crate::{
 };
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+const INPUT_BUFFER_BYTES: usize = 64 * 1024;
 
 const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
@@ -507,7 +513,10 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
         let plan = program.event_plan().map_err(RunError::Compile)?;
         return run_event_filter(options, &plan, variables, &analysis, stdin, stdout, stderr);
     }
-    if matches!(analysis.selected_plan, PlanKind::Events | PlanKind::Subtree) {
+    if matches!(
+        analysis.selected_plan,
+        PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking
+    ) {
         return match program.automatic_plan().map_err(RunError::Compile)? {
             AutomaticPlan::Events(plan) => {
                 run_automatic_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
@@ -515,7 +524,10 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
             AutomaticPlan::Subtree(plan) => {
                 run_automatic_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
             }
-            _ => unreachable!("bounded selection returns a bounded typed plan"),
+            AutomaticPlan::HybridBlocking(plan) => {
+                run_hybrid_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
+            }
+            _ => unreachable!("automatic selection returns an automatic typed plan"),
         };
     }
     let plan = program.document_plan();
@@ -605,6 +617,7 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
             ReportExecution {
                 analysis: &analysis,
                 retention: RetentionObservations::default(),
+                resource_outcome: "success",
             },
         )?;
     }
@@ -850,7 +863,7 @@ fn transcode_reader<R: Read, W: Write>(
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     match format {
         InputFormat::Json => decode_json_event_stream(
-            BufReader::with_capacity(64 * 1024, reader),
+            buffered_input(reader),
             source,
             consumer,
             JsonEventOptions {
@@ -1087,6 +1100,9 @@ fn write_explain(
         PlanKind::WholeInput => "all input documents",
         PlanKind::Blocking => "one document plus blocking operator state",
         PlanKind::Subtree => "one selected complete subtree",
+        PlanKind::HybridBlocking => {
+            "bounded decoder state plus cardinality-proportional projected collection and blocking state"
+        }
         PlanKind::Document => "one complete document",
     };
     let detection = input_format_name(options.input_format);
@@ -1116,6 +1132,36 @@ fn write_explain(
                 writeln!(stderr, "value-escapes: {}", proof.value_escapes)?;
                 writeln!(stderr, "retention-high-water: available in --report-file")?;
             }
+            if let Some(proof) = &analysis.hybrid_proof {
+                writeln!(
+                    stderr,
+                    "collection-boundary: {}..{}",
+                    proof.collection.start, proof.collection.end
+                )?;
+                writeln!(
+                    stderr,
+                    "blocking-cause: {}..{}",
+                    proof.blocking_cause.start, proof.blocking_cause.end
+                )?;
+                writeln!(stderr, "hybrid-preparation: {:?}", proof.preparation)?;
+                let (eligible, reason) = parallel_selected_decode_explain(options, analysis);
+                writeln!(
+                    stderr,
+                    "parallel-selected-decode: {} ({reason})",
+                    if eligible {
+                        "eligible"
+                    } else {
+                        "serial-fallback"
+                    }
+                )?;
+            }
+            for rewrite in &analysis.optimizer_rewrites {
+                writeln!(
+                    stderr,
+                    "optimizer-rewrite: {} at {}..{}",
+                    rewrite.name, rewrite.span.start, rewrite.span.end
+                )?;
+            }
             if let Some(rejection) = &analysis.stream_rejection {
                 writeln!(stderr, "stream-rejection: {rejection}")?;
             }
@@ -1124,7 +1170,7 @@ fn write_explain(
             }
             writeln!(
                 stderr,
-                "limits: input={} depth={} token={} line={} lookahead={} vm-steps={} results={} output={} prepare-memory={} spool={}",
+                "limits: input={} depth={} token={} line={} lookahead={} vm-steps={} results={} output={} prepare-memory={} hybrid-batch-values={} hybrid-in-flight-batches={} hybrid-in-flight-bytes={} decode-batch-values={} decode-batch-bytes={} decode-in-flight-batches={} decode-in-flight-bytes={} spool={}",
                 options.limits.input_bytes,
                 options.limits.depth,
                 options.limits.token_bytes,
@@ -1134,6 +1180,13 @@ fn write_explain(
                 options.limits.results,
                 options.limits.output_bytes,
                 options.limits.preparation_memory_bytes,
+                options.limits.hybrid_batch_values,
+                options.limits.hybrid_in_flight_batches,
+                options.limits.hybrid_in_flight_bytes,
+                options.limits.decode_batch_values,
+                options.limits.decode_batch_bytes,
+                options.limits.decode_in_flight_batches,
+                options.limits.decode_in_flight_bytes,
                 options.limits.spool_bytes,
             )?;
         }
@@ -1151,6 +1204,13 @@ fn write_explain(
                     serde_json::to_value(&analysis.stream_proof)?
                 },
                 "stream_rejection": analysis.stream_rejection,
+                "hybrid_proof": analysis.hybrid_proof,
+                "parallel_selected_decode": {
+                    "eligible": parallel_selected_decode_explain(options, analysis).0,
+                    "reason": parallel_selected_decode_explain(options, analysis).1,
+                    "worker_count": parallel_worker_count(),
+                },
+                "optimizer_rewrites": analysis.optimizer_rewrites,
                 "transcode_rejection": analysis.transcode_rejection,
                 "identity_proof": analysis.transcode_proof.map(|_| "semantic-identity"),
                 "duplicate_policy": analysis.transcode_proof.map(|proof| proof.duplicate_policy),
@@ -1169,6 +1229,13 @@ fn write_explain(
                     "results": options.limits.results,
                     "output_bytes": options.limits.output_bytes,
                     "preparation_memory_bytes": options.limits.preparation_memory_bytes,
+                    "hybrid_batch_values": options.limits.hybrid_batch_values,
+                    "hybrid_in_flight_batches": options.limits.hybrid_in_flight_batches,
+                    "hybrid_in_flight_bytes": options.limits.hybrid_in_flight_bytes,
+                    "decode_batch_values": options.limits.decode_batch_values,
+                    "decode_batch_bytes": options.limits.decode_batch_bytes,
+                    "decode_in_flight_batches": options.limits.decode_in_flight_batches,
+                    "decode_in_flight_bytes": options.limits.decode_in_flight_bytes,
                     "spool_bytes": options.limits.spool_bytes,
                 }
             });
@@ -1177,6 +1244,31 @@ fn write_explain(
         }
     }
     Ok(())
+}
+
+fn parallel_selected_decode_explain<'a>(
+    options: &RunOptions,
+    analysis: &'a Analysis,
+) -> (bool, &'a str) {
+    if analysis.selected_plan != PlanKind::HybridBlocking {
+        return (
+            false,
+            analysis
+                .stream_rejection
+                .as_deref()
+                .unwrap_or("plan-is-not-hybrid-blocking"),
+        );
+    }
+    if parallel_worker_count() <= 1 {
+        return (false, "one-worker-configured");
+    }
+    if !matches!(options.input_format, InputFormat::Auto | InputFormat::Json) {
+        return (false, "input-format-is-not-json-document");
+    }
+    if analysis.hybrid_proof.is_none() {
+        return (false, "hybrid-plan-has-no-static-prefix-proof");
+    }
+    (true, "static-array-prefix")
 }
 
 const fn input_format_name(format: InputFormat) -> &'static str {
@@ -1260,6 +1352,7 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
             ReportExecution {
                 analysis,
                 retention: RetentionObservations::default(),
+                resource_outcome: "success",
             },
         )?;
     }
@@ -1272,7 +1365,17 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
 struct RetentionObservations {
     bytes_high_water: usize,
     depth_high_water: usize,
+    decoder_depth_high_water: usize,
     completed_subtrees: u64,
+    retained_results_high_water: usize,
+    retained_bytes_high_water: usize,
+    sort_runs: usize,
+    in_flight_batches_high_water: usize,
+    in_flight_bytes_high_water: usize,
+    decode_batches: usize,
+    decode_in_flight_batches_high_water: usize,
+    decode_in_flight_bytes_high_water: usize,
+    decode_reordered_batches_high_water: usize,
 }
 
 fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
@@ -1300,8 +1403,12 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
         current: None,
         current_item: None,
         deferred_item: None,
+        collected: None,
+        hybrid_suffix: None,
         last: None,
         results: 0,
+        current_retained_results: 0,
+        current_retained_bytes: 0,
     };
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
@@ -1330,7 +1437,6 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
                 &mut executor,
             )?;
         }
-        executor.finish_source()?;
     }
     executor.output.finish()?;
     if let Some(path) = &options.report_file {
@@ -1344,12 +1450,99 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
             ReportExecution {
                 analysis,
                 retention: executor.retention,
+                resource_outcome: "success",
             },
         )?;
     }
     Ok(executor
         .output
         .exit_status(options.exit_status, executor.last.as_ref()))
+}
+
+fn run_hybrid_filter<R: Read, W: Write, E: Write>(
+    options: &RunOptions,
+    plan: &Plan<Compiled, HybridBlocking>,
+    variables: &BTreeMap<Arc<str>, Value>,
+    analysis: &Analysis,
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+) -> Result<ExitStatus, RunError> {
+    let mut executor = AutomaticExecutor {
+        plan,
+        prefix: plan
+            .automatic_prefix()
+            .expect("hybrid plan has a proven producer prefix")
+            .to_vec(),
+        projection: plan.automatic_projection().map(<[PathComponent]>::to_vec),
+        variables,
+        output: ResultOutput::new(stdout, options),
+        stderr,
+        trace_remaining: options.trace_limit,
+        observations: VmObservations::default(),
+        retention: RetentionObservations::default(),
+        current: None,
+        current_item: None,
+        deferred_item: None,
+        collected: Some(HybridCollection::new(plan, options)),
+        hybrid_suffix: Some(plan),
+        last: None,
+        results: 0,
+        current_retained_results: 0,
+        current_retained_bytes: 0,
+    };
+    let files = if options.files.is_empty() {
+        vec![Path::new("-").to_owned()]
+    } else {
+        options.files.clone()
+    };
+    let execution = (|| {
+        for path in files {
+            if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                return Err(RunError::Interrupted);
+            }
+            if path == Path::new("-") {
+                automatic_reader(
+                    options,
+                    selected_input_format(options, &path),
+                    &mut *stdin,
+                    "<stdin>",
+                    &mut executor,
+                )?;
+            } else {
+                let identity = path.display().to_string();
+                automatic_reader(
+                    options,
+                    selected_input_format(options, &path),
+                    open_path(&path)?,
+                    &identity,
+                    &mut executor,
+                )?;
+            }
+        }
+        executor.output.finish()?;
+        Ok(executor
+            .output
+            .exit_status(options.exit_status, executor.last.as_ref()))
+    })();
+    if let Some(path) = &options.report_file {
+        write_report(
+            path,
+            &[executor.observations],
+            executor.results,
+            executor.output.written(),
+            options,
+            PlanKind::HybridBlocking,
+            ReportExecution {
+                analysis,
+                retention: executor.retention,
+                resource_outcome: execution
+                    .as_ref()
+                    .map_or_else(|error| resource_outcome(error), |_| "success"),
+            },
+        )?;
+    }
+    execution
 }
 
 fn automatic_reader<R: Read, W: Write, E: Write, M>(
@@ -1394,16 +1587,28 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     match format {
-        InputFormat::Json => automatic_json_into(reader, stream_options, executor),
+        InputFormat::Json => {
+            automatic_json_into(buffered_input(reader), stream_options, true, executor)?;
+            executor.finish_source()
+        }
         InputFormat::JsonLines => {
             automatic_json_lines_into(reader, identity, options, stream_options, executor)
         }
-        InputFormat::Toon => automatic_toon_into(reader, options, stream_options, executor),
+        InputFormat::Toon => {
+            automatic_toon_into(reader, options, stream_options, executor)?;
+            executor.finish_source()
+        }
         InputFormat::Auto => {
             let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
             match report.selected {
-                InputFormat::Json => automatic_json_into(replay, stream_options, executor),
-                InputFormat::Toon => automatic_toon_into(replay, options, stream_options, executor),
+                InputFormat::Json => {
+                    automatic_json_into(buffered_input(replay), stream_options, true, executor)?;
+                    executor.finish_source()
+                }
+                InputFormat::Toon => {
+                    automatic_toon_into(replay, options, stream_options, executor)?;
+                    executor.finish_source()
+                }
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detected YAML cannot execute a decoder-event plan".to_owned(),
                 )),
@@ -1431,30 +1636,92 @@ fn automatic_json_lines_into<R: Read, W: Write, E: Write, M>(
         decode_options(options, InputFormat::JsonLines),
     );
     while let Some((record, line)) = source.next_record()? {
-        automatic_json_into(record.as_slice(), stream_options, executor)
+        automatic_json_into(record.as_slice(), stream_options, false, executor)
             .map_err(|error| json_lines_record_error(error, identity, line))?;
         executor.finish_source()?;
     }
     Ok(())
 }
 
-fn automatic_json_into<R: Read, W: Write, E: Write, M>(
+fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
     reader: R,
     options: StreamOptions,
+    parallel_allowed: bool,
     executor: &mut AutomaticExecutor<'_, W, E, M>,
 ) -> Result<(), RunError> {
     let mut execution_error = None;
-    let decoded = stream_json(reader, options, |record| match executor.accept(record) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            execution_error = Some(error);
-            Err("automatic stream consumer stopped".to_owned())
+    let selection = executor.stream_selection();
+    let parallel =
+        parallel_allowed && executor.hybrid_suffix.is_some() && parallel_worker_count() > 1;
+    let parallel_options = ParallelJsonOptions {
+        batch_values: executor.output.options.limits.decode_batch_values,
+        batch_bytes: executor.output.options.limits.decode_batch_bytes,
+        in_flight_batches: executor.output.options.limits.decode_in_flight_batches,
+        in_flight_bytes: executor.output.options.limits.decode_in_flight_bytes,
+    };
+    let decoded = {
+        let mut accept = |record| match executor.accept(record) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                execution_error = Some(error);
+                Err("automatic stream consumer stopped".to_owned())
+            }
+        };
+        if parallel {
+            stream_json_selected_records_parallel(
+                reader,
+                options,
+                selection,
+                parallel_options,
+                cancellation(),
+                &mut accept,
+            )
+        } else {
+            let mut selected = SelectedStreamObservations::default();
+            let result = stream_json_selected_records_with_control(
+                reader,
+                options,
+                selection,
+                cancellation(),
+                &mut selected,
+                &mut accept,
+            );
+            executor.retention.decoder_depth_high_water = executor
+                .retention
+                .decoder_depth_high_water
+                .max(selected.depth_high_water);
+            result.map(|()| ParallelJsonObservations::default())
         }
-    });
+    };
+    if let Ok(observations) = decoded.as_ref() {
+        executor.retention.decode_batches = executor
+            .retention
+            .decode_batches
+            .saturating_add(observations.batches);
+        executor.retention.decoder_depth_high_water = executor
+            .retention
+            .decoder_depth_high_water
+            .max(observations.depth_high_water);
+        executor.retention.decode_in_flight_batches_high_water = executor
+            .retention
+            .decode_in_flight_batches_high_water
+            .max(observations.in_flight_batches_high_water);
+        executor.retention.decode_in_flight_bytes_high_water = executor
+            .retention
+            .decode_in_flight_bytes_high_water
+            .max(observations.in_flight_bytes_high_water);
+        executor.retention.decode_reordered_batches_high_water = executor
+            .retention
+            .decode_reordered_batches_high_water
+            .max(observations.reordered_batches_high_water);
+    }
     if let Some(error) = execution_error {
         return Err(error);
     }
-    decoded.map_err(RunError::Input)
+    if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(RunError::Interrupted);
+    }
+    decoded.map(|_| ()).map_err(RunError::Input)
 }
 
 fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
@@ -1464,7 +1731,9 @@ fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
     executor: &mut AutomaticExecutor<'_, W, E, M>,
 ) -> Result<(), RunError> {
     let mut execution_error = None;
-    let decoded = stream_toon(
+    let selection = executor.stream_selection();
+    let mut selected = SelectedStreamObservations::default();
+    let decoded = stream_toon_selected_records_with_control(
         BufReader::new(reader),
         tq_toon::DecoderConfig {
             strict: options.strict,
@@ -1475,6 +1744,9 @@ fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
             ..tq_toon::DecoderConfig::default()
         },
         stream_options,
+        selection,
+        cancellation(),
+        &mut selected,
         |record| match executor.accept(record) {
             Ok(()) => Ok(()),
             Err(error) => {
@@ -1483,10 +1755,97 @@ fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
             }
         },
     );
+    executor.retention.decoder_depth_high_water = executor
+        .retention
+        .decoder_depth_high_water
+        .max(selected.depth_high_water);
     if let Some(error) = execution_error {
         return Err(error);
     }
+    if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(RunError::Interrupted);
+    }
     decoded.map_err(RunError::Input)
+}
+
+enum HybridCollection {
+    Collect(Vec<Value>),
+    StableSort {
+        pipeline: Option<StableSortPipeline>,
+        config: (usize, usize, usize, usize),
+    },
+}
+
+impl HybridCollection {
+    fn new(plan: &Plan<Compiled, HybridBlocking>, options: &RunOptions) -> Self {
+        if plan.hybrid_preparation() == HybridPreparation::StableSortRuns {
+            let in_flight_bytes = options.limits.hybrid_in_flight_bytes.max(1);
+            let in_flight_batches = options.limits.hybrid_in_flight_batches.max(1);
+            let config = (
+                options.limits.hybrid_batch_values.max(1),
+                (in_flight_bytes / in_flight_batches).max(1),
+                in_flight_batches,
+                in_flight_bytes,
+            );
+            Self::StableSort {
+                pipeline: Some(hybrid_sort_pipeline(config)),
+                config,
+            }
+        } else {
+            Self::Collect(Vec::new())
+        }
+    }
+
+    fn push(&mut self, value: Value) -> Result<(), RunError> {
+        match self {
+            Self::Collect(values) => {
+                values.push(value);
+                Ok(())
+            }
+            Self::StableSort { pipeline, .. } => {
+                let bytes = estimate_value_bytes(&value).saturating_add(32);
+                pipeline
+                    .as_mut()
+                    .expect("active hybrid sort pipeline")
+                    .push(value, bytes)
+                    .map_err(hybrid_pipeline_error)
+            }
+        }
+    }
+
+    fn finish_document(
+        &mut self,
+    ) -> Result<(Vec<Value>, StableSortPipelineObservations), RunError> {
+        match self {
+            Self::Collect(values) => Ok((
+                std::mem::take(values),
+                StableSortPipelineObservations::default(),
+            )),
+            Self::StableSort { pipeline, config } => {
+                let active = pipeline.take().expect("active hybrid sort pipeline");
+                let (values, observations) = active.finish().map_err(hybrid_pipeline_error)?;
+                *pipeline = Some(hybrid_sort_pipeline(*config));
+                Ok((values, observations))
+            }
+        }
+    }
+}
+
+fn hybrid_sort_pipeline(config: (usize, usize, usize, usize)) -> StableSortPipeline {
+    let pipeline = StableSortPipeline::new(config.0, config.1, config.2, config.3);
+    if let Some(flag) = cancellation() {
+        pipeline.with_cancellation(flag)
+    } else {
+        pipeline
+    }
+}
+
+fn hybrid_pipeline_error(resource: &'static str) -> RunError {
+    if resource == "interrupted" {
+        RunError::Interrupted
+    } else {
+        RunError::Resource(resource)
+    }
 }
 
 struct AutomaticExecutor<'a, W, E, M> {
@@ -1502,16 +1861,24 @@ struct AutomaticExecutor<'a, W, E, M> {
     current: Option<Capture>,
     current_item: Option<Vec<PathComponent>>,
     deferred_item: Option<Value>,
+    collected: Option<HybridCollection>,
+    hybrid_suffix: Option<&'a Plan<Compiled, HybridBlocking>>,
     last: Option<Value>,
     results: usize,
+    current_retained_results: usize,
+    current_retained_bytes: usize,
 }
 
 impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
-    fn accept(&mut self, record: Value) -> Result<(), RunError> {
+    fn stream_selection(&self) -> StreamSelection {
+        StreamSelection::new(self.prefix.clone(), self.projection.clone())
+    }
+
+    fn accept(&mut self, record: StreamRecord) -> Result<(), RunError> {
         if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             return Err(RunError::Interrupted);
         }
-        let (path, value) = decode_event_record(record)?;
+        let (path, value) = record.into_parts();
         let record_bytes = estimate_event_bytes(&path, value.as_ref());
         if path == self.prefix {
             if let Some(value) = value
@@ -1594,9 +1961,14 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
 
     fn finish_source(&mut self) -> Result<(), RunError> {
         if self.projection.is_some() {
-            return self.complete_projection_item();
+            self.complete_projection_item()?;
+        } else {
+            self.complete_capture()?;
         }
-        self.complete_capture()
+        if let Some(plan) = self.hybrid_suffix {
+            self.finish_hybrid_document(plan)?;
+        }
+        Ok(())
     }
 
     fn accept_projection(
@@ -1692,6 +2064,12 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
     }
 
     fn emit_direct(&mut self, value: Value) -> Result<(), RunError> {
+        if self.collected.is_some() {
+            self.observe_retained_value(&value);
+        }
+        if let Some(collected) = self.collected.as_mut() {
+            return collected.push(value);
+        }
         self.output.emit(&value)?;
         self.last = Some(value);
         self.results = self.results.saturating_add(1);
@@ -1718,21 +2096,74 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
     }
 
     fn evaluate(&mut self, input: Value, base: bool) -> Result<(), RunError> {
+        let limits = self.remaining_vm_limits();
         let mut vm = if base {
-            Vm::new_automatic_base(
-                self.plan,
-                input,
-                vm_limits(self.output.options),
-                self.variables.clone(),
-            )
+            Vm::new_automatic_base(self.plan, input, limits, self.variables.clone())
         } else {
-            Vm::new_automatic_item(
-                self.plan,
-                input,
-                vm_limits(self.output.options),
-                self.variables.clone(),
-            )
+            Vm::new_automatic_item(self.plan, input, limits, self.variables.clone())
         }
+        .with_trace_limit(self.trace_remaining);
+        if let Some(flag) = cancellation() {
+            vm = vm.with_cancellation(flag);
+        }
+        let mut output_error = None;
+        let evaluated = vm.for_each_result(|value| {
+            if self.collected.is_some() {
+                self.observe_retained_value(&value);
+            }
+            if let Some(collected) = self.collected.as_mut() {
+                if let Err(error) = collected.push(value) {
+                    output_error = Some(error);
+                    return false;
+                }
+                return true;
+            }
+            if let Err(error) = self.output.emit(&value) {
+                output_error = Some(error);
+                return false;
+            }
+            self.last = Some(value);
+            self.results = self.results.saturating_add(1);
+            true
+        });
+        merge_observations(&mut self.observations, vm.observations());
+        if let Some(error) = output_error {
+            return Err(error);
+        }
+        evaluated.map_err(RunError::Runtime)?;
+        if self.trace_remaining != 0 {
+            for entry in vm.trace() {
+                writeln!(self.stderr, "trace: {entry}")?;
+            }
+            self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
+        }
+        Ok(())
+    }
+
+    fn finish_hybrid_document(
+        &mut self,
+        plan: &Plan<Compiled, HybridBlocking>,
+    ) -> Result<(), RunError> {
+        let (values, preparation) = self
+            .collected
+            .as_mut()
+            .expect("hybrid execution collects producer results")
+            .finish_document()?;
+        self.retention.sort_runs = self.retention.sort_runs.saturating_add(preparation.batches);
+        self.retention.in_flight_batches_high_water = self
+            .retention
+            .in_flight_batches_high_water
+            .max(preparation.in_flight_batches);
+        self.retention.in_flight_bytes_high_water = self
+            .retention
+            .in_flight_bytes_high_water
+            .max(preparation.in_flight_bytes);
+        let mut vm = Vm::new_hybrid_suffix(
+            plan,
+            Value::array(values),
+            self.remaining_vm_limits(),
+            self.variables.clone(),
+        )
         .with_trace_limit(self.trace_remaining);
         if let Some(flag) = cancellation() {
             vm = vm.with_cancellation(flag);
@@ -1747,6 +2178,9 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             self.results = self.results.saturating_add(1);
             true
         });
+        merge_observations(&mut self.observations, vm.observations());
+        self.current_retained_results = 0;
+        self.current_retained_bytes = 0;
         if let Some(error) = output_error {
             return Err(error);
         }
@@ -1757,8 +2191,28 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             }
             self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
         }
-        merge_observations(&mut self.observations, vm.observations());
         Ok(())
+    }
+
+    fn remaining_vm_limits(&self) -> VmLimits {
+        let mut limits = vm_limits(self.output.options);
+        limits.steps = limits.steps.saturating_sub(self.observations.steps);
+        limits
+    }
+
+    fn observe_retained_value(&mut self, value: &Value) {
+        self.current_retained_results = self.current_retained_results.saturating_add(1);
+        self.current_retained_bytes = self
+            .current_retained_bytes
+            .saturating_add(estimate_value_bytes(value).saturating_add(32));
+        self.retention.retained_results_high_water = self
+            .retention
+            .retained_results_high_water
+            .max(self.current_retained_results);
+        self.retention.retained_bytes_high_water = self
+            .retention
+            .retained_bytes_high_water
+            .max(self.current_retained_bytes);
     }
 }
 
@@ -1836,31 +2290,6 @@ impl BuildNode {
                 .map(Value::object),
         }
     }
-}
-
-fn decode_event_record(record: Value) -> Result<(Vec<PathComponent>, Option<Value>), RunError> {
-    let Value::Array(parts) = record else {
-        return Err(invalid_automatic_event());
-    };
-    if !(1..=2).contains(&parts.len()) {
-        return Err(invalid_automatic_event());
-    }
-    let Value::Array(path) = &parts[0] else {
-        return Err(invalid_automatic_event());
-    };
-    let path = path
-        .iter()
-        .map(|component| match component {
-            Value::String(key) => Ok(PathComponent::Key(Arc::clone(key))),
-            Value::Number(index) => index
-                .to_string()
-                .parse::<usize>()
-                .map(PathComponent::Index)
-                .map_err(|_| invalid_automatic_event()),
-            _ => Err(invalid_automatic_event()),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((path, parts.get(1).cloned()))
 }
 
 fn path_kind_mismatch(actual: &[PathComponent], expected: &[PathComponent]) -> bool {
@@ -2636,6 +3065,10 @@ fn open_path(path: &Path) -> Result<File, RunError> {
     })
 }
 
+fn buffered_input<R: Read>(reader: R) -> BufReader<R> {
+    BufReader::with_capacity(INPUT_BUFFER_BYTES, reader)
+}
+
 fn format_from_path(path: &Path) -> Option<InputFormat> {
     let extension = path.extension()?.to_str()?;
     if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
@@ -2767,6 +3200,7 @@ fn write_report(
     let ReportExecution {
         analysis,
         retention,
+        resource_outcome,
     } = execution;
     let report = serde_json::json!({
         "schema_version": 1,
@@ -2776,11 +3210,14 @@ fn write_report(
         "execution": {
             "plan": plan.to_string(),
             "proof": analysis.stream_proof,
+            "hybrid_proof": analysis.hybrid_proof,
+            "optimizer_rewrites": analysis.optimizer_rewrites,
             "stream_rejection": analysis.stream_rejection,
             "retained_working_set": match plan {
                 PlanKind::Transcode => "bounded-structural-preparation",
                 PlanKind::Events => "decoder-events",
                 PlanKind::Subtree => "selected-subtree",
+                PlanKind::HybridBlocking => "projected-collection-and-blocking-state",
                 PlanKind::Document => "document",
                 PlanKind::WholeInput => "whole-input",
                 PlanKind::Blocking => "document-and-blocking-state",
@@ -2788,8 +3225,23 @@ fn write_report(
             "retention_high_water": {
                 "bytes": retention.bytes_high_water,
                 "depth": retention.depth_high_water,
+                "decoder_depth": retention.decoder_depth_high_water,
                 "completed_subtrees": retention.completed_subtrees,
+                "retained_result_count": retention.retained_results_high_water,
+                "retained_estimated_bytes": retention.retained_bytes_high_water,
+                "blocking_state": if plan == PlanKind::HybridBlocking { "projected-collection-and-blocking-suffix" } else { "none" },
+                "sort_runs": retention.sort_runs,
+                "in_flight_batches": retention.in_flight_batches_high_water,
+                "in_flight_bytes": retention.in_flight_bytes_high_water,
+                "worker_count": parallel_worker_count(),
+                "parallel_decode_batches": retention.decode_batches,
+                "parallel_decode_in_flight_batches": retention.decode_in_flight_batches_high_water,
+                "parallel_decode_in_flight_bytes": retention.decode_in_flight_bytes_high_water,
+                "parallel_decode_reordered_batches": retention.decode_reordered_batches_high_water,
+                "parallel_decode_active": retention.decode_batches > 0,
+                "root_materialized": !matches!(plan, PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking | PlanKind::Transcode),
             },
+            "resource_outcome": resource_outcome,
         },
         "limits": {
             "input_bytes": options.limits.input_bytes,
@@ -2801,6 +3253,13 @@ fn write_report(
             "results": options.limits.results,
             "output_bytes": options.limits.output_bytes,
             "preparation_memory_bytes": options.limits.preparation_memory_bytes,
+            "hybrid_batch_values": options.limits.hybrid_batch_values,
+            "hybrid_in_flight_batches": options.limits.hybrid_in_flight_batches,
+            "hybrid_in_flight_bytes": options.limits.hybrid_in_flight_bytes,
+            "decode_batch_values": options.limits.decode_batch_values,
+            "decode_batch_bytes": options.limits.decode_batch_bytes,
+            "decode_in_flight_batches": options.limits.decode_in_flight_batches,
+            "decode_in_flight_bytes": options.limits.decode_in_flight_bytes,
             "spool_bytes": options.limits.spool_bytes,
         },
         "observations": observations.iter().map(|item| serde_json::json!({
@@ -2895,6 +3354,13 @@ fn write_transcode_report(
             "results": options.limits.results,
             "output_bytes": options.limits.output_bytes,
             "preparation_memory_bytes": options.limits.preparation_memory_bytes,
+            "hybrid_batch_values": options.limits.hybrid_batch_values,
+            "hybrid_in_flight_batches": options.limits.hybrid_in_flight_batches,
+            "hybrid_in_flight_bytes": options.limits.hybrid_in_flight_bytes,
+            "decode_batch_values": options.limits.decode_batch_values,
+            "decode_batch_bytes": options.limits.decode_batch_bytes,
+            "decode_in_flight_batches": options.limits.decode_in_flight_batches,
+            "decode_in_flight_bytes": options.limits.decode_in_flight_bytes,
             "spool_bytes": options.limits.spool_bytes,
         },
         "observations": [],
@@ -2907,6 +3373,7 @@ fn write_transcode_report(
 struct ReportExecution<'a> {
     analysis: &'a Analysis,
     retention: RetentionObservations,
+    resource_outcome: &'a str,
 }
 
 fn exit_status(enabled: bool, last: Option<&Value>) -> ExitStatus {
@@ -2930,12 +3397,30 @@ mod tests {
 
     use super::run_with_io;
     use crate::{Command, ExecutionOverride, ExitStatus, parse_args};
+    use tq_core::parallel_worker_count;
 
     fn execute(
         arguments: &[&str],
         input: &[u8],
     ) -> (Result<ExitStatus, super::RunError>, Vec<u8>, Vec<u8>) {
         let command = parse_args(arguments.iter().copied()).unwrap();
+        let mut stdin = input;
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let status = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
+        (status, stdout, stderr)
+    }
+
+    fn execute_with_override(
+        arguments: &[&str],
+        input: &[u8],
+        execution_override: ExecutionOverride,
+    ) -> (Result<ExitStatus, super::RunError>, Vec<u8>, Vec<u8>) {
+        let mut command = parse_args(arguments.iter().copied()).unwrap();
+        let Command::Run(options) = &mut command else {
+            panic!("expected run command")
+        };
+        options.execution_override = execution_override;
         let mut stdin = input;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -3222,6 +3707,25 @@ mod tests {
     }
 
     #[test]
+    fn lightweight_json_transcode_matches_document_scalar_rendering() {
+        for input in [
+            br"1e2".as_slice(),
+            br#"[1e2,"true",false,null,9007199254740993]"#.as_slice(),
+            br#"{"plain":"null","number":1e2,"bool":true,"nil":null,"array":[1e2,"true",false,null]}"#.as_slice(),
+        ] {
+            let arguments = ["-ijson", "-otoon", "."];
+            let automatic =
+                execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+            let document = execute_with_override(&arguments, input, ExecutionOverride::Document);
+            assert_eq!(automatic.0.unwrap(), ExitStatus::Success);
+            assert_eq!(document.0.unwrap(), ExitStatus::Success);
+            assert_eq!(automatic.1, document.1);
+            assert!(automatic.2.is_empty());
+            assert!(document.2.is_empty());
+        }
+    }
+
+    #[test]
     fn json_transcode_buffers_source_reads() {
         let mut json = Vec::with_capacity(256 * 1024 + 2);
         json.push(b'"');
@@ -3232,6 +3736,40 @@ mod tests {
             reads: 0,
         };
         let command = parse_args(["--input-format", "json", "."]).unwrap();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert!(input.reads < 16, "source was read {} times", input.reads);
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn automatic_json_buffers_source_reads() {
+        let item = br#"{"value":1,"discarded":[1,2,3]}"#;
+        let mut json = Vec::with_capacity(item.len() * 4_000 + 16);
+        json.extend_from_slice(br#"{"items":["#);
+        for index in 0..4_000 {
+            if index != 0 {
+                json.push(b',');
+            }
+            json.extend_from_slice(item);
+        }
+        json.extend_from_slice(b"]}");
+        let mut input = CountingReader {
+            input: Cursor::new(json),
+            reads: 0,
+        };
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            ".items[].value",
+        ])
+        .unwrap();
         let mut output = Vec::new();
         let mut error = Vec::new();
         assert_eq!(
@@ -3810,5 +4348,327 @@ mod tests {
         assert_eq!(output, b"[1,2,3]\n");
         let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
         assert_eq!(explain["execution"]["plan"], "whole-input");
+    }
+
+    #[test]
+    fn hybrid_sort_matches_document_and_preserves_json_lines_boundaries() {
+        let query = "[.items[].value] | sort";
+        let input = br#"{"items":[{"value":3},{"value":1},{"value":2}]}"#;
+        let hybrid = execute(&["-ijson", "-ojson", "-c", "--explain-json", query], input);
+        let document = execute(&["-iyaml", "-ojson", "-c", query], input);
+        assert_eq!(hybrid.0.unwrap(), ExitStatus::Success);
+        assert_eq!(document.0.unwrap(), ExitStatus::Success);
+        assert_eq!(hybrid.1, document.1);
+        let explain: serde_json::Value = serde_json::from_slice(&hybrid.2).unwrap();
+        assert_eq!(explain["execution"]["plan"], "hybrid-streaming-blocking");
+        assert_eq!(
+            explain["execution"]["hybrid_proof"]["preparation"],
+            "stable-sort-runs"
+        );
+
+        let json_lines = br#"{"items":[{"value":2},{"value":1}]}
+{"items":[{"value":4},{"value":3}]}
+"#;
+        let (status, output, _) = execute(&["-ijsonl", "-ojsonl", query], json_lines);
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[1,2]\n[3,4]\n");
+
+        let (status, output, _) = execute(
+            &["-ijson", "-ojson", "-c", query],
+            br#"{"items":[{"value":2},{"value":1},"#,
+        );
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
+        assert!(output.is_empty());
+
+        let (status, output, _) = execute(
+            &[
+                "-ijson",
+                "-ojson",
+                "-c",
+                "--hybrid-in-flight-bytes",
+                "1",
+                query,
+            ],
+            input,
+        );
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
+        assert!(output.is_empty());
+
+        let (status, output, _) = execute(
+            &["-ijson", "-ojson", "-c", query],
+            br#"{"items":[{"value":1,"value":2},{}]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[null,2]\n");
+    }
+
+    #[test]
+    fn hybrid_and_forced_document_agree_on_projected_sort_edge_cases() {
+        let arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--hybrid-batch-values",
+            "1",
+            "--decode-batch-values",
+            "1",
+            "[.items[].value] | sort",
+        ];
+        for input in [
+            br#"{"items":[]}"#.as_slice(),
+            br#"{"items":[{"value":null},{"value":false},{"value":1},{"value":"x"},{"value":[]},{"value":{}}]}"#.as_slice(),
+            br#"{"items":[{"value":{"a":1,"b":2}},{"value":{"b":2,"a":1}}]}"#.as_slice(),
+            br#"{"items":[{"discarded":{"x":1,"x":2},"value":3},{"value":1,"value":2},{}]}"#.as_slice(),
+        ] {
+            let hybrid = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+            let document =
+                execute_with_override(&arguments, input, ExecutionOverride::Document);
+            assert_eq!(hybrid.0.unwrap(), document.0.unwrap());
+            assert_eq!(hybrid.1, document.1);
+            assert!(hybrid.2.is_empty());
+            assert!(document.2.is_empty());
+        }
+
+        let input = br#"{"items":{"value":1}}"#;
+        let hybrid = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&arguments, input, ExecutionOverride::Document);
+        assert_eq!(
+            hybrid.0.unwrap_err().status(),
+            document.0.unwrap_err().status()
+        );
+        assert_eq!(hybrid.1, document.1);
+    }
+
+    #[test]
+    fn hybrid_vm_step_limit_is_shared_across_document_suffixes() {
+        let arguments = [
+            "-ijsonl",
+            "-ojsonl",
+            "--max-vm-steps",
+            "1",
+            "[.items[].value] | sort",
+        ];
+        let input = br#"{"items":[{"value":2},{"value":1}]}
+{"items":[{"value":4},{"value":3}]}
+"#;
+        let hybrid = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+
+        assert_eq!(hybrid.0.unwrap_err().status(), ExitStatus::Resource);
+        assert_eq!(hybrid.1, b"[1,2]\n");
+    }
+
+    #[test]
+    fn parallel_decode_preserves_cross_batch_stability_and_downstream_errors() {
+        let stable_arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--decode-batch-values",
+            "1",
+            "--hybrid-batch-values",
+            "1",
+            "[.items[]] | sort_by(.key)",
+        ];
+        let input =
+            br#"{"items":[{"key":1,"id":"first"},{"key":0,"id":"zero"},{"key":1,"id":"second"}]}"#;
+        let automatic =
+            execute_with_override(&stable_arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&stable_arguments, input, ExecutionOverride::Document);
+        assert_eq!(automatic.0.unwrap(), document.0.unwrap());
+        assert_eq!(automatic.1, document.1);
+        assert_eq!(automatic.1, b"[{\"key\":0,\"id\":\"zero\"},{\"key\":1,\"id\":\"first\"},{\"key\":1,\"id\":\"second\"}]\n");
+
+        let fallible_arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--decode-batch-values",
+            "1",
+            "[.items[].value] | map(if . == 2 then error(\"boom\") else . end) | sort",
+        ];
+        let input = br#"{"items":[{"value":3},{"value":2},{"value":1}]}"#;
+        let automatic =
+            execute_with_override(&fallible_arguments, input, ExecutionOverride::Automatic);
+        let document =
+            execute_with_override(&fallible_arguments, input, ExecutionOverride::Document);
+        assert_eq!(
+            automatic.0.unwrap_err().status(),
+            document.0.unwrap_err().status()
+        );
+        assert_eq!(automatic.1, document.1);
+    }
+
+    #[test]
+    fn nested_static_prefix_is_parallel_eligible_and_dynamic_dependency_is_explained() {
+        let (status, output, explain) = execute(
+            &[
+                "-ijson",
+                "-ojson",
+                "-c",
+                "--explain-json",
+                "--decode-batch-values",
+                "1",
+                "[.root.features[].value] | sort",
+            ],
+            br#"{"root":{"features":[{"value":2},{"value":1}]}}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[1,2]\n");
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["eligible"],
+            parallel_worker_count() > 1
+        );
+        if parallel_worker_count() > 1 {
+            assert_eq!(
+                explain["execution"]["parallel_selected_decode"]["reason"],
+                "static-array-prefix"
+            );
+        }
+
+        let (status, _, explain) = execute(
+            &[
+                "-ijson",
+                "-ojson",
+                "-c",
+                "--arg",
+                "key",
+                "items",
+                "--explain-json",
+                "[.[$key][]] | sort",
+            ],
+            br#"{"items":[2,1]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["eligible"],
+            false
+        );
+        assert!(
+            explain["execution"]["parallel_selected_decode"]["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("not statically partitionable"))
+        );
+    }
+
+    #[test]
+    fn hybrid_report_and_dead_sort_explain_are_machine_readable() {
+        let directory = tempfile::tempdir().unwrap();
+        let report_path = directory.path().join("hybrid.json");
+        let command = parse_args([
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--explain-json",
+            "--report-file",
+            report_path.to_str().unwrap(),
+            "[.items[].value] | sort",
+        ])
+        .unwrap();
+        let mut input = br#"{"items":[{"value":2},{"value":1}]}"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        let explain: serde_json::Value = serde_json::from_slice(&error).unwrap();
+        assert_eq!(explain["execution"]["plan"], "hybrid-streaming-blocking");
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["eligible"],
+            parallel_worker_count() > 1
+        );
+        let report: serde_json::Value =
+            serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
+        assert_eq!(report["execution"]["plan"], "hybrid-streaming-blocking");
+        assert_eq!(
+            report["execution"]["retention_high_water"]["root_materialized"],
+            false
+        );
+        assert!(report["execution"]["retention_high_water"]["sort_runs"].is_u64());
+        assert!(report["execution"]["retention_high_water"]["worker_count"].is_u64());
+        assert_eq!(
+            report["execution"]["retention_high_water"]["retained_result_count"],
+            2
+        );
+        assert!(
+            report["execution"]["retention_high_water"]["retained_estimated_bytes"]
+                .as_u64()
+                .is_some_and(|bytes| bytes > 0)
+        );
+        assert!(
+            report["execution"]["retention_high_water"]["decoder_depth"]
+                .as_u64()
+                .is_some_and(|depth| depth >= 3)
+        );
+        assert_eq!(
+            report["execution"]["retention_high_water"]["blocking_state"],
+            "projected-collection-and-blocking-suffix"
+        );
+        assert_eq!(report["execution"]["resource_outcome"], "success");
+        assert_eq!(
+            report["execution"]["retention_high_water"]["parallel_decode_active"],
+            parallel_worker_count() > 1
+        );
+
+        let (status, _, explain) = execute(
+            &[
+                "-ijson",
+                "-ojson",
+                "-c",
+                "--explain-json",
+                "[.items[].value] | sort | length",
+            ],
+            br#"{"items":[{"value":2},{"value":1}]}"#,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
+        assert_eq!(
+            explain["execution"]["optimizer_rewrites"][0]["name"],
+            "array-sort-before-length"
+        );
+        assert_eq!(
+            explain["execution"]["hybrid_proof"]["preparation"],
+            "collect"
+        );
+    }
+
+    #[test]
+    fn hybrid_report_records_resource_failure_outcome() {
+        let directory = tempfile::tempdir().unwrap();
+        let failed_report_path = directory.path().join("hybrid-failed.json");
+        let command = parse_args([
+            "-ijson",
+            "-ojson",
+            "-c",
+            "--hybrid-in-flight-bytes",
+            "1",
+            "--report-file",
+            failed_report_path.to_str().unwrap(),
+            "[.items[].value] | sort",
+        ])
+        .unwrap();
+        let mut input = br#"{"items":[{"value":2},{"value":1}]}"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error)
+                .unwrap_err()
+                .status(),
+            ExitStatus::Resource
+        );
+        assert!(output.is_empty());
+        let failed_report: serde_json::Value =
+            serde_json::from_slice(&fs::read(failed_report_path).unwrap()).unwrap();
+        assert_eq!(
+            failed_report["execution"]["resource_outcome"],
+            "resource-limit"
+        );
+        assert!(
+            failed_report["execution"]["retention_high_water"]["retained_result_count"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
+        );
     }
 }

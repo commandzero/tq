@@ -1,9 +1,14 @@
 //! Canonical, ordered TOON v3 writer over tq's exact value model.
 
-use std::io::{self, Write};
+use std::{
+    borrow::Cow,
+    io::{self, Write},
+};
 
 use thiserror::Error;
 use tq_core::{Object, Value};
+
+use crate::ScalarToken;
 
 const INDENT: &[u8; 64] = b"                                                                ";
 
@@ -347,10 +352,40 @@ impl<W: Write> Encoder<W> {
 }
 
 #[derive(Clone, Copy)]
-enum ScalarContext {
+pub(crate) enum ScalarContext {
     Root,
     Object,
     Array,
+}
+
+pub(crate) fn render_scalar_token(
+    value: ScalarToken<'_>,
+    config: WriterConfig,
+    context: ScalarContext,
+) -> Cow<'_, str> {
+    match value {
+        ScalarToken::Null => Cow::Borrowed("null"),
+        ScalarToken::Bool(false) => Cow::Borrowed("false"),
+        ScalarToken::Bool(true) => Cow::Borrowed("true"),
+        ScalarToken::Number(value) => Cow::Borrowed(value),
+        ScalarToken::String(value) => {
+            if safe_string(value, config.delimiter, context) {
+                Cow::Borrowed(value)
+            } else {
+                Cow::Owned(quote(value))
+            }
+        }
+    }
+}
+
+pub(crate) fn write_scalar_token(
+    mut output: impl Write,
+    value: ScalarToken<'_>,
+    config: WriterConfig,
+    context: ScalarContext,
+) -> Result<(), WriterError> {
+    output.write_all(render_scalar_token(value, config, context).as_bytes())?;
+    Ok(())
 }
 
 fn is_scalar(value: &Value) -> bool {
@@ -434,8 +469,11 @@ fn identifier_segment(value: &str) -> bool {
         && characters.all(|character| character.is_alphanumeric() || character == '_')
 }
 
-pub(crate) fn encode_array_scalar(value: &Value, config: WriterConfig) -> String {
-    Encoder::new(io::sink(), config).scalar(value, ScalarContext::Array)
+pub(crate) fn encode_array_scalar_token(
+    value: ScalarToken<'_>,
+    config: WriterConfig,
+) -> Cow<'_, str> {
+    render_scalar_token(value, config, ScalarContext::Array)
 }
 
 pub(crate) fn encode_tabular_row(

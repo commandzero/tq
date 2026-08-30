@@ -1,10 +1,10 @@
 //! Query-independent JSON structural events without root materialization.
 
-use std::{fmt, io::Read, sync::Arc};
+use std::{fmt, io::Read};
 
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use tq_core::{Number, SourceId, Span};
-use tq_toon::{DecoderCapabilities, Event, EventConsumer, Scalar};
+use tq_core::{SourceId, Span};
+use tq_toon::{DecoderCapabilities, Event, EventConsumer};
 
 const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
@@ -136,6 +136,19 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
+    fn ensure_started(&mut self) -> Result<(), String> {
+        if !self.started {
+            emit(
+                self.consumer,
+                Event::DocumentStart {
+                    span: Span::new(self.source, 0, 0),
+                },
+            )?;
+            self.started = true;
+        }
+        Ok(())
+    }
+
     fn finish(&mut self) -> Result<(), String> {
         if !self.started {
             return Err("JSON document contained no value".to_owned());
@@ -157,16 +170,33 @@ where
     type Error = String;
 
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
-        if !self.started {
-            emit(
-                self.consumer,
-                Event::DocumentStart {
-                    span: Span::new(self.source, 0, 0),
-                },
-            )?;
-            self.started = true;
-        }
+        self.ensure_started()?;
         emit(self.consumer, event)
+    }
+
+    fn consume_text_key(&mut self, span: Span, value: String, quoted: bool) -> Result<(), String> {
+        self.ensure_started()?;
+        self.consumer.consume_text_key(span, value, quoted)
+    }
+
+    fn consume_null(&mut self, span: Span) -> Result<(), String> {
+        self.ensure_started()?;
+        self.consumer.consume_null(span)
+    }
+
+    fn consume_bool(&mut self, span: Span, value: bool) -> Result<(), String> {
+        self.ensure_started()?;
+        self.consumer.consume_bool(span, value)
+    }
+
+    fn consume_text_string(&mut self, span: Span, value: String) -> Result<(), String> {
+        self.ensure_started()?;
+        self.consumer.consume_text_string(span, value)
+    }
+
+    fn consume_number_literal(&mut self, span: Span, literal: String) -> Result<(), String> {
+        self.ensure_started()?;
+        self.consumer.consume_number_literal(span, literal)
     }
 }
 
@@ -209,15 +239,6 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
-    fn scalar<E: de::Error>(&mut self, value: Scalar) -> Result<(), E> {
-        self.consumer
-            .consume(Event::Scalar {
-                span: self.span(),
-                value,
-            })
-            .map_err(|error| E::custom(error.to_string()))
-    }
-
     const fn span(&self) -> Span {
         Span::new(self.source, 0, 0)
     }
@@ -234,43 +255,48 @@ where
         formatter.write_str("a JSON value")
     }
 
-    fn visit_bool<E: de::Error>(mut self, value: bool) -> Result<(), E> {
-        self.scalar(Scalar::Bool(value))
+    fn visit_bool<E: de::Error>(self, value: bool) -> Result<(), E> {
+        self.consumer
+            .consume_bool(self.span(), value)
+            .map_err(E::custom)
     }
 
     fn visit_i64<E: de::Error>(mut self, value: i64) -> Result<(), E> {
-        self.number(&value.to_string())
+        self.number(value.to_string())
     }
 
     fn visit_i128<E: de::Error>(mut self, value: i128) -> Result<(), E> {
-        self.number(&value.to_string())
+        self.number(value.to_string())
     }
 
     fn visit_u64<E: de::Error>(mut self, value: u64) -> Result<(), E> {
-        self.number(&value.to_string())
+        self.number(value.to_string())
     }
 
     fn visit_u128<E: de::Error>(mut self, value: u128) -> Result<(), E> {
-        self.number(&value.to_string())
+        self.number(value.to_string())
     }
 
     fn visit_f64<E: de::Error>(mut self, value: f64) -> Result<(), E> {
-        let number = Number::from_f64(value).map_err(E::custom)?;
-        self.scalar(Scalar::Number(number))
+        self.number(value.to_string())
     }
 
-    fn visit_str<E: de::Error>(mut self, value: &str) -> Result<(), E> {
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<(), E> {
         self.check_token::<E>(value.len())?;
-        self.scalar(Scalar::String(Arc::from(value)))
+        self.consumer
+            .consume_text_string(self.span(), value.to_owned())
+            .map_err(E::custom)
     }
 
-    fn visit_string<E: de::Error>(mut self, value: String) -> Result<(), E> {
+    fn visit_string<E: de::Error>(self, value: String) -> Result<(), E> {
         self.check_token::<E>(value.len())?;
-        self.scalar(Scalar::String(Arc::from(value)))
+        self.consumer
+            .consume_text_string(self.span(), value)
+            .map_err(E::custom)
     }
 
-    fn visit_none<E: de::Error>(mut self) -> Result<(), E> {
-        self.scalar(Scalar::Null)
+    fn visit_none<E: de::Error>(self) -> Result<(), E> {
+        self.consumer.consume_null(self.span()).map_err(E::custom)
     }
 
     fn visit_some<D>(self, deserializer: D) -> Result<(), D::Error>
@@ -286,8 +312,8 @@ where
         .deserialize(deserializer)
     }
 
-    fn visit_unit<E: de::Error>(mut self) -> Result<(), E> {
-        self.scalar(Scalar::Null)
+    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
+        self.consumer.consume_null(self.span()).map_err(E::custom)
     }
 
     fn visit_seq<A>(self, mut sequence: A) -> Result<(), A::Error>
@@ -343,7 +369,7 @@ where
                     "invalid arbitrary-precision number envelope",
                 ));
             }
-            return self.number(&literal);
+            return self.number(literal);
         }
 
         self.consumer
@@ -376,33 +402,34 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
-    fn number<E: de::Error>(&mut self, literal: &str) -> Result<(), E> {
+    fn number<E: de::Error>(&mut self, literal: String) -> Result<(), E> {
         self.check_token::<E>(literal.len())?;
-        let number = Number::parse(literal).map_err(E::custom)?;
-        self.scalar(Scalar::Number(number))
+        self.consumer
+            .consume_number_literal(self.span(), literal)
+            .map_err(E::custom)
     }
 
     fn key<E: de::Error>(&mut self, value: String) -> Result<(), E> {
         self.check_token::<E>(value.len())?;
         self.consumer
-            .consume(Event::Key {
-                span: self.span(),
-                value: Arc::from(value),
-                quoted: true,
-            })
-            .map_err(|error| E::custom(error.to_string()))
+            .consume_text_key(self.span(), value, true)
+            .map_err(E::custom)
     }
 
     fn check_token<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
         if bytes > self.options.maximum_token_bytes {
-            return Err(E::custom("JSON token byte limit exceeded"));
+            return Err(E::custom(
+                "JSON token byte limit exceeded: input resource limit exceeded: token-bytes",
+            ));
         }
         Ok(())
     }
 
     fn child_depth<E: de::Error>(&self) -> Result<usize, E> {
         if self.depth >= self.options.maximum_depth {
-            return Err(E::custom("JSON nesting depth limit exceeded"));
+            return Err(E::custom(
+                "JSON nesting depth limit exceeded: input resource limit exceeded: depth",
+            ));
         }
         Ok(self.depth + 1)
     }
@@ -437,6 +464,63 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct TokenCollector {
+        events: Vec<Event>,
+        keys: Vec<String>,
+        strings: Vec<String>,
+        numbers: Vec<String>,
+        nulls: usize,
+        booleans: Vec<bool>,
+    }
+
+    impl EventConsumer for TokenCollector {
+        type Error = Infallible;
+
+        fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
+            self.events.push(event);
+            Ok(())
+        }
+
+        fn consume_text_key(
+            &mut self,
+            _span: tq_core::Span,
+            value: String,
+            _quoted: bool,
+        ) -> Result<(), String> {
+            self.keys.push(value);
+            Ok(())
+        }
+
+        fn consume_null(&mut self, _span: tq_core::Span) -> Result<(), String> {
+            self.nulls += 1;
+            Ok(())
+        }
+
+        fn consume_bool(&mut self, _span: tq_core::Span, value: bool) -> Result<(), String> {
+            self.booleans.push(value);
+            Ok(())
+        }
+
+        fn consume_text_string(
+            &mut self,
+            _span: tq_core::Span,
+            value: String,
+        ) -> Result<(), String> {
+            self.strings.push(value);
+            Ok(())
+        }
+
+        fn consume_number_literal(
+            &mut self,
+            _span: tq_core::Span,
+            literal: String,
+        ) -> Result<(), String> {
+            self.numbers.push(literal);
+            Ok(())
+        }
+    }
+
     #[test]
     fn emits_ordered_duplicate_keys_and_exact_numbers_without_a_root_value() {
         let mut collector = Collector::default();
@@ -463,6 +547,29 @@ mod tests {
                 ..
             } if number.to_string() == "9007199254740993"
         )));
+    }
+
+    #[test]
+    fn delivers_json_tokens_without_scalar_or_key_events_when_supported() {
+        let mut collector = TokenCollector::default();
+        decode_json_events(
+            br#"{"key":["value",1e2,true,null]}"#.as_slice(),
+            SourceId::new(1),
+            &mut collector,
+        )
+        .unwrap();
+
+        assert_eq!(collector.keys, ["key"]);
+        assert_eq!(collector.strings, ["value"]);
+        assert_eq!(collector.numbers, ["1e+2"]);
+        assert_eq!(collector.booleans, [true]);
+        assert_eq!(collector.nulls, 1);
+        assert!(
+            collector
+                .events
+                .iter()
+                .all(|event| !matches!(event, Event::Key { .. } | Event::Scalar { .. }))
+        );
     }
 
     #[test]

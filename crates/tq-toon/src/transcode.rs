@@ -9,12 +9,13 @@ use std::{
 };
 
 use thiserror::Error;
-use tq_core::{Object, Value};
+use tq_core::{Number, Object, Value};
 
 use crate::{
     ArrayPreparationConfig, DuplicateKeyPolicy, Event, EventConsumer, PreparationArena,
     PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PreparedObject,
-    Scalar, SpoolError, WriterConfig, WriterError, write_value, writer::render_key,
+    Scalar, ScalarToken, SpoolError, WriterConfig, WriterError, write_value,
+    writer::{self, ScalarContext, render_key},
 };
 
 /// Output commitment selected before structural decoding.
@@ -209,6 +210,27 @@ impl<W: Write> TranscodeConsumer<W> {
         self.output
     }
 
+    fn check_cancellation(&self) -> Result<(), TranscodeError> {
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            Err(TranscodeError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn accepts_lightweight_scalar(&self) -> bool {
+        self.frames.last().is_none_or(|frame| {
+            matches!(
+                frame,
+                Frame::DirectObject { .. } | Frame::RootArray { .. } | Frame::DirectArray { .. }
+            )
+        })
+    }
+
     fn start_object(&mut self) -> Result<(), TranscodeError> {
         let charge = self.arena.enter()?;
         if self.duplicate_keys == DuplicateKeyPolicy::Reject
@@ -397,6 +419,52 @@ impl<W: Write> TranscodeConsumer<W> {
         Ok(())
     }
 
+    fn complete_scalar(&mut self, value: ScalarToken<'_>) -> Result<(), TranscodeError> {
+        match self.frames.last_mut() {
+            Some(Frame::DirectObject { pending_key, .. }) => {
+                let key = pending_key
+                    .take()
+                    .ok_or(TranscodeError::Structure("object value without a key"))?;
+                let index = self.frames.len() - 1;
+                self.prepare_direct_member_line(index)?;
+                self.output.write_all(render_key(&key).as_bytes())?;
+                self.output.write_all(b": ")?;
+                let depth = match &self.frames[index] {
+                    Frame::DirectObject { depth, .. } => *depth,
+                    _ => unreachable!(),
+                };
+                let mut indented = IndentingWriter {
+                    output: &mut self.output,
+                    indentation: depth.saturating_mul(self.writer.indent_size),
+                    line_start: false,
+                };
+                writer::write_scalar_token(&mut indented, value, self.writer, ScalarContext::Root)?;
+                let Frame::DirectObject { wrote_member, .. } = &mut self.frames[index] else {
+                    unreachable!()
+                };
+                *wrote_member = true;
+            }
+            Some(Frame::RootArray { array, .. } | Frame::DirectArray { array, .. }) => {
+                array.push_scalar(value)?;
+            }
+            None if !self.root_complete => {
+                self.current_truthy = Some(!matches!(
+                    value,
+                    ScalarToken::Null | ScalarToken::Bool(false)
+                ));
+                writer::write_scalar_token(
+                    &mut self.output,
+                    value,
+                    self.writer,
+                    ScalarContext::Root,
+                )?;
+                self.root_complete = true;
+            }
+            _ => self.complete_value(scalar_token_value(value)?)?,
+        }
+        Ok(())
+    }
+
     fn end_object(&mut self) -> Result<(), TranscodeError> {
         let frame = self
             .frames
@@ -571,6 +639,17 @@ impl<W: Write> TranscodeConsumer<W> {
     }
 }
 
+fn scalar_token_value(value: ScalarToken<'_>) -> Result<Value, TranscodeError> {
+    Ok(match value {
+        ScalarToken::Null => Value::Null,
+        ScalarToken::Bool(value) => Value::Bool(value),
+        ScalarToken::Number(value) => Value::Number(
+            Number::parse(value).map_err(|_| TranscodeError::Structure("invalid number token"))?,
+        ),
+        ScalarToken::String(value) => Value::string(value.to_owned()),
+    })
+}
+
 fn retained_value_bytes(value: &Value) -> usize {
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => std::mem::size_of::<Value>(),
@@ -597,13 +676,7 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
     type Error = TranscodeError;
 
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
-        if self
-            .cancellation
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Relaxed))
-        {
-            return Err(TranscodeError::Cancelled);
-        }
+        self.check_cancellation()?;
         match event {
             Event::DocumentStart { .. } => {
                 if self.documents >= self.maximum_documents {
@@ -647,5 +720,62 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
             }
         }
         Ok(())
+    }
+
+    fn consume_text_key(
+        &mut self,
+        _span: tq_core::Span,
+        value: String,
+        _quoted: bool,
+    ) -> Result<(), String> {
+        self.check_cancellation()
+            .map_err(|error| error.to_string())?;
+        self.key(Arc::from(value))
+            .map_err(|error| error.to_string())
+    }
+
+    fn consume_null(&mut self, _span: tq_core::Span) -> Result<(), String> {
+        self.check_cancellation()
+            .map_err(|error| error.to_string())?;
+        self.complete_scalar(ScalarToken::Null)
+            .map_err(|error| error.to_string())
+    }
+
+    fn consume_bool(&mut self, _span: tq_core::Span, value: bool) -> Result<(), String> {
+        self.check_cancellation()
+            .map_err(|error| error.to_string())?;
+        self.complete_scalar(ScalarToken::Bool(value))
+            .map_err(|error| error.to_string())
+    }
+
+    fn consume_text_string(&mut self, _span: tq_core::Span, value: String) -> Result<(), String> {
+        self.check_cancellation()
+            .map_err(|error| error.to_string())?;
+        if self.accepts_lightweight_scalar() {
+            self.complete_scalar(ScalarToken::String(&value))
+                .map_err(|error| error.to_string())
+        } else {
+            self.complete_value(Value::string(value))
+                .map_err(|error| error.to_string())
+        }
+    }
+
+    fn consume_number_literal(
+        &mut self,
+        _span: tq_core::Span,
+        literal: String,
+    ) -> Result<(), String> {
+        self.check_cancellation()
+            .map_err(|error| error.to_string())?;
+        if self.accepts_lightweight_scalar() {
+            let canonical =
+                Number::canonicalize_literal(&literal).map_err(|error| error.to_string())?;
+            self.complete_scalar(ScalarToken::Number(&canonical))
+                .map_err(|error| error.to_string())
+        } else {
+            let number = Number::parse(&literal).map_err(|error| error.to_string())?;
+            self.complete_value(Value::Number(number))
+                .map_err(|error| error.to_string())
+        }
     }
 }

@@ -13,8 +13,8 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    Bytecode, Compiled, Diagnostic, DiagnosticClass, Document, Events, PathComponent, Plan, Value,
-    bytecode::Operation,
+    Bytecode, Compiled, Diagnostic, DiagnosticClass, Document, Events, HybridBlocking,
+    PathComponent, Plan, Value, bytecode::Operation,
 };
 
 /// Explicit VM stack and step limits.
@@ -245,6 +245,28 @@ impl Vm {
         Self::from_bytecode(
             plan.automatic_base_bytecode()
                 .expect("automatic base VM requires an automatic plan"),
+            input,
+            limits,
+            variables,
+        )
+    }
+
+    /// Creates a VM for the suffix of a validated hybrid blocking plan.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the typed plan was constructed without its validated
+    /// hybrid suffix bytecode, which public phase transitions do not permit.
+    #[must_use]
+    pub fn new_hybrid_suffix(
+        plan: &Plan<Compiled, HybridBlocking>,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
+        Self::from_bytecode(
+            plan.hybrid_suffix_bytecode()
+                .expect("hybrid suffix VM requires a hybrid plan"),
             input,
             limits,
             variables,
