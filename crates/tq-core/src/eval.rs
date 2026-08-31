@@ -3167,7 +3167,9 @@ impl Evaluator<'_> {
             name if name.starts_with('@') => {
                 vec![format::apply(name, input, self.limits.output_bytes)]
             }
-            "tojson" => vec![bounded_json(input, self.limits.output_bytes).map(Value::string)],
+            "tojson" => {
+                vec![format::bounded_json(input, self.limits.output_bytes).map(Value::string)]
+            }
             "fromjson" => vec![fromjson(input, self.limits)],
             "range" => self.range(arguments, input, environment, depth),
             "add" => fold_values(input, None, binary_add),

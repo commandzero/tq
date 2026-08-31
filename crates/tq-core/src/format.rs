@@ -341,7 +341,7 @@ enum JsonFrame<'a> {
     Object(&'a Object, usize),
 }
 
-fn bounded_json(value: &Value, output_limit: usize) -> Result<String, VmError> {
+pub(crate) fn bounded_json(value: &Value, output_limit: usize) -> Result<String, VmError> {
     let mut writer = BoundedWriter::new(output_limit);
     let mut frames = vec![JsonFrame::Value(value)];
     while let Some(frame) = frames.pop() {

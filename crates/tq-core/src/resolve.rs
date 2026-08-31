@@ -1436,35 +1436,37 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             if &**name == "inputs" {
                 add_effect(analysis, Effect::WholeInput, expr.span);
             }
-            if name.starts_with('@') || matches!(
-                &**name,
-                "all"
-                    | "any"
-                    | "ascii_downcase"
-                    | "ceil"
-                    | "explode"
-                    | "fabs"
-                    | "floor"
-                    | "fromjson"
-                    | "getpath"
-                    | "group_by"
-                    | "implode"
-                    | "limit"
-                    | "ltrimstr"
-                    | "max_by"
-                    | "min_by"
-                    | "path"
-                    | "setpath"
-                    | "to_entries"
-                    | "tojson"
-                    | "tostream"
-                    | "with_entries"
-                    | "error"
-                    | "tonumber"
-                    | "length"
-                    | "has"
-                    | "in"
-            ) {
+            if name.starts_with('@')
+                || matches!(
+                    &**name,
+                    "all"
+                        | "any"
+                        | "ascii_downcase"
+                        | "ceil"
+                        | "explode"
+                        | "fabs"
+                        | "floor"
+                        | "fromjson"
+                        | "getpath"
+                        | "group_by"
+                        | "implode"
+                        | "limit"
+                        | "ltrimstr"
+                        | "max_by"
+                        | "min_by"
+                        | "path"
+                        | "setpath"
+                        | "to_entries"
+                        | "tojson"
+                        | "tostream"
+                        | "with_entries"
+                        | "error"
+                        | "tonumber"
+                        | "length"
+                        | "has"
+                        | "in"
+                )
+            {
                 add_effect(analysis, Effect::PossibleFailure, expr.span);
             }
         }
