@@ -1,18 +1,8 @@
 name: Regex, date, and platform contract
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/regex-date-platform.yml"
-      - "Cargo.lock"
-      - "Cargo.toml"
-      - "crates/tq-cli/**"
-      - "crates/tq-core/**"
-      - "crates/tq-test-support/**"
-      - "tests/compatibility/cases/regex-date-platform.jsonl"
-      - "tests/platform/**"
-  push:
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:

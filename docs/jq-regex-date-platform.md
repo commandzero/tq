@@ -42,8 +42,15 @@ weekday fields.
 timezone. Local results use the release host's configured timezone and are
 classified as platform-dependent in
 `tests/platform/regex-date-platform-v1.json`.
-The UTC boundary and ambient-policy tests run on Linux, macOS, and Windows in
-`.github/workflows/regex-date-platform.yml`.
+Run the UTC boundary and ambient-policy checks locally during PR preflight:
+
+```console
+cargo test -p tq-core regex_date_platform_release_host_contract
+cargo test -p tq-cli ambient
+```
+
+The same checks run on Linux, macOS, and Windows when a GitHub release is
+published by `.github/workflows/regex-date-platform.yml`.
 
 ## Environment and input metadata
 
