@@ -22,6 +22,7 @@ pub struct Bytecode {
     functions: Arc<[UserFunction]>,
     modules: Arc<[ModuleInfo]>,
     root: u32,
+    managed_tree_execution: bool,
 }
 
 /// Stable bytecode validation or decoding failure.
@@ -290,6 +291,7 @@ impl Bytecode {
             strings: Arc::from([]),
             functions: Arc::from([]),
             modules: Arc::from([]),
+            managed_tree_execution: false,
         };
         bytecode.validate()?;
         Ok(bytecode)
@@ -408,13 +410,14 @@ impl Bytecode {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let bytecode = Self {
+        let mut bytecode = Self {
             instructions: compiler.instructions.into(),
             constants: compiler.constants.into(),
             strings: compiler.strings.into(),
             functions: functions.into(),
             modules: modules.to_vec().into(),
             root,
+            managed_tree_execution: false,
         };
         bytecode.validate().map_err(|error| {
             Box::new(
@@ -426,6 +429,7 @@ impl Bytecode {
                 .at(ast.span, "compiled bytecode failed mandatory validation"),
             )
         })?;
+        bytecode.managed_tree_execution = crate::eval::managed_execution(&bytecode);
         Ok(bytecode)
     }
 
@@ -447,6 +451,10 @@ impl Bytecode {
 
     pub(crate) const fn root(&self) -> u32 {
         self.root
+    }
+
+    pub(crate) const fn managed_tree_execution(&self) -> bool {
+        self.managed_tree_execution
     }
 
     #[cfg(test)]
@@ -474,6 +482,7 @@ impl Bytecode {
             functions: Arc::from([]),
             modules: Arc::from([]),
             root: 0,
+            managed_tree_execution: false,
         }
     }
 }
@@ -1246,6 +1255,7 @@ mod tests {
             functions: Arc::from([]),
             modules: Arc::from([]),
             root: 0,
+            managed_tree_execution: false,
         };
         assert!(matches!(
             invalid_call.validate(),

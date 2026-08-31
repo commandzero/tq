@@ -3619,6 +3619,14 @@ mod tests {
     use crate::{Command, ExecutionOverride, ExitStatus, parse_args};
     use tq_core::parallel_worker_count;
 
+    struct NoRead;
+
+    impl Read for NoRead {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            panic!("compile failure must not read input")
+        }
+    }
+
     fn execute(
         arguments: &[&str],
         input: &[u8],
@@ -3646,6 +3654,43 @@ mod tests {
         let mut stderr = Vec::new();
         let status = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
         (status, stdout, stderr)
+    }
+
+    #[test]
+    fn user_function_executes_inside_map_before_cli_output() {
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "--compact-output",
+                "def f: . + 1; map(f)",
+            ],
+            b"[1,2]\n",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[2,3]\n");
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn unexecutable_user_function_closure_fails_before_input() {
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "def f: .; .[0:1] | f",
+        ])
+        .unwrap();
+        let mut input = NoRead;
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        let failure = run_with_io(command, &mut input, &mut output, &mut error).unwrap_err();
+        assert_eq!(failure.status(), ExitStatus::Compile);
+        assert!(failure.to_string().contains("TQ-CAP-USER-FUNCTIONS"));
+        assert!(output.is_empty());
     }
 
     #[test]

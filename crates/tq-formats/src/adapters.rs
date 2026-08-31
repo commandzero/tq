@@ -511,7 +511,7 @@ pub fn decode_toon(
     }])
 }
 
-/// Decodes one ordered, arbitrary-precision-aware JSON document.
+/// Decodes ordered, arbitrary-precision-aware JSON documents.
 ///
 /// # Errors
 ///
@@ -522,14 +522,10 @@ pub fn decode_json(
 ) -> Result<Vec<Document>, FormatError> {
     let identity = identity.into();
     serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<serde_json::Value>()
+        .into_iter::<Value>()
         .enumerate()
         .map(|(index, value)| {
             let value = value.map_err(|error| FormatError::Parse {
-                format: InputFormat::Json,
-                message: error.to_string(),
-            })?;
-            let value = Value::from_json(value).map_err(|error| FormatError::Parse {
                 format: InputFormat::Json,
                 message: error.to_string(),
             })?;
@@ -746,7 +742,7 @@ mod tests {
     use tq_toon::DecoderConfig;
 
     use super::{
-        DecodeOptions, JsonLinesDocumentSource, decode_bytes, decode_json_lines,
+        DecodeOptions, JsonLinesDocumentSource, decode_bytes, decode_json, decode_json_lines,
         decode_toon_sequence, decode_yaml,
     };
     use crate::InputFormat;
@@ -767,6 +763,22 @@ mod tests {
         assert_eq!(toon[0].value, yaml[0].value);
         assert_eq!(yaml[0].value, json[0].value);
         assert_eq!(toon[0].format, InputFormat::Toon);
+    }
+
+    #[test]
+    fn json_documents_preserve_order_and_exact_numbers() {
+        let documents =
+            decode_json(br#"{"z":9007199254740993,"a":1} [2,3]"#, "documents.json").unwrap();
+
+        assert_eq!(documents.len(), 2);
+        assert_eq!(
+            documents[0].value.to_string(),
+            r#"{"z":9007199254740993,"a":1}"#
+        );
+        assert_eq!(documents[0].identity, "documents.json");
+        assert_eq!(documents[0].index, 0);
+        assert_eq!(documents[1].value.to_string(), "[2,3]");
+        assert_eq!(documents[1].index, 1);
     }
 
     #[test]
