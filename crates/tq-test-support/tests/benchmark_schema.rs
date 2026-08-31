@@ -101,7 +101,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             }
         }
     }
-    assert_eq!(ids.len(), 35);
+    assert_eq!(ids.len(), 36);
 }
 
 #[test]
@@ -120,6 +120,7 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         "benchmark.string-reduction",
         "benchmark.array-construction",
         "benchmark.object-construction",
+        "benchmark.object-deep-merge",
         "benchmark.path-update",
         "benchmark.blocking-sort",
         "benchmark.comma-generator-sort",

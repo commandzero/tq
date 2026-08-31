@@ -3,8 +3,8 @@
   "profile": "full",
   "corpus": {
     "path": "tests/compatibility/cases",
-    "bytes": 100485,
-    "sha256": "f5f78554b98581fc275b36f9a4d1ffb3edf0dcbab215637000fbd81b168828a5"
+    "bytes": 127116,
+    "sha256": "254fb1f87aaeb1d66c89e531e99bcaf34fece607d3d60cb73a3b1233eb63f69b"
   },
   "tools": [
     {
@@ -18238,6 +18238,276 @@
       ]
     },
     {
+      "id": "operator.multiply.object-deep-merge",
+      "capabilities": [
+        "arithmetic.multiply",
+        "arithmetic.object-deep-merge"
+      ],
+      "observations": [
+        {
+          "tool": "jq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            {
+              "a": {
+                "b": 1,
+                "c": 2
+              },
+              "replace": 4,
+              "keep": 0,
+              "new": 3
+            }
+          ],
+          "stdout_hex": "7b0a20202261223a207b0a202020202262223a20312c0a202020202263223a20320a20207d2c0a2020227265706c616365223a20342c0a2020226b656570223a20302c0a2020226e6577223a20330a7d0a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 4304,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            {
+              "a": {
+                "b": 1,
+                "c": 2
+              },
+              "replace": 4,
+              "keep": 0,
+              "new": 3
+            }
+          ],
+          "stdout_hex": "7b2261223a7b2262223a312c2263223a327d2c227265706c616365223a342c226b656570223a302c226e6577223a337d0a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 7055,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [
+            {
+              "a": {
+                "b": 1,
+                "c": 2
+              },
+              "replace": 4,
+              "keep": 0,
+              "new": 3
+            }
+          ],
+          "stdout_hex": "7b2261223a7b2262223a312c2263223a327d2c227265706c616365223a342c226b656570223a302c226e6577223a337d0a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 7054,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            {
+              "a": {
+                "b": 1,
+                "c": 2
+              },
+              "replace": 4,
+              "keep": 0,
+              "new": 3
+            }
+          ],
+          "stdout_hex": "1e613a0a2020623a20310a2020633a20320a7265706c6163653a20340a6b6565703a20300a6e65773a20330a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3492,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [
+            {
+              "a": {
+                "b": 1,
+                "c": 2
+              },
+              "replace": 4,
+              "keep": 0,
+              "new": 3
+            }
+          ],
+          "stdout_hex": "1e613a0a2020623a20310a2020633a20320a7265706c6163653a20340a6b6565703a20300a6e65773a20330a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3352,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "toon",
+          "state": "executed",
+          "results": [
+            {
+              "a": {
+                "b": 1,
+                "c": 2
+              },
+              "replace": 4,
+              "keep": 0,
+              "new": 3
+            }
+          ],
+          "stdout_hex": "1e613a0a2020623a20310a2020633a20320a7265706c6163653a20340a6b6565703a20300a6e65773a20330a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3171,
+          "note": null
+        }
+      ],
+      "semantic_diffs": []
+    },
+    {
+      "id": "operator.multiply.type-error",
+      "capabilities": [
+        "arithmetic.multiply",
+        "arithmetic.type-error"
+      ],
+      "observations": [
+        {
+          "tool": "jq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [],
+          "stdout_hex": "",
+          "raw_stdout_hex": null,
+          "stderr_hex": "6a713a206572726f7220286174203c737464696e3e3a30293a206f626a65637420287b2261223a317d2920616e64206e756d626572202832292063616e6e6f74206265206d756c7469706c6965640a",
+          "process_status": "exited",
+          "exit_code": 5,
+          "error_class": "runtime-type-path",
+          "wall_time_micros": 4109,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [],
+          "stdout_hex": "",
+          "raw_stdout_hex": null,
+          "stderr_hex": "4572726f723a2063616e6e6f74206d756c7469706c792021216d61702077697468202121696e740a",
+          "process_status": "exited",
+          "exit_code": 1,
+          "error_class": "runtime-type-path",
+          "wall_time_micros": 6951,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [],
+          "stdout_hex": "",
+          "raw_stdout_hex": null,
+          "stderr_hex": "4572726f723a2063616e6e6f74206d756c7469706c792021216d61702077697468202121696e740a",
+          "process_status": "exited",
+          "exit_code": 1,
+          "error_class": "runtime-type-path",
+          "wall_time_micros": 6911,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [],
+          "stdout_hex": "",
+          "raw_stdout_hex": null,
+          "stderr_hex": "74713a2072756e74696d65206572726f723a2063616e6e6f74206d756c7469706c79206f626a65637420616e64206e756d6265720a",
+          "process_status": "exited",
+          "exit_code": 5,
+          "error_class": "runtime-type-path",
+          "wall_time_micros": 3436,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [],
+          "stdout_hex": "",
+          "raw_stdout_hex": null,
+          "stderr_hex": "74713a2072756e74696d65206572726f723a2063616e6e6f74206d756c7469706c79206f626a65637420616e64206e756d6265720a",
+          "process_status": "exited",
+          "exit_code": 5,
+          "error_class": "runtime-type-path",
+          "wall_time_micros": 3069,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "toon",
+          "state": "executed",
+          "results": [],
+          "stdout_hex": "",
+          "raw_stdout_hex": null,
+          "stderr_hex": "74713a2072756e74696d65206572726f723a2063616e6e6f74206d756c7469706c79206f626a65637420616e64206e756d6265720a",
+          "process_status": "exited",
+          "exit_code": 5,
+          "error_class": "runtime-type-path",
+          "wall_time_micros": 3469,
+          "note": null
+        }
+      ],
+      "semantic_diffs": [
+        {
+          "left": "jq",
+          "left_format": "json",
+          "right": "yq",
+          "right_format": "json",
+          "summary": "exit code"
+        },
+        {
+          "left": "yq",
+          "left_format": "json",
+          "right": "tq",
+          "right_format": "json",
+          "summary": "exit code"
+        },
+        {
+          "left": "yq",
+          "left_format": "yaml",
+          "right": "tq",
+          "right_format": "yaml",
+          "summary": "exit code"
+        }
+      ]
+    },
+    {
       "id": "platform.denied",
       "capabilities": [
         "platform.denied",
@@ -21270,6 +21540,161 @@
       "semantic_diffs": []
     },
     {
+      "id": "update.multiply.object-deep-merge",
+      "capabilities": [
+        "update.arithmetic",
+        "update.multiply",
+        "arithmetic.object-deep-merge"
+      ],
+      "observations": [
+        {
+          "tool": "jq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            {
+              "settings": {
+                "display": {
+                  "density": "compact",
+                  "theme": "dark"
+                },
+                "cache": true
+              }
+            }
+          ],
+          "stdout_hex": "7b0a20202273657474696e6773223a207b0a2020202022646973706c6179223a207b0a2020202020202264656e73697479223a2022636f6d70616374222c0a202020202020227468656d65223a20226461726b220a202020207d2c0a20202020226361636865223a20747275650a20207d0a7d0a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 4438,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            {
+              "settings": {
+                "display": {
+                  "density": "compact",
+                  "theme": "dark"
+                },
+                "cache": true
+              }
+            }
+          ],
+          "stdout_hex": "7b2273657474696e6773223a7b22646973706c6179223a7b2264656e73697479223a22636f6d70616374222c227468656d65223a226461726b227d2c226361636865223a747275657d7d0a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 7000,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [
+            {
+              "settings": {
+                "display": {
+                  "density": "compact",
+                  "theme": "dark"
+                },
+                "cache": true
+              }
+            }
+          ],
+          "stdout_hex": "7b2273657474696e6773223a7b22646973706c6179223a7b2264656e73697479223a22636f6d70616374222c227468656d65223a226461726b227d2c226361636865223a747275657d7d0a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 6960,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            {
+              "settings": {
+                "display": {
+                  "density": "compact",
+                  "theme": "dark"
+                },
+                "cache": true
+              }
+            }
+          ],
+          "stdout_hex": "1e73657474696e67733a0a2020646973706c61793a0a2020202064656e736974793a20636f6d706163740a202020207468656d653a206461726b0a202063616368653a20747275650a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3468,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [
+            {
+              "settings": {
+                "display": {
+                  "density": "compact",
+                  "theme": "dark"
+                },
+                "cache": true
+              }
+            }
+          ],
+          "stdout_hex": "1e73657474696e67733a0a2020646973706c61793a0a2020202064656e736974793a20636f6d706163740a202020207468656d653a206461726b0a202063616368653a20747275650a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3303,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "toon",
+          "state": "executed",
+          "results": [
+            {
+              "settings": {
+                "display": {
+                  "density": "compact",
+                  "theme": "dark"
+                },
+                "cache": true
+              }
+            }
+          ],
+          "stdout_hex": "1e73657474696e67733a0a2020646973706c61793a0a2020202064656e736974793a20636f6d706163740a202020207468656d653a206461726b0a202063616368653a20747275650a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3170,
+          "note": null
+        }
+      ],
+      "semantic_diffs": []
+    },
+    {
       "id": "update.pipe",
       "capabilities": [
         "update.pipe",
@@ -22154,8 +22579,8 @@
       "harness_errors": 0
     },
     "arithmetic.multiply": {
-      "cases": 1,
-      "executed": 6,
+      "cases": 3,
+      "executed": 18,
       "skipped": 0,
       "harness_errors": 0
     },
@@ -22172,8 +22597,8 @@
       "harness_errors": 0
     },
     "arithmetic.type-error": {
-      "cases": 1,
-      "executed": 6,
+      "cases": 2,
+      "executed": 12,
       "skipped": 0,
       "harness_errors": 0
     },
@@ -23450,8 +23875,8 @@
       "harness_errors": 0
     },
     "update.arithmetic": {
-      "cases": 4,
-      "executed": 24,
+      "cases": 5,
+      "executed": 30,
       "skipped": 0,
       "harness_errors": 0
     },
@@ -23480,8 +23905,8 @@
       "harness_errors": 0
     },
     "update.multiply": {
-      "cases": 1,
-      "executed": 6,
+      "cases": 2,
+      "executed": 12,
       "skipped": 0,
       "harness_errors": 0
     },
@@ -23597,6 +24022,12 @@
       "cases": 3,
       "executed": 14,
       "skipped": 4,
+      "harness_errors": 0
+    },
+    "arithmetic.object-deep-merge": {
+      "cases": 2,
+      "executed": 12,
+      "skipped": 0,
       "harness_errors": 0
     }
   },
@@ -23844,10 +24275,11 @@
     "variable.shadow": "supported",
     "variable.shadowing": "supported",
     "variable.unknown": "supported",
-    "function.argument-generator": "supported"
+    "function.argument-generator": "supported",
+    "arithmetic.object-deep-merge": "supported"
   },
   "capability_counts": {
-    "supported": 225,
+    "supported": 226,
     "partial": 5,
     "divergent": 10,
     "unsupported": 2,
