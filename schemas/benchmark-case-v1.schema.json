@@ -14,7 +14,7 @@
       "additionalProperties": false,
       "required": ["family", "tiers"],
       "properties": {
-        "family": {"enum": ["natural", "usgs", "large-natural", "synthetic-helper", "issue5-input-sequence"]},
+        "family": {"enum": ["natural", "usgs", "large-natural", "synthetic-helper", "issue5-input-sequence", "deep-merge-helper"]},
         "tiers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["small", "medium", "large", "startup"]}}
       }
     },

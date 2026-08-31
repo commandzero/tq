@@ -35,6 +35,7 @@ const RAPID_CASES: &[&str] = &[
     "benchmark.event-stream",
 ];
 const RAPID_SOURCE: &str = "usgs-all-month";
+const DEEP_MERGE_ENTRIES: usize = 10_000;
 
 fn main() -> ExitCode {
     match run() {
@@ -427,10 +428,56 @@ fn prepare_smoke(examples: &Path) -> Result<PreparedCampaign, Box<dyn std::error
     prepared.tier = DatasetTier::Startup;
     datasets.push(prepared);
     datasets.push(prepare_issue5_input_sequence(temporary.path())?);
+
+    let deep_merge_bytes = deep_merge_fixture(DEEP_MERGE_ENTRIES)?;
+    let deep_merge_path = temporary.path().join("deep-merge.json");
+    fs::write(&deep_merge_path, &deep_merge_bytes)?;
+    let deep_merge = SmokeSnapshot {
+        source_id: "deep-merge".to_owned(),
+        file: deep_merge_path,
+        artifact: ArtifactIdentity {
+            path: "deep-merge.json".to_owned(),
+            bytes: u64::try_from(deep_merge_bytes.len())?,
+            sha256: hex(&Sha256::digest(&deep_merge_bytes)),
+        },
+        document: tq_test_support::corpus::DocumentIdentity {
+            root_type: "array".to_owned(),
+            logical_records: 2,
+        },
+    };
+    let mut prepared = prepare_smoke_snapshot(&deep_merge, temporary.path())?;
+    prepared.tier = DatasetTier::Startup;
+    datasets.push(prepared);
     Ok(PreparedCampaign {
         _temporary: Some(temporary),
         datasets,
     })
+}
+
+fn deep_merge_fixture(entries: usize) -> Result<Vec<u8>, serde_json::Error> {
+    let mut left = serde_json::Map::new();
+    let mut right = serde_json::Map::new();
+    for index in 0..entries {
+        let key = format!("key_{index:05}");
+        left.insert(
+            key.clone(),
+            serde_json::json!({
+                "shared": {"left": index, "replace": "left"},
+                "left_only": index
+            }),
+        );
+        right.insert(
+            key,
+            serde_json::json!({
+                "shared": {"right": index, "replace": "right"},
+                "right_only": index
+            }),
+        );
+    }
+    serde_json::to_vec(&[
+        serde_json::Value::Object(left),
+        serde_json::Value::Object(right),
+    ])
 }
 
 fn prepare_smoke_snapshot(
@@ -667,7 +714,10 @@ fn family_matches(
             dataset.tier != DatasetTier::Startup && dataset.source_id != "issue5-input-sequence"
         }
         tq_test_support::benchmark::DatasetFamily::SyntheticHelper => {
-            dataset.tier == DatasetTier::Startup
+            dataset.source_id == "startup"
+        }
+        tq_test_support::benchmark::DatasetFamily::DeepMergeHelper => {
+            dataset.source_id == "deep-merge"
         }
         tq_test_support::benchmark::DatasetFamily::Issue5InputSequence => {
             dataset.source_id == "issue5-input-sequence"

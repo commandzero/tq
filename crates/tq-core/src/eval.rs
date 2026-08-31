@@ -4187,7 +4187,7 @@ fn binary_value(operator: BinaryOperator, left: &Value, right: &Value) -> Result
         BinaryOperator::GreaterEqual => Ok(Value::Bool(left >= right)),
         BinaryOperator::Add => binary_add(left, right),
         BinaryOperator::Subtract => binary_subtract(left, right),
-        BinaryOperator::Multiply => numeric(left, right, Number::multiply, "multiply"),
+        BinaryOperator::Multiply => binary_multiply(left, right),
         BinaryOperator::Divide => numeric(left, right, Number::divide, "divide"),
         BinaryOperator::Remainder => match (left, right) {
             (Value::Number(left), Value::Number(right)) if right.as_f64() != 0.0 => {
@@ -4246,6 +4246,37 @@ fn binary_subtract(left: &Value, right: &Value) -> Result<Value, VmError> {
         )),
         _ => Err(runtime("subtraction requires numbers or arrays".to_owned())),
     }
+}
+
+fn binary_multiply(left: &Value, right: &Value) -> Result<Value, VmError> {
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => left
+            .multiply(right)
+            .map(Value::Number)
+            .map_err(|error| runtime(error.to_string())),
+        (Value::Object(left), Value::Object(right)) => {
+            Ok(Value::object(merge_objects(left, right)))
+        }
+        _ => Err(runtime(format!(
+            "cannot multiply {} and {}",
+            type_name(left),
+            type_name(right)
+        ))),
+    }
+}
+
+fn merge_objects(left: &Object, right: &Object) -> Object {
+    let mut merged = left.clone();
+    for (key, right_value) in right {
+        let value = match (merged.get(key), right_value) {
+            (Some(Value::Object(left)), Value::Object(right)) => {
+                Value::object(merge_objects(left, right))
+            }
+            _ => right_value.clone(),
+        };
+        merged.insert(Arc::clone(key), value);
+    }
+    merged
 }
 
 fn numeric(
@@ -5048,7 +5079,7 @@ fn update_value(
         AssignmentOperator::Set | AssignmentOperator::Update => Ok(replacement.clone()),
         AssignmentOperator::Add => binary_add(old, replacement),
         AssignmentOperator::Subtract => binary_subtract(old, replacement),
-        AssignmentOperator::Multiply => numeric(old, replacement, Number::multiply, "multiply"),
+        AssignmentOperator::Multiply => binary_multiply(old, replacement),
         AssignmentOperator::Divide => numeric(old, replacement, Number::divide, "divide"),
         AssignmentOperator::Alternative => Ok(if old.is_truthy() {
             old.clone()
@@ -5330,6 +5361,47 @@ mod tests {
         assert_eq!(
             json(run(r#"{"a":1}+{"a":2,"b":3}"#, "null")),
             [r#"{"a":2,"b":3}"#]
+        );
+    }
+
+    #[test]
+    fn object_multiplication_recursively_merges_and_preserves_key_order() {
+        assert_eq!(
+            json(run(
+                r#"{"a":{"b":1},"replace":{"left":true},"keep":0} * {"a":{"c":2},"replace":4,"new":3}"#,
+                "null"
+            )),
+            [r#"{"a":{"b":1,"c":2},"replace":4,"keep":0,"new":3}"#]
+        );
+    }
+
+    #[test]
+    fn object_multiplication_uses_the_right_value_for_non_object_conflicts() {
+        assert_eq!(
+            json(run(
+                r#"[{"a":1} * {"a":{"nested":true}}, {"a":{"nested":true}} * {"a":1}, 6 * 7]"#,
+                "null"
+            )),
+            [r#"[{"a":{"nested":true}},{"a":1},42]"#]
+        );
+    }
+
+    #[test]
+    fn multiplication_rejects_mixed_object_and_number_operands() {
+        assert_eq!(
+            json(run(r#"{"a":1} * 2"#, "null")),
+            ["error:runtime error: cannot multiply object and number"]
+        );
+    }
+
+    #[test]
+    fn multiplication_update_recursively_merges_objects() {
+        assert_eq!(
+            json(run(
+                r#".settings *= {"display":{"theme":"dark"}}"#,
+                r#"{"settings":{"display":{"density":"compact"},"cache":true}}"#
+            )),
+            [r#"{"settings":{"display":{"density":"compact","theme":"dark"},"cache":true}}"#]
         );
     }
 

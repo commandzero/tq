@@ -44,7 +44,8 @@ case "$campaign:$profile" in
         exec cargo run --quiet -p tq-test-support --bin tq-bench -- run \
             --profile smoke --output "$work_root/smoke.json" --max-samples 1 \
             --case benchmark.startup --case benchmark.parse-discard \
-            --case benchmark.scalar-extraction --case benchmark.event-stream
+            --case benchmark.scalar-extraction --case benchmark.event-stream \
+            --case benchmark.object-deep-merge
         ;;
     benchmark:rapid|benchmark:standard|benchmark:large)
         mkdir -p "$work_root"

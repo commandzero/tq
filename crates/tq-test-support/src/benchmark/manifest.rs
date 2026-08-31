@@ -57,6 +57,8 @@ pub enum DatasetFamily {
     SyntheticHelper,
     /// Reviewed deterministic multi-document sequence for `inputs`.
     Issue5InputSequence,
+    /// Deterministic recursive object-merge fixture.
+    DeepMergeHelper,
 }
 
 /// Natural, non-resized dataset category.
