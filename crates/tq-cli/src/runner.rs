@@ -4037,6 +4037,50 @@ mod tests {
     }
 
     #[test]
+    fn jq_special_variables_match_automatic_and_document_plans() {
+        let arguments = [
+            "--allow-environment",
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            ".items[] | [$__loc__, ($ENV | type)]",
+        ];
+        let input = br#"{"items":[null,null]}"#;
+        let automatic = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&arguments, input, ExecutionOverride::Document);
+        assert_eq!(automatic.0.unwrap(), ExitStatus::Success);
+        assert_eq!(document.0.unwrap(), ExitStatus::Success);
+        assert_eq!(automatic.1, document.1);
+        assert_eq!(
+            automatic.1,
+            b"[{\"file\":\"<top-level>\",\"line\":1},\"object\"]\n[{\"file\":\"<top-level>\",\"line\":1},\"object\"]\n"
+        );
+        assert_eq!(automatic.2, [] as [u8; 0]);
+        assert_eq!(document.2, [] as [u8; 0]);
+
+        let denied_arguments = [
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            ".items[] | $ENV",
+        ];
+        let automatic =
+            execute_with_override(&denied_arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&denied_arguments, input, ExecutionOverride::Document);
+        assert_eq!(
+            automatic.0.unwrap_err().status(),
+            document.0.unwrap_err().status()
+        );
+        assert_eq!(automatic.1, document.1);
+        assert_eq!(automatic.2, [] as [u8; 0]);
+        assert_eq!(document.2, [] as [u8; 0]);
+    }
+
+    #[test]
     fn external_arguments_cannot_supply_internal_ambient_values() {
         let (status, output, error) = execute(
             &[

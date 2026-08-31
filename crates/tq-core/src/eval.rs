@@ -5162,8 +5162,8 @@ mod tests {
     use indexmap::IndexMap;
 
     use super::{
-        PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline, Value, extrema,
-        sort_by_cached_key, stable_sort_values,
+        Operation, PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline,
+        Value, extrema, sort_by_cached_key, stable_sort_values,
     };
     use crate::{InputCursor, ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
 
@@ -5363,6 +5363,78 @@ mod tests {
             json(run_with_variables("$ENV.KNOWN_SENTINEL", "null", variables)),
             vec![r#""present""#]
         );
+    }
+
+    #[test]
+    fn env_variable_is_consistent_across_all_evaluator_routes() {
+        let variables = BTreeMap::from([(
+            Arc::from(super::AMBIENT_ENVIRONMENT),
+            Value::object(IndexMap::from([(
+                Arc::from("KNOWN_SENTINEL"),
+                Value::string("present"),
+            )])),
+        )]);
+        let compile = |query: &str| {
+            let query = resolve(
+                parse(query).unwrap(),
+                &ResolveOptions {
+                    variables: variables.keys().cloned().collect(),
+                    ..ResolveOptions::default()
+                },
+            )
+            .unwrap();
+            analyze(query).compile().unwrap()
+        };
+
+        let kernel = compile("$ENV");
+        let kernel_bytecode = kernel.bytecode();
+        assert!(matches!(
+            kernel_bytecode.instructions()[kernel_bytecode.root() as usize].operation,
+            Operation::Variable(_)
+        ));
+
+        let managed = compile("[$ENV.KNOWN_SENTINEL]");
+        assert!(managed.bytecode().managed_tree_execution());
+        assert!(!matches!(
+            managed.bytecode().instructions()[managed.bytecode().root() as usize].operation,
+            Operation::Variable(_)
+        ));
+
+        let recursive = compile("$ENV.KNOWN_SENTINEL | explode | length");
+        assert!(!recursive.bytecode().managed_tree_execution());
+
+        assert_eq!(
+            json(run_with_variables("$ENV", "null", variables.clone())),
+            [r#"{"KNOWN_SENTINEL":"present"}"#]
+        );
+        assert_eq!(
+            json(run_with_variables(
+                "[$ENV.KNOWN_SENTINEL]",
+                "null",
+                variables.clone()
+            )),
+            [r#"["present"]"#]
+        );
+        assert_eq!(
+            json(run_with_variables(
+                "$ENV.KNOWN_SENTINEL | explode | length",
+                "null",
+                variables
+            )),
+            ["7"]
+        );
+
+        for query in [
+            "$ENV",
+            "[$ENV.KNOWN_SENTINEL]",
+            "$ENV.KNOWN_SENTINEL | explode | length",
+        ] {
+            let denied = json(run(query, "null"));
+            assert!(
+                denied[0].contains("capability policy"),
+                "{query}: {denied:?}"
+            );
+        }
     }
 
     #[test]

@@ -20,6 +20,7 @@ use crate::{
     phase::{automatic_stream_proof, hybrid_stream_proof},
 };
 
+use crate::diagnostic::SourceLineIndex;
 use crate::eval::AMBIENT_ENVIRONMENT;
 
 /// One versioned built-in signature.
@@ -197,29 +198,26 @@ struct CachedModule {
 #[derive(Clone)]
 struct SourceMetadata {
     name: Arc<str>,
-    line_starts: Arc<[u64]>,
+    line_index: SourceLineIndex,
 }
 
 impl SourceMetadata {
     fn new(name: impl Into<Arc<str>>, text: &str) -> Self {
-        let mut line_starts = vec![0];
-        for (index, byte) in text.bytes().enumerate() {
-            if byte == b'\n' {
-                line_starts.push(u64::try_from(index).unwrap_or(u64::MAX).saturating_add(1));
-            }
-        }
         Self {
             name: name.into(),
-            line_starts: line_starts.into(),
+            line_index: SourceLineIndex::new(text),
         }
     }
 
     fn from_source(source: &SourceFile) -> Self {
-        Self::new(source.name(), source.text())
+        Self {
+            name: Arc::from(source.name()),
+            line_index: source.line_index(),
+        }
     }
 
     fn line(&self, byte: u64) -> u64 {
-        u64::try_from(self.line_starts.partition_point(|start| *start <= byte)).unwrap_or(u64::MAX)
+        self.line_index.line(byte)
     }
 }
 
