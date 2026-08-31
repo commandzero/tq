@@ -39,7 +39,7 @@ pub struct BuiltinRegistry;
 
 impl BuiltinRegistry {
     /// Registry semantic version.
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
 
     /// Returns the signature for a supported built-in.
     #[must_use]
@@ -59,42 +59,61 @@ impl BuiltinRegistry {
 
 const BUILTINS: &[Builtin] = &[
     builtin("add", 0, 0, true),
+    builtin("all", 2, 2, false),
+    builtin("any", 2, 2, false),
     builtin("arrays", 0, 0, false),
+    builtin("ascii_downcase", 0, 0, false),
     builtin("booleans", 0, 0, false),
     builtin("capture", 1, 2, false),
+    builtin("ceil", 0, 0, false),
     builtin("empty", 0, 0, false),
     builtin("env", 0, 0, false),
     builtin("error", 0, 1, false),
+    builtin("explode", 0, 0, false),
+    builtin("fabs", 0, 0, false),
     builtin("flatten", 0, 1, true),
+    builtin("floor", 0, 0, false),
     builtin("fromdate", 0, 0, false),
     builtin("fromdateiso8601", 0, 0, false),
+    builtin("fromjson", 0, 0, false),
+    builtin("getpath", 1, 1, false),
     builtin("gmtime", 0, 0, false),
+    builtin("group_by", 1, 1, true),
     builtin("gsub", 2, 3, false),
     builtin("has", 1, 1, false),
     builtin("in", 1, 1, false),
     builtin("input_filename", 0, 0, false),
     builtin("input_line_number", 0, 0, false),
+    builtin("inputs", 0, 0, false),
+    builtin("implode", 0, 0, false),
     builtin("iterables", 0, 0, false),
     builtin("keys", 0, 0, true),
     builtin("keys_unsorted", 0, 0, false),
     builtin("length", 0, 0, false),
+    builtin("limit", 2, 2, false),
     builtin("localtime", 0, 0, false),
+    builtin("ltrimstr", 1, 1, false),
     builtin("map", 1, 1, true),
     builtin("map_values", 1, 1, true),
     builtin("max", 0, 0, true),
     builtin("match", 1, 2, false),
     builtin("min", 0, 0, true),
+    builtin("max_by", 1, 1, true),
+    builtin("min_by", 1, 1, true),
     builtin("mktime", 0, 0, false),
     builtin("modulemeta", 0, 0, false),
     builtin("nulls", 0, 0, false),
     builtin("now", 0, 0, false),
     builtin("numbers", 0, 0, false),
     builtin("objects", 0, 0, false),
+    builtin("path", 1, 1, false),
+    builtin("paths", 0, 0, false),
     builtin("range", 1, 3, false),
     builtin("reverse", 0, 0, true),
     builtin("scan", 1, 2, false),
     builtin("scalars", 0, 0, false),
     builtin("select", 1, 1, false),
+    builtin("setpath", 2, 2, false),
     builtin("sort", 0, 0, true),
     builtin("sort_by", 1, 1, true),
     builtin("split", 1, 2, false),
@@ -107,6 +126,9 @@ const BUILTINS: &[Builtin] = &[
     builtin("test", 1, 2, false),
     builtin("todate", 0, 0, false),
     builtin("todateiso8601", 0, 0, false),
+    builtin("to_entries", 0, 0, true),
+    builtin("tojson", 0, 0, false),
+    builtin("tostream", 0, 0, false),
     builtin("tonumber", 0, 0, false),
     builtin("tostring", 0, 0, false),
     builtin("type", 0, 0, false),
@@ -114,6 +136,7 @@ const BUILTINS: &[Builtin] = &[
     builtin("unique_by", 1, 1, true),
     builtin("utf8bytelength", 0, 0, false),
     builtin("values", 0, 0, false),
+    builtin("with_entries", 1, 1, true),
 ];
 
 const fn builtin(
@@ -840,7 +863,7 @@ pub fn analyze_with_context(
         add_effect(&mut analysis, Effect::SemanticIdentity, query.ast().span);
     }
     analyze_expr(query.ast(), &mut analysis);
-    if context.whole_input {
+    if context.whole_input || analysis.capabilities.whole_input {
         add_effect(&mut analysis, Effect::WholeInput, query.ast().span);
         add_effect(&mut analysis, Effect::Document, query.ast().span);
         analysis.selected_plan = PlanKind::WholeInput;
@@ -1379,6 +1402,9 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             if matches!(
                 &**name,
                 "range"
+                    | "inputs"
+                    | "paths"
+                    | "tostream"
                     | "select"
                     | "values"
                     | "scalars"
@@ -1392,7 +1418,38 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             ) {
                 add_effect(analysis, Effect::Generator, expr.span);
             }
-            if matches!(&**name, "error" | "tonumber" | "length" | "has" | "in") {
+            if &**name == "inputs" {
+                add_effect(analysis, Effect::WholeInput, expr.span);
+            }
+            if matches!(
+                &**name,
+                "all"
+                    | "any"
+                    | "ascii_downcase"
+                    | "ceil"
+                    | "explode"
+                    | "fabs"
+                    | "floor"
+                    | "fromjson"
+                    | "getpath"
+                    | "group_by"
+                    | "implode"
+                    | "limit"
+                    | "ltrimstr"
+                    | "max_by"
+                    | "min_by"
+                    | "path"
+                    | "setpath"
+                    | "to_entries"
+                    | "tojson"
+                    | "tostream"
+                    | "with_entries"
+                    | "error"
+                    | "tonumber"
+                    | "length"
+                    | "has"
+                    | "in"
+            ) {
                 add_effect(analysis, Effect::PossibleFailure, expr.span);
             }
         }
@@ -1486,7 +1543,7 @@ mod tests {
 
     #[test]
     fn registry_is_versioned_and_checks_arity_and_new_builtin_names() {
-        assert_eq!(BuiltinRegistry::VERSION, 1);
+        assert_eq!(BuiltinRegistry::VERSION, 2);
         assert!(BuiltinRegistry.get("sort_by").unwrap().blocking);
         assert_eq!(
             resolve(parse("range()").unwrap(), &ResolveOptions::default())
@@ -1502,6 +1559,33 @@ mod tests {
         .unwrap();
         resolve(parse("env").unwrap(), &ResolveOptions::default()).unwrap();
         resolve(parse("input_filename").unwrap(), &ResolveOptions::default()).unwrap();
+        for query in [
+            "to_entries",
+            "with_entries(.)",
+            "group_by(.)",
+            "min_by(.)",
+            "max_by(.)",
+            "limit(1; .)",
+            "paths",
+            "getpath([])",
+            "setpath([]; 1)",
+            "path(.)",
+            "tostream",
+            "tojson",
+            "fromjson",
+            "inputs",
+            "any(.[]; .)",
+            "all(.[]; .)",
+            "ltrimstr(\"x\")",
+            "ascii_downcase",
+            "explode",
+            "implode",
+            "floor",
+            "ceil",
+            "fabs",
+        ] {
+            resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap();
+        }
     }
 
     #[test]

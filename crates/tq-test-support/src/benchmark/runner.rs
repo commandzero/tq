@@ -289,6 +289,8 @@ fn row(
         samples,
         summary,
         reference_ratios: BTreeMap::new(),
+        reference_peak_rss_ratios: BTreeMap::new(),
+        soft_performance_objective: None,
     }
 }
 

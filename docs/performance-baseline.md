@@ -36,3 +36,15 @@ TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --re
 
 The gate skips comparisons when the profile, machine, corpus artifact, or tool
 identity differs. A reference-tool change is metadata, not a regression.
+
+## jq-relative soft objective
+
+Issue #5 workloads report an informational comparison against jq on the same
+JSON input and recorded host. The target is at most 2.0 times jq's median wall
+time and at most 1.5 times jq's maximum observed peak RSS. The report labels
+each metric `met`, `missed`, or `not-comparable`. A miss remains visible but
+does not fail the campaign or replace tq's self-regression gate.
+
+The `inputs` workload uses a reviewed deterministic 65,536-document corpus
+with separately identified JSON, YAML, and TOON sequence artifacts; natural
+benchmark sources are never repeated or resized to construct that workload.

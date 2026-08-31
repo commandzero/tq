@@ -426,6 +426,7 @@ fn prepare_smoke(examples: &Path) -> Result<PreparedCampaign, Box<dyn std::error
     let mut prepared = prepare_smoke_snapshot(&startup, temporary.path())?;
     prepared.tier = DatasetTier::Startup;
     datasets.push(prepared);
+    datasets.push(prepare_issue5_input_sequence(temporary.path())?);
     Ok(PreparedCampaign {
         _temporary: Some(temporary),
         datasets,
@@ -470,6 +471,7 @@ fn prepare_smoke_snapshot(
 }
 
 fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std::error::Error>> {
+    let temporary = tempfile::tempdir()?;
     let mut datasets = Vec::new();
     for path in &options.manifests {
         let manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(path)?)?;
@@ -524,9 +526,68 @@ fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std:
     if options.profile == "rapid" && datasets.is_empty() {
         return Err(format!("rapid profile requires a {RAPID_SOURCE} snapshot").into());
     }
+    datasets.push(prepare_issue5_input_sequence(temporary.path())?);
     Ok(PreparedCampaign {
-        _temporary: None,
+        _temporary: Some(temporary),
         datasets,
+    })
+}
+
+fn prepare_issue5_input_sequence(
+    output: &Path,
+) -> Result<PreparedDataset, Box<dyn std::error::Error>> {
+    const RECORDS: u64 = 65_536;
+    let mut json = Vec::new();
+    let mut yaml = Vec::new();
+    let mut toon = Vec::new();
+    for id in 0..RECORDS {
+        let value = id % 997;
+        writeln!(
+            json,
+            "{{\"id\":{id},\"value\":{value},\"label\":\"issue5-input-{id}\"}}"
+        )?;
+        writeln!(
+            yaml,
+            "---\nid: {id}\nvalue: {value}\nlabel: issue5-input-{id}"
+        )?;
+        writeln!(
+            toon,
+            "\x1eid: {id}\nvalue: {value}\nlabel: issue5-input-{id}"
+        )?;
+    }
+    let paths = [
+        ("json", output.join("issue5-input-sequence.json"), json),
+        ("yaml", output.join("issue5-input-sequence.yaml"), yaml),
+        ("toon", output.join("issue5-input-sequence.toonseq"), toon),
+    ];
+    let mut formats = BTreeMap::new();
+    for (format, path, bytes) in paths {
+        fs::write(&path, &bytes)?;
+        formats.insert(
+            format,
+            (
+                path.clone(),
+                ArtifactIdentity {
+                    path: path.display().to_string(),
+                    bytes: bytes.len() as u64,
+                    sha256: hex(&Sha256::digest(&bytes)),
+                },
+            ),
+        );
+    }
+    let manifest_sha256 = formats
+        .get("json")
+        .ok_or("missing generated JSON input sequence")?
+        .1
+        .sha256
+        .clone();
+    Ok(PreparedDataset {
+        source_id: "issue5-input-sequence".to_owned(),
+        tier: DatasetTier::Medium,
+        logical_records: RECORDS,
+        manifest_sha256,
+        origin: "synthetic-reviewed".to_owned(),
+        formats,
     })
 }
 
@@ -602,16 +663,46 @@ fn family_matches(
     dataset: &PreparedDataset,
 ) -> bool {
     match family {
-        tq_test_support::benchmark::DatasetFamily::Natural => dataset.tier != DatasetTier::Startup,
+        tq_test_support::benchmark::DatasetFamily::Natural => {
+            dataset.tier != DatasetTier::Startup && dataset.source_id != "issue5-input-sequence"
+        }
         tq_test_support::benchmark::DatasetFamily::SyntheticHelper => {
             dataset.tier == DatasetTier::Startup
         }
+        tq_test_support::benchmark::DatasetFamily::Issue5InputSequence => {
+            dataset.source_id == "issue5-input-sequence"
+        }
         tq_test_support::benchmark::DatasetFamily::Usgs => {
-            matches!(dataset.tier, DatasetTier::Small | DatasetTier::Medium)
+            dataset.source_id != "issue5-input-sequence"
+                && matches!(dataset.tier, DatasetTier::Small | DatasetTier::Medium)
         }
         tq_test_support::benchmark::DatasetFamily::LargeNatural => {
             dataset.tier == DatasetTier::Large
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DatasetTier, PreparedDataset, family_matches};
+    use std::collections::BTreeMap;
+    use tq_test_support::benchmark::DatasetFamily;
+
+    #[test]
+    fn issue5_input_sequence_has_one_disjoint_dataset_family() {
+        let dataset = PreparedDataset {
+            source_id: "issue5-input-sequence".to_owned(),
+            tier: DatasetTier::Medium,
+            logical_records: 65_536,
+            manifest_sha256: String::new(),
+            origin: "synthetic-reviewed".to_owned(),
+            formats: BTreeMap::new(),
+        };
+        assert!(family_matches(DatasetFamily::Issue5InputSequence, &dataset));
+        assert!(!family_matches(DatasetFamily::Natural, &dataset));
+        assert!(!family_matches(DatasetFamily::Usgs, &dataset));
+        assert!(!family_matches(DatasetFamily::LargeNatural, &dataset));
+        assert!(!family_matches(DatasetFamily::SyntheticHelper, &dataset));
     }
 }
 

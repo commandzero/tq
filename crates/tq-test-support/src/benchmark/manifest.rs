@@ -55,6 +55,8 @@ pub enum DatasetFamily {
     LargeNatural,
     /// Deterministic startup/helper fixture.
     SyntheticHelper,
+    /// Reviewed deterministic multi-document sequence for `inputs`.
+    Issue5InputSequence,
 }
 
 /// Natural, non-resized dataset category.

@@ -12,7 +12,7 @@ Goals:
 - Reuse jq comparison, path, JSON, number, and resource-limit policies already implemented by tq.
 - Preserve lazy generator behavior for `limit`, `any`, `all`, `paths`, `tostream`, and `inputs`.
 - Give the evaluator controlled access to remaining decoded inputs without coupling `tq-core` to files or stdin.
-- Aim for no more than 2.0 times jq's median wall time and 1.5 times jq's median peak RSS on representative, correctness-equivalent JSON workloads.
+- Aim for no more than 2.0 times jq's median wall time and 1.5 times jq's maximum observed peak RSS on representative, correctness-equivalent JSON workloads.
 
 Non-goals:
 
@@ -61,7 +61,7 @@ Mark full-array transforms as blocking. Keep path walkers, predicates, `limit`, 
 
 ### Measure a soft jq-relative performance target
 
-Add representative same-format JSON benchmarks for collection transforms, path traversal, JSON conversion, short-circuit generators, scalar utilities, and `inputs`. Compare release builds on the same recorded host with identical inputs, equivalent queries, output sinks, warmups, and sample counts. Use the median valid sample for both wall time and peak RSS. The target is a wall-time ratio no greater than 2.0 and a peak-RSS ratio no greater than 1.5 relative to jq.
+Add representative same-format JSON benchmarks for collection transforms, path traversal, JSON conversion, short-circuit generators, scalar utilities, and `inputs`. Compare release builds on the same recorded host with identical inputs, equivalent queries, output sinks, warmups, and sample counts. Use the median valid sample for wall time and the maximum observed peak RSS. The target is a wall-time ratio no greater than 2.0 and a peak-RSS ratio no greater than 1.5 relative to jq.
 
 These are diagnostic targets, not acceptance gates. Correctness, bounded resource behavior, and tq's existing self-regression policy remain hard requirements. A target miss stays in the report and creates an optimization lead, but does not encourage workload-specific shortcuts or block the compatible implementation.
 

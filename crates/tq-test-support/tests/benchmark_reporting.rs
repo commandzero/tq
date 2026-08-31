@@ -6,10 +6,11 @@ use serde_json::json;
 use tq_test_support::{
     benchmark::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
-        BenchmarkRow, BenchmarkSample, Comparability, CorrectnessDecision, CorrectnessObservation,
-        CorrectnessPayload, ExecutionClass, InputFormat, OutputContractKind, RegressionGate,
-        RegressionThresholds, collect_environment, compare_reports, correctness_gate,
-        evaluate_regression, populate_reference_ratios, semantic_digest, summarize_samples,
+        BenchmarkRow, BenchmarkSample, Comparability, ComparisonFamily, CorrectnessDecision,
+        CorrectnessObservation, CorrectnessPayload, ExecutionClass, InputFormat,
+        OutputContractKind, RegressionGate, RegressionThresholds, SoftObjectiveStatus,
+        collect_environment, compare_reports, correctness_gate, evaluate_regression,
+        populate_reference_ratios, semantic_digest, summarize_samples,
     },
     compatibility::ProcessStatus,
     corpus::ArtifactIdentity,
@@ -161,13 +162,13 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
         }],
         tools: Vec::new(),
         cases: vec![BenchmarkRow {
-            case_id: "benchmark.identity".to_owned(),
+            case_id: "benchmark.issue5-identity".to_owned(),
             adapter_id: "tq-json".to_owned(),
             source_id: "source".to_owned(),
             tier: "small".to_owned(),
             input_format: InputFormat::Json,
             execution_class: ExecutionClass::Document,
-            comparison_families: Vec::new(),
+            comparison_families: vec![ComparisonFamily::SameFormat],
             command: vec!["tq".to_owned(), ".".to_owned()],
             outcome: BenchmarkOutcome::Timed,
             warmups: 2,
@@ -180,6 +181,8 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
             samples,
             summary,
             reference_ratios: BTreeMap::new(),
+            reference_peak_rss_ratios: BTreeMap::new(),
+            soft_performance_objective: None,
         }],
         comparability: Comparability::default(),
         regression_gate: RegressionGate::default(),
@@ -196,6 +199,52 @@ fn reference_ratios_are_independent_and_have_no_composite_score() {
     report.cases.push(jq);
     populate_reference_ratios(&mut report.cases, &["jq-json"]);
     assert!(report.cases[0].reference_ratios.contains_key("jq-json"));
+    assert!(
+        report.cases[0]
+            .reference_peak_rss_ratios
+            .contains_key("jq-json")
+    );
+    let objective = report.cases[0]
+        .soft_performance_objective
+        .as_ref()
+        .expect("tq/jq objective");
+    assert_eq!(objective.wall_time_ratio, Some(1.0));
+    assert_eq!(objective.peak_rss_ratio, Some(1.0));
+    assert_eq!(
+        objective.wall_time,
+        tq_test_support::benchmark::SoftObjectiveStatus::Met
+    );
+    assert_eq!(
+        objective.peak_rss,
+        tq_test_support::benchmark::SoftObjectiveStatus::Met
+    );
+    assert!(
+        report
+            .render_human()
+            .contains("soft jq target: time Met, rss Met")
+    );
     let value = serde_json::to_value(&report.cases[0]).expect("row JSON");
     assert!(value.get("composite_score").is_none());
+}
+
+#[test]
+fn soft_jq_objective_rejects_incorrect_or_policy_mismatched_rows() {
+    let mut report = campaign("machine-a", "digest-a", 100, 1024);
+    let mut jq = report.cases[0].clone();
+    jq.adapter_id = "jq-json".to_owned();
+    jq.outcome = BenchmarkOutcome::Incorrect;
+    report.cases.push(jq);
+    populate_reference_ratios(&mut report.cases, &["jq-json"]);
+    let objective = report.cases[0]
+        .soft_performance_objective
+        .as_ref()
+        .expect("issue 5 objective");
+    assert_eq!(objective.wall_time, SoftObjectiveStatus::NotComparable);
+    assert_eq!(objective.peak_rss, SoftObjectiveStatus::NotComparable);
+    assert!(report.cases[0].reference_ratios.is_empty());
+
+    report.cases[1].outcome = BenchmarkOutcome::Timed;
+    report.cases[1].limits.output_bytes += 1;
+    populate_reference_ratios(&mut report.cases, &["jq-json"]);
+    assert!(report.cases[0].reference_ratios.is_empty());
 }
