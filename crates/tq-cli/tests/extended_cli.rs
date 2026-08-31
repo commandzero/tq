@@ -732,6 +732,29 @@ fn color_binary_encoding_and_argument_file_limits_are_classified() {
     assert!(!stderr.contains("do-not-leak"));
 }
 
+#[test]
+fn sort_by_accepts_a_comma_generator_as_one_argument() {
+    let output = tq(
+        &[
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            "sort_by(.a,.b)",
+        ],
+        br#"[{"a":1,"b":2},{"a":1,"b":1}]
+"#,
+    );
+    assert_eq!(output.code, 0);
+    assert_eq!(
+        output.stdout,
+        br#"[{"a":1,"b":1},{"a":1,"b":2}]
+"#
+    );
+    assert!(output.stderr.is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn ordered_files_preserve_a_complete_frame_before_a_closed_downstream_pipe() {

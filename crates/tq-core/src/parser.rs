@@ -446,7 +446,7 @@ impl Parser<'_> {
         {
             if !matches!(self.current().kind, TokenKind::RightParen) {
                 loop {
-                    arguments.push(self.assignment()?);
+                    arguments.push(self.comma()?);
                     if self
                         .take(|kind| matches!(kind, TokenKind::Semicolon))
                         .is_none()
@@ -900,6 +900,28 @@ mod tests {
         assert_eq!(
             parse(".a = .b = 1").unwrap().hir(),
             "set(access(., field:a), set(access(., field:b), 1))"
+        );
+    }
+
+    #[test]
+    fn comma_generator_is_one_function_argument() {
+        assert_eq!(
+            parse("sort_by(.a,.b)").unwrap().hir(),
+            "call(sort_by, comma(access(., field:a), access(., field:b)))"
+        );
+        assert_eq!(
+            parse("sort_by((.a,.b))").unwrap().hir(),
+            "call(sort_by, comma(access(., field:a), access(., field:b)))"
+        );
+        assert_eq!(
+            parse("def pair(f; g): [f, g]; pair(1,2; 3,4)")
+                .unwrap()
+                .hir(),
+            "def(pair; f; g => array(comma(call(f), call(g))); call(pair, comma(1, 2), comma(3, 4)))"
+        );
+        assert_eq!(
+            parse("sort_by(.a,.b; )").unwrap_err().code,
+            "TQ-PARSE-EXPRESSION-001"
         );
     }
 

@@ -2955,8 +2955,8 @@ impl Evaluator<'_> {
         };
         let mut keyed = Vec::new();
         for value in values.iter() {
-            match first_value(self.node(*argument, value, environment, depth)) {
-                Ok(key) => keyed.push((key, value.clone())),
+            match collect_values(self.node(*argument, value, environment, depth)) {
+                Ok(key_values) => keyed.push((Value::array(key_values), value.clone())),
                 Err(error) => return one_error(error),
             }
         }
@@ -4244,6 +4244,30 @@ mod tests {
     }
 
     #[test]
+    fn keyed_sort_uses_every_value_from_its_filter() {
+        assert_eq!(
+            json(run(
+                "sort_by(.a,.b)",
+                r#"[{"a":1,"b":2},{"a":1,"b":1},{"a":0,"b":9}]"#,
+            )),
+            [r#"[{"a":0,"b":9},{"a":1,"b":1},{"a":1,"b":2}]"#]
+        );
+        assert_eq!(
+            json(run(
+                "unique_by(.a,.b)",
+                r#"[{"a":1,"b":2,"id":"first"},{"a":1,"b":1},{"a":1,"b":2,"id":"last"}]"#,
+            )),
+            [r#"[{"a":1,"b":1},{"a":1,"b":2,"id":"first"}]"#]
+        );
+        assert_eq!(json(run("sort_by(empty)", "[3,1,2]")), ["[3,1,2]"]);
+        assert_eq!(json(run("sort_by(.)", "[3,1,2]")), ["[1,2,3]"]);
+        assert!(
+            json(run(r#"sort_by(.a, error("bad"))"#, r#"[{"a":1}]"#,))[0]
+                .starts_with("error:runtime error: bad")
+        );
+    }
+
+    #[test]
     fn parallel_collections_preserve_order_and_extrema_ties() {
         let count = PARALLEL_SORT_THRESHOLD + 1;
         let original = (0..count)
@@ -4303,6 +4327,10 @@ mod tests {
     fn user_functions_preserve_generator_arguments_scope_and_managed_recursion() {
         assert_eq!(
             json(run("def pair($x; $y): $x, $y; pair((1,2); (3,4))", "null")),
+            ["1", "3", "1", "4", "2", "3", "2", "4"]
+        );
+        assert_eq!(
+            json(run("def pair($x; $y): $x, $y; pair(1,2; 3,4)", "null")),
             ["1", "3", "1", "4", "2", "3", "2", "4"]
         );
         assert_eq!(json(run("def twice(f): f | f; twice(. + 1)", "1")), ["3"]);

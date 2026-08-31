@@ -1502,6 +1502,12 @@ mod tests {
         .unwrap();
         resolve(parse("env").unwrap(), &ResolveOptions::default()).unwrap();
         resolve(parse("input_filename").unwrap(), &ResolveOptions::default()).unwrap();
+        resolve(parse("sort_by(.a,.b)").unwrap(), &ResolveOptions::default()).unwrap();
+        resolve(
+            parse("def pair(f; g): [f, g]; pair(1,2; 3,4)").unwrap(),
+            &ResolveOptions::default(),
+        )
+        .unwrap();
     }
 
     #[test]
