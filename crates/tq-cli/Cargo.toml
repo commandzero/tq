@@ -9,6 +9,7 @@ homepage.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
+# The compatibility report is embedded in the published CLI package.
 readme = "../../README.md"
 include = ["src/**", "tests/**", "LICENSE", "../../README.md"]
 
