@@ -7,7 +7,15 @@ archive_root=${TQ_BENCHMARK_ARCHIVE_ROOT:-$HOME/Development/commandzero/tq-bench
 output_dir=${3:-$archive_root/.work/parallel-selected-json/$(date +%Y-%m-%d)}
 runs=${RUNS:-3}
 warmups=${WARMUPS:-2}
-workers=${WORKERS:-$(sysctl -n hw.logicalcpu)}
+if [ -n "${WORKERS:-}" ]; then
+  workers=$WORKERS
+else
+  workers=$(sysctl -n hw.logicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+fi
+worker_counts=(1 4 8)
+if ((workers != 1 && workers != 4 && workers != 8)); then
+  worker_counts+=("$workers")
+fi
 query='[.features[].properties.release] | sort'
 
 mkdir -p "$output_dir"
@@ -24,14 +32,19 @@ if [[ $plan != hybrid-streaming-blocking || $preparation != stable-sort-runs || 
   exit 2
 fi
 
-RAYON_NUM_THREADS=1 "$tq" -i json -o json -c \
-  --max-vm-steps 1000000000 "$query" "$input" > "$output_dir/single.correctness"
-RAYON_NUM_THREADS="$workers" "$tq" -i json -o json -c \
-  --max-vm-steps 1000000000 --report-file "$output_dir/multi.report.json" \
-  "$query" "$input" > "$output_dir/multi.correctness"
-cmp "$output_dir/single.correctness" "$output_dir/multi.correctness"
+run_correctness() {
+  local threads=$1
+  RAYON_NUM_THREADS="$threads" "$tq" -i json -o json -c \
+    --max-vm-steps 1000000000 --report-file "$output_dir/workers-$threads.report.json" \
+    "$query" "$input" > "$output_dir/workers-$threads.correctness"
+}
 
-correctness_sha=$(shasum -a 256 "$output_dir/multi.correctness" | awk '{print $1}')
+for threads in "${worker_counts[@]}"; do
+  run_correctness "$threads"
+  cmp "$output_dir/workers-1.correctness" "$output_dir/workers-$threads.correctness"
+done
+
+correctness_sha=$(shasum -a 256 "$output_dir/workers-1.correctness" | awk '{print $1}')
 input_sha=$(shasum -a 256 "$input" | awk '{print $1}')
 binary_sha=$(shasum -a 256 "$tq" | awk '{print $1}')
 input_bytes=$(stat -f %z "$input")
@@ -42,10 +55,22 @@ run_mode() {
     --max-vm-steps 1000000000 "$query" "$input" > /dev/null
 }
 
+mode_name() {
+  local threads=$1
+  if ((threads == 1)); then
+    echo single
+  elif ((threads == workers)); then
+    echo multi
+  else
+    echo "parallel-$threads"
+  fi
+}
+
 for ((warmup = 1; warmup <= warmups; warmup++)); do
   echo "warmup $warmup/$warmups" >&2
-  run_mode 1
-  run_mode "$workers"
+  for threads in "${worker_counts[@]}"; do
+    run_mode "$threads"
+  done
 done
 
 echo 'mode,workers,run,wall_seconds,user_seconds,system_seconds,cpu_seconds,peak_rss_bytes,output_sha256' \
@@ -55,9 +80,15 @@ measure() {
   local mode=$1 threads=$2 run=$3
   local timing=$output_dir/$mode-$run.time
   echo "measure $run/$runs $mode" >&2
+  local status=0
   /usr/bin/time -lp env RAYON_NUM_THREADS="$threads" "$tq" \
     -i json -o json -c --max-vm-steps 1000000000 "$query" "$input" \
-    > /dev/null 2> "$timing"
+    > /dev/null 2> "$timing" || status=$?
+  if ((status != 0)) && {
+    ! grep -q '^real ' "$timing" || ! grep -q 'Operation not permitted' "$timing"
+  }; then
+    return "$status"
+  fi
   awk -v mode="$mode" -v workers="$threads" -v run="$run" -v output_sha="$correctness_sha" '
     /^real / { wall=$2 }
     /^user / { user=$2 }
@@ -69,11 +100,14 @@ measure() {
 
 for ((run = 1; run <= runs; run++)); do
   if ((run % 2 == 1)); then
-    measure single 1 "$run"
-    measure multi "$workers" "$run"
+    for threads in "${worker_counts[@]}"; do
+      measure "$(mode_name "$threads")" "$threads" "$run"
+    done
   else
-    measure multi "$workers" "$run"
-    measure single 1 "$run"
+    for ((index = ${#worker_counts[@]} - 1; index >= 0; index--)); do
+      threads=${worker_counts[index]}
+      measure "$(mode_name "$threads")" "$threads" "$run"
+    done
   fi
 done
 
@@ -84,6 +118,7 @@ done
   echo "correctness_sha256=$correctness_sha"
   echo "query=$query"
   echo "workers=$workers"
+  echo "worker_counts=${worker_counts[*]}"
   echo "warmups=$warmups"
   echo "runs=$runs"
   echo "tq=$tq"

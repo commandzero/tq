@@ -9,8 +9,8 @@ OPENSPEC ?= openspec
 .PHONY: help fmt fmt-check check lint test openspec-validate \
 	preflight-infra preflight engine-gate \
 	compatibility-smoke compatibility-full \
-	benchmark benchmark-rapid benchmark-smoke benchmark-standard benchmark-large \
-	benchmark-refresh-rapid benchmark-refresh-standard benchmark-refresh-large \
+	benchmark benchmark-rapid benchmark-smoke benchmark-standard benchmark-large benchmark-extra-large \
+	benchmark-refresh-rapid benchmark-refresh-standard benchmark-refresh-large benchmark-refresh-extra-large \
 	benchmark-stack-overflow fuzz
 
 help:
@@ -61,6 +61,9 @@ benchmark-standard: ## Run standard benchmarks with the machine-local corpus
 benchmark-large: ## Run large benchmarks with the machine-local corpus
 	@./scripts/run-campaign.sh benchmark large
 
+benchmark-extra-large: ## Measure selected JSON scaling on the large corpus
+	@./scripts/run-campaign.sh benchmark extra-large
+
 benchmark-refresh-standard: ## Refresh upstream standard sources, then benchmark
 	@TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark standard
 
@@ -69,6 +72,9 @@ benchmark-refresh-rapid: ## Refresh usgs-all-month, then run the rapid matrix
 
 benchmark-refresh-large: ## Refresh the upstream large source, then benchmark
 	@TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark large
+
+benchmark-refresh-extra-large: ## Refresh the large source, then measure parallel scaling
+	@TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark extra-large
 
 benchmark-stack-overflow: ## Run the checked-in Stack Overflow jq benchmark
 	@./scripts/run-campaign.sh benchmark stack-overflow

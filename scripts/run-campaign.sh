@@ -74,6 +74,63 @@ case "$campaign:$profile" in
             --cache-root "$cache_root" \
             --origin "$corpus_origin"
         ;;
+    benchmark:extra-large)
+        mkdir -p "$work_root"
+        cache_root="${TQ_CORPUS_CACHE:-$work_root/corpus}"
+        corpus_origin="${TQ_CORPUS_ORIGIN:-frozen}"
+        cargo build --quiet --release -p tq-cli
+        TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
+        export TQ_BIN
+
+        if [ -n "${TQ_BENCH_MANIFEST:-}" ]; then
+            manifest="$TQ_BENCH_MANIFEST"
+        elif [ -n "${TQ_BENCH_MANIFESTS:-}" ]; then
+            manifest=""
+            old_ifs=$IFS
+            IFS=:
+            for candidate in $TQ_BENCH_MANIFESTS; do
+                if [ "$(jq -r '.source_id' "$candidate")" = microsoft-us-buildings-georgia ]; then
+                    manifest="$candidate"
+                    break
+                fi
+            done
+            IFS=$old_ifs
+        else
+            refresh_json="$(mktemp "${TMPDIR:-/tmp}/tq-corpus.XXXXXX")"
+            trap 'rm -f "$refresh_json"' EXIT HUP INT TERM
+            if [ "$corpus_origin" = refreshed ]; then
+                corpus_command=refresh
+            else
+                corpus_command=prepare
+            fi
+            cargo run --quiet --release -p tq-test-support --bin tq-corpus -- \
+                "$corpus_command" tests/corpus/sources "$cache_root" large >"$refresh_json"
+            manifest="$(jq -r '.manifests[] | select(endswith("/microsoft-us-buildings-georgia/manifest.json"))' "$refresh_json" | head -n 1)"
+            rm -f "$refresh_json"
+            trap - EXIT HUP INT TERM
+        fi
+
+        if [ -z "${manifest:-}" ] || [ ! -f "$manifest" ]; then
+            echo "extra-large benchmark requires the microsoft-us-buildings-georgia manifest" >&2
+            exit 69
+        fi
+        if [ "$(jq -r '.source_id' "$manifest")" != microsoft-us-buildings-georgia ]; then
+            echo "extra-large benchmark manifest is not microsoft-us-buildings-georgia: $manifest" >&2
+            exit 69
+        fi
+        source_path="$(jq -r '.artifacts.source_json.path' "$manifest")"
+        if [ -z "$source_path" ] || [ "$source_path" = null ]; then
+            echo "extra-large benchmark manifest has no source JSON artifact: $manifest" >&2
+            exit 69
+        fi
+        input="$cache_root/$source_path"
+        if [ ! -f "$input" ]; then
+            echo "extra-large benchmark source is missing: $input" >&2
+            exit 69
+        fi
+        exec benchmarks/cases/parallel-selected-json.sh \
+            "$input" "$TQ_BIN" "$work_root/parallel-selected-json/$(date +%Y-%m-%d)"
+        ;;
     benchmark:stack-overflow)
         mkdir -p "$work_root"
         cargo build --quiet --release -p tq-cli

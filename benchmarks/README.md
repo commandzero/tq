@@ -19,6 +19,8 @@ a machine downloads missing sources, then uses the release `tq` binary to
 generate and validate a compact,
 lossless YAML 1.2 JSON-subset representation and TOON. Later runs reuse the
 admitted snapshot without network access, conversion, or full-file hashing.
+Extra-large runs the selected-array JSON scaling benchmark against that same
+Microsoft archive, comparing one, four, eight, and all available Rayon workers.
 
 If a refresh stops after installing generated files but before admitting the
 manifest, resume validation without regenerating the files:
@@ -56,12 +58,16 @@ make benchmark-rapid
 make benchmark-smoke
 make benchmark-standard
 make benchmark-large
+make benchmark-extra-large
+make benchmark-refresh-extra-large
 make benchmark-stack-overflow
 ```
 
 The standard and large targets reuse the machine-local corpus. The explicit
 `benchmark-refresh-rapid`, `benchmark-refresh-standard`, and
 `benchmark-refresh-large` acquire new upstream snapshots before running.
+`benchmark-refresh-extra-large` refreshes the Microsoft archive before running
+the parallel scaling campaign.
 
 `make benchmark` is the default rapid run. It is equivalent to
 `make benchmark-rapid`. The direct campaign runner also defaults to rapid when
@@ -136,6 +142,17 @@ MiB.
 
 The latest full `tq`/`yq`/`jq` campaign is stored in the archive repository. It
 includes the complete standard matrix and a bounded large-corpus diagnostic.
+
+The extra-large parallel campaign is intentionally narrower than the full
+large matrix. It correctness-checks `[.features[].properties.release] | sort`,
+then records wall time, user/system CPU, peak RSS, and output digest for one,
+four, eight, and all available workers. It reuses the validated
+`microsoft-us-buildings-georgia` manifest and writes samples under
+`.work/parallel-selected-json/YYYY-MM-DD/`.
+
+```console
+make benchmark-extra-large
+```
 
 ## Streaming transcode campaign
 
