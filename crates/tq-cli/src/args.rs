@@ -1170,7 +1170,7 @@ mod tests {
             panic!("run command")
         };
         assert_eq!(run.filter, FilterSource::Inline(".".to_owned()));
-        assert!(run.files.is_empty());
+        assert_eq!(run.files, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

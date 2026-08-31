@@ -3190,8 +3190,8 @@ impl Evaluator<'_> {
         };
         let mut keyed = Vec::new();
         for value in values.iter() {
-            match first_value(self.node(*argument, value, environment, depth)) {
-                Ok(key) => keyed.push((key, value.clone())),
+            match collect_values(self.node(*argument, value, environment, depth)) {
+                Ok(key_values) => keyed.push((Value::array(key_values), value.clone())),
                 Err(error) => return one_error(error),
             }
         }
@@ -4947,7 +4947,7 @@ mod tests {
         assert_eq!(json(run(".[1:3]", "[0,1,2,3]")), ["[1,2]"]);
         assert_eq!(json(run(".[] | .x", r#"[{"x":1},{"x":2}]"#)), ["1", "2"]);
         assert_eq!(json(run(".a, .missing?", r#"{"a":1}"#)), ["1", "null"]);
-        assert_eq!(run("empty", "null"), Vec::new());
+        assert_eq!(run("empty", "null"), Vec::<Result<Value, String>>::new());
     }
 
     #[test]
@@ -5077,6 +5077,30 @@ mod tests {
                 r#"[["z"],{}]"#,
                 r#"[["z"]]"#,
             ]
+        );
+    }
+
+    #[test]
+    fn keyed_sort_uses_every_value_from_its_filter() {
+        assert_eq!(
+            json(run(
+                "sort_by(.a,.b)",
+                r#"[{"a":1,"b":2},{"a":1,"b":1},{"a":0,"b":9}]"#,
+            )),
+            [r#"[{"a":0,"b":9},{"a":1,"b":1},{"a":1,"b":2}]"#]
+        );
+        assert_eq!(
+            json(run(
+                "unique_by(.a,.b)",
+                r#"[{"a":1,"b":2,"id":"first"},{"a":1,"b":1},{"a":1,"b":2,"id":"last"}]"#,
+            )),
+            [r#"[{"a":1,"b":1},{"a":1,"b":2,"id":"first"}]"#]
+        );
+        assert_eq!(json(run("sort_by(empty)", "[3,1,2]")), ["[3,1,2]"]);
+        assert_eq!(json(run("sort_by(.)", "[3,1,2]")), ["[1,2,3]"]);
+        assert!(
+            json(run(r#"sort_by(.a, error("bad"))"#, r#"[{"a":1}]"#,))[0]
+                .starts_with("error:runtime error: bad")
         );
     }
 
@@ -5237,6 +5261,10 @@ mod tests {
             json(run("def pair($x; $y): $x, $y; pair((1,2); (3,4))", "null")),
             ["1", "3", "1", "4", "2", "3", "2", "4"]
         );
+        assert_eq!(
+            json(run("def pair($x; $y): $x, $y; pair(1,2; 3,4)", "null")),
+            ["1", "3", "1", "4", "2", "3", "2", "4"]
+        );
         assert_eq!(json(run("def twice(f): f | f; twice(. + 1)", "1")), ["3"]);
         assert_eq!(
             json(run("def wrapped(f): [f, (not)]; wrapped((1,2))", "null")),
@@ -5322,7 +5350,10 @@ mod tests {
         let partial = json(run(r#""before=\(1,error("boom"),2)""#, "null"));
         assert_eq!(partial[0], r#""before=1""#);
         assert!(partial[1].starts_with("error:runtime error: boom"));
-        assert_eq!(run(r#""\(empty)""#, "null"), Vec::new());
+        assert_eq!(
+            run(r#""\(empty)""#, "null"),
+            Vec::<Result<Value, String>>::new()
+        );
     }
 
     #[test]

@@ -1,30 +1,30 @@
 {
   "schema_version": 1,
   "corpus": {
-    "path": "$HOME/Development/commandzero/tq/tests/compatibility/cases",
+    "path": "tests/compatibility/cases",
     "bytes": 77678,
     "sha256": "aa58227330d93adb9859a759a09fcd433b9a3d31850e89f61b5967089045a0bc"
   },
   "tools": [
     {
       "tool": "jq",
-      "path": "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+      "path": "jq",
       "version": "jq-1.8.2-8-g603db3f",
       "executable": {
-        "path": "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "path": "jq",
         "bytes": 527680,
         "sha256": "d25a7231a8cd3ab48ecaab2854d56161860c95d8e3ff067dff0065814218691e"
       },
       "build_features": [
-        "--with-oniguruma=/opt/homebrew/opt/oniguruma --disable-maintainer-mode --disable-shared --enable-static"
+        "--with-oniguruma --disable-maintainer-mode --disable-shared --enable-static"
       ]
     },
     {
       "tool": "yq",
-      "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+      "path": "yq",
       "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2",
       "executable": {
-        "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "path": "yq",
         "bytes": 12996258,
         "sha256": "b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952"
       },

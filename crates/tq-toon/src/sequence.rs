@@ -102,7 +102,7 @@ mod tests {
             WriterConfig::default(),
         )
         .unwrap();
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
     }
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
             error,
             SequenceError::Cardinality(CardinalityError::Multiple)
         ));
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
 
         write_unframed(&mut output, [&values[0]], WriterConfig::default()).unwrap();
         assert_eq!(output, b"true");
@@ -133,7 +133,7 @@ mod tests {
             bytes: Vec::new(),
         };
         assert!(write_sequence(&mut failing, [&value], WriterConfig::default()).is_err());
-        assert!(!failing.bytes.is_empty());
+        assert_ne!(failing.bytes, [] as [u8; 0]);
     }
 
     struct FailAfter {

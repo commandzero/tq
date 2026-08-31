@@ -3,8 +3,8 @@
   "profile": "full",
   "corpus": {
     "path": "tests/compatibility/cases",
-    "bytes": 100485,
-    "sha256": "f5f78554b98581fc275b36f9a4d1ffb3edf0dcbab215637000fbd81b168828a5"
+    "bytes": 98729,
+    "sha256": "c92627b2292e40a600f6cb0d5b2754c93e51ef6c3cbd1ee9ca7dd57b7234fb03"
   },
   "tools": [
     {
@@ -3296,338 +3296,6 @@
           "exit_code": 0,
           "error_class": null,
           "wall_time_micros": 3521,
-          "note": null
-        }
-      ],
-      "semantic_diffs": []
-    },
-    {
-      "id": "builtin.sort-by-generator",
-      "capabilities": [
-        "builtin.sort-by",
-        "function.argument-generator",
-        "execution.blocking"
-      ],
-      "observations": [
-        {
-          "tool": "jq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 0,
-                "b": 9
-              },
-              {
-                "a": 1,
-                "b": 1
-              },
-              {
-                "a": 1,
-                "b": 2
-              }
-            ]
-          ],
-          "stdout_hex": "5b0a20207b0a202020202261223a20302c0a202020202262223a20390a20207d2c0a20207b0a202020202261223a20312c0a202020202262223a20310a20207d2c0a20207b0a202020202261223a20312c0a202020202262223a20320a20207d0a5d0a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 5231,
-          "note": null
-        },
-        {
-          "tool": "yq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 0,
-                "b": 9
-              },
-              {
-                "a": 1,
-                "b": 1
-              },
-              {
-                "a": 1,
-                "b": 2
-              }
-            ]
-          ],
-          "stdout_hex": "5b7b2261223a302c2262223a397d2c7b2261223a312c2262223a317d2c7b2261223a312c2262223a327d5d0a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 7816,
-          "note": null
-        },
-        {
-          "tool": "yq",
-          "input_format": "yaml",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 0,
-                "b": 9
-              },
-              {
-                "a": 1,
-                "b": 1
-              },
-              {
-                "a": 1,
-                "b": 2
-              }
-            ]
-          ],
-          "stdout_hex": "5b7b2261223a302c2262223a397d2c7b2261223a312c2262223a317d2c7b2261223a312c2262223a327d5d0a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 8179,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 0,
-                "b": 9
-              },
-              {
-                "a": 1,
-                "b": 1
-              },
-              {
-                "a": 1,
-                "b": 2
-              }
-            ]
-          ],
-          "stdout_hex": "1e5b335d7b612c627d3a0a2020302c390a2020312c310a2020312c320a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 3901,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "yaml",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 0,
-                "b": 9
-              },
-              {
-                "a": 1,
-                "b": 1
-              },
-              {
-                "a": 1,
-                "b": 2
-              }
-            ]
-          ],
-          "stdout_hex": "1e5b335d7b612c627d3a0a2020302c390a2020312c310a2020312c320a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 3933,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "toon",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 0,
-                "b": 9
-              },
-              {
-                "a": 1,
-                "b": 1
-              },
-              {
-                "a": 1,
-                "b": 2
-              }
-            ]
-          ],
-          "stdout_hex": "1e5b335d7b612c627d3a0a2020302c390a2020312c310a2020312c320a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 5170,
-          "note": null
-        }
-      ],
-      "semantic_diffs": []
-    },
-    {
-      "id": "builtin.unique-by-generator",
-      "capabilities": [
-        "builtin.unique-by",
-        "function.argument-generator",
-        "execution.blocking"
-      ],
-      "observations": [
-        {
-          "tool": "jq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 1,
-                "b": 1,
-                "id": "first"
-              },
-              {
-                "a": 1,
-                "b": 2,
-                "id": "distinct"
-              }
-            ]
-          ],
-          "stdout_hex": "5b0a20207b0a202020202261223a20312c0a202020202262223a20312c0a20202020226964223a20226669727374220a20207d2c0a20207b0a202020202261223a20312c0a202020202262223a20322c0a20202020226964223a202264697374696e6374220a20207d0a5d0a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2927,
-          "note": null
-        },
-        {
-          "tool": "yq",
-          "input_format": "json",
-          "state": "unsupported",
-          "results": [],
-          "stdout_hex": null,
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": null,
-          "exit_code": null,
-          "error_class": null,
-          "wall_time_micros": null,
-          "note": "yq treats a comma generator as sequential unique_by filters rather than one composite key"
-        },
-        {
-          "tool": "yq",
-          "input_format": "yaml",
-          "state": "unsupported",
-          "results": [],
-          "stdout_hex": null,
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": null,
-          "exit_code": null,
-          "error_class": null,
-          "wall_time_micros": null,
-          "note": "yq treats a comma generator as sequential unique_by filters rather than one composite key"
-        },
-        {
-          "tool": "tq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 1,
-                "b": 1,
-                "id": "first"
-              },
-              {
-                "a": 1,
-                "b": 2,
-                "id": "distinct"
-              }
-            ]
-          ],
-          "stdout_hex": "1e5b325d7b612c622c69647d3a0a2020312c312c66697273740a2020312c322c64697374696e63740a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2552,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "yaml",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 1,
-                "b": 1,
-                "id": "first"
-              },
-              {
-                "a": 1,
-                "b": 2,
-                "id": "distinct"
-              }
-            ]
-          ],
-          "stdout_hex": "1e5b325d7b612c622c69647d3a0a2020312c312c66697273740a2020312c322c64697374696e63740a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2776,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "toon",
-          "state": "executed",
-          "results": [
-            [
-              {
-                "a": 1,
-                "b": 1,
-                "id": "first"
-              },
-              {
-                "a": 1,
-                "b": 2,
-                "id": "distinct"
-              }
-            ]
-          ],
-          "stdout_hex": "1e5b325d7b612c622c69647d3a0a2020312c312c66697273740a2020312c322c64697374696e63740a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2370,
           "note": null
         }
       ],
@@ -11383,128 +11051,6 @@
           "exit_code": 0,
           "error_class": null,
           "wall_time_micros": 3109,
-          "note": null
-        }
-      ],
-      "semantic_diffs": []
-    },
-    {
-      "id": "function.argument-generator",
-      "capabilities": [
-        "function.call",
-        "function.argument-generator"
-      ],
-      "observations": [
-        {
-          "tool": "jq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              1,
-              2,
-              3,
-              4
-            ]
-          ],
-          "stdout_hex": "5b0a2020312c0a2020322c0a2020332c0a2020340a5d0a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2645,
-          "note": null
-        },
-        {
-          "tool": "yq",
-          "input_format": "json",
-          "state": "unsupported",
-          "results": [],
-          "stdout_hex": null,
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": null,
-          "exit_code": null,
-          "error_class": null,
-          "wall_time_micros": null,
-          "note": "case adapter is unsupported"
-        },
-        {
-          "tool": "yq",
-          "input_format": "yaml",
-          "state": "unsupported",
-          "results": [],
-          "stdout_hex": null,
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": null,
-          "exit_code": null,
-          "error_class": null,
-          "wall_time_micros": null,
-          "note": "case adapter is unsupported"
-        },
-        {
-          "tool": "tq",
-          "input_format": "json",
-          "state": "executed",
-          "results": [
-            [
-              1,
-              2,
-              3,
-              4
-            ]
-          ],
-          "stdout_hex": "1e5b345d3a20312c322c332c340a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2334,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "yaml",
-          "state": "executed",
-          "results": [
-            [
-              1,
-              2,
-              3,
-              4
-            ]
-          ],
-          "stdout_hex": "1e5b345d3a20312c322c332c340a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2349,
-          "note": null
-        },
-        {
-          "tool": "tq",
-          "input_format": "toon",
-          "state": "executed",
-          "results": [
-            [
-              1,
-              2,
-              3,
-              4
-            ]
-          ],
-          "stdout_hex": "1e5b345d3a20312c322c332c340a",
-          "raw_stdout_hex": null,
-          "stderr_hex": null,
-          "process_status": "exited",
-          "exit_code": 0,
-          "error_class": null,
-          "wall_time_micros": 2407,
           "note": null
         }
       ],
@@ -22328,8 +21874,8 @@
       "harness_errors": 0
     },
     "builtin.sort-by": {
-      "cases": 2,
-      "executed": 12,
+      "cases": 1,
+      "executed": 6,
       "skipped": 0,
       "harness_errors": 0
     },
@@ -22364,9 +21910,9 @@
       "harness_errors": 0
     },
     "builtin.unique-by": {
-      "cases": 2,
-      "executed": 10,
-      "skipped": 2,
+      "cases": 1,
+      "executed": 6,
+      "skipped": 0,
       "harness_errors": 0
     },
     "builtin.utf8bytelength": {
@@ -22880,9 +22426,9 @@
       "harness_errors": 0
     },
     "execution.blocking": {
-      "cases": 14,
-      "executed": 82,
-      "skipped": 2,
+      "cases": 12,
+      "executed": 72,
+      "skipped": 0,
       "harness_errors": 0
     },
     "execution.streaming": {
@@ -22916,9 +22462,9 @@
       "harness_errors": 0
     },
     "function.call": {
-      "cases": 3,
-      "executed": 12,
-      "skipped": 6,
+      "cases": 2,
+      "executed": 8,
+      "skipped": 4,
       "harness_errors": 0
     },
     "function.capture": {
@@ -23592,12 +23138,6 @@
       "executed": 6,
       "skipped": 0,
       "harness_errors": 0
-    },
-    "function.argument-generator": {
-      "cases": 3,
-      "executed": 14,
-      "skipped": 4,
-      "harness_errors": 0
     }
   },
   "capability_matrix": {
@@ -23843,11 +23383,10 @@
     "variable.scope": "supported",
     "variable.shadow": "supported",
     "variable.shadowing": "supported",
-    "variable.unknown": "supported",
-    "function.argument-generator": "supported"
+    "variable.unknown": "supported"
   },
   "capability_counts": {
-    "supported": 225,
+    "supported": 224,
     "partial": 5,
     "divergent": 10,
     "unsupported": 2,

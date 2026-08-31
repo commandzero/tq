@@ -97,11 +97,11 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
         }
         for adapter in adapters.iter().filter(|adapter| adapter["tool"] == "yq") {
             if let Some(query) = adapter.get("query") {
-                assert!(!query.as_str().expect("adapter query").is_empty());
+                assert_ne!(query.as_str().expect("adapter query"), "");
             }
         }
     }
-    assert_eq!(ids.len(), 23);
+    assert_eq!(ids.len(), 24);
 }
 
 #[test]
@@ -122,6 +122,7 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         "benchmark.object-construction",
         "benchmark.path-update",
         "benchmark.blocking-sort",
+        "benchmark.comma-generator-sort",
         "benchmark.dead-sort-length",
         "benchmark.identity-reencode",
         "benchmark.event-stream",

@@ -1848,7 +1848,7 @@ mod tests {
             publication.publish_single(&mut output, 2),
             Err(PublicationError::Cardinality(_))
         ));
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
 
         publication.publish_single(&mut output, 1).unwrap();
         assert_eq!(output, b"abcdef");

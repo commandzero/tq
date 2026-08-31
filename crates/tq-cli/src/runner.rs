@@ -237,7 +237,7 @@ pub fn run_with_io<R: Read + Send, W: Write, E: Write>(
         }
         Command::Compatibility => {
             stdout.write_all(include_bytes!(
-                "../../../tests/compatibility/reviews/coverage-v1.json"
+                "../tests/compatibility/reviews/coverage-v1.json"
             ))?;
             stdout.write_all(b"\n")?;
             Ok(ExitStatus::Success)
@@ -2742,7 +2742,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         };
         if self.options.raw_output {
             let mut writer = LimitedWriter::new(
-                &mut self.writer,
+                &mut *self.writer,
                 &mut self.written,
                 self.options.limits.output_bytes,
             );
@@ -2775,7 +2775,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             return Ok(());
         }
         let mut writer = LimitedWriter::new(
-            &mut self.writer,
+            &mut *self.writer,
             &mut self.written,
             self.options.limits.output_bytes,
         );
@@ -2824,7 +2824,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             .into());
         }
         let mut writer = LimitedWriter::new(
-            &mut self.writer,
+            &mut *self.writer,
             &mut self.written,
             self.options.limits.output_bytes,
         );
@@ -2870,7 +2870,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
     fn flush_unframed(&mut self) -> Result<(), RunError> {
         let value = self.unframed.take().expect("checked unframed output");
         let mut writer = LimitedWriter::new(
-            &mut self.writer,
+            &mut *self.writer,
             &mut self.written,
             self.options.limits.output_bytes,
         );
@@ -3721,13 +3721,13 @@ mod tests {
             ExitStatus::Success
         );
         assert_eq!(output, b"\x1e1\n\x1e2\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
 
         let (status, output, error) =
             execute(&["--input-format", "json", "--unframed", "."], b"1 2");
         assert!(matches!(status, Err(super::RunError::Cardinality(_))));
-        assert!(output.is_empty());
-        assert!(error.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -3830,9 +3830,9 @@ mod tests {
     fn ambient_builtins_are_denied_by_default_and_admitted_explicitly() {
         let (denied, output, error) = execute(&["--output-format", "json", "-c", "env"], b"null\n");
         assert!(denied.is_err());
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
         let error = String::from_utf8(error).expect("UTF-8 stderr");
-        assert!(error.is_empty(), "run_with_io returns errors to its caller");
+        assert_eq!(error, "", "run_with_io returns errors to its caller");
 
         for query in ["now", "input_filename"] {
             let (denied, output, error) =
@@ -3840,8 +3840,8 @@ mod tests {
             let denied = denied.expect_err("platform access should be denied by default");
             assert_eq!(denied.status(), ExitStatus::Runtime);
             assert!(denied.to_string().contains("capability policy"));
-            assert!(output.is_empty());
-            assert!(error.is_empty());
+            assert_eq!(output, [] as [u8; 0]);
+            assert_eq!(error, [] as [u8; 0]);
         }
 
         let (allowed, output, error) = execute(
@@ -3856,7 +3856,7 @@ mod tests {
         );
         assert_eq!(allowed.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"\"object\"\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
 
         let (platform, output, error) = execute(
             &[
@@ -3870,7 +3870,7 @@ mod tests {
         );
         assert_eq!(platform.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[\"<stdin>\",1,\"number\"]\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[derive(Default)]
@@ -3908,7 +3908,7 @@ mod tests {
         let (status, stdout, stderr) = execute(&["."], b"name: Ada");
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"\x1ename: Ada\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -3923,7 +3923,7 @@ mod tests {
         );
         assert_eq!(output.bytes, b"\x1ename: Ada\n");
         assert_eq!(output.flush_points.first(), Some(&1));
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -3940,8 +3940,8 @@ mod tests {
             assert_eq!(automatic.0.unwrap(), ExitStatus::Success);
             assert_eq!(document.0.unwrap(), ExitStatus::Success);
             assert_eq!(automatic.1, document.1);
-            assert!(automatic.2.is_empty());
-            assert!(document.2.is_empty());
+            assert_eq!(automatic.2, [] as [u8; 0]);
+            assert_eq!(document.2, [] as [u8; 0]);
         }
     }
 
@@ -3963,7 +3963,7 @@ mod tests {
             ExitStatus::Success
         );
         assert!(input.reads < 16, "source was read {} times", input.reads);
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -3992,7 +3992,7 @@ mod tests {
             ExitStatus::Success
         );
         assert!(input.reads < 16, "source was read {} times", input.reads);
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -4026,7 +4026,7 @@ mod tests {
             ExitStatus::Success
         );
         assert!(input.reads < 16, "source was read {} times", input.reads);
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -4089,14 +4089,14 @@ mod tests {
             stdout,
             b"6\n42\n{\"kind\":\"test\",\"deps\":[],\"defs\":[\"twice/1\"]}\n"
         );
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
 
         let cycle = ["-L", root.as_str(), "-n", "include \"a\"; ."];
         let (status, stdout, _) = execute(&cycle, b"must not be consumed");
         let error = status.unwrap_err().to_string();
         assert!(error.contains("cyclic module import"));
         assert!(error.contains("a.jq") && error.contains("b.jq"));
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
 
         let escape = ["-L", root.as_str(), "-n", "include \"../outside\"; ."];
         let (status, _, _) = execute(&escape, b"");
@@ -4212,7 +4212,7 @@ mod tests {
         );
         assert_eq!(output.bytes, b"1\n2\n");
         assert_eq!(output.flush_points, [2, 4, 4]);
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -4225,8 +4225,8 @@ mod tests {
                 run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
                 ExitStatus::Success
             );
-            assert!(!output.is_empty());
-            assert!(error.is_empty());
+            assert_ne!(output, [] as [u8; 0]);
+            assert_eq!(error, [] as [u8; 0]);
         }
     }
 
@@ -4235,7 +4235,7 @@ mod tests {
         let (status, stdout, stderr) = execute(&["-n", "1, error(\"later\")"], b"");
         assert!(matches!(status, Err(super::RunError::Runtime(_))));
         assert_eq!(stdout, b"\x1e1\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -4303,7 +4303,7 @@ mod tests {
             b"null",
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
     }
 
     #[test]
@@ -4313,7 +4313,7 @@ mod tests {
             b"[1]",
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
-        assert!(!stdout.is_empty());
+        assert_ne!(stdout, [] as [u8; 0]);
         let report: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
         assert_eq!(report["execution"]["plan"], "events");
         assert_eq!(report["execution"]["input_detection"], "override:json");
@@ -4336,7 +4336,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"1\n3\nnull\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
 
         let (status, stdout, stderr) = execute(
             &[
@@ -4351,7 +4351,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"\"b\"\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -4369,7 +4369,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"1\n3\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -4446,7 +4446,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"1\n2\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -4464,7 +4464,7 @@ mod tests {
         );
         assert!(matches!(status, Err(super::RunError::Runtime(_))));
         assert_eq!(stdout, b"1\n");
-        assert!(stderr.is_empty());
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -4486,8 +4486,8 @@ mod tests {
             status,
             Err(super::RunError::Resource("subtree-bytes"))
         ));
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -4567,8 +4567,8 @@ mod tests {
             );
             assert_eq!(automatic.0.unwrap(), document.0.unwrap());
             assert_eq!(automatic.1, document.1);
-            assert!(automatic.2.is_empty());
-            assert!(document.2.is_empty());
+            assert_eq!(automatic.2, [] as [u8; 0]);
+            assert_eq!(document.2, [] as [u8; 0]);
         }
     }
 
@@ -4579,7 +4579,7 @@ mod tests {
             br#"{"items":[{"x":1}]}"#,
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
-        assert!(!stdout.is_empty());
+        assert_ne!(stdout, [] as [u8; 0]);
         let explain: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
         assert_eq!(explain["execution"]["plan"], "document");
         assert_eq!(
@@ -4656,7 +4656,7 @@ mod tests {
             br#"{"items":[{"value":2},{"value":1},"#,
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
 
         let (status, output, _) = execute(
             &[
@@ -4670,7 +4670,7 @@ mod tests {
             input,
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
 
         let (status, output, _) = execute(
             &["-ijson", "-ojson", "-c", query],
@@ -4703,8 +4703,8 @@ mod tests {
                 execute_with_override(&arguments, input, ExecutionOverride::Document);
             assert_eq!(hybrid.0.unwrap(), document.0.unwrap());
             assert_eq!(hybrid.1, document.1);
-            assert!(hybrid.2.is_empty());
-            assert!(document.2.is_empty());
+            assert_eq!(hybrid.2, [] as [u8; 0]);
+            assert_eq!(document.2, [] as [u8; 0]);
         }
 
         let input = br#"{"items":{"value":1}}"#;
@@ -4936,7 +4936,7 @@ mod tests {
                 .status(),
             ExitStatus::Resource
         );
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
         let failed_report: serde_json::Value =
             serde_json::from_slice(&fs::read(failed_report_path).unwrap()).unwrap();
         assert_eq!(

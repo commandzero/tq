@@ -4,20 +4,26 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-publish = false
+description = "TOON, YAML, JSON, and JSON Lines support for tq"
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+include = ["src/**", "tests/**", "LICENSE", "../../README.md"]
 
 [dependencies]
-memchr = "2.7.6"
+memchr = "2.8.3"
 rayon = "1.12.0"
-serde = "1.0.228"
+serde = "1.0.229"
 serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
-thiserror = "2.0.19"
-tq-core = { path = "../tq-core" }
-tq-toon = { path = "../tq-toon" }
-yaml_serde = "0.10.4"
+thiserror = "2.0.20"
+tq-core = { version = "0.1.0", path = "../tq-core" }
+tq-toon = { version = "0.1.0", path = "../tq-toon" }
+yaml_serde = "0.10.7"
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-tempfile = "3.23.0"
+tempfile = "3.27.0"

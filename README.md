@@ -11,14 +11,17 @@ The language also includes `empty`, `error`, optional access, `try/catch`,
 `reduce`, and `foreach`. See [jq compatibility](docs/compatibility.md) for
 supported syntax and known differences.
 
-## Build and use
+## Install and use
 
 Rust 1.87 or newer is required.
 
 ```console
-cargo build --release
-target/release/tq '.features[] | {id, magnitude: .properties.mag}' feed.json
+cargo install tq-cli
+tq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
+
+To build from a checkout instead, run `cargo build --release` and use
+`target/release/tq`.
 
 With no file argument, `tq` reads stdin. It processes files and `-` in argument
 order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.jsonl`, and `.ndjson`

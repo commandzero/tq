@@ -20,7 +20,10 @@ fn outcome(stdout: &[u8]) -> ProcessOutcome {
 
 #[test]
 fn jq_distinguishes_zero_results_one_null_and_multiple_ordered_results() {
-    assert!(normalize_jq(&outcome(b"")).unwrap().results.is_empty());
+    assert_eq!(
+        normalize_jq(&outcome(b"")).unwrap().results,
+        [] as [serde_json::Value; 0]
+    );
     assert_eq!(
         normalize_jq(&outcome(b"null\n")).unwrap().results,
         [json!(null)]
@@ -52,7 +55,10 @@ fn yq_preserves_document_sequence_and_records_yaml_boundary() {
 
 #[test]
 fn yq_distinguishes_empty_output_and_compact_json_text_sequences() {
-    assert!(normalize_yq(&outcome(b"")).unwrap().results.is_empty());
+    assert_eq!(
+        normalize_yq(&outcome(b"")).unwrap().results,
+        [] as [serde_json::Value; 0]
+    );
     assert_eq!(
         normalize_yq(&outcome(b"1\nnull\n{\"z\":2}\n"))
             .unwrap()
@@ -63,11 +69,9 @@ fn yq_distinguishes_empty_output_and_compact_json_text_sequences() {
 
 #[test]
 fn toon_text_sequence_preserves_zero_one_and_multiline_results() {
-    assert!(
-        normalize_toon_sequence(&outcome(b""))
-            .unwrap()
-            .results
-            .is_empty()
+    assert_eq!(
+        normalize_toon_sequence(&outcome(b"")).unwrap().results,
+        [] as [serde_json::Value; 0]
     );
     let normalized =
         normalize_toon_sequence(&outcome(b"\x1ename: Alice\nage: 30\n\x1eitems[2]: 1,2\n"))
