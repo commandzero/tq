@@ -4267,16 +4267,23 @@ fn binary_multiply(left: &Value, right: &Value) -> Result<Value, VmError> {
 
 fn merge_objects(left: &Object, right: &Object) -> Object {
     let mut merged = left.clone();
-    for (key, right_value) in right {
-        let value = match (merged.get(key), right_value) {
-            (Some(Value::Object(left)), Value::Object(right)) => {
-                Value::object(merge_objects(left, right))
-            }
-            _ => right_value.clone(),
-        };
-        merged.insert(Arc::clone(key), value);
-    }
+    merge_into_object(&mut merged, right);
     merged
+}
+
+fn merge_into_object(merged: &mut Object, right: &Object) {
+    for (key, right_value) in right {
+        if let Some(left_value) = merged.get_mut(key) {
+            match (left_value, right_value) {
+                (Value::Object(left), Value::Object(right)) => {
+                    merge_into_object(Arc::make_mut(left), right);
+                }
+                (left, right) => *left = right.clone(),
+            }
+        } else {
+            merged.insert(Arc::clone(key), right_value.clone());
+        }
+    }
 }
 
 fn numeric(
