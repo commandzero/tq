@@ -895,6 +895,22 @@ mod tests {
     }
 
     #[test]
+    fn json5_document_accepts_required_escape_and_number_forms() {
+        let documents = decode_json5(
+            br"{escaped: '\x41\u0042', continued: 'first\
+second', leading: .5, trailing: 5., positive: +6, negative: -7, exponent: 1e2}",
+            "grammar.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            documents[0].value.to_string(),
+            r#"{"escaped":"AB","continued":"firstsecond","leading":0.5,"trailing":5,"positive":6,"negative":-7,"exponent":100}"#
+        );
+    }
+
+    #[test]
     fn json5_document_preserves_literal_triple_quoted_content() {
         let documents = decode_json5(
             br#"{markdown: """first line

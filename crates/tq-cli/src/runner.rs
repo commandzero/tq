@@ -53,6 +53,8 @@ const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
 const INPUT_FILENAME: &str = "__tq_input_filename";
 const INPUT_LINE_NUMBER: &str = "__tq_input_line_number";
+const JSON5_STREAM_UNSUPPORTED: &str =
+    "JSON5 input is document-at-a-time and cannot satisfy --stream";
 
 /// Command execution failure with a stable exit category.
 #[derive(Debug, Error)]
@@ -388,9 +390,7 @@ fn validate_stream_input_formats(options: &RunOptions) -> Result<(), RunError> {
                 path != Path::new("-") && format_from_path(path) == Some(InputFormat::Json5)
             }));
     if json5_selected {
-        return Err(RunError::Unsupported(
-            "JSON5 input is document-at-a-time and cannot satisfy --stream".to_owned(),
-        ));
+        return Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned()));
     }
     Ok(())
 }
@@ -2492,9 +2492,7 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
         InputFormat::Yaml => Err(RunError::Unsupported(
             "YAML input is document-at-a-time and cannot satisfy --stream".to_owned(),
         )),
-        InputFormat::Json5 => Err(RunError::Unsupported(
-            "JSON5 input is document-at-a-time and cannot satisfy --stream".to_owned(),
-        )),
+        InputFormat::Json5 => Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned())),
         InputFormat::ToonSequence => Err(RunError::Unsupported(
             "TOON sequence input cannot currently be nested inside --stream".to_owned(),
         )),
