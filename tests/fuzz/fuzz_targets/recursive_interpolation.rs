@@ -26,11 +26,17 @@ fuzz_target!(|data: &[u8]| {
         "@base64d",
     ];
     let format = formats[selector % formats.len()];
-    let query = match data.get(1).copied().unwrap_or_default() % 4 {
+    let query = match data.get(1).copied().unwrap_or_default() % 9 {
         0 => "..".to_owned(),
         1 => format!("\"value=\\({source})\""),
         2 => format.to_owned(),
-        _ => format!("{format} \"value=\\({source})\""),
+        3 => format!("{format} \"value=\\({source})\""),
+        4 => "recurse(if type == \"array\" then .[] else empty end)".to_owned(),
+        5 => format!("recurse(. + 1; . < {})", depth.min(16)),
+        6 => "walk(if type == \"number\" then . + 1 else . end)".to_owned(),
+        7 => "label $outer | 1, (label $inner | 2, break $inner, 3), break $outer, 4"
+            .to_owned(),
+        _ => "label $out | try (1, break $out, 2) catch ., 3".to_owned(),
     };
     let Ok(parsed) = parse(&query) else {
         return;

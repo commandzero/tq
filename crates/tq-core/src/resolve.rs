@@ -39,7 +39,7 @@ pub struct BuiltinRegistry;
 
 impl BuiltinRegistry {
     /// Registry semantic version.
-    pub const VERSION: u32 = 2;
+    pub const VERSION: u32 = 3;
 
     /// Returns the signature for a supported built-in.
     #[must_use]
@@ -118,6 +118,7 @@ const BUILTINS: &[Builtin] = &[
     builtin("path", 1, 1, false),
     builtin("paths", 0, 0, false),
     builtin("range", 1, 3, false),
+    builtin("recurse", 0, 2, false),
     builtin("reverse", 0, 0, true),
     builtin("scan", 1, 2, false),
     builtin("scalars", 0, 0, false),
@@ -146,6 +147,7 @@ const BUILTINS: &[Builtin] = &[
     builtin("utf8bytelength", 0, 0, false),
     builtin("values", 0, 0, false),
     builtin("with_entries", 1, 1, true),
+    builtin("walk", 1, 1, true),
 ];
 
 const fn builtin(
@@ -374,11 +376,15 @@ impl ModuleLoader {
                     **catch = self.expand((**catch).clone())?;
                 }
             }
+            ExprKind::Label { body, .. } => {
+                **body = self.expand((**body).clone())?;
+            }
             ExprKind::Identity
             | ExprKind::Literal(_)
             | ExprKind::Variable(_)
             | ExprKind::Empty
-            | ExprKind::RecursiveDescent => {}
+            | ExprKind::RecursiveDescent
+            | ExprKind::Break { .. } => {}
             ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
                 unreachable!("module wrapper handled before child expansion")
             }
@@ -796,11 +802,13 @@ fn walk_expr_mut(expr: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
                 visit(catch);
             }
         }
+        ExprKind::Label { body, .. } => visit(body),
         ExprKind::Identity
         | ExprKind::Literal(_)
         | ExprKind::Variable(_)
         | ExprKind::Empty
-        | ExprKind::RecursiveDescent => {}
+        | ExprKind::RecursiveDescent
+        | ExprKind::Break { .. } => {}
     }
 }
 
@@ -992,6 +1000,8 @@ struct Resolver {
     registry: BuiltinRegistry,
     next_variable: u32,
     next_function: u32,
+    labels: Vec<(Arc<str>, u32)>,
+    next_label: u32,
 }
 
 impl Resolver {
@@ -1008,6 +1018,8 @@ impl Resolver {
             registry: BuiltinRegistry,
             next_variable: 0,
             next_function: 0,
+            labels: Vec::new(),
+            next_label: 0,
         }
     }
 
@@ -1031,6 +1043,36 @@ impl Resolver {
                     ));
                 };
                 *name = Arc::clone(runtime);
+            }
+            ExprKind::Label { name, symbol, body } => {
+                let resolved = self.next_label;
+                self.next_label = self.next_label.checked_add(1).ok_or_else(|| {
+                    error(
+                        "TQ-RESOURCE-LABELS-001",
+                        "label symbol limit exceeded".to_owned(),
+                        expr.span,
+                    )
+                })?;
+                *symbol = Some(resolved);
+                self.labels.push((Arc::clone(name), resolved));
+                let result = self.resolve_expr(body);
+                self.labels.pop();
+                result?;
+            }
+            ExprKind::Break { name, symbol } => {
+                let Some(resolved) = self
+                    .labels
+                    .iter()
+                    .rev()
+                    .find_map(|(candidate, symbol)| (candidate == name).then_some(*symbol))
+                else {
+                    return Err(error(
+                        "TQ-RESOLVE-LABEL-001",
+                        format!("unknown label ${name}"),
+                        expr.span,
+                    ));
+                };
+                *symbol = Some(resolved);
             }
             ExprKind::Interpolation(segments) => {
                 for segment in segments {
@@ -1282,7 +1324,6 @@ impl Resolver {
 fn deferred_builtin(name: &str) -> Option<&'static str> {
     match name {
         "nan" => Some("nonfinite-result"),
-        "recurse" | "walk" => Some("recursive-builtins"),
         _ => None,
     }
 }
@@ -1298,6 +1339,15 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
         ExprKind::RecursiveDescent => {
             add_effect(analysis, Effect::Generator, expr.span);
             add_effect(analysis, Effect::Subtree, expr.span);
+        }
+        ExprKind::Label { body, .. } => {
+            analyze_expr(body, analysis);
+            add_effect(analysis, Effect::Generator, expr.span);
+            add_effect(analysis, Effect::PossibleFailure, expr.span);
+        }
+        ExprKind::Break { .. } => {
+            add_effect(analysis, Effect::Generator, expr.span);
+            add_effect(analysis, Effect::PossibleFailure, expr.span);
         }
         ExprKind::Interpolation(segments) => {
             for segment in segments {
@@ -1430,11 +1480,19 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
                     | "numbers"
                     | "strings"
                     | "nulls"
+                    | "recurse"
             ) {
                 add_effect(analysis, Effect::Generator, expr.span);
             }
             if &**name == "inputs" {
                 add_effect(analysis, Effect::WholeInput, expr.span);
+            }
+            if &**name == "recurse" {
+                add_effect(analysis, Effect::Subtree, expr.span);
+            }
+            if &**name == "walk" {
+                add_effect(analysis, Effect::Document, expr.span);
+                add_effect(analysis, Effect::Generator, expr.span);
             }
             if name.starts_with('@')
                 || matches!(
@@ -1465,6 +1523,8 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
                         | "length"
                         | "has"
                         | "in"
+                        | "recurse"
+                        | "walk"
                 )
             {
                 add_effect(analysis, Effect::PossibleFailure, expr.span);
@@ -1559,8 +1619,25 @@ mod tests {
     }
 
     #[test]
+    fn resolves_labels_in_a_distinct_lexical_namespace() {
+        resolve(
+            parse("1 as $x | label $x | (label $x | break $x), break $x").unwrap(),
+            &ResolveOptions::default(),
+        )
+        .unwrap();
+
+        let error = resolve(
+            parse("label $visible | break $missing").unwrap(),
+            &ResolveOptions::default(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "TQ-RESOLVE-LABEL-001");
+        assert_eq!(error.labels[0].span.start, 17);
+    }
+
+    #[test]
     fn registry_is_versioned_and_checks_arity_and_new_builtin_names() {
-        assert_eq!(BuiltinRegistry::VERSION, 2);
+        assert_eq!(BuiltinRegistry::VERSION, 3);
         assert!(BuiltinRegistry.get("sort_by").unwrap().blocking);
         assert_eq!(
             resolve(parse("range()").unwrap(), &ResolveOptions::default())
@@ -1600,6 +1677,10 @@ mod tests {
             "floor",
             "ceil",
             "fabs",
+            "recurse",
+            "recurse(.)",
+            "recurse(.; true)",
+            "walk(.)",
         ] {
             resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap();
         }
@@ -1609,6 +1690,9 @@ mod tests {
             &ResolveOptions::default(),
         )
         .unwrap();
+        assert_eq!(BuiltinRegistry.get("recurse").unwrap().minimum_arity, 0);
+        assert_eq!(BuiltinRegistry.get("recurse").unwrap().maximum_arity, 2);
+        assert!(BuiltinRegistry.get("walk").unwrap().blocking);
         for format in [
             "@text", "@json", "@html", "@uri", "@csv", "@tsv", "@sh", "@base64", "@base64d",
         ] {
@@ -1620,17 +1704,7 @@ mod tests {
 
     #[test]
     fn every_deferred_grammar_family_has_a_stable_capability_code() {
-        let parse_cases = [
-            ("label $x | .", "TQ-CAP-LABELS"),
-            ("break $x", "TQ-CAP-BREAK"),
-        ];
-        for (query, code) in parse_cases {
-            assert_eq!(parse(query).unwrap_err().code, code, "{query}");
-        }
-        let resolve_cases = [
-            ("nan", "TQ-CAP-NONFINITE-RESULT"),
-            ("recurse", "TQ-CAP-RECURSIVE-BUILTINS"),
-        ];
+        let resolve_cases = [("nan", "TQ-CAP-NONFINITE-RESULT")];
         for (query, code) in resolve_cases {
             let error = resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap_err();
             assert_eq!(error.code, code, "{query}");
@@ -1651,6 +1725,22 @@ mod tests {
         assert!(capabilities.mutation);
         assert!(capabilities.generator);
         assert!(capabilities.possible_failure);
+    }
+
+    #[test]
+    fn recursive_builtins_select_context_preserving_plans() {
+        let recurse =
+            analyze(resolve(parse("recurse(.[]?)").unwrap(), &ResolveOptions::default()).unwrap());
+        assert!(recurse.capabilities().generator);
+        assert!(recurse.capabilities().subtree);
+        assert!(recurse.capabilities().possible_failure);
+        assert_eq!(recurse.analysis().selected_plan, crate::PlanKind::Document);
+
+        let walk = analyze(resolve(parse("walk(.)").unwrap(), &ResolveOptions::default()).unwrap());
+        assert!(walk.capabilities().document);
+        assert!(walk.capabilities().blocking);
+        assert!(walk.capabilities().generator);
+        assert_eq!(walk.analysis().selected_plan, crate::PlanKind::Blocking);
     }
 
     #[test]

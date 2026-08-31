@@ -142,6 +142,11 @@ pub(crate) enum Operation {
     Variable(u32),
     Empty,
     RecursiveDescent,
+    Label {
+        symbol: u32,
+        body: u32,
+    },
+    Break(u32),
     Interpolation(Vec<InterpolationOperand>),
     AccessField {
         base: u32,
@@ -510,6 +515,29 @@ impl Compiler {
             ExprKind::Variable(name) => Operation::Variable(self.string(name)),
             ExprKind::Empty => Operation::Empty,
             ExprKind::RecursiveDescent => Operation::RecursiveDescent,
+            ExprKind::Label { symbol, body, .. } => Operation::Label {
+                symbol: symbol.ok_or_else(|| {
+                    Box::new(
+                        Diagnostic::new(
+                            "TQ-BYTECODE-LABEL-001",
+                            DiagnosticClass::Compile,
+                            "label has no resolved symbol",
+                        )
+                        .at(expr.span, "resolve labels before compilation"),
+                    )
+                })?,
+                body: self.expression(body)?,
+            },
+            ExprKind::Break { symbol, .. } => Operation::Break(symbol.ok_or_else(|| {
+                Box::new(
+                    Diagnostic::new(
+                        "TQ-BYTECODE-LABEL-001",
+                        DiagnosticClass::Compile,
+                        "break has no resolved label symbol",
+                    )
+                    .at(expr.span, "resolve labels before compilation"),
+                )
+            })?),
             ExprKind::Interpolation(segments) => Operation::Interpolation(
                 segments
                     .iter()
@@ -976,6 +1004,7 @@ fn validate_instruction(
                 target(*catch)?;
             }
         }
+        Operation::Label { body, .. } => target(*body)?,
         Operation::LoadInput
         | Operation::Duplicate
         | Operation::Pop
@@ -984,7 +1013,8 @@ fn validate_instruction(
         | Operation::EndCatch
         | Operation::Identity
         | Operation::Empty
-        | Operation::RecursiveDescent => {}
+        | Operation::RecursiveDescent
+        | Operation::Break(_) => {}
     }
     Ok(())
 }
@@ -1220,6 +1250,19 @@ mod tests {
         .disassemble();
         assert!(recursive_interpolation.contains("RecursiveDescent"));
         assert!(recursive_interpolation.contains("Interpolation"));
+
+        let labels = analyze(
+            resolve(
+                parse("label $out | 1, break $out, 2").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .disassemble();
+        assert!(labels.contains("Label"));
+        assert!(labels.contains("Break"));
     }
 
     #[test]

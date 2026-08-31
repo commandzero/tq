@@ -62,9 +62,6 @@ struct Parser<'a> {
 
 impl Parser<'_> {
     fn complete(mut self) -> Result<Expr, Box<Diagnostic>> {
-        if let TokenKind::Deferred(capability) = &self.current().kind {
-            return Err(self.deferred(capability, self.current().span));
-        }
         let expression = self.comma()?;
         if !matches!(self.current().kind, TokenKind::EndOfInput) {
             return Err(self.unexpected("end of query"));
@@ -380,11 +377,12 @@ impl Parser<'_> {
             TokenKind::Try => self.try_catch(token.span),
             TokenKind::Reduce => self.fold(token.span, false),
             TokenKind::Foreach => self.fold(token.span, true),
+            TokenKind::Label => self.label(token.span),
+            TokenKind::Break => self.break_expression(token.span),
             TokenKind::Def => self.definition(token.span),
             TokenKind::Include => self.include(token.span),
             TokenKind::Import => self.import(token.span),
             TokenKind::Module => self.module(token.span),
-            TokenKind::Deferred(capability) => Err(self.deferred(&capability, token.span)),
             _ => Err(self.error_at(
                 "TQ-PARSE-EXPRESSION-001",
                 "expected filter expression",
@@ -684,6 +682,46 @@ impl Parser<'_> {
         Ok(Expr::new(kind, joined(open, close.span)))
     }
 
+    fn label(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let variable = self.advance().clone();
+        let TokenKind::Variable(name) = variable.kind else {
+            return Err(self.error_at(
+                "TQ-PARSE-LABEL-001",
+                "expected label variable after 'label'",
+                variable.span,
+            ));
+        };
+        self.expect(
+            |kind| matches!(kind, TokenKind::Pipe),
+            "'|' after label variable",
+        )?;
+        let body = self.comma()?;
+        let span = joined(open, body.span);
+        Ok(Expr::new(
+            ExprKind::Label {
+                name,
+                symbol: None,
+                body: Box::new(body),
+            },
+            span,
+        ))
+    }
+
+    fn break_expression(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
+        let variable = self.advance().clone();
+        let TokenKind::Variable(name) = variable.kind else {
+            return Err(self.error_at(
+                "TQ-PARSE-BREAK-001",
+                "expected label variable after 'break'",
+                variable.span,
+            ));
+        };
+        Ok(Expr::new(
+            ExprKind::Break { name, symbol: None },
+            joined(open, variable.span),
+        ))
+    }
+
     fn definition(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
         let name = self.advance().clone();
         let TokenKind::Identifier(name_value) = name.kind else {
@@ -890,15 +928,6 @@ impl Parser<'_> {
         )
     }
 
-    fn deferred(&self, capability: &str, span: Span) -> Box<Diagnostic> {
-        let capability = capability.replace('_', "-");
-        self.error_at(
-            &format!("TQ-CAP-{}", capability.to_ascii_uppercase()),
-            &format!("jq capability {capability:?} is deferred"),
-            span,
-        )
-    }
-
     fn error_at(&self, code: &str, message: &str, span: Span) -> Box<Diagnostic> {
         let context = self.source.render_context(span, 160);
         let label = if context.is_empty() {
@@ -1005,6 +1034,20 @@ mod tests {
             parse_bytes("query", &[0xff]).unwrap_err().code,
             "TQ-LEX-UTF8-001"
         );
+    }
+
+    #[test]
+    fn parses_lexical_labels_and_breaks_with_stable_spans() {
+        let query = parse("label $outer | 1, break $outer, 2").unwrap();
+        assert_eq!(
+            query.hir(),
+            "label($outer; comma(comma(1, break($outer)), 2))"
+        );
+        assert_eq!(query.source().text().len() as u64, 33);
+
+        for malformed in ["label", "label x | .", "label $x .", "break", "break x"] {
+            assert!(parse(malformed).is_err(), "{malformed}");
+        }
     }
 
     #[test]
