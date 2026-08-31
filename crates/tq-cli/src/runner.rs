@@ -2379,7 +2379,7 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
     };
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     match format {
-        InputFormat::Json => stream_json_into(reader, stream_options, executor),
+        InputFormat::Json => stream_json_into(buffered_input(reader), stream_options, executor),
         InputFormat::JsonLines => {
             stream_json_lines_into(reader, identity, options, stream_options, executor)
         }
@@ -2387,7 +2387,9 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
         InputFormat::Auto => {
             let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
             match report.selected {
-                InputFormat::Json => stream_json_into(replay, stream_options, executor),
+                InputFormat::Json => {
+                    stream_json_into(buffered_input(replay), stream_options, executor)
+                }
                 InputFormat::Toon => stream_toon_into(replay, options, stream_options, executor),
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detection selected YAML, which is document-at-a-time and cannot satisfy --stream; use --input-format json for JSON syntax".to_owned(),
@@ -3736,6 +3738,35 @@ mod tests {
             reads: 0,
         };
         let command = parse_args(["--input-format", "json", "."]).unwrap();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert!(input.reads < 16, "source was read {} times", input.reads);
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn json_event_stream_buffers_source_reads() {
+        let mut json = Vec::with_capacity(256 * 1024 + 2);
+        json.push(b'"');
+        json.extend(std::iter::repeat_n(b'a', 256 * 1024));
+        json.push(b'"');
+        let mut input = CountingReader {
+            input: Cursor::new(json),
+            reads: 0,
+        };
+        let command = parse_args([
+            "--stream",
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            ".",
+        ])
+        .unwrap();
         let mut output = Vec::new();
         let mut error = Vec::new();
         assert_eq!(
