@@ -954,7 +954,9 @@ fn transcode_reader<R: Read, W: Write>(
 }
 
 fn map_transcode_message(format: InputFormat, message: String) -> RunError {
-    if message.contains("resource limit")
+    if message.contains("prepared output exceeds configured byte limit") {
+        RunError::Resource("output-bytes")
+    } else if message.contains("resource limit")
         || message.contains("limit exceeded")
         || message.contains("preparation")
         || message.contains("spool")
@@ -976,6 +978,9 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
         TranscodeError::Spool(SpoolError::Io(error))
         | TranscodeError::Writer(WriterError::Io(error))
         | TranscodeError::Io(error) => {
+            if let Some(mapped) = map_wrapped_spool_error(&error) {
+                return mapped;
+            }
             let message = error.to_string();
             if message.contains("output resource limit exceeded") {
                 RunError::Resource("output-bytes")
@@ -998,6 +1003,19 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
             message: message.to_owned(),
         }),
     }
+}
+
+fn map_wrapped_spool_error(error: &io::Error) -> Option<RunError> {
+    let source = error.get_ref()?.downcast_ref::<SpoolError>()?;
+    Some(match source {
+        SpoolError::OutputLimit => RunError::Resource("output-bytes"),
+        SpoolError::Cancelled => RunError::Interrupted,
+        SpoolError::MemoryLimit
+        | SpoolError::Disabled
+        | SpoolError::Limit
+        | SpoolError::NestingLimit => RunError::Resource("transcode-preparation"),
+        SpoolError::Io(_) | SpoolError::Decode(_) => return None,
+    })
 }
 
 fn map_publication_error(error: PublicationError) -> RunError {
@@ -3849,6 +3867,19 @@ mod tests {
         );
         let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
         assert_eq!(report["execution"]["resource_outcome"], "resource-limit");
+
+        let command =
+            parse_args(["--input-format", "json", "--max-output-bytes", "1", "."]).unwrap();
+        let mut input = br#"1"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error)
+                .unwrap_err()
+                .status(),
+            ExitStatus::Resource
+        );
+        assert!(output.is_empty());
 
         for arguments in [
             ["--input-format", "json", "--output-format", "json", "."],
