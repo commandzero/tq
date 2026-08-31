@@ -1,25 +1,23 @@
 # Contributing to tq
 
-Use `make` for the repository's standard development tasks:
+Run the repository preflight before submitting a change:
 
 ```console
-make help
-make preflight
+./scripts/preflight.sh
 ```
 
-`make preflight` works even before the `tq` engine exists. It checks formatting,
-compilation, lint rules, workspace tests, and the active OpenSpec change. New
-automation should call this target. The MVP does not depend on hosted CI.
+The script checks formatting, compilation, lint rules, workspace tests, and all
+OpenSpec specifications. New automation should call this script.
 
-These targets run the compatibility, benchmark, and fuzz programs:
+The campaign runner handles compatibility, benchmark, and fuzz programs:
 
 ```console
-make compatibility-smoke
-make compatibility-full
-make benchmark-smoke
-make benchmark-standard
-make benchmark-large
-make fuzz
+./scripts/run-campaign.sh compatibility smoke
+./scripts/run-campaign.sh compatibility full
+./scripts/run-campaign.sh benchmark smoke
+./scripts/run-campaign.sh benchmark standard
+./scripts/run-campaign.sh benchmark large
+./scripts/run-campaign.sh fuzz default
 ```
 
 ## Compatibility-case-first development
@@ -54,15 +52,3 @@ analysis along with the parser, evaluator, compatibility cases, and benchmarks.
 If the change keeps a complete document, every input, or blocking operator
 state, expose that fact in `--explain`. Keep event-plan APIs separate from
 document and whole-input plans with Rust typestate.
-
-## Baseline-first gate
-
-The benchmark corpus and jq/yq baselines define the behavior that `tq` must
-follow. Do not start section 6 or later in
-`openspec/changes/build-tq-mvp/tasks.md` until every task in sections 2 through
-5 is complete.
-
-Run `make engine-gate` before engine work. Until the baseline is complete, the
-command fails and prints the remaining tasks. During the MVP, benchmark results
-come from local runs. Every report must identify the machine and tools because
-results from different systems are not directly comparable.

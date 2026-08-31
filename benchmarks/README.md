@@ -50,29 +50,27 @@ admitted source and resumes an interrupted snapshot. Use `refresh` instead of
 for an explicit full SHA-256 and cross-format audit. Normal benchmark runs use
 the machine-local verification cache and check file metadata before replay.
 
-The Make targets prepare or replay the selected corpus and write local reports:
+The campaign runner prepares or replays the selected corpus and writes local
+reports:
 
 ```console
-make benchmark
-make benchmark-rapid
-make benchmark-smoke
-make benchmark-standard
-make benchmark-large
-make benchmark-extra-large
-make benchmark-refresh-extra-large
-make benchmark-stack-overflow
+./scripts/run-campaign.sh benchmark
+./scripts/run-campaign.sh benchmark rapid
+./scripts/run-campaign.sh benchmark smoke
+./scripts/run-campaign.sh benchmark standard
+./scripts/run-campaign.sh benchmark large
+./scripts/run-campaign.sh benchmark extra-large
+TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark extra-large
+./scripts/run-campaign.sh benchmark stack-overflow
 ```
 
-The standard and large targets reuse the machine-local corpus. The explicit
-`benchmark-refresh-rapid`, `benchmark-refresh-standard`, and
-`benchmark-refresh-large` acquire new upstream snapshots before running.
-`benchmark-refresh-extra-large` refreshes the Microsoft archive before running
-the parallel scaling campaign.
+The standard and large profiles reuse the machine-local corpus. Set
+`TQ_CORPUS_ORIGIN=refreshed` to acquire a new upstream snapshot before running
+the rapid, standard, large, or extra-large profile.
 
-`make benchmark` is the default rapid run. It is equivalent to
-`make benchmark-rapid`. The direct campaign runner also defaults to rapid when
-called as `./scripts/run-campaign.sh benchmark`, and `tq-bench` defaults to the
-same profile when no profile is supplied.
+The campaign runner defaults to the rapid profile when called as
+`./scripts/run-campaign.sh benchmark`, and `tq-bench` uses the same default when
+no profile is supplied.
 
 That target runs the checked-in Stack Overflow scenarios through the shared
 Rust correctness and measurement code.
@@ -151,7 +149,7 @@ four, eight, and all available workers. It reuses the validated
 `.work/parallel-selected-json/YYYY-MM-DD/`.
 
 ```console
-make benchmark-extra-large
+./scripts/run-campaign.sh benchmark extra-large
 ```
 
 ## Streaming transcode campaign

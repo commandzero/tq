@@ -106,8 +106,8 @@ The compatibility suite sends the same cases through jq, yq, and tq, then
 compares result order, result count, failures, and raw framing.
 
 ```console
-make compatibility-smoke
-make compatibility-full
+./scripts/run-campaign.sh compatibility smoke
+./scripts/run-campaign.sh compatibility full
 target/release/tq compatibility
 ```
 
@@ -119,9 +119,9 @@ identity, and every incorrect or failed run. The runner does not resize inputs
 to manufacture target sizes.
 
 ```console
-make benchmark-smoke
-make benchmark-standard
-make benchmark-large       # opt-in; uses the natural ~1 GB-class corpus
+./scripts/run-campaign.sh benchmark smoke
+./scripts/run-campaign.sh benchmark standard
+./scripts/run-campaign.sh benchmark large  # opt-in; uses the natural ~1 GB-class corpus
 ```
 
 The case-first workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). See the
