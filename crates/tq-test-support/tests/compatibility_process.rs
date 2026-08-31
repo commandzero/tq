@@ -1,6 +1,6 @@
 //! Compatibility subprocess isolation tests.
 
-use std::{path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 use tq_test_support::compatibility::{Invocation, ProcessStatus, run_process};
 
@@ -15,6 +15,7 @@ fn stdout_stderr_stdin_and_exit_status_are_captured_separately() {
         stdin: b"input\n".to_vec(),
         timeout: Duration::from_secs(2),
         current_dir: None,
+        environment: BTreeMap::new(),
     })
     .expect("process observation");
 
@@ -32,6 +33,7 @@ fn runaway_process_is_killed_and_classified_timeout() {
         stdin: Vec::new(),
         timeout: Duration::from_millis(30),
         current_dir: None,
+        environment: BTreeMap::new(),
     })
     .expect("timeout observation");
 
@@ -52,6 +54,7 @@ fn recorded_command_redacts_structured_argument_values() {
         stdin: Vec::new(),
         timeout: Duration::from_secs(1),
         current_dir: None,
+        environment: BTreeMap::new(),
     })
     .expect("process observation");
 

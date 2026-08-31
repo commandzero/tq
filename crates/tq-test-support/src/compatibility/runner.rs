@@ -289,6 +289,7 @@ fn execute(
         stdin,
         timeout,
         current_dir: Some(repository_root.to_owned()),
+        environment: BTreeMap::from([("TQ_COMPAT_SENTINEL".to_owned(), "present".to_owned())]),
     });
     let outcome = match process {
         Ok(outcome) => outcome,

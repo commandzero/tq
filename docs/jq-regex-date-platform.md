@@ -54,15 +54,22 @@ published by `.github/workflows/regex-date-platform.yml`.
 
 ## Environment and input metadata
 
-`env`, `input_filename`, and `input_line_number` are denied by default.
-`--allow-environment` captures Unicode process environment pairs into a
-query-visible object. `--allow-platform` admits input identity/line metadata.
+`env`, `$ENV`, `input_filename`, and `input_line_number` are denied by default.
+`--allow-environment` captures one startup snapshot of Unicode process
+environment pairs. `env` and `$ENV` read that same object throughout the
+invocation. `--allow-platform` admits input identity/line metadata.
 Library callers can independently deny either capability with
 `CapabilityPolicy`, even if the command requests it.
 
 Policy failures name only the requested operation and policy class. Reports do
-not serialize environment values unless the query returns them. The executable
-compatibility case checks only `env | type`.
+not serialize environment values unless the query returns them. Compatibility
+cases inspect only object shape and the presence of a fixed campaign sentinel.
+
+`$__loc__` does not require an ambient capability. It returns an ordered object
+with `file` and one-based `line` fields for the reference in the query source.
+Inline CLI filters use `<top-level>`. Filter files and imported modules use
+their path identity, and references inside definitions report the definition
+line rather than the call site.
 
 For multi-document decoded input, `input_line_number` currently identifies the
 first admitted logical input. Per-record physical line tracking and jq's exact
