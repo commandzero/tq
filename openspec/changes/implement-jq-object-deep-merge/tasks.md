@@ -14,7 +14,7 @@
 
 ### Benchmark result
 
-On the recorded local host `e7072e9dbaedb94b8a3a2538095f41b995d8c001ad34b440fe8944326af1c665`, the 10,000-entry generated workload used two warmups and 30 measured samples per tool. tq's median wall time was 71,944.5 microseconds versus jq's 123,634.5 microseconds, a ratio of `0.582` that met the `2.0` goal. tq's peak RSS was 54,132,736 bytes versus jq's 33,210,368 bytes, a ratio of `1.630` that missed the `1.5` soft goal. The result calls for follow-up allocation profiling but does not block this correctness fix.
+On the recorded local host `e7072e9dbaedb94b8a3a2538095f41b995d8c001ad34b440fe8944326af1c665`, the 10,000-entry generated workload used two warmups and 30 measured samples per tool. The reference was jq 1.7.1 at `/nix/store/lmlmb3a5kzza0si8xfghr7x17vg8bzxb-jq-1.7.1-bin/bin/jq` (SHA-256 `ce795a25d5b358cc01b84b079370392d4eb4d49b6d4e3353306eb4b4d8650281`); the candidate was tq 0.1.0 at `target/release/tq` (SHA-256 `222713a8992fcb2f0630234827f99d926a7ba22a34ecc5eeaf11b6956af8357e`). tq's median wall time was 71,944.5 microseconds versus jq's 123,634.5 microseconds, a ratio of `0.582` that met the `2.0` goal. tq's peak RSS was 54,132,736 bytes versus jq's 33,210,368 bytes, a ratio of `1.630` that missed the `1.5` soft goal. The result calls for follow-up allocation profiling but does not block this correctness fix.
 
 ## 4. Verify compatibility and repository health
 
