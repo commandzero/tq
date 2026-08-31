@@ -3,7 +3,6 @@
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
-    io,
     rc::Rc,
     sync::{
         Arc,
@@ -25,7 +24,7 @@ use crate::{
     VmObservations,
     ast::{AssignmentOperator, BinaryOperator, ParameterKind, UnaryOperator},
     bytecode::{InterpolationOperand, KeyOperand, Operation},
-    stdlib,
+    format, stdlib,
 };
 
 pub(crate) const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
@@ -431,6 +430,15 @@ fn managed_operation_supported(bytecode: &Bytecode, operation: &Operation) -> bo
                             | "type"
                             | "unique"
                             | "utf8bytelength"
+                            | "@base64"
+                            | "@base64d"
+                            | "@csv"
+                            | "@html"
+                            | "@json"
+                            | "@sh"
+                            | "@text"
+                            | "@tsv"
+                            | "@uri"
                     ))
         }),
         _ => false,
@@ -1559,7 +1567,7 @@ fn evaluate_generator_stream(
                     environment,
                 } => {
                     let piece = interpolation_remaining(&pieces, limits.output_bytes)
-                        .and_then(|remaining| interpolation_value(&value, remaining));
+                        .and_then(|remaining| format::text(&value, remaining));
                     let piece = match piece {
                         Ok(piece) => piece,
                         Err(error) => {
@@ -1879,10 +1887,11 @@ fn generator_builtin(
             value => return Err(type_error("tonumber", value)),
         },
         "tostring" => {
-            return interpolation_value(input, output_limit)
+            return format::text(input, output_limit)
                 .map(Value::String)
                 .map(Some);
         }
+        name if name.starts_with('@') => return format::apply(name, input, output_limit).map(Some),
         "type" => return Ok(Some(Value::string(type_name(input)))),
         "unique" => return unique_values(input).into_iter().next().transpose(),
         "utf8bytelength" => match input {
@@ -1892,141 +1901,6 @@ fn generator_builtin(
         _ => return Err(invalid("generator built-in left admitted subset")),
     };
     Ok(selected.then(|| input.clone()))
-}
-
-fn interpolation_value(value: &Value, output_limit: usize) -> Result<Arc<str>, VmError> {
-    match value {
-        Value::String(value) if value.len() <= output_limit => Ok(Arc::clone(value)),
-        Value::String(_) => Err(resource("output-bytes")),
-        value => bounded_json(value, output_limit).map(Arc::from),
-    }
-}
-
-struct BoundedJsonWriter {
-    output: String,
-    limit: usize,
-}
-
-impl BoundedJsonWriter {
-    fn new(limit: usize) -> Self {
-        Self {
-            output: String::new(),
-            limit,
-        }
-    }
-
-    fn push(&mut self, value: &str) -> Result<(), VmError> {
-        let length = self
-            .output
-            .len()
-            .checked_add(value.len())
-            .filter(|length| *length <= self.limit)
-            .ok_or_else(|| resource("output-bytes"))?;
-        self.output
-            .try_reserve_exact(length - self.output.len())
-            .map_err(|_| resource("output-bytes"))?;
-        self.output.push_str(value);
-        Ok(())
-    }
-}
-
-impl std::fmt::Write for BoundedJsonWriter {
-    fn write_str(&mut self, value: &str) -> std::fmt::Result {
-        self.push(value).map_err(|_| std::fmt::Error)
-    }
-}
-
-impl io::Write for BoundedJsonWriter {
-    fn write(&mut self, value: &[u8]) -> io::Result<usize> {
-        let value = std::str::from_utf8(value)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        self.push(value)
-            .map_err(|_| io::Error::other("output byte limit exceeded"))?;
-        Ok(value.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-fn write_jq_number(writer: &mut BoundedJsonWriter, value: &Number) -> Result<(), VmError> {
-    let literal = value.to_string();
-    let Some(exponent) = literal.find(['e', 'E']) else {
-        return writer.push(&literal);
-    };
-    let sign = exponent + 1;
-    if literal
-        .as_bytes()
-        .get(sign)
-        .is_some_and(|byte| *byte == b'+' || *byte == b'-')
-    {
-        return writer.push(&literal);
-    }
-    writer.push(&literal[..sign])?;
-    writer.push("+")?;
-    writer.push(&literal[sign..])
-}
-
-enum JsonFrame<'a> {
-    Value(&'a Value),
-    Array(&'a [Value], usize),
-    Object(&'a Object, usize),
-}
-
-fn bounded_json(value: &Value, output_limit: usize) -> Result<String, VmError> {
-    let mut writer = BoundedJsonWriter::new(output_limit);
-    let mut frames = vec![JsonFrame::Value(value)];
-    while let Some(frame) = frames.pop() {
-        match frame {
-            JsonFrame::Value(Value::Null) => writer.push("null")?,
-            JsonFrame::Value(Value::Bool(value)) => {
-                writer.push(if *value { "true" } else { "false" })?;
-            }
-            JsonFrame::Value(Value::Number(value)) => write_jq_number(&mut writer, value)?,
-            JsonFrame::Value(Value::String(value)) => {
-                serde_json::to_writer(&mut writer, value.as_ref())
-                    .map_err(|_| resource("output-bytes"))?;
-            }
-            JsonFrame::Value(Value::Array(values)) => {
-                writer.push("[")?;
-                frames.push(JsonFrame::Array(values, 0));
-            }
-            JsonFrame::Value(Value::Object(values)) => {
-                writer.push("{")?;
-                frames.push(JsonFrame::Object(values, 0));
-            }
-            JsonFrame::Array(values, next) => {
-                if next == values.len() {
-                    writer.push("]")?;
-                } else {
-                    if next > 0 {
-                        writer.push(",")?;
-                    }
-                    frames.push(JsonFrame::Array(values, next + 1));
-                    frames.push(JsonFrame::Value(&values[next]));
-                }
-            }
-            JsonFrame::Object(values, next) => {
-                if next == values.len() {
-                    writer.push("}")?;
-                } else {
-                    if next > 0 {
-                        writer.push(",")?;
-                    }
-                    let Some((key, value)) = values.get_index(next) else {
-                        return Err(invalid("object entry missing during interpolation"));
-                    };
-                    serde_json::to_writer(&mut writer, key.as_ref())
-                        .map_err(|_| resource("output-bytes"))?;
-                    writer.push(":")?;
-                    frames.push(JsonFrame::Object(values, next + 1));
-                    frames.push(JsonFrame::Value(value));
-                }
-            }
-        }
-    }
-    Ok(writer.output)
 }
 
 fn module_metadata(bytecode: &Bytecode, input: &Value) -> Result<Value, VmError> {
@@ -2621,7 +2495,7 @@ impl Evaluator<'_> {
                         Ok(value) => {
                             let mut nested = pieces.clone();
                             let piece = interpolation_remaining(&nested, self.limits.output_bytes)
-                                .and_then(|remaining| interpolation_value(&value, remaining));
+                                .and_then(|remaining| format::text(&value, remaining));
                             match piece {
                                 Ok(piece) => {
                                     nested[slot] = Some(piece);
@@ -3289,8 +3163,9 @@ impl Evaluator<'_> {
                 }
                 value => one_error(type_error("tonumber", value)),
             },
-            "tostring" => {
-                vec![interpolation_value(input, self.limits.output_bytes).map(Value::String)]
+            "tostring" => vec![format::text(input, self.limits.output_bytes).map(Value::String)],
+            name if name.starts_with('@') => {
+                vec![format::apply(name, input, self.limits.output_bytes)]
             }
             "tojson" => vec![bounded_json(input, self.limits.output_bytes).map(Value::string)],
             "fromjson" => vec![fromjson(input, self.limits)],
@@ -6014,6 +5889,54 @@ mod tests {
             run(r#""\(empty)""#, "null"),
             Vec::<Result<Value, String>>::new()
         );
+    }
+
+    #[test]
+    fn format_filters_match_jq_across_generator_and_fallback_paths() {
+        assert_eq!(json(run("@base64", r#""hello""#)), [r#""aGVsbG8=""#]);
+        assert_eq!(
+            json(run("@base64 | .[0:]", r#""hello""#)),
+            [r#""aGVsbG8=""#]
+        );
+        assert_eq!(
+            json(run(
+                r#"@uri "https://x.test?q=\(.q, .alt)""#,
+                r#"{"q":"a b","alt":"<&"}"#,
+            )),
+            [
+                r#""https://x.test?q=a%20b""#,
+                r#""https://x.test?q=%3C%26""#,
+            ]
+        );
+        assert!(run(r#"@uri "x=\(empty)""#, "null").is_empty());
+        assert_eq!(
+            json(run("@csv, @tsv, @sh", r#"["a b",1,null,true]"#)),
+            [
+                r#""\"a b\",1,,true""#,
+                r#""a b\t1\t\ttrue""#,
+                r#""'a b' 1 null true""#,
+            ]
+        );
+        assert!(json(run("@base64d", r#""not base64""#))[0].starts_with("error:runtime error:"));
+
+        let plan = analyze(resolve(parse("@uri").unwrap(), &ResolveOptions::default()).unwrap())
+            .compile()
+            .unwrap()
+            .document_plan();
+        let mut limited = Vm::new(
+            &plan,
+            Value::string(" "),
+            VmLimits {
+                output_bytes: 2,
+                ..VmLimits::default()
+            },
+        );
+        assert!(matches!(
+            limited.next_result(),
+            Err(crate::VmError::Resource {
+                resource: "output-bytes"
+            })
+        ));
     }
 
     #[test]

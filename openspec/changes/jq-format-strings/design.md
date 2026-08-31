@@ -29,7 +29,7 @@ Replace the deferred lexer token with `TokenKind::Format(Arc<str>)`. The parser 
 
 For a following template, the parser first builds the existing literal or interpolation expression. A plain literal remains unchanged. For an interpolated string, it rewrites each `InterpolationSegment::Expression(expr)` as `expr | @name` while preserving literal segments. Existing interpolation evaluation then handles zero-result expressions, multiple results, error propagation, and concatenation without a new bytecode operation.
 
-The resolver recognizes supported format call names. An unresolved name beginning with `@` gets a format-specific compile diagnostic rather than the generic unknown-function diagnostic.
+The parser validates the format token before lowering so unknown names cannot disappear with a literal-only template. The resolver also recognizes supported format call names and keeps a format-specific guard for unresolved calls beginning with `@`, rather than emitting the generic unknown-function diagnostic.
 
 This is smaller than adding format-specific AST, bytecode, continuation, and fallback-evaluator variants. It also keeps formatting available anywhere an ordinary filter can run.
 

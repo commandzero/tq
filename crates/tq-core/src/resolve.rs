@@ -58,6 +58,15 @@ impl BuiltinRegistry {
 }
 
 const BUILTINS: &[Builtin] = &[
+    builtin("@base64", 0, 0, false),
+    builtin("@base64d", 0, 0, false),
+    builtin("@csv", 0, 0, false),
+    builtin("@html", 0, 0, false),
+    builtin("@json", 0, 0, false),
+    builtin("@sh", 0, 0, false),
+    builtin("@text", 0, 0, false),
+    builtin("@tsv", 0, 0, false),
+    builtin("@uri", 0, 0, false),
     builtin("add", 0, 0, true),
     builtin("all", 2, 2, false),
     builtin("any", 2, 2, false),
@@ -1170,6 +1179,12 @@ impl Resolver {
                         ));
                     }
                     *target = Some(CallTarget::Builtin);
+                } else if name.starts_with('@') {
+                    return Err(error(
+                        "TQ-RESOLVE-FORMAT-001",
+                        format!("unknown jq format {name}"),
+                        expr.span,
+                    ));
                 } else {
                     return Err(error(
                         "TQ-RESOLVE-BUILTIN-001",
@@ -1421,7 +1436,7 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             if &**name == "inputs" {
                 add_effect(analysis, Effect::WholeInput, expr.span);
             }
-            if matches!(
+            if name.starts_with('@') || matches!(
                 &**name,
                 "all"
                     | "any"
@@ -1592,6 +1607,13 @@ mod tests {
             &ResolveOptions::default(),
         )
         .unwrap();
+        for format in [
+            "@text", "@json", "@html", "@uri", "@csv", "@tsv", "@sh", "@base64", "@base64d",
+        ] {
+            let resolved = resolve(parse(format).unwrap(), &ResolveOptions::default()).unwrap();
+            assert!(!analyze(resolved).capabilities().blocking, "{format}");
+        }
+        assert_eq!(parse("@nope").unwrap_err().code, "TQ-RESOLVE-FORMAT-001");
     }
 
     #[test]
@@ -1599,7 +1621,6 @@ mod tests {
         let parse_cases = [
             ("label $x | .", "TQ-CAP-LABELS"),
             ("break $x", "TQ-CAP-BREAK"),
-            ("@text \"x\"", "TQ-CAP-FORMAT-STRINGS"),
         ];
         for (query, code) in parse_cases {
             assert_eq!(parse(query).unwrap_err().code, code, "{query}");

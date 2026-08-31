@@ -101,7 +101,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             }
         }
     }
-    assert_eq!(ids.len(), 27);
+    assert_eq!(ids.len(), 35);
 }
 
 #[test]
@@ -138,6 +138,14 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         "benchmark.user-filter-select",
         "benchmark.user-filter-sort-by",
         "benchmark.regex-test",
+        "benchmark.format-base64-startup",
+        "benchmark.format-json",
+        "benchmark.format-uri-html",
+        "benchmark.format-csv",
+        "benchmark.format-tsv",
+        "benchmark.format-shell",
+        "benchmark.format-base64-roundtrip",
+        "benchmark.format-template",
     ] {
         assert!(
             cases.contains(&format!("\"{workload}\"")),
@@ -151,6 +159,45 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         .expect("event stream case");
     assert_eq!(event["measure_first_result"], true);
     assert_eq!(event["limits"]["rss_bytes"], 128 * 1024 * 1024);
+}
+
+#[test]
+fn format_workloads_separate_startup_and_throughput_jq_tq_comparisons() {
+    let cases = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/cases/workloads.jsonl"),
+    )
+    .expect("benchmark cases")
+    .lines()
+    .map(|line| serde_json::from_str::<Value>(line).expect("case JSON"))
+    .filter(|case| {
+        case["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("benchmark.format-"))
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 8);
+    assert!(cases.iter().any(|case| {
+        case["execution_class"] == "startup"
+            && case["dataset_selector"]["tiers"] == json!(["startup"])
+    }));
+    assert!(
+        cases
+            .iter()
+            .filter(|case| case["execution_class"] != "startup")
+            .all(|case| case["dataset_selector"]["family"] == "natural"
+                && case["dataset_selector"]["tiers"] == json!(["small", "medium", "large"]))
+    );
+    for case in cases {
+        assert_eq!(case["output_contract"]["reference_adapter"], "jq-json");
+        let applicable = case["adapters"]
+            .as_array()
+            .expect("adapter matrix")
+            .iter()
+            .filter(|adapter| adapter["applicable"] == true)
+            .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(applicable, BTreeSet::from(["jq-json", "tq-json"]));
+    }
 }
 
 fn compatibility_ids(root: &Path) -> BTreeSet<String> {

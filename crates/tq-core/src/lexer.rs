@@ -73,6 +73,7 @@ pub(crate) enum TokenKind {
     InterpolationStart,
     InterpolationEnd,
     Number(Arc<str>),
+    Format(Arc<str>),
     Deferred(Arc<str>),
     EndOfInput,
 }
@@ -384,7 +385,8 @@ impl Lexer<'_> {
         {
             self.index += 1;
         }
-        self.push(start, TokenKind::Deferred("format-strings".into()));
+        let name: Arc<str> = self.source.text()[start..self.index].into();
+        self.push(start, TokenKind::Format(name));
         Ok(())
     }
 
@@ -629,6 +631,16 @@ mod tests {
             tokens[tokens.len() - 2].kind,
             TokenKind::StringEnd
         ));
+    }
+
+    #[test]
+    fn tokenizes_format_names_and_adjacent_templates_with_spans() {
+        let source = SourceFile::new(SourceId::new(0), "query", "@base64 | @uri \"q=\\(.)\"");
+        let tokens = lex(&source).unwrap();
+        assert!(matches!(&tokens[0].kind, TokenKind::Format(name) if &**name == "@base64"));
+        assert_eq!((tokens[0].span.start, tokens[0].span.end), (0, 7));
+        assert!(matches!(&tokens[2].kind, TokenKind::Format(name) if &**name == "@uri"));
+        assert!(matches!(tokens[3].kind, TokenKind::StringStart));
     }
 
     #[test]
