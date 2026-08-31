@@ -511,7 +511,7 @@ pub fn decode_toon(
     }])
 }
 
-/// Decodes one ordered, arbitrary-precision-aware JSON document.
+/// Decodes ordered, arbitrary-precision-aware JSON documents.
 ///
 /// # Errors
 ///
