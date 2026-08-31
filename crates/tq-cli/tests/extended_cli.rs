@@ -539,6 +539,29 @@ fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
 }
 
 #[test]
+fn malformed_json_does_not_publish_a_partial_toon_record() {
+    let output = tq(
+        &["."],
+        b"{\n  \"a\": \"\"\"line1\nline2\"\"\",\n  \"b\": 1\n}\n",
+    );
+
+    assert_eq!(output.code, 5);
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Json input rejected"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let later_error = tq(
+        &["-ijson", "."],
+        b"{\"ok\":1}\n{\"a\":\"\"\"line1\nline2\"\"\"}\n",
+    );
+    assert_eq!(later_error.code, 5);
+    assert_eq!(later_error.stdout, b"\x1eok: 1\n");
+}
+
+#[test]
 fn json_lines_stream_resets_roots_and_late_errors_keep_prior_output() {
     let streamed = tq(
         &["--stream", "-ijsonl", "-ojsonl", "."],

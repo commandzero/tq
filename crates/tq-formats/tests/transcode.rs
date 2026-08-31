@@ -155,7 +155,7 @@ fn malformed_unframed_input_and_spool_exhaustion_publish_nothing() {
 }
 
 #[test]
-fn strict_toon_duplicate_key_is_rejected_after_sequence_prefix() {
+fn strict_toon_duplicate_key_does_not_publish_a_partial_sequence_record() {
     let input = b"a: 1\na: 2";
     let (preparation, arena) = preparation(1024, 1024);
     let mut consumer = TranscodeConsumer::new(
@@ -175,7 +175,7 @@ fn strict_toon_duplicate_key_is_rejected_after_sequence_prefix() {
         .decode_into(&mut consumer)
         .is_err()
     );
-    assert!(consumer.into_inner().starts_with(b"\x1ea: 1"));
+    assert_eq!(consumer.into_inner(), [] as [u8; 0]);
 }
 
 #[test]

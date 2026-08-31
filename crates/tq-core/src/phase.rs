@@ -176,7 +176,7 @@ pub enum TranscodeDuplicatePolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TranscodeCommitment {
-    /// Record-separator framing permits completed records to publish directly.
+    /// Record-separator framing publishes each completed record independently.
     DirectSequence,
     /// Bytes remain private until exactly one successful result is known.
     AtomicUnframed,

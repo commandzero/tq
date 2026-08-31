@@ -976,8 +976,14 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
         TranscodeError::Spool(SpoolError::Io(error))
         | TranscodeError::Writer(WriterError::Io(error))
         | TranscodeError::Io(error) => {
-            if error.to_string().contains("output resource limit exceeded") {
+            let message = error.to_string();
+            if message.contains("output resource limit exceeded") {
                 RunError::Resource("output-bytes")
+            } else if message.contains("spool")
+                || message.contains("resource limit")
+                || message.contains("preparation")
+            {
+                RunError::Resource("transcode-preparation")
             } else {
                 RunError::Io(error)
             }
@@ -3730,13 +3736,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_json_transcode_rejects_a_late_duplicate_after_partial_output() {
+    fn identity_json_transcode_rejects_a_late_duplicate_without_partial_output() {
         let (status, output, explain) = execute(
             &["--input-format", "json", "--explain-json", "."],
             br#"{"b":1,"a":2,"b":3}"#,
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
-        assert_eq!(output, b"\x1eb: 1\na: 2");
+        assert_eq!(output, [] as [u8; 0]);
         let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
         assert_eq!(explain["execution"]["plan"], "transcode");
         assert_eq!(explain["execution"]["duplicate_policy"], "reject");
@@ -3957,7 +3963,7 @@ mod tests {
     }
 
     #[test]
-    fn transcode_flushes_the_sequence_prefix_before_root_payload() {
+    fn transcode_flushes_only_after_the_sequence_record_is_complete() {
         let command = parse_args(["--input-format", "json", "."]).unwrap();
         let mut input = br#"{"name":"Ada"}"#.as_slice();
         let mut output = FlushWriter::default();
@@ -3967,7 +3973,7 @@ mod tests {
             ExitStatus::Success
         );
         assert_eq!(output.bytes, b"\x1ename: Ada\n");
-        assert_eq!(output.flush_points.first(), Some(&1));
+        assert_eq!(output.flush_points.first(), Some(&output.bytes.len()));
         assert_eq!(error, [] as [u8; 0]);
     }
 

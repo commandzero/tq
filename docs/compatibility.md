@@ -22,8 +22,8 @@ Identity JSON or strict TOON input written as canonical TOON may select the
 bytes must match forced document execution for inputs without duplicate object
 names. Streaming JSON cannot apply jq's last-value/first-position normalization
 after publishing an earlier member. A duplicate therefore rejects the current
-record. Sequence framing may leave that final record incomplete; unframed output
-publishes nothing. Strict TOON also rejects duplicate paths. Safe key folding,
+record. Sequence framing discards that final record before publication; unframed
+output publishes nothing. Strict TOON also rejects duplicate paths. Safe key folding,
 sorted-key output, explicit jq stream input, slurp, raw/joined output,
 proxy-on-error, non-TOON output, and non-identity filters use the existing plans.
 
