@@ -31,7 +31,7 @@ fn incorrect_candidate_never_receives_timing_samples() {
     )
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
-    assert!(row.samples.is_empty());
+    assert_eq!(row.samples.len(), 0);
     assert!(row.summary.is_none());
 }
 

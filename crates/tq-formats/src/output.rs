@@ -313,7 +313,7 @@ mod tests {
                 )
                 .is_err()
             );
-            assert!(output.is_empty());
+            assert_eq!(output, [] as [u8; 0]);
         }
     }
 
@@ -370,6 +370,6 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(empty.is_empty());
+        assert_eq!(empty, [] as [u8; 0]);
     }
 }

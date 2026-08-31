@@ -90,7 +90,7 @@ fn machine_and_human_reports_include_required_sections() {
 fn baseline_diffs_ignore_timing_but_expose_every_observation_change() {
     let old = CompatibilityBaseline::from(&report(1, 10));
     let same_value = CompatibilityBaseline::from(&report(1, 999_999));
-    assert!(diff_baselines(Some(&old), &same_value).is_empty());
+    assert_eq!(diff_baselines(Some(&old), &same_value).len(), 0);
 
     let candidate = CompatibilityBaseline::from(&report(2, 20));
     let differences = diff_baselines(Some(&old), &candidate);

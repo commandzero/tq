@@ -99,7 +99,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
         }
         for adapter in adapters.iter().filter(|adapter| adapter["tool"] == "yq") {
             if let Some(query) = adapter.get("query") {
-                assert!(!query.as_str().expect("adapter query").is_empty());
+                assert_ne!(query.as_str().expect("adapter query"), "");
             }
         }
     }

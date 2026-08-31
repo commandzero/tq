@@ -59,8 +59,8 @@ fn correctness_gate_rejects_semantic_and_normalization_failures() {
 fn environment_has_stable_identity_and_explicit_optional_fields() {
     let environment = collect_environment("release-benchmark");
     assert_eq!(environment.machine_identity.len(), 64);
-    assert!(!environment.os.is_empty());
-    assert!(!environment.architecture.is_empty());
+    assert_ne!(environment.os, "");
+    assert_ne!(environment.architecture, "");
     assert_eq!(environment.compiler_profile, "release-benchmark");
     let value = serde_json::to_value(environment).expect("environment JSON");
     for optional in [

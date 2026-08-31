@@ -9,7 +9,8 @@ homepage.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-include = ["src/**", "tests/**", "LICENSE"]
+readme = "../../README.md"
+include = ["src/**", "tests/**", "LICENSE", "../../README.md"]
 
 [dependencies]
 serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }

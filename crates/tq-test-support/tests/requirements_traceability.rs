@@ -54,7 +54,7 @@ fn every_mvp_scenario_has_one_explicit_existing_evidence_route() {
         let (path, symbol) = locator
             .rsplit_once('#')
             .unwrap_or_else(|| panic!("{id} evidence must name a symbol: {evidence}"));
-        assert!(!symbol.is_empty(), "{id} has an empty evidence symbol");
+        assert_ne!(symbol, "", "{id} has an empty evidence symbol");
         let evidence_path = root.join(path);
         assert!(
             evidence_path.is_file(),

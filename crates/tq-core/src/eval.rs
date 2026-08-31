@@ -4187,7 +4187,7 @@ mod tests {
         assert_eq!(json(run(".[1:3]", "[0,1,2,3]")), ["[1,2]"]);
         assert_eq!(json(run(".[] | .x", r#"[{"x":1},{"x":2}]"#)), ["1", "2"]);
         assert_eq!(json(run(".a, .missing?", r#"{"a":1}"#)), ["1", "null"]);
-        assert!(run("empty", "null").is_empty());
+        assert_eq!(run("empty", "null"), Vec::<Result<Value, String>>::new());
     }
 
     #[test]
@@ -4390,7 +4390,10 @@ mod tests {
         let partial = json(run(r#""before=\(1,error("boom"),2)""#, "null"));
         assert_eq!(partial[0], r#""before=1""#);
         assert!(partial[1].starts_with("error:runtime error: boom"));
-        assert!(run(r#""\(empty)""#, "null").is_empty());
+        assert_eq!(
+            run(r#""\(empty)""#, "null"),
+            Vec::<Result<Value, String>>::new()
+        );
     }
 
     #[test]

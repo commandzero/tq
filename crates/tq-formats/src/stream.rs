@@ -1297,7 +1297,7 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(values.is_empty());
+        assert_eq!(values, [] as [tq_core::Value; 0]);
         assert!(error.contains("token-bytes"));
         assert!(error.contains("resource limit"));
     }
