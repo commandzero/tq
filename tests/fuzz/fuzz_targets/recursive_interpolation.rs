@@ -8,17 +8,29 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
 
-    let depth = data.first().copied().map_or(0, usize::from).min(64);
-    let mut input = Value::Null;
+    let selector = data.first().copied().map_or(0, usize::from);
+    let depth = selector.min(64);
+    let text = String::from_utf8_lossy(data.get(2..).unwrap_or_default());
+    let mut input = match selector % 3 {
+        0 => Value::string(text.as_ref()),
+        1 => Value::array([Value::string(text.as_ref()), Value::Null, Value::Bool(true)]),
+        _ => Value::Null,
+    };
     for _ in 0..depth {
         input = Value::array([input]);
     }
 
     let source = std::str::from_utf8(data.get(1..).unwrap_or_default()).unwrap_or(".");
-    let query = if data.get(1).is_some_and(|byte| byte & 1 == 0) {
-        "..".to_owned()
-    } else {
-        format!("\"value=\\({source})\"")
+    let formats = [
+        "@text", "@json", "@html", "@uri", "@csv", "@tsv", "@sh", "@base64",
+        "@base64d",
+    ];
+    let format = formats[selector % formats.len()];
+    let query = match data.get(1).copied().unwrap_or_default() % 4 {
+        0 => "..".to_owned(),
+        1 => format!("\"value=\\({source})\""),
+        2 => format.to_owned(),
+        _ => format!("{format} \"value=\\({source})\""),
     };
     let Ok(parsed) = parse(&query) else {
         return;

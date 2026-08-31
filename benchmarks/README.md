@@ -7,6 +7,20 @@ generated formats, full JSON sample data, or reviewed reports here. The
 campaign runner discovers a sibling `tq-benchmarks` checkout automatically;
 set `TQ_BENCHMARK_ARCHIVE_ROOT` when the archive lives elsewhere.
 
+## Required execution permissions
+
+Run every benchmark campaign outside restricted sandboxes with permission to
+inspect child processes. In Codex, this means approving elevated execution for
+the complete campaign command. A sandboxed run can make process-group sampling
+fail, misclassify child outcomes, and leave RSS unavailable.
+
+On macOS, `/usr/bin/time -l` is required for every authoritative peak RSS
+sample. Record its `maximum resident set size` value for each measured jq, yq,
+or tq invocation under the campaign's normal warmup and sample policy. The
+harness may also sample the child process group with `ps`, but that does not
+replace `/usr/bin/time -l`. If either process inspection or `time` output is
+blocked, discard the campaign and rerun it elevated.
+
 The catalog in `cases/workloads.jsonl` runs jq on JSON, yq on JSON and YAML, and
 tq on JSON, YAML, and TOON. It reports native-format views separately. The
 runner checks ordered values before it times a row.
@@ -122,9 +136,9 @@ and records `resource-limit`, timeout, or signal outcomes. It does not time
 unverified output or load a multi-gigabyte result into the runner.
 
 On macOS, RSS enforcement samples the complete child process group with
-`ps -axo pgid=,rss=`. Run resource-gated campaigns in an environment that
-permits that command. If a sandbox blocks process inspection, the report marks
-RSS unavailable and cannot claim that it enforced the limit.
+`ps -axo pgid=,rss=`. This requires the elevated execution described above.
+`/usr/bin/time -l` supplies the authoritative per-process peak RSS evidence.
+Do not accept a sandboxed report that marks RSS unavailable.
 
 Pass `--baseline PATH` to evaluate a manifest-aware tq self-regression. The
 accepted local defaults are 50% median wall time, 20% peak RSS, and at least

@@ -8,6 +8,7 @@ use crate::{
         Access, AssignmentOperator, BinaryOperator, Definition, Expr, ExprKind, FunctionParameter,
         InterpolationSegment, ObjectEntry, ObjectKey, ParameterKind, UnaryOperator,
     },
+    format,
     lexer::{Token, TokenKind, lex, validate_utf8},
 };
 
@@ -364,6 +365,7 @@ impl Parser<'_> {
             }
             TokenKind::Variable(name) => Ok(Expr::new(ExprKind::Variable(name), token.span)),
             TokenKind::Identifier(name) => self.call_or_name(name, token.span),
+            TokenKind::Format(name) => self.format(name, token.span),
             TokenKind::LeftParen => {
                 let expression = self.comma()?;
                 let close = self.expect(
@@ -431,6 +433,50 @@ impl Parser<'_> {
                     ));
                 }
             }
+        }
+    }
+
+    fn format(&mut self, name: Arc<str>, span: Span) -> Result<Expr, Box<Diagnostic>> {
+        if !format::is_supported(&name) {
+            return Err(self.error_at(
+                "TQ-RESOLVE-FORMAT-001",
+                &format!("unknown jq format {name:?}"),
+                span,
+            ));
+        }
+        match self.current().kind.clone() {
+            TokenKind::String(value) => {
+                let string = self.advance().clone();
+                Ok(Expr::new(
+                    ExprKind::Literal(Value::string(value)),
+                    joined(span, string.span),
+                ))
+            }
+            TokenKind::StringStart => {
+                let open = self.advance().span;
+                let mut template = self.interpolation(open)?;
+                let ExprKind::Interpolation(segments) = &mut template.kind else {
+                    unreachable!("interpolation parser returns an interpolation expression");
+                };
+                for segment in segments {
+                    let InterpolationSegment::Expression(expression) = segment else {
+                        continue;
+                    };
+                    let expression_span = expression.span;
+                    let input = std::mem::replace(
+                        expression,
+                        Expr::new(ExprKind::Identity, expression_span),
+                    );
+                    let call = format_call(Arc::clone(&name), span);
+                    *expression = Expr::new(
+                        ExprKind::Pipe(Box::new(input), Box::new(call)),
+                        joined(span, expression_span),
+                    );
+                }
+                template.span = joined(span, template.span);
+                Ok(template)
+            }
+            _ => Ok(format_call(name, span)),
         }
     }
 
@@ -868,6 +914,17 @@ const fn joined(left: Span, right: Span) -> Span {
     Span::new(left.source, left.start, right.end)
 }
 
+fn format_call(name: Arc<str>, span: Span) -> Expr {
+    Expr::new(
+        ExprKind::Call {
+            name,
+            arguments: Vec::new(),
+            target: None,
+        },
+        span,
+    )
+}
+
 const fn filter_terminator(kind: &TokenKind) -> bool {
     matches!(
         kind,
@@ -958,6 +1015,25 @@ mod tests {
             "interpolate(\"x=\", comma(1, 2), \"; y=\", interpolate(\"z=\", ., \"\"), \"\")"
         );
         assert_eq!(parse("..[0]").unwrap().source().text(), "..[0]");
+    }
+
+    #[test]
+    fn lowers_standalone_and_template_formats_to_calls() {
+        assert_eq!(parse("@base64").unwrap().hir(), "call(@base64)");
+        assert_eq!(
+            parse(r#"@uri "https://x.test?q=\(.q)""#).unwrap().hir(),
+            "interpolate(\"https://x.test?q=\", pipe(access(., field:q), call(@uri)), \"\")"
+        );
+        assert_eq!(
+            parse(r#"@uri "literal ?&""#).unwrap().hir(),
+            r#""literal ?&""#
+        );
+        assert!(parse(r#"@uri "\(empty)""#).is_ok());
+        assert!(parse(r#"@uri "\(1,2)""#).is_ok());
+        assert_eq!(
+            parse(r#"@unknown "literal""#).unwrap_err().code,
+            "TQ-RESOLVE-FORMAT-001"
+        );
     }
 
     #[test]

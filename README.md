@@ -123,6 +123,11 @@ Reports record time, CPU, peak RSS, throughput, output size, machine and tool
 identity, and every incorrect or failed run. The runner does not resize inputs
 to manufacture target sizes.
 
+Benchmark commands require elevated child-process inspection permissions and
+must run outside restricted sandboxes. On macOS, every authoritative peak RSS
+sample comes from `/usr/bin/time -l`; a run with unavailable RSS must be rerun
+with the required permissions.
+
 ```console
 ./scripts/run-campaign.sh benchmark smoke
 ./scripts/run-campaign.sh benchmark standard

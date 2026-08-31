@@ -22,6 +22,7 @@ mod ast;
 mod bytecode;
 mod diagnostic;
 mod eval;
+mod format;
 mod lexer;
 mod number;
 mod parser;

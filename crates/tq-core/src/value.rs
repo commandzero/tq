@@ -519,6 +519,9 @@ mod tests {
             serde_json::to_string(&value).unwrap(),
             r#"{"z":9007199254740993,"a":[1e+1000000,0,"x"]}"#
         );
+
+        let oversized = "1".repeat(4097);
+        assert!(serde_json::from_str::<Value>(&oversized).is_err());
     }
 
     #[test]

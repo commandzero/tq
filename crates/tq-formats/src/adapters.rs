@@ -556,7 +556,7 @@ pub fn decode_yaml(
     // JSON is a YAML 1.2 subset. Prefer the exact-literal JSON decoder when
     // the complete source satisfies that subset so yaml_serde cannot round a
     // large decimal through its binary64 visitor before tq sees it.
-    if serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
+    if is_json_number(bytes) || serde_json::from_slice::<serde_json::Value>(bytes).is_ok() {
         let mut documents = decode_json(bytes, identity.clone())?;
         for document in &mut documents {
             document.format = InputFormat::Yaml;
@@ -579,6 +579,51 @@ pub fn decode_yaml(
         });
     }
     Ok(documents)
+}
+
+fn is_json_number(bytes: &[u8]) -> bool {
+    let bytes = bytes.trim_ascii();
+    let mut index = usize::from(bytes.first() == Some(&b'-'));
+    match bytes.get(index) {
+        Some(b'0') => index += 1,
+        Some(b'1'..=b'9') => {
+            index += 1;
+            while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+                index += 1;
+            }
+        }
+        _ => return false,
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let fraction_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == fraction_start {
+            return false;
+        }
+    }
+    if bytes
+        .get(index)
+        .is_some_and(|byte| matches!(byte, b'e' | b'E'))
+    {
+        index += 1;
+        if bytes
+            .get(index)
+            .is_some_and(|byte| matches!(byte, b'+' | b'-'))
+        {
+            index += 1;
+        }
+        let exponent_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == exponent_start {
+            return false;
+        }
+    }
+    index == bytes.len()
 }
 
 /// Decodes an RS-prefix/LF-suffix TOON Text Sequence into ordered documents.
@@ -805,6 +850,10 @@ mod tests {
 
         let over_limit = "1".repeat(4097);
         assert!(decode_yaml(over_limit.as_bytes(), "over-limit-json-subset").is_err());
+
+        let quoted_digits = format!("\"{over_limit}\"");
+        let documents = decode_yaml(quoted_digits.as_bytes(), "quoted-digits").unwrap();
+        assert_eq!(documents[0].value, tq_core::Value::string(over_limit));
     }
 
     #[test]

@@ -2013,6 +2013,7 @@ dependencies = [
 name = "tq-core"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "indexmap",
  "jiff",
  "num-bigint",

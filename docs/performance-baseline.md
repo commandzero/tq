@@ -10,6 +10,13 @@ Record the input size, tool versions, commands, timing, peak RSS, comparison
 method, and important failures. Leave out the full corpus and per-sample data
 from the report itself.
 
+Run all benchmark and baseline commands outside restricted sandboxes with
+elevated permission to inspect child processes. On macOS, collect every
+authoritative peak RSS sample with `/usr/bin/time -l` and record the reported
+`maximum resident set size`. Process-group sampling may supplement this value,
+but it cannot replace it. Discard and rerun any campaign whose sandbox blocks
+process inspection or leaves macOS RSS unavailable.
+
 The current reviewed reports are kept in the `commandzero/tq-benchmarks`
 repository alongside their raw campaign outputs.
 

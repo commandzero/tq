@@ -45,6 +45,11 @@ Add a self-regression threshold only after a stable local baseline exists.
 jq/yq ratios are comparisons, not universal tq pass/fail gates. Preserve
 incorrect, unsupported, timeout, signal/OOM, and resource-limit rows.
 
+Run every benchmark command outside restricted sandboxes with elevated
+permission to inspect child processes. On macOS, use `/usr/bin/time -l` for
+every authoritative peak RSS sample and record `maximum resident set size`.
+Discard and rerun campaigns whose permissions leave RSS unavailable.
+
 ## Capability promotion
 
 When you add syntax or a built-in, update the resolver registry and capability
