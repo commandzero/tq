@@ -2,22 +2,22 @@
   "schema_version": 1,
   "profile": "full",
   "corpus": {
-    "path": "$HOME/Development/commandzero/tq/crates/tq-test-support/../../tests/compatibility/cases",
+    "path": "tests/compatibility/cases",
     "bytes": 98729,
     "sha256": "c92627b2292e40a600f6cb0d5b2754c93e51ef6c3cbd1ee9ca7dd57b7234fb03"
   },
   "tools": [
     {
       "tool": "jq",
-      "path": "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+      "path": "jq",
       "version": "jq-1.8.2-8-g603db3f",
       "executable": {
-        "path": "$HOME/Development/commandzero/tq/target/reference-build/jq/jq",
+        "path": "jq",
         "bytes": 527680,
         "sha256": "d25a7231a8cd3ab48ecaab2854d56161860c95d8e3ff067dff0065814218691e"
       },
       "build_features": [
-        "--with-oniguruma=/opt/homebrew/opt/oniguruma --disable-maintainer-mode --disable-shared --enable-static"
+        "--with-oniguruma --disable-maintainer-mode --disable-shared --enable-static"
       ]
     },
     {
@@ -39,10 +39,10 @@
     },
     {
       "tool": "tq",
-      "path": "$HOME/Development/commandzero/tq/target/release/tq",
+      "path": "tq",
       "version": "tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)",
       "executable": {
-        "path": "$HOME/Development/commandzero/tq/target/release/tq",
+        "path": "tq",
         "bytes": 4313424,
         "sha256": "9664bf1518fa0cd56972e30e6dc8b0c7c74318a584ecb353f8d128875f62395b"
       },
