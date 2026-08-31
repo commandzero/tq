@@ -358,9 +358,12 @@ impl<'de> Visitor<'de> for ValueVisitor {
         if first_key == SERDE_JSON_NUMBER_TOKEN
             && second_key.is_none()
             && let Value::String(literal) = &first_value
-            && let Ok(number) = Number::parse(literal)
         {
-            return Ok(Value::Number(number));
+            match Number::parse(literal) {
+                Ok(number) => return Ok(Value::Number(number)),
+                Err(NumberError::Invalid) => {}
+                Err(error) => return Err(de::Error::custom(error)),
+            }
         }
 
         let mut values = Object::with_capacity(map.size_hint().unwrap_or(0).saturating_add(2));
