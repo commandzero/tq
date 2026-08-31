@@ -95,6 +95,40 @@ fn denied_ambient_access_redacts_diagnostics_and_report_observations() {
 }
 
 #[test]
+fn input_line_number_is_input_context_while_ambient_platform_data_remains_denied() {
+    let line_number = tq(
+        &[
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            "input_line_number",
+        ],
+        b"1\n",
+    );
+    assert_eq!(
+        line_number.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&line_number.stderr)
+    );
+    assert_eq!(line_number.stdout, b"1\n");
+    assert_eq!(line_number.stderr, [] as [u8; 0]);
+
+    for query in ["input_filename", "now"] {
+        let denied = tq(&["-ijson", "-ojson", "-c", query], b"1\n");
+        assert_eq!(denied.code, 5, "{query}");
+        assert_eq!(denied.stdout, [] as [u8; 0], "{query}");
+        assert!(
+            String::from_utf8_lossy(&denied.stderr).contains("capability policy"),
+            "{query}: {}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+    }
+}
+
+#[test]
 fn regex_and_date_failures_keep_distinct_cli_experiences() {
     let unsupported = tq(
         &["--output-format", "json", "-c", r#"test("(?=a)")"#],

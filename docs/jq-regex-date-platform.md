@@ -54,16 +54,18 @@ published by `.github/workflows/regex-date-platform.yml`.
 
 ## Environment and input metadata
 
-`env`, `input_filename`, and `input_line_number` are denied by default.
-`--allow-environment` captures Unicode process environment pairs into a
-query-visible object. `--allow-platform` admits input identity/line metadata.
-Library callers can independently deny either capability with
-`CapabilityPolicy`, even if the command requests it.
+`env` and `input_filename` are denied by default. `--allow-environment` captures
+Unicode process environment pairs into a query-visible object.
+`--allow-platform` admits input source identity as well as the clock and timezone
+operations described above. `input_line_number` reads decoder-owned input
+context and requires no capability flag. Library callers can independently deny
+environment or platform access with `CapabilityPolicy`; those settings do not
+deny line context supplied with an input.
 
 Policy failures name only the requested operation and policy class. Reports do
 not serialize environment values unless the query returns them. The executable
 compatibility case checks only `env | type`.
 
-For multi-document decoded input, `input_line_number` currently identifies the
-first admitted logical input. Per-record physical line tracking and jq's exact
-non-Unicode environment behavior remain documented platform divergences.
+For multi-document decoded input, `input_line_number` currently reports the
+one-based logical document index. Per-record physical line tracking and jq's
+exact non-Unicode environment behavior remain documented divergences.

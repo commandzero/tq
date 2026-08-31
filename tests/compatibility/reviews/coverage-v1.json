@@ -3,8 +3,8 @@
   "profile": "full",
   "corpus": {
     "path": "tests/compatibility/cases",
-    "bytes": 127116,
-    "sha256": "254fb1f87aaeb1d66c89e531e99bcaf34fece607d3d60cb73a3b1233eb63f69b"
+    "bytes": 127561,
+    "sha256": "b2e813904a9d72bc6a0d56b2ee03d36f82255eaef4ecaeed698927ca2f34fbb2"
   },
   "tools": [
     {
@@ -12155,6 +12155,108 @@
       "semantic_diffs": []
     },
     {
+      "id": "input.line-number",
+      "capabilities": [
+        "input.line-number",
+        "input.context"
+      ],
+      "observations": [
+        {
+          "tool": "jq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            1
+          ],
+          "stdout_hex": "310a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3919,
+          "note": null
+        },
+        {
+          "tool": "yq",
+          "input_format": "json",
+          "state": "unsupported",
+          "results": [],
+          "stdout_hex": null,
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": null,
+          "exit_code": null,
+          "error_class": null,
+          "wall_time_micros": null,
+          "note": "case adapter is unsupported"
+        },
+        {
+          "tool": "yq",
+          "input_format": "yaml",
+          "state": "unsupported",
+          "results": [],
+          "stdout_hex": null,
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": null,
+          "exit_code": null,
+          "error_class": null,
+          "wall_time_micros": null,
+          "note": "case adapter is unsupported"
+        },
+        {
+          "tool": "tq",
+          "input_format": "json",
+          "state": "executed",
+          "results": [
+            1
+          ],
+          "stdout_hex": "1e310a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 3080,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "yaml",
+          "state": "executed",
+          "results": [
+            1
+          ],
+          "stdout_hex": "1e310a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 2978,
+          "note": null
+        },
+        {
+          "tool": "tq",
+          "input_format": "toon",
+          "state": "executed",
+          "results": [
+            1
+          ],
+          "stdout_hex": "1e310a",
+          "raw_stdout_hex": null,
+          "stderr_hex": null,
+          "process_status": "exited",
+          "exit_code": 0,
+          "error_class": null,
+          "wall_time_micros": 2936,
+          "note": null
+        }
+      ],
+      "semantic_diffs": []
+    },
+    {
       "id": "interpolation.conversion",
       "capabilities": [
         "interpolation.string",
@@ -23418,6 +23520,18 @@
       "skipped": 1,
       "harness_errors": 0
     },
+    "input.context": {
+      "cases": 1,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
+    "input.line-number": {
+      "cases": 1,
+      "executed": 4,
+      "skipped": 2,
+      "harness_errors": 0
+    },
     "interpolation.conversion": {
       "cases": 1,
       "executed": 4,
@@ -24175,6 +24289,8 @@
     "generator.many": "supported",
     "generator.zero": "supported",
     "identity": "partial",
+    "input.context": "supported",
+    "input.line-number": "supported",
     "interpolation.conversion": "supported",
     "interpolation.escape": "supported",
     "interpolation.generator": "supported",
@@ -24279,7 +24395,7 @@
     "arithmetic.object-deep-merge": "supported"
   },
   "capability_counts": {
-    "supported": 226,
+    "supported": 228,
     "partial": 5,
     "divergent": 10,
     "unsupported": 2,

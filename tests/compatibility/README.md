@@ -30,8 +30,8 @@ table before moving a filter that uses less common language or CLI features.
   structured default is TOON Text Sequence.
 - YAML output uses exact-number-preserving YAML 1.2 flow syntax.
 - `-L` is repeatable and searches only explicit, confined module roots.
-- `env` requires `--allow-environment`; clock, timezone, and input metadata
-  require `--allow-platform`.
+- `env` requires `--allow-environment`; clock, timezone, and `input_filename`
+  require `--allow-platform`. `input_line_number` is available by default.
 
 The generated report records current capability counts and raw-byte
 differences. Labels and breaks are the next unsupported language features.
