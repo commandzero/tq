@@ -290,6 +290,14 @@ enum GeneratorTask {
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
+    RecurseChildren {
+        input: Value,
+        next: usize,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
     RecurseValue {
         value: Value,
         filter: Option<u32>,
@@ -330,21 +338,31 @@ enum GeneratorTask {
 }
 
 fn task_owned_by_label(task: &GeneratorTask, label: u32) -> bool {
-    task_continuations(task).iter().any(
+    task_has_continuation(
+        task,
         |continuation| matches!(continuation, GeneratorContinuation::Label(symbol) if *symbol == label),
     )
 }
 
+fn task_has_continuation(
+    task: &GeneratorTask,
+    predicate: impl Fn(&GeneratorContinuation) -> bool,
+) -> bool {
+    task_continuations(task).iter().any(predicate)
+}
+
 fn task_owned_by_catch(task: &GeneratorTask, boundary: u64) -> bool {
-    task_continuations(task).iter().any(|continuation| {
-        matches!(continuation, GeneratorContinuation::Catch { boundary: candidate, .. } if *candidate == boundary)
-    })
+    task_has_continuation(
+        task,
+        |continuation| matches!(continuation, GeneratorContinuation::Catch { boundary: candidate, .. } if *candidate == boundary),
+    )
 }
 
 fn task_owned_by_limit(task: &GeneratorTask, boundary: u64) -> bool {
-    task_continuations(task).iter().any(|continuation| {
-        matches!(continuation, GeneratorContinuation::LimitItem { boundary: candidate, .. } if *candidate == boundary)
-    })
+    task_has_continuation(
+        task,
+        |continuation| matches!(continuation, GeneratorContinuation::LimitItem { boundary: candidate, .. } if *candidate == boundary),
+    )
 }
 
 fn task_continuations(task: &GeneratorTask) -> &[GeneratorContinuation] {
@@ -359,6 +377,7 @@ fn task_continuations(task: &GeneratorTask) -> &[GeneratorContinuation] {
         | GeneratorTask::FinishAlternative { continuations, .. }
         | GeneratorTask::Traverse { continuations, .. }
         | GeneratorTask::RecurseExpand { continuations, .. }
+        | GeneratorTask::RecurseChildren { continuations, .. }
         | GeneratorTask::RecurseValue { continuations, .. }
         | GeneratorTask::WalkValue { continuations, .. }
         | GeneratorTask::WalkArray { continuations, .. }
@@ -434,11 +453,11 @@ impl TraversalCursor {
     }
 }
 
-fn recursive_children(value: &Value) -> Vec<Value> {
+fn recursive_child(value: &Value, index: usize) -> Option<Value> {
     match value {
-        Value::Array(values) => values.iter().cloned().collect(),
-        Value::Object(values) => values.values().cloned().collect(),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Vec::new(),
+        Value::Array(values) => values.get(index).cloned(),
+        Value::Object(values) => values.get_index(index).map(|(_, value)| value.clone()),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
     }
 }
 
@@ -1023,20 +1042,46 @@ fn evaluate_generator_stream(
                         None,
                     )
                 } else {
-                    let children = recursive_children(&input);
-                    for child in children.into_iter().rev() {
-                        pending.push(GeneratorTask::RecurseValue {
-                            value: child,
-                            filter: None,
-                            condition: None,
-                            depth: depth.saturating_add(1),
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
-                    }
+                    pending.push(GeneratorTask::RecurseChildren {
+                        input,
+                        next: 0,
+                        depth,
+                        environment,
+                        frames,
+                        continuations,
+                    });
                     continue;
                 }
+            }
+            GeneratorTask::RecurseChildren {
+                input,
+                next,
+                depth,
+                environment,
+                frames,
+                continuations,
+            } => {
+                let Some(child) = recursive_child(&input, next) else {
+                    continue;
+                };
+                pending.push(GeneratorTask::RecurseChildren {
+                    input,
+                    next: next.saturating_add(1),
+                    depth,
+                    environment: Arc::clone(&environment),
+                    frames: Arc::clone(&frames),
+                    continuations: continuations.clone(),
+                });
+                pending.push(GeneratorTask::RecurseValue {
+                    value: child,
+                    filter: None,
+                    condition: None,
+                    depth: depth.saturating_add(1),
+                    environment,
+                    frames,
+                    continuations,
+                });
+                continue;
             }
             GeneratorTask::RecurseValue {
                 value,
@@ -5962,6 +6007,43 @@ mod tests {
         )
         .with_cancellation(cancellation);
         assert_eq!(vm.next_result().unwrap_err(), crate::VmError::Interrupted);
+    }
+
+    #[test]
+    fn default_recurse_pulls_wide_children_on_demand() {
+        let plan = analyze(
+            resolve(
+                parse("limit(2; recurse)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let source = format!(
+            "[{}]",
+            (0..128)
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let input: Value = serde_json::from_str(&source).unwrap();
+        let mut vm = Vm::new(
+            &plan,
+            input.clone(),
+            VmLimits {
+                fork_stack: 8,
+                ..VmLimits::default()
+            },
+        );
+
+        assert_eq!(vm.next_result().unwrap(), Some(input));
+        assert_eq!(
+            vm.next_result().unwrap(),
+            Some(serde_json::from_str("0").unwrap())
+        );
+        assert_eq!(vm.next_result().unwrap(), None);
     }
 
     #[test]
