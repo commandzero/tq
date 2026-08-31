@@ -20,9 +20,9 @@
 
 - [x] 4.1 Add jq-target compatibility JSONL cases for all nine standalone formats, formatted interpolation, multiplicity, Unicode, invalid types, and malformed base64, and verify the compatibility schema/discovery tests accept the cases.
 - [x] 4.2 Extend the query fuzz target with standalone and template format syntax plus bounded arbitrary values, and verify the fuzz target builds without adding an unbounded allocation path.
-- [ ] 4.3 Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`; fix all failures and confirm the issue's `"hello" | @base64` reproduction emits `"aGVsbG8="` from the release binary.
+- [x] 4.3 Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`; fix all failures and confirm the issue's `"hello" | @base64` reproduction emits `"aGVsbG8="` from the release binary.
 
 ## 5. Performance comparison
 
 - [x] 5.1 Add correctness-gated jq and tq benchmark cases for scalar and structured conversion, escape expansion, CSV/TSV rows, shell quoting, base64 encode/decode, and formatted interpolation; verify startup-heavy and throughput-heavy workloads use identical inputs and output sinks within each comparison.
-- [x] 5.2 Run the format-string campaign with release tq and the manifest-recorded jq binary, then report per-case median wall-time and peak-RSS ratios against the soft limits of 2.0 and 1.5; retain every miss as visible comparative evidence without making it a CI or release failure.
+- [x] 5.2 Run the format-string campaign outside the restricted sandbox with elevated child-process inspection permissions, release tq, and the manifest-recorded jq binary; on macOS collect every authoritative RSS sample with `/usr/bin/time -l`, report per-case median wall-time and peak-RSS ratios against the soft limits of 2.0 and 1.5, and retain every miss as visible comparative evidence without making it a CI or release failure.

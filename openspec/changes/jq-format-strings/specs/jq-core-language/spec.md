@@ -50,8 +50,12 @@ The language SHALL support the jq 1.7 format filters `@text`, `@json`, `@html`, 
 ## MODIFIED Requirements
 
 ### Requirement: Deferred syntax is explicit
-User-defined `def`, modules/import/include, `reduce`, `foreach`, labels/break, recursive descent, advanced regex, date, environment, and platform I/O built-ins SHALL remain outside this MVP unless separately promoted by an accepted spec. Unsupported syntax MUST fail at compile time with a stable capability identifier.
+Labels and `break`, recursive built-ins such as `recurse` and `walk`, and non-finite result built-ins SHALL remain deferred unless separately promoted by an accepted spec. Unsupported syntax or built-ins MUST fail at compile time with a stable capability identifier. User-defined functions, modules, `reduce`, `foreach`, recursive descent, string interpolation, format strings, regex, date, environment, and admitted platform built-ins are supported by their accepted specifications and MUST NOT be described as deferred.
 
-#### Scenario: Deferred reduce
-- **WHEN** an MVP binary receives a `reduce` expression
-- **THEN** it reports that `reduce` belongs to a deferred compatibility capability and does not partially execute the query
+#### Scenario: Deferred labels and break
+- **WHEN** a query contains `label $out` or `break $out`
+- **THEN** compilation fails with the stable labels or break capability identifier and does not partially execute the query
+
+#### Scenario: Deferred recursive built-in
+- **WHEN** a query calls `recurse` or `walk`
+- **THEN** compilation fails with the stable recursive-builtins capability identifier

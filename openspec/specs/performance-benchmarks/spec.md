@@ -93,7 +93,11 @@ The suite SHALL separately report the native-format end-to-end comparison of jq 
 - **THEN** it presents them in separate labeled tables and does not combine their ratios into one ranking
 
 ### Requirement: Resource and latency metrics
-Each valid benchmark sample SHALL capture wall-clock duration and process exit status. Supported local benchmark hosts MUST additionally capture user CPU, system CPU, peak resident memory, output bytes, and time to first result for cases where the harness can observe it without changing semantics.
+Each valid benchmark sample SHALL capture wall-clock duration and process exit status. Supported local benchmark hosts MUST additionally capture user CPU, system CPU, peak resident memory, output bytes, and time to first result for cases where the harness can observe it without changing semantics. Every accepted benchmark campaign MUST run outside restricted sandboxes with permission to inspect child processes. On macOS, every authoritative peak RSS sample MUST come from the measured process's `maximum resident set size` reported by `/usr/bin/time -l`; harness process-group sampling MAY supplement but MUST NOT replace that measurement.
+
+#### Scenario: Restricted process inspection
+- **WHEN** a sandbox or permission policy prevents child-process inspection or `/usr/bin/time -l` collection on macOS
+- **THEN** the benchmark run is invalid and must be rerun with elevated permissions rather than accepted with unavailable RSS
 
 #### Scenario: Large stream case
 - **WHEN** an explicit stream benchmark runs
@@ -101,7 +105,7 @@ Each valid benchmark sample SHALL capture wall-clock duration and process exit s
 
 #### Scenario: Metric unavailable
 - **WHEN** an operating system cannot provide a requested metric
-- **THEN** the report marks that metric unavailable rather than substituting zero
+- **THEN** the report marks that metric unavailable rather than substituting zero, except that missing macOS RSS caused by restricted permissions invalidates the run
 
 ### Requirement: Statistically useful sampling
 The harness SHALL use warmups and repeated samples appropriate to the natural input size. The default policy MUST run at least 30 measured samples for startup/small cases, 10 for medium cases, and 3 for large cases unless a reviewed campaign time budget explicitly lowers the count.

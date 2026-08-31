@@ -13,6 +13,7 @@ The jq 1.7 contract has two syntax forms. Standalone `@name` formats the current
 - Bound every formatter by `VmLimits::output_bytes`, including temporary buffers whose size can be predicted from input length.
 - Match defined jq 1.7 behavior and choose a deterministic error for decoded bytes that cannot inhabit tq's UTF-8 string model.
 - Aim for no more than 2.0 times jq's wall time and 1.5 times jq's peak resident memory on each comparable, correctness-gated format-string benchmark case.
+- Require benchmark execution outside restricted sandboxes. The runner needs permission to inspect child processes, and macOS campaigns use `/usr/bin/time -l` for every authoritative peak RSS measurement.
 
 **Non-Goals:**
 
@@ -58,6 +59,10 @@ Lexer and parser tests cover token spans, standalone calls, templates, literal-o
 Add representative format-string workloads to the existing benchmark catalogue. The set covers scalar and structured text conversion, expanding escapes, tabular rows, base64 encode/decode, and formatted interpolation. jq and tq must consume the same JSON artifact, write equivalent output to the same sink, and pass the corresponding compatibility case before their samples count.
 
 Run the release tq binary and the manifest-recorded jq binary on the same benchmark host under the existing warmup and sample policy. For each comparable case, report `tq median wall time / jq median wall time` and `tq median peak RSS / jq median peak RSS`. The soft goals are ratios at or below 2.0 and 1.5 respectively. Report startup-heavy and throughput-heavy cases separately so process startup does not hide formatter cost.
+
+All accepted benchmark runs execute with elevated child-process inspection permissions. A restricted sandbox can suppress process-group observations and produce misleading failures or unavailable RSS values. On macOS, wrap each measured jq and tq invocation with `/usr/bin/time -l` and use its `maximum resident set size` value for the authoritative RSS sample. Treat a run without those permissions or measurements as an invalid campaign, not as evidence that RSS is unavailable.
+
+The accepted 30-sample macOS format campaign used two warmups per tool, identical inputs and `/dev/null` sinks, the manifest-recorded jq 1.7.1 binary, and release tq. Median wall-time ratios ranged from 0.992 to 1.009. Median peak RSS ratios measured with `/usr/bin/time -l` were 1.067 for base64 startup, 1.103 for JSON, 1.181 for URI/HTML, 1.076 for CSV, 1.050 for TSV, 1.099 for shell, 1.181 for base64 round trip, and 1.181 for formatted templates. Every case met both soft targets.
 
 A missed target remains visible in the benchmark report and prompts profiling, but it does not fail CI, block correctness work, or override tq's own accepted regression thresholds. This follows the main performance specification's treatment of cross-tool measurements as comparative evidence.
 

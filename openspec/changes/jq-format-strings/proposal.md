@@ -9,7 +9,7 @@ Issue #6 shows that tq rejects jq format strings at compile time, including the 
 - Support the template form, such as `@uri "https://example.test?q=\(.query)"`, where literal text remains unchanged and only interpolation results are escaped.
 - Enforce the existing VM output-byte limit while formatting and return stable compile or runtime diagnostics for unknown formats, invalid input types, malformed base64, and oversized results.
 - Add jq differential cases for standalone filters, template interpolation, Unicode, escaping boundaries, type errors, and resource limits.
-- Add correctness-gated jq comparison benchmarks with a soft target that tq takes no more than 2.0 times jq's wall time and no more than 1.5 times jq's peak resident memory on each comparable format-string case.
+- Add correctness-gated jq comparison benchmarks with a soft target that tq takes no more than 2.0 times jq's wall time and no more than 1.5 times jq's peak resident memory on each comparable format-string case. Accepted runs require elevated child-process inspection permissions and macOS peak RSS measurements from `/usr/bin/time -l`.
 - Keep recursive built-ins and labels from issue #6 out of scope for this change.
 
 ## Capabilities
