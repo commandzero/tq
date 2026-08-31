@@ -217,13 +217,15 @@ fn copy_quoted_string(
     let mut escaped = false;
     while *index < bytes.len() {
         let byte = bytes[*index];
+        if !escaped && byte == quote {
+            *index += 1;
+            break;
+        }
         *index += 1;
         if escaped {
             escaped = false;
         } else if byte == b'\\' {
             escaped = true;
-        } else if byte == quote {
-            break;
         }
         check_token(index.saturating_sub(start + 1), maximum_token_bytes)?;
     }

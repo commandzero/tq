@@ -939,6 +939,17 @@ second \n line with "quotes""""}"#,
         .unwrap();
         assert_eq!(shallow[0].value.to_string(), r#"{"value":"[not depth]"}"#);
 
+        let exact_string = decode_json5(
+            br#"{a: "abc"}"#,
+            "exact-token.json5",
+            DecodeOptions {
+                maximum_token_bytes: 3,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(exact_string[0].value.to_string(), r#"{"a":"abc"}"#);
+
         for input in [
             br"{long: 1}".as_slice(),
             br#"{a: "long"}"#.as_slice(),
