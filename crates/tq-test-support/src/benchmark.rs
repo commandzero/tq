@@ -25,8 +25,8 @@ pub use measure::{
 pub use report::{
     BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
     BenchmarkRow, BenchmarkSample, Comparability, MetricSummary, RegressionGate,
-    RegressionThresholds, RowSummary, compare_reports, evaluate_regression,
-    populate_reference_ratios, summarize_samples,
+    RegressionThresholds, RowSummary, SoftObjectiveStatus, SoftPerformanceObjective,
+    compare_reports, evaluate_regression, populate_reference_ratios, summarize_samples,
 };
 pub use runner::{
     BenchmarkRunnerError, is_correctness_output_limit, normalize_correctness_run,

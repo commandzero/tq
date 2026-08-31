@@ -89,6 +89,37 @@ pub struct BenchmarkRow {
     pub summary: Option<RowSummary>,
     /// Ratios to named reference rows; informational only.
     pub reference_ratios: BTreeMap<String, f64>,
+    /// Peak-RSS ratios to named reference rows; informational only.
+    #[serde(default)]
+    pub reference_peak_rss_ratios: BTreeMap<String, f64>,
+    /// Soft jq-relative targets for tq JSON rows.
+    #[serde(default)]
+    pub soft_performance_objective: Option<SoftPerformanceObjective>,
+}
+
+/// Informational jq-relative time and memory assessment.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SoftPerformanceObjective {
+    /// tq median wall time divided by jq median wall time.
+    pub wall_time_ratio: Option<f64>,
+    /// tq maximum observed peak RSS divided by jq's value.
+    pub peak_rss_ratio: Option<f64>,
+    /// Assessment against the 2.0 wall-time target.
+    pub wall_time: SoftObjectiveStatus,
+    /// Assessment against the 1.5 peak-RSS target.
+    pub peak_rss: SoftObjectiveStatus,
+}
+
+/// Result of one non-blocking comparative target.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SoftObjectiveStatus {
+    /// The comparable ratio is within the target.
+    Met,
+    /// The comparable ratio exceeds the target.
+    Missed,
+    /// One of the required comparable metrics is absent.
+    NotComparable,
 }
 
 /// First-class row outcome.
@@ -253,10 +284,19 @@ impl BenchmarkCampaignReport {
                     || "-".to_owned(),
                     |summary| format!("{:.0} us", summary.wall_time_micros.median),
                 );
+                let objective =
+                    row.soft_performance_objective
+                        .as_ref()
+                        .map_or_else(String::new, |objective| {
+                            format!(
+                                ", soft jq target: time {:?}, rss {:?}",
+                                objective.wall_time, objective.peak_rss
+                            )
+                        });
                 writeln!(
                     output,
-                    "- {} {} {}: {:?}, {}",
-                    row.case_id, row.adapter_id, row.source_id, row.outcome, median
+                    "- {} {} {}: {:?}, {}{}",
+                    row.case_id, row.adapter_id, row.source_id, row.outcome, median, objective
                 )
                 .expect("write benchmark report");
             }
@@ -342,11 +382,22 @@ pub fn compare_reports(
 /// Adds independent wall-time ratios to matching named reference adapters.
 ///
 /// Ratios are informational and are never combined into a winner score.
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "peak-memory reference ratios intentionally use floating-point reporting"
+)]
 pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: &[&str]) {
-    let medians = rows
+    let summaries = rows
         .iter()
         .filter_map(|row| {
-            let median = row.summary.as_ref()?.wall_time_micros.median;
+            if row.outcome != BenchmarkOutcome::Timed
+                || !row
+                    .comparison_families
+                    .contains(&ComparisonFamily::SameFormat)
+            {
+                return None;
+            }
+            let summary = row.summary.as_ref()?;
             Some((
                 (
                     row.case_id.clone(),
@@ -354,14 +405,28 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                     row.tier.clone(),
                     row.adapter_id.clone(),
                 ),
-                median,
+                (
+                    summary.wall_time_micros.median,
+                    summary.peak_rss_bytes,
+                    row.input_format,
+                    row.warmups,
+                    row.requested_samples,
+                    row.timeout_seconds,
+                    row.limits.output_bytes,
+                    row.limits.rss_bytes,
+                ),
             ))
         })
         .collect::<BTreeMap<_, _>>();
     for row in rows {
+        let comparable_candidate = row.outcome == BenchmarkOutcome::Timed
+            && row
+                .comparison_families
+                .contains(&ComparisonFamily::SameFormat);
         let Some(own) = row
             .summary
             .as_ref()
+            .filter(|_| comparable_candidate)
             .map(|summary| summary.wall_time_micros.median)
         else {
             continue;
@@ -373,13 +438,62 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 row.tier.clone(),
                 (*reference).to_owned(),
             );
-            if let Some(reference_median) = medians.get(&key) {
+            if let Some((
+                reference_median,
+                reference_rss,
+                reference_format,
+                reference_warmups,
+                reference_samples,
+                reference_timeout,
+                reference_output_limit,
+                reference_rss_limit,
+            )) = summaries.get(&key)
+                && row.input_format == *reference_format
+                && row.warmups == *reference_warmups
+                && row.requested_samples == *reference_samples
+                && row.timeout_seconds == *reference_timeout
+                && row.limits.output_bytes == *reference_output_limit
+                && row.limits.rss_bytes == *reference_rss_limit
+            {
                 if *reference_median > 0.0 {
                     row.reference_ratios
                         .insert((*reference).to_owned(), own / reference_median);
                 }
+                if let (Some(own_rss), Some(reference_rss)) = (
+                    row.summary
+                        .as_ref()
+                        .and_then(|summary| summary.peak_rss_bytes),
+                    reference_rss,
+                ) && *reference_rss > 0
+                {
+                    row.reference_peak_rss_ratios.insert(
+                        (*reference).to_owned(),
+                        own_rss as f64 / *reference_rss as f64,
+                    );
+                }
             }
         }
+        if row.case_id.starts_with("benchmark.issue5-")
+            && row.adapter_id == "tq-json"
+            && reference_adapters.contains(&"jq-json")
+        {
+            let wall_time_ratio = row.reference_ratios.get("jq-json").copied();
+            let peak_rss_ratio = row.reference_peak_rss_ratios.get("jq-json").copied();
+            row.soft_performance_objective = Some(SoftPerformanceObjective {
+                wall_time_ratio,
+                peak_rss_ratio,
+                wall_time: soft_status(wall_time_ratio, 2.0),
+                peak_rss: soft_status(peak_rss_ratio, 1.5),
+            });
+        }
+    }
+}
+
+fn soft_status(ratio: Option<f64>, target: f64) -> SoftObjectiveStatus {
+    match ratio {
+        Some(ratio) if ratio <= target => SoftObjectiveStatus::Met,
+        Some(_) => SoftObjectiveStatus::Missed,
+        None => SoftObjectiveStatus::NotComparable,
     }
 }
 

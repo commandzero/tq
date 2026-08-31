@@ -54,4 +54,4 @@ pub use resolve::{
     resolve,
 };
 pub use value::{Object, Value, ValueKind};
-pub use vm::{Vm, VmError, VmLimits, VmObservations};
+pub use vm::{InputCursor, InputValue, Vm, VmError, VmLimits, VmObservations};

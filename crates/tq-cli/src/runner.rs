@@ -8,25 +8,27 @@ use std::{
     sync::{
         Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
+        mpsc::{SyncSender, sync_channel},
     },
+    thread,
 };
 
 use thiserror::Error;
 use tq_core::{
     Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
-    HybridBlocking, HybridPreparation, Number, PathComponent, Plan, PlanKind, Query,
-    ResolveOptions, Resolved, SourceId, StableSortPipeline, StableSortPipelineObservations,
-    Transcode, TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits,
-    TranscodeProof, Value, Vm, VmError, VmLimits, VmObservations, analyze_with_context,
-    parallel_worker_count, parse_bytes, resolve,
+    HybridBlocking, HybridPreparation, InputCursor, InputValue, Number, PathComponent, Plan,
+    PlanKind, Query, ResolveOptions, Resolved, SourceId, StableSortPipeline,
+    StableSortPipelineObservations, Transcode, TranscodeCommitment, TranscodeDuplicatePolicy,
+    TranscodeInput, TranscodeLimits, TranscodeProof, Value, Vm, VmError, VmLimits, VmObservations,
+    analyze_with_context, parallel_worker_count, parse_bytes, resolve,
 };
 use tq_formats::{
-    DecodeOptions, FormatError, InputFormat, JsonEventOptions, JsonLinesDocumentSource,
-    OutputError, OutputFormat, OutputOptions, ParallelJsonObservations, ParallelJsonOptions,
-    ProbeReport, SelectedStreamObservations, StreamOptions, StreamRecord, StreamSelection,
-    ToonFraming, decode_bytes, decode_json, decode_json_event_stream, decode_toon, probe_format,
-    probe_reader, stream_json, stream_json_selected_records_parallel,
-    stream_json_selected_records_with_control, stream_toon,
+    DecodeOptions, DocumentSource, FormatError, InputFormat, JsonDocumentSource, JsonEventOptions,
+    JsonLinesDocumentSource, OutputError, OutputFormat, OutputOptions, ParallelJsonObservations,
+    ParallelJsonOptions, ProbeReport, SelectedStreamObservations, StreamOptions, StreamRecord,
+    StreamSelection, ToonFraming, VecDocumentSource, decode_bytes, decode_json,
+    decode_json_event_stream, decode_toon, probe_format, probe_reader, stream_json,
+    stream_json_selected_records_parallel, stream_json_selected_records_with_control, stream_toon,
     stream_toon_selected_records_with_control, write_results,
 };
 use tq_toon::{
@@ -42,6 +44,10 @@ use crate::{
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 const INPUT_BUFFER_BYTES: usize = 64 * 1024;
+// A rendezvous channel forces one kernel wakeup per document. This small bound
+// keeps source read-ahead and retained values fixed while allowing the decoder
+// and evaluator to run in batches.
+const REMAINING_INPUT_BUFFER_DOCUMENTS: usize = 16;
 
 const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
@@ -162,7 +168,7 @@ pub fn run(mut command: Command) -> ExitStatus {
             ColorMode::Never
         };
     }
-    let mut stdin = io::stdin().lock();
+    let mut stdin = io::stdin();
     let stdout = io::stdout().lock();
     let mut stdout = io::BufWriter::with_capacity(64 * 1024, stdout);
     let mut stderr = io::stderr().lock();
@@ -209,7 +215,7 @@ fn cancellation() -> Option<Arc<AtomicBool>> {
 /// # Errors
 ///
 /// Returns stable CLI, compile, input, runtime, resource, or output failures.
-pub fn run_with_io<R: Read, W: Write, E: Write>(
+pub fn run_with_io<R: Read + Send, W: Write, E: Write>(
     command: Command,
     stdin: &mut R,
     stdout: &mut W,
@@ -257,7 +263,7 @@ pub fn run_with_io<R: Read, W: Write, E: Write>(
     clippy::too_many_lines,
     reason = "bounded format detection and planning stay visibly ahead of decoder execution"
 )]
-fn run_filter<R: Read, W: Write, E: Write>(
+fn run_filter<R: Read + Send, W: Write, E: Write>(
     options: &RunOptions,
     stdin: &mut R,
     stdout: &mut W,
@@ -458,7 +464,7 @@ fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
     clippy::too_many_lines,
     reason = "the command lifecycle keeps pre-input planning visibly ahead of decoder execution"
 )]
-fn run_resolved_filter<R: Read, W: Write, E: Write>(
+fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
     options: &RunOptions,
     resolved: Query<Resolved>,
     variables: &BTreeMap<Arc<str>, Value>,
@@ -538,7 +544,7 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
     let mut observations = Vec::new();
     let mut runtime_error = None;
     {
-        let mut evaluate = |input| -> Result<bool, RunError> {
+        let mut evaluate = |input, input_cursor: Option<InputCursor>| -> Result<bool, RunError> {
             let input = match input {
                 StructuredInput::Value(input) => input,
                 StructuredInput::Proxy(bytes) => {
@@ -549,6 +555,9 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
             let mut vm =
                 Vm::new_with_variables(&plan, input, vm_limits(options), variables.clone())
                     .with_trace_limit(options.trace_limit);
+            if let Some(cursor) = input_cursor {
+                vm = vm.with_input_cursor(cursor);
+            }
             if let Some(flag) = cancellation() {
                 vm = vm.with_cancellation(flag);
             }
@@ -575,10 +584,57 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
             Ok(runtime_error.is_none())
         };
 
-        if options.slurp || options.raw_input {
+        if analysis.capabilities.whole_input
+            && !options.slurp
+            && !options.raw_input
+            && !options.proxy_on_error
+        {
+            thread::scope(|scope| {
+                let (sender, receiver) = sync_channel(REMAINING_INPUT_BUFFER_DOCUMENTS);
+                scope.spawn(move || produce_remaining_inputs(options, stdin, &sender));
+                let cursor = InputCursor::from_provider(move || match receiver.recv() {
+                    Ok(RemainingInputMessage::Value(value)) => Ok(Some(value)),
+                    Ok(RemainingInputMessage::Error(error)) => Err(error),
+                    Ok(RemainingInputMessage::Done) | Err(_) => Ok(None),
+                });
+                let result: Result<(), RunError> = (|| {
+                    while let Some(input) = pull_remaining_input(&cursor)? {
+                        if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                            break;
+                        }
+                    }
+                    Ok(())
+                })();
+                drop(cursor);
+                result
+            })?;
+        } else if analysis.capabilities.whole_input && !options.slurp && !options.raw_input {
             match load_inputs(options, stdin)? {
                 LoadedInputs::Proxy(bytes) => {
-                    let _ = evaluate(StructuredInput::Proxy(bytes))?;
+                    let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
+                }
+                LoadedInputs::Documents(inputs) => {
+                    let cursor = InputCursor::from_input_values(
+                        inputs
+                            .into_iter()
+                            .map(|document| InputValue {
+                                value: document.value,
+                                identity: Arc::from(document.identity),
+                                line_number: document.index.saturating_add(1),
+                            })
+                            .collect(),
+                    );
+                    while let Some(input) = cursor.next_value()? {
+                        if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if options.slurp || options.raw_input {
+            match load_inputs(options, stdin)? {
+                LoadedInputs::Proxy(bytes) => {
+                    let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
                 }
                 LoadedInputs::Documents(inputs) => {
                     let values = if options.slurp && !options.raw_input {
@@ -592,14 +648,14 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
                         inputs.into_iter().map(|document| document.value).collect()
                     };
                     for input in values {
-                        if !evaluate(StructuredInput::Value(input))? {
+                        if !evaluate(StructuredInput::Value(input), None)? {
                             break;
                         }
                     }
                 }
             }
         } else {
-            for_each_structured_input(options, stdin, &mut evaluate)?;
+            for_each_structured_input(options, stdin, &mut |input| evaluate(input, None))?;
         }
     }
 
@@ -622,6 +678,12 @@ fn run_resolved_filter<R: Read, W: Write, E: Write>(
         )?;
     }
     if let Some(error) = runtime_error {
+        if let VmError::Input { message } = error {
+            return Err(RunError::Input(FormatError::Parse {
+                format: InputFormat::Auto,
+                message: message.to_string(),
+            }));
+        }
         return Err(RunError::Runtime(error));
     }
     Ok(result_output.exit_status(options.exit_status, last.as_ref()))
@@ -2616,6 +2678,8 @@ fn vm_limits(options: &RunOptions) -> VmLimits {
         path_stack: options.limits.depth,
         call_stack: options.limits.depth.saturating_mul(4),
         output_bytes: usize::try_from(options.limits.output_bytes).unwrap_or(usize::MAX),
+        json_depth: options.limits.depth,
+        json_token_bytes: options.limits.token_bytes,
         regex_pattern_bytes: options.limits.token_bytes,
         regex_input_bytes: usize::try_from(options.limits.input_bytes).unwrap_or(usize::MAX),
         ..VmLimits::default()
@@ -2985,6 +3049,160 @@ fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
         }));
     }
     Ok(documents.pop().expect("one document").value)
+}
+
+enum RemainingInputMessage {
+    Value(InputValue),
+    Error(VmError),
+    Done,
+}
+
+fn produce_remaining_inputs<R: Read>(
+    options: &RunOptions,
+    stdin: &mut R,
+    sender: &SyncSender<RemainingInputMessage>,
+) {
+    let result = produce_remaining_inputs_inner(options, stdin, sender);
+    let message = result.map_or_else(
+        |error| RemainingInputMessage::Error(deferred_run_error(error)),
+        |()| RemainingInputMessage::Done,
+    );
+    let _ = sender.send(message);
+}
+
+fn produce_remaining_inputs_inner<R: Read>(
+    options: &RunOptions,
+    stdin: &mut R,
+    sender: &SyncSender<RemainingInputMessage>,
+) -> Result<(), RunError> {
+    if options.null_input {
+        send_remaining(
+            sender,
+            tq_formats::Document {
+                value: Value::Null,
+                identity: "<null-input>".to_owned(),
+                format: options.input_format,
+                index: 0,
+            },
+        );
+        return Ok(());
+    }
+    let files = if options.files.is_empty() {
+        vec![Path::new("-").to_owned()]
+    } else {
+        options.files.clone()
+    };
+    for path in files {
+        if path == Path::new("-") {
+            produce_remaining_reader(
+                options,
+                options.input_format,
+                &mut *stdin,
+                "<stdin>",
+                sender,
+            )?;
+        } else {
+            let identity = path.display().to_string();
+            produce_remaining_reader(
+                options,
+                selected_input_format(options, &path),
+                open_path(&path)?,
+                &identity,
+                sender,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn produce_remaining_reader<R: Read>(
+    options: &RunOptions,
+    requested: InputFormat,
+    reader: R,
+    identity: &str,
+    sender: &SyncSender<RemainingInputMessage>,
+) -> Result<(), RunError> {
+    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+    if requested == InputFormat::Auto {
+        let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+        return produce_committed_remaining_reader(
+            options,
+            report.selected,
+            replay,
+            identity,
+            sender,
+        );
+    }
+    produce_committed_remaining_reader(options, requested, reader, identity, sender)
+}
+
+fn produce_committed_remaining_reader<R: Read>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    sender: &SyncSender<RemainingInputMessage>,
+) -> Result<(), RunError> {
+    let mut source: Box<dyn DocumentSource> = match format {
+        InputFormat::Json => Box::new(JsonDocumentSource::new(
+            BufReader::with_capacity(INPUT_BUFFER_BYTES, reader),
+            identity,
+        )),
+        InputFormat::JsonLines => Box::new(JsonLinesDocumentSource::new(
+            BufReader::new(reader),
+            identity,
+            decode_options(options, format),
+        )),
+        InputFormat::Yaml | InputFormat::Toon | InputFormat::ToonSequence => {
+            let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+            Box::new(VecDocumentSource::new(decode_bytes(
+                &bytes,
+                identity,
+                decode_options(options, format),
+            )?))
+        }
+        InputFormat::Auto => unreachable!("auto input is committed before decoding"),
+    };
+    while let Some(document) = source.next_document()? {
+        if !send_remaining(sender, document) {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn send_remaining(
+    sender: &SyncSender<RemainingInputMessage>,
+    document: tq_formats::Document,
+) -> bool {
+    sender
+        .send(RemainingInputMessage::Value(InputValue {
+            value: document.value,
+            identity: Arc::from(document.identity),
+            line_number: document.index.saturating_add(1),
+        }))
+        .is_ok()
+}
+
+fn pull_remaining_input(cursor: &InputCursor) -> Result<Option<Value>, RunError> {
+    cursor.next_value().map_err(|error| match error {
+        VmError::Input { message } => RunError::Input(FormatError::Parse {
+            format: InputFormat::Auto,
+            message: message.to_string(),
+        }),
+        error => RunError::Runtime(error),
+    })
+}
+
+fn deferred_run_error(error: RunError) -> VmError {
+    match error {
+        RunError::Runtime(error) => error,
+        RunError::Resource(resource) => VmError::Resource { resource },
+        RunError::Interrupted => VmError::Interrupted,
+        error => VmError::Input {
+            message: error.to_string().into(),
+        },
+    }
 }
 
 enum LoadedInputs {
@@ -3809,6 +4027,35 @@ mod tests {
         );
         assert!(input.reads < 16, "source was read {} times", input.reads);
         assert_eq!(error, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn inputs_json_buffers_source_reads() {
+        let mut json = Vec::with_capacity(16 * 1024);
+        for _ in 0..4_000 {
+            json.extend_from_slice(b"1\n");
+        }
+        let mut input = CountingReader {
+            input: Cursor::new(json),
+            reads: 0,
+        };
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "[., inputs] | length",
+        ])
+        .unwrap();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output, b"4000\n");
+        assert!(input.reads < 16, "source was read {} times", input.reads);
+        assert!(error.is_empty());
     }
 
     #[test]

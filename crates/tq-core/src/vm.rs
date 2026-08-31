@@ -1,9 +1,9 @@
 //! Pull-based bytecode VM kernel with explicit bounded stacks and forks.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
@@ -16,6 +16,117 @@ use crate::{
     Bytecode, Compiled, Diagnostic, DiagnosticClass, Document, Events, HybridBlocking,
     PathComponent, Plan, Value, bytecode::Operation,
 };
+
+type InputProvider = dyn FnMut() -> Result<Option<InputValue>, VmError> + Send;
+
+/// One value pulled from the remaining-input source and its ambient context.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputValue {
+    /// Decoded value.
+    pub value: Value,
+    /// User-visible source identity used by `input_filename`.
+    pub identity: Arc<str>,
+    /// One-based source position used by `input_line_number`.
+    pub line_number: u64,
+}
+
+enum InputCursorState {
+    Values(VecDeque<Value>),
+    InputValues(VecDeque<InputValue>),
+    Provider(Box<InputProvider>),
+}
+
+struct InputCursorInner {
+    source: InputCursorState,
+    current: Option<InputValue>,
+}
+
+/// Shared ordered source values available to jq's `inputs` builtin.
+#[derive(Clone)]
+pub struct InputCursor(Arc<Mutex<InputCursorInner>>);
+
+impl std::fmt::Debug for InputCursor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("InputCursor(..)")
+    }
+}
+
+impl Default for InputCursor {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl InputCursor {
+    /// Creates a cursor over decoded values in source order.
+    #[must_use]
+    pub fn new(values: Vec<Value>) -> Self {
+        Self(Arc::new(Mutex::new(InputCursorInner {
+            source: InputCursorState::Values(values.into()),
+            current: None,
+        })))
+    }
+
+    /// Creates a cursor over decoded values with their source context.
+    #[must_use]
+    pub fn from_input_values(values: Vec<InputValue>) -> Self {
+        Self(Arc::new(Mutex::new(InputCursorInner {
+            source: InputCursorState::InputValues(values.into()),
+            current: None,
+        })))
+    }
+
+    /// Creates a cursor backed by a pull-based source provider.
+    #[must_use]
+    pub fn from_provider(
+        provider: impl FnMut() -> Result<Option<InputValue>, VmError> + Send + 'static,
+    ) -> Self {
+        Self(Arc::new(Mutex::new(InputCursorInner {
+            source: InputCursorState::Provider(Box::new(provider)),
+            current: None,
+        })))
+    }
+
+    /// Pulls the next value exactly once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an internal runtime error if another thread poisoned the cursor.
+    pub fn next_value(&self) -> Result<Option<Value>, VmError> {
+        self.0
+            .lock()
+            .map_err(|_| VmError::Runtime {
+                message: "remaining-input cursor is unavailable".into(),
+            })
+            .and_then(|mut state| match &mut state.source {
+                InputCursorState::Values(values) => Ok(values.pop_front()),
+                InputCursorState::InputValues(values) => {
+                    if let Some(next) = values.pop_front() {
+                        let value = next.value.clone();
+                        state.current = Some(next);
+                        Ok(Some(value))
+                    } else {
+                        Ok(None)
+                    }
+                }
+                InputCursorState::Provider(provider) => {
+                    if let Some(next) = provider()? {
+                        let value = next.value.clone();
+                        state.current = Some(next);
+                        Ok(Some(value))
+                    } else {
+                        Ok(None)
+                    }
+                }
+            })
+    }
+
+    /// Returns the context of the most recently pulled value.
+    #[must_use]
+    pub fn current_context(&self) -> Option<InputValue> {
+        self.0.lock().ok()?.current.clone()
+    }
+}
 
 /// Explicit VM stack and step limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -32,6 +143,10 @@ pub struct VmLimits {
     pub steps: u64,
     /// Maximum bytes in one materialized interpolation result.
     pub output_bytes: usize,
+    /// Maximum nesting depth accepted by `fromjson`.
+    pub json_depth: usize,
+    /// Maximum bytes in one `fromjson` scalar or object-key token.
+    pub json_token_bytes: usize,
     /// Maximum UTF-8 bytes admitted in one regex pattern.
     pub regex_pattern_bytes: usize,
     /// Maximum UTF-8 bytes searched by one regex operation.
@@ -49,6 +164,8 @@ impl Default for VmLimits {
             fork_stack: 4096,
             steps: 10_000_000,
             output_bytes: 8 * 1024 * 1024 * 1024,
+            json_depth: 256,
+            json_token_bytes: 8 * 1024 * 1024,
             regex_pattern_bytes: 64 * 1024,
             regex_input_bytes: 64 * 1024 * 1024,
             regex_compiled_bytes: 2 * 1024 * 1024,
@@ -76,6 +193,12 @@ pub struct VmObservations {
 /// Deterministic VM failure.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum VmError {
+    /// A deferred remaining-input provider could not decode its next value.
+    #[error("input error: {message}")]
+    Input {
+        /// Stable bounded source message.
+        message: Arc<str>,
+    },
     /// Runtime error instruction or unsupported value operation.
     #[error("runtime error: {message}")]
     Runtime {
@@ -116,6 +239,7 @@ impl VmError {
     #[must_use]
     pub fn diagnostic(&self) -> Diagnostic {
         let class = match self {
+            Self::Input { .. } => DiagnosticClass::Input,
             Self::Resource { .. } => DiagnosticClass::Resource,
             Self::NumericRange { .. } => DiagnosticClass::NumericRange,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,
@@ -170,6 +294,7 @@ pub struct Vm {
     tree_worker: Option<JoinHandle<()>>,
     tree_stop: Arc<AtomicBool>,
     cancellation: Option<Arc<AtomicBool>>,
+    input_cursor: Option<InputCursor>,
 }
 
 impl Vm {
@@ -305,6 +430,7 @@ impl Vm {
             tree_worker: None,
             tree_stop: Arc::new(AtomicBool::new(false)),
             cancellation: None,
+            input_cursor: None,
         }
     }
 
@@ -320,6 +446,13 @@ impl Vm {
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
         self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Installs the shared cursor used by jq's `inputs` builtin.
+    #[must_use]
+    pub fn with_input_cursor(mut self, cursor: InputCursor) -> Self {
+        self.input_cursor = Some(cursor);
         self
     }
 
@@ -422,6 +555,7 @@ impl Vm {
                 self.limits,
                 self.cancellation.as_deref(),
                 &self.tree_stop,
+                self.input_cursor.as_ref(),
                 |result, _| match result {
                     Ok(value) => emit(value),
                     Err(error) => {
@@ -451,6 +585,7 @@ impl Vm {
         let variables = self.variables.clone();
         let limits = self.limits;
         let cancellation = self.cancellation.clone();
+        let input_cursor = self.input_cursor.clone();
         let stop = Arc::clone(&self.tree_stop);
         let (result_sender, result_receiver) = sync_channel(0);
         let (demand_sender, demand_receiver) = sync_channel(0);
@@ -467,6 +602,7 @@ impl Vm {
                     limits,
                     cancellation.as_deref(),
                     &stop,
+                    input_cursor.as_ref(),
                     |result, observations| {
                         result_sender
                             .send(TreeMessage::Result(result, observations))

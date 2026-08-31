@@ -12,9 +12,9 @@ mod stream;
 mod structural;
 
 pub use adapters::{
-    DecodeOptions, JsonLinesDocumentSource, ProbeReport, ReplayReader, VecDocumentSource,
-    decode_bytes, decode_json, decode_json_lines, decode_toon, decode_toon_sequence, decode_yaml,
-    probe_format, probe_reader,
+    DecodeOptions, JsonDocumentSource, JsonLinesDocumentSource, ProbeReport, ReplayReader,
+    VecDocumentSource, decode_bytes, decode_json, decode_json_lines, decode_toon,
+    decode_toon_sequence, decode_yaml, probe_format, probe_reader,
 };
 pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
 pub use parallel_json::{

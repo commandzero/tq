@@ -99,6 +99,49 @@ impl DocumentSource for VecDocumentSource {
     }
 }
 
+/// Incremental source for whitespace-separated JSON values.
+pub struct JsonDocumentSource<R: Read> {
+    stream: serde_json::StreamDeserializer<'static, serde_json::de::IoRead<R>, serde_json::Value>,
+    identity: String,
+    index: u64,
+}
+
+impl<R: Read> JsonDocumentSource<R> {
+    /// Creates a pull source that parses only the next requested JSON value.
+    #[must_use]
+    pub fn new(reader: R, identity: impl Into<String>) -> Self {
+        Self {
+            stream: serde_json::Deserializer::from_reader(reader).into_iter(),
+            identity: identity.into(),
+            index: 0,
+        }
+    }
+}
+
+impl<R: Read> DocumentSource for JsonDocumentSource<R> {
+    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        let Some(value) = self.stream.next() else {
+            return Ok(None);
+        };
+        let value = value.map_err(|error| FormatError::Parse {
+            format: InputFormat::Json,
+            message: error.to_string(),
+        })?;
+        let value = Value::from_json(value).map_err(|error| FormatError::Parse {
+            format: InputFormat::Json,
+            message: error.to_string(),
+        })?;
+        let index = self.index;
+        self.index = self.index.saturating_add(1);
+        Ok(Some(Document {
+            value,
+            identity: self.identity.clone(),
+            format: InputFormat::Json,
+            index,
+        }))
+    }
+}
+
 /// Decodes one byte source using an override or bounded syntax detection.
 ///
 /// Each call probes independently using a bounded prefix. Once probing commits,

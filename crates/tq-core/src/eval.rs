@@ -21,7 +21,8 @@ use rayon::{
 };
 
 use crate::{
-    Bytecode, Number, Object, Path, PathComponent, Value, VmError, VmLimits, VmObservations,
+    Bytecode, InputCursor, Number, Object, Path, PathComponent, Value, VmError, VmLimits,
+    VmObservations,
     ast::{AssignmentOperator, BinaryOperator, ParameterKind, UnaryOperator},
     bytecode::{InterpolationOperand, KeyOperand, Operation},
     stdlib,
@@ -53,6 +54,10 @@ struct UserFrame {
     filters: Vec<Option<FilterArgument>>,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "stream evaluation keeps execution limits, observations, cancellation, and the shared input cursor explicit"
+)]
 pub(crate) fn evaluate_stream(
     bytecode: &Bytecode,
     input: &Value,
@@ -60,6 +65,7 @@ pub(crate) fn evaluate_stream(
     limits: VmLimits,
     cancellation: Option<&AtomicBool>,
     stop: &AtomicBool,
+    input_cursor: Option<&InputCursor>,
     mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
 ) -> VmObservations {
     if generator_subset(bytecode) {
@@ -79,6 +85,7 @@ pub(crate) fn evaluate_stream(
         observations: Cell::new(VmObservations::default()),
         cancellation,
         stop,
+        input_cursor,
     };
     evaluator.emit_node(bytecode.root(), input, variables, 0, &mut |result| {
         let mut observations = evaluator.observations.get();
@@ -1556,6 +1563,7 @@ struct Evaluator<'a> {
     observations: Cell<VmObservations>,
     cancellation: Option<&'a AtomicBool>,
     stop: &'a AtomicBool,
+    input_cursor: Option<&'a InputCursor>,
 }
 
 impl Evaluator<'_> {
@@ -1878,6 +1886,67 @@ impl Evaluator<'_> {
                         }
                         self.emit_range(&arguments, input, environment, depth + 1, emit)
                     }
+                    "inputs" => {
+                        if let Err(error) = self.enter(depth) {
+                            return emit(Err(error));
+                        }
+                        let Some(cursor) = self.input_cursor else {
+                            return true;
+                        };
+                        loop {
+                            match cursor.next_value() {
+                                Ok(Some(value)) => {
+                                    if !emit(Ok(value)) {
+                                        return true;
+                                    }
+                                }
+                                Ok(None) => return true,
+                                Err(error) => return emit(Err(error)),
+                            }
+                        }
+                    }
+                    "paths" => self.emit_descendant_paths(input, depth + 1, emit),
+                    "tostream" => self.emit_tostream(input, depth + 1, emit),
+                    "limit" => {
+                        if let Err(error) = self.enter(depth) {
+                            return emit(Err(error));
+                        }
+                        let Some(count_node) = arguments.first() else {
+                            return emit(Err(invalid("limit count missing")));
+                        };
+                        let Some(expression) = arguments.get(1) else {
+                            return emit(Err(invalid("limit expression missing")));
+                        };
+                        let mut keep_going = true;
+                        self.emit_node(*count_node, input, environment, depth + 1, &mut |count| {
+                            let count = match count.and_then(|value| limit_count(&value)) {
+                                Ok(count) => count,
+                                Err(error) => {
+                                    keep_going = emit(Err(error));
+                                    return keep_going;
+                                }
+                            };
+                            let mut emitted = 0usize;
+                            if count > 0 {
+                                self.emit_node(
+                                    *expression,
+                                    input,
+                                    environment,
+                                    depth + 1,
+                                    &mut |result| {
+                                        let success = result.is_ok();
+                                        keep_going = emit(result);
+                                        if success {
+                                            emitted += 1;
+                                        }
+                                        keep_going && emitted < count
+                                    },
+                                );
+                            }
+                            keep_going
+                        });
+                        true
+                    }
                     _ => self
                         .node(node, input, environment, depth)
                         .into_iter()
@@ -1918,6 +1987,97 @@ impl Evaluator<'_> {
                 return false;
             }
         }
+    }
+
+    fn emit_descendant_paths(
+        &self,
+        input: &Value,
+        depth: usize,
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        let mut pending = Vec::new();
+        push_children(input, &[], &mut pending);
+        while let Some((value, components)) = pending.pop() {
+            if components.len() > self.limits.path_stack {
+                return emit(Err(resource("path-stack")));
+            }
+            if let Err(error) = self.enter(depth.saturating_add(components.len())) {
+                return emit(Err(error));
+            }
+            if !emit(Ok(path_value(&Path::new(components.clone())))) {
+                return true;
+            }
+            push_children(&value, &components, &mut pending);
+        }
+        true
+    }
+
+    fn emit_tostream(
+        &self,
+        input: &Value,
+        depth: usize,
+        emit: &mut dyn FnMut(Result<Value, VmError>) -> bool,
+    ) -> bool {
+        enum Frame {
+            Visit(Value, Vec<PathComponent>, bool),
+            Close(Vec<PathComponent>),
+        }
+
+        let mut pending = vec![Frame::Visit(input.clone(), Vec::new(), true)];
+        while let Some(frame) = pending.pop() {
+            match frame {
+                Frame::Close(path) => {
+                    if let Err(error) = self.enter(depth.saturating_add(path.len())) {
+                        return emit(Err(error));
+                    }
+                    if !emit(Ok(Value::array(vec![path_value(&Path::new(path))]))) {
+                        return true;
+                    }
+                }
+                Frame::Visit(value, path, root) => {
+                    if path.len() > self.limits.path_stack {
+                        return emit(Err(resource("path-stack")));
+                    }
+                    if let Err(error) = self.enter(depth.saturating_add(path.len())) {
+                        return emit(Err(error));
+                    }
+                    match &value {
+                        Value::Array(values) if !values.is_empty() => {
+                            if !root {
+                                pending.push(Frame::Close(path.clone()));
+                            }
+                            for (index, child) in values.iter().enumerate().rev() {
+                                let mut child_path = path.clone();
+                                child_path.push(PathComponent::Index(index));
+                                pending.push(Frame::Visit(child.clone(), child_path, false));
+                            }
+                        }
+                        Value::Object(values) if !values.is_empty() => {
+                            if !root {
+                                pending.push(Frame::Close(path.clone()));
+                            }
+                            for (key, child) in values.iter().rev() {
+                                let mut child_path = path.clone();
+                                child_path.push(PathComponent::Key(Arc::clone(key)));
+                                pending.push(Frame::Visit(child.clone(), child_path, false));
+                            }
+                        }
+                        _ => {
+                            let record =
+                                Value::array(vec![path_value(&Path::new(path.clone())), value]);
+                            if !emit(Ok(record)) {
+                                return true;
+                            }
+                            if !root && !emit(Ok(Value::array(vec![path_value(&Path::new(path))])))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn emit_interpolation(
@@ -2633,6 +2793,8 @@ impl Evaluator<'_> {
             }
             "map" => self.map(arguments, input, environment, depth, false),
             "map_values" => self.map(arguments, input, environment, depth, true),
+            "to_entries" => vec![to_entries(input)],
+            "with_entries" => self.with_entries(arguments, input, environment, depth),
             "tonumber" => match input {
                 Value::Number(_) => vec![Ok(input.clone())],
                 Value::String(value) => {
@@ -2646,12 +2808,17 @@ impl Evaluator<'_> {
             "tostring" => {
                 vec![interpolation_value(input, self.limits.output_bytes).map(Value::String)]
             }
+            "tojson" => vec![bounded_json(input, self.limits.output_bytes).map(Value::string)],
+            "fromjson" => vec![fromjson(input, self.limits)],
             "range" => self.range(arguments, input, environment, depth),
             "add" => fold_values(input, None, binary_add),
             "min" => extrema(input, false),
             "max" => extrema(input, true),
             "sort" => sort_values(input),
             "sort_by" => self.sort_by(arguments, input, environment, depth, false),
+            "group_by" => self.group_by(arguments, input, environment, depth),
+            "min_by" => self.keyed_extrema(arguments, input, environment, depth, false),
+            "max_by" => self.keyed_extrema(arguments, input, environment, depth, true),
             "unique" => unique_values(input),
             "unique_by" => self.sort_by(arguments, input, environment, depth, true),
             "reverse" => reverse(input),
@@ -2670,6 +2837,45 @@ impl Evaluator<'_> {
                     Err(error) => one_error(error),
                 }
             }
+            "limit" => self.limit(arguments, input, environment, depth),
+            "any" => self.any_all(arguments, input, environment, depth, true),
+            "all" => self.any_all(arguments, input, environment, depth, false),
+            "ltrimstr" => self.argument_values(arguments, input, environment, depth, 0, |prefix| {
+                ltrimstr(input, prefix)
+            }),
+            "ascii_downcase" => vec![ascii_downcase(input)],
+            "explode" => vec![explode(input)],
+            "implode" => vec![implode(input)],
+            "floor" => vec![math_value(input, "floor", f64::floor)],
+            "ceil" => vec![math_value(input, "ceil", f64::ceil)],
+            "fabs" => vec![math_value(input, "fabs", f64::abs)],
+            "paths" => match descendant_paths(input, self.limits.path_stack) {
+                Ok(paths) => paths
+                    .into_iter()
+                    .map(|path| Ok(path_value(&path)))
+                    .collect(),
+                Err(error) => one_error(error),
+            },
+            "path" => {
+                let Some(argument) = arguments.first() else {
+                    return one_error(invalid("path argument missing"));
+                };
+                match self.paths(*argument, input, environment, depth) {
+                    Ok(paths) => paths
+                        .into_iter()
+                        .map(|path| Ok(path_value(&path)))
+                        .collect(),
+                    Err(error) => one_error(error),
+                }
+            }
+            "getpath" => self.argument_values(arguments, input, environment, depth, 0, |path| {
+                jq_path(path).and_then(|path| getpath(input, &path))
+            }),
+            "setpath" => self.setpath(arguments, input, environment, depth),
+            "tostream" => match tostream(input, self.limits.path_stack) {
+                Ok(records) => records.into_iter().map(Ok).collect(),
+                Err(error) => one_error(error),
+            },
             "error" => {
                 let message = if let Some(argument) = arguments.first() {
                     match first_value(self.node(*argument, input, environment, depth)) {
@@ -2738,12 +2944,41 @@ impl Evaluator<'_> {
             ),
             "now" => vec![stdlib::now(ambient_platform(environment))],
             "env" => vec![ambient_environment(environment)],
-            "input_filename" => vec![ambient_value(environment, INPUT_FILENAME, "input_filename")],
-            "input_line_number" => vec![ambient_value(
-                environment,
-                INPUT_LINE_NUMBER,
-                "input_line_number",
-            )],
+            "input_filename" => vec![
+                self.input_cursor
+                    .and_then(InputCursor::current_context)
+                    .map_or_else(
+                        || ambient_value(environment, INPUT_FILENAME, "input_filename"),
+                        |context| Ok(Value::string(context.identity)),
+                    ),
+            ],
+            "input_line_number" => vec![
+                self.input_cursor
+                    .and_then(InputCursor::current_context)
+                    .map_or_else(
+                        || ambient_value(environment, INPUT_LINE_NUMBER, "input_line_number"),
+                        |context| {
+                            Ok(Value::Number(
+                                Number::parse(&context.line_number.to_string())
+                                    .expect("a source line number is an admitted exact integer"),
+                            ))
+                        },
+                    ),
+            ],
+            "inputs" => {
+                let Some(cursor) = self.input_cursor else {
+                    return Vec::new();
+                };
+                let mut values = Vec::new();
+                loop {
+                    match cursor.next_value() {
+                        Ok(Some(value)) => values.push(Ok(value)),
+                        Ok(None) => break,
+                        Err(error) => return one_error(error),
+                    }
+                }
+                values
+            }
             _ => one_error(VmError::Unsupported {
                 operation: format!("builtin {name}").into(),
             }),
@@ -2972,6 +3207,222 @@ impl Evaluator<'_> {
         ))]
     }
 
+    fn with_entries(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+    ) -> Outcomes {
+        let Some(argument) = arguments.first() else {
+            return one_error(invalid("with_entries argument missing"));
+        };
+        let entries = match to_entries(input) {
+            Ok(Value::Array(entries)) => entries,
+            Ok(_) => unreachable!("to_entries always returns an array"),
+            Err(error) => return one_error(error),
+        };
+        let mut mapped = Vec::new();
+        for entry in entries.iter() {
+            match collect_values(self.node(*argument, entry, environment, depth)) {
+                Ok(values) => mapped.extend(values),
+                Err(error) => return one_error(error),
+            }
+        }
+        vec![from_entries(&mapped)]
+    }
+
+    fn keyed_values(
+        &self,
+        operation: &str,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+    ) -> Result<Vec<(Value, Value)>, VmError> {
+        let Value::Array(values) = input else {
+            return Err(type_error(operation, input));
+        };
+        let Some(argument) = arguments.first() else {
+            return Err(invalid("keyed builtin argument missing"));
+        };
+        let mut keyed = Vec::with_capacity(values.len());
+        for value in values.iter() {
+            let keys = collect_values(self.node(*argument, value, environment, depth))?;
+            keyed.push((Value::array(keys), value.clone()));
+        }
+        Ok(keyed)
+    }
+
+    fn group_by(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+    ) -> Outcomes {
+        let mut keyed = match self.keyed_values("group_by", arguments, input, environment, depth) {
+            Ok(keyed) => keyed,
+            Err(error) => return one_error(error),
+        };
+        sort_by_cached_key(&mut keyed);
+        let mut groups: Vec<Vec<Value>> = Vec::new();
+        let mut previous: Option<Value> = None;
+        for (key, value) in keyed {
+            if previous.as_ref() != Some(&key) {
+                groups.push(Vec::new());
+                previous = Some(key);
+            }
+            groups.last_mut().expect("group was created").push(value);
+        }
+        vec![Ok(Value::array(
+            groups.into_iter().map(Value::array).collect::<Vec<_>>(),
+        ))]
+    }
+
+    fn keyed_extrema(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+        maximum: bool,
+    ) -> Outcomes {
+        let operation = if maximum { "max_by" } else { "min_by" };
+        let keyed = match self.keyed_values(operation, arguments, input, environment, depth) {
+            Ok(keyed) => keyed,
+            Err(error) => return one_error(error),
+        };
+        let selected = if maximum {
+            keyed.into_iter().max_by(|left, right| left.0.cmp(&right.0))
+        } else {
+            keyed.into_iter().min_by(|left, right| left.0.cmp(&right.0))
+        };
+        vec![Ok(selected.map_or(Value::Null, |(_, value)| value))]
+    }
+
+    fn limit(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+    ) -> Outcomes {
+        let Some(count_node) = arguments.first() else {
+            return one_error(invalid("limit count missing"));
+        };
+        let Some(expression) = arguments.get(1) else {
+            return one_error(invalid("limit expression missing"));
+        };
+        let mut output = Vec::new();
+        for count in self.node(*count_node, input, environment, depth) {
+            let count = match count.and_then(|value| limit_count(&value)) {
+                Ok(count) => count,
+                Err(error) => {
+                    output.push(Err(error));
+                    break;
+                }
+            };
+            if count == 0 {
+                continue;
+            }
+            let mut emitted = 0usize;
+            self.emit_node(*expression, input, environment, depth, &mut |result| {
+                let success = result.is_ok();
+                output.push(result);
+                if success {
+                    emitted += 1;
+                }
+                success && emitted < count
+            });
+        }
+        output
+    }
+
+    fn any_all(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+        any: bool,
+    ) -> Outcomes {
+        let Some(generator) = arguments.first() else {
+            return one_error(invalid("predicate generator missing"));
+        };
+        let Some(condition) = arguments.get(1) else {
+            return one_error(invalid("predicate condition missing"));
+        };
+        let mut decision = None;
+        let mut failure = None;
+        self.emit_node(*generator, input, environment, depth, &mut |generated| {
+            let generated = match generated {
+                Ok(value) => value,
+                Err(error) => {
+                    failure = Some(error);
+                    return false;
+                }
+            };
+            self.emit_node(*condition, &generated, environment, depth, &mut |tested| {
+                let tested = match tested {
+                    Ok(value) => value.is_truthy(),
+                    Err(error) => {
+                        failure = Some(error);
+                        return false;
+                    }
+                };
+                if any == tested {
+                    decision = Some(any);
+                    false
+                } else {
+                    true
+                }
+            });
+            decision.is_none() && failure.is_none()
+        });
+        if let Some(error) = failure {
+            one_error(error)
+        } else {
+            vec![Ok(Value::Bool(decision.unwrap_or(!any)))]
+        }
+    }
+
+    fn setpath(
+        &self,
+        arguments: &[u32],
+        input: &Value,
+        environment: &Environment,
+        depth: usize,
+    ) -> Outcomes {
+        let Some(path_node) = arguments.first() else {
+            return one_error(invalid("setpath path missing"));
+        };
+        let Some(value_node) = arguments.get(1) else {
+            return one_error(invalid("setpath value missing"));
+        };
+        let paths = self.node(*path_node, input, environment, depth);
+        let values = self.node(*value_node, input, environment, depth);
+        let mut output = Vec::new();
+        for value in &values {
+            match value {
+                Ok(value) => {
+                    for path in &paths {
+                        let path = match path {
+                            Ok(path) => match jq_path(path) {
+                                Ok(path) => path,
+                                Err(error) => return one_error(error),
+                            },
+                            Err(error) => return one_error(error.clone()),
+                        };
+                        output.push(replace_or_create(input, &path, value.clone()));
+                    }
+                }
+                Err(error) => return one_error(error.clone()),
+            }
+        }
+        output
+    }
+
     fn assignment(
         &self,
         operator: AssignmentOperator,
@@ -3161,6 +3612,18 @@ impl Evaluator<'_> {
             }
         }
         Ok(output)
+    }
+}
+
+fn limit_count(value: &Value) -> Result<usize, VmError> {
+    let Value::Number(number) = value else {
+        return Err(type_error("limit", value));
+    };
+    match number.exact_index() {
+        Some(count) if count >= 0 => Ok(usize::try_from(count).unwrap_or(usize::MAX)),
+        _ => Err(runtime(
+            "limit count must be a non-negative integer".to_owned(),
+        )),
     }
 }
 
@@ -3514,6 +3977,186 @@ fn selector(input: &Value, selected: bool) -> Outcomes {
     }
 }
 
+fn to_entries(input: &Value) -> Result<Value, VmError> {
+    let entries = match input {
+        Value::Array(values) => values
+            .iter()
+            .enumerate()
+            .map(|(index, value)| {
+                Ok(Value::object(Object::from_iter([
+                    (Arc::from("key"), number_usize(index)?),
+                    (Arc::from("value"), value.clone()),
+                ])))
+            })
+            .collect::<Result<Vec<_>, VmError>>()?,
+        Value::Object(values) => values
+            .iter()
+            .map(|(key, value)| {
+                Value::object(Object::from_iter([
+                    (Arc::from("key"), Value::String(Arc::clone(key))),
+                    (Arc::from("value"), value.clone()),
+                ]))
+            })
+            .collect(),
+        value => return Err(type_error("to_entries", value)),
+    };
+    Ok(Value::array(entries))
+}
+
+fn from_entries(entries: &[Value]) -> Result<Value, VmError> {
+    let mut object = Object::new();
+    for entry in entries {
+        let Value::Object(entry) = entry else {
+            return Err(type_error("with_entries", entry));
+        };
+        let key = entry
+            .get("key")
+            .or_else(|| entry.get("Key"))
+            .or_else(|| entry.get("name"))
+            .or_else(|| entry.get("Name"))
+            .ok_or_else(|| runtime("entry is missing a key".to_owned()))?;
+        let value = entry
+            .get("value")
+            .or_else(|| entry.get("Value"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        let key = match key {
+            Value::String(key) => Arc::clone(key),
+            Value::Number(number) => Arc::from(number.to_string()),
+            value => return Err(type_error("entry key", value)),
+        };
+        object.insert(key, value);
+    }
+    Ok(Value::object(object))
+}
+
+fn ltrimstr(input: &Value, prefix: &Value) -> Result<Value, VmError> {
+    let Value::String(input) = input else {
+        return Err(type_error("ltrimstr", input));
+    };
+    let Value::String(prefix) = prefix else {
+        return Err(type_error("ltrimstr", prefix));
+    };
+    Ok(Value::string(
+        input
+            .strip_prefix(prefix.as_ref())
+            .unwrap_or(input.as_ref()),
+    ))
+}
+
+fn ascii_downcase(input: &Value) -> Result<Value, VmError> {
+    let Value::String(input) = input else {
+        return Err(type_error("ascii_downcase", input));
+    };
+    Ok(Value::string(
+        input
+            .chars()
+            .map(|character| {
+                if character.is_ascii_uppercase() {
+                    character.to_ascii_lowercase()
+                } else {
+                    character
+                }
+            })
+            .collect::<String>(),
+    ))
+}
+
+fn explode(input: &Value) -> Result<Value, VmError> {
+    let Value::String(input) = input else {
+        return Err(type_error("explode", input));
+    };
+    input
+        .chars()
+        .map(|character| number_usize(character as usize))
+        .collect::<Result<Vec<_>, _>>()
+        .map(Value::array)
+}
+
+fn implode(input: &Value) -> Result<Value, VmError> {
+    let Value::Array(input) = input else {
+        return Err(type_error("implode", input));
+    };
+    let mut output = String::with_capacity(input.len());
+    for value in input.iter() {
+        let Value::Number(number) = value else {
+            return Err(type_error("implode", value));
+        };
+        let codepoint = number
+            .exact_index()
+            .and_then(|value| u32::try_from(value).ok())
+            .and_then(char::from_u32)
+            .unwrap_or(char::REPLACEMENT_CHARACTER);
+        output.push(codepoint);
+    }
+    Ok(Value::string(output))
+}
+
+fn math_value(input: &Value, operation: &str, apply: fn(f64) -> f64) -> Result<Value, VmError> {
+    let Value::Number(number) = input else {
+        return Err(type_error(operation, input));
+    };
+    Number::from_f64(apply(number.as_f64()))
+        .map(Value::Number)
+        .map_err(|error| runtime(error.to_string()))
+}
+
+fn fromjson(input: &Value, limits: VmLimits) -> Result<Value, VmError> {
+    let Value::String(input) = input else {
+        return Err(type_error("fromjson", input));
+    };
+    if input.len() > limits.output_bytes {
+        return Err(resource("output-bytes"));
+    }
+    let value: Value =
+        serde_json::from_str(input).map_err(|error| runtime(format!("invalid JSON: {error}")))?;
+    validate_fromjson_limits(&value, 0, limits)?;
+    Ok(value)
+}
+
+fn validate_fromjson_limits(value: &Value, depth: usize, limits: VmLimits) -> Result<(), VmError> {
+    match value {
+        Value::Null | Value::Bool(_) => Ok(()),
+        Value::Number(number) => {
+            if number.to_string().len() > limits.json_token_bytes {
+                Err(resource("token-bytes"))
+            } else {
+                Ok(())
+            }
+        }
+        Value::String(value) => {
+            if value.len() > limits.json_token_bytes {
+                Err(resource("token-bytes"))
+            } else {
+                Ok(())
+            }
+        }
+        Value::Array(values) => {
+            let next_depth = depth.saturating_add(1);
+            if next_depth > limits.json_depth {
+                return Err(resource("depth"));
+            }
+            for value in values.iter() {
+                validate_fromjson_limits(value, next_depth, limits)?;
+            }
+            Ok(())
+        }
+        Value::Object(values) => {
+            let next_depth = depth.saturating_add(1);
+            if next_depth > limits.json_depth {
+                return Err(resource("depth"));
+            }
+            for (key, value) in values.iter() {
+                if key.len() > limits.json_token_bytes {
+                    return Err(resource("token-bytes"));
+                }
+                validate_fromjson_limits(value, next_depth, limits)?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn fold_values(
     input: &Value,
     initial: Option<Value>,
@@ -3857,6 +4500,8 @@ fn stable_merge(left: Vec<Value>, right: Vec<Value>) -> Vec<Value> {
 }
 
 fn sort_by_cached_key(values: &mut [(Value, Value)]) {
+    // `sort_by` and Rayon `par_sort_by` are stable, so equal keys retain the
+    // order in which jq produced them.
     if values.len() >= PARALLEL_SORT_THRESHOLD {
         values.par_sort_by(|left, right| left.0.cmp(&right.0));
     } else {
@@ -3916,6 +4561,121 @@ fn path_component(value: &Value) -> Result<PathComponent, VmError> {
             .ok_or_else(|| runtime("path index must be a non-negative exact integer".to_owned())),
         value => Err(type_error("path component", value)),
     }
+}
+
+fn jq_path(value: &Value) -> Result<Vec<PathComponent>, VmError> {
+    let Value::Array(components) = value else {
+        return Err(type_error("path", value));
+    };
+    components.iter().map(path_component).collect()
+}
+
+fn path_value(path: &Path) -> Value {
+    Value::array(
+        path.components()
+            .iter()
+            .map(|component| match component {
+                PathComponent::Key(key) => Ok(Value::String(Arc::clone(key))),
+                PathComponent::Index(index) => number_usize(*index),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .expect("usize path indices are representable jq numbers"),
+    )
+}
+
+fn getpath(input: &Value, path: &[PathComponent]) -> Result<Value, VmError> {
+    let mut current = input.clone();
+    for component in path {
+        current = match component {
+            PathComponent::Key(key) => access_index(&current, &Value::String(Arc::clone(key)))?,
+            PathComponent::Index(index) => access_index(&current, &number_usize(*index)?)?,
+        };
+    }
+    Ok(current)
+}
+
+fn descendant_paths(input: &Value, limit: usize) -> Result<Vec<Path>, VmError> {
+    let mut output = Vec::new();
+    let mut pending = Vec::new();
+    push_children(input, &[], &mut pending);
+    while let Some((value, components)) = pending.pop() {
+        if components.len() > limit {
+            return Err(resource("path-stack"));
+        }
+        output.push(Path::new(components.clone()));
+        push_children(&value, &components, &mut pending);
+    }
+    Ok(output)
+}
+
+fn push_children(
+    value: &Value,
+    prefix: &[PathComponent],
+    pending: &mut Vec<(Value, Vec<PathComponent>)>,
+) {
+    match value {
+        Value::Array(values) => {
+            for (index, child) in values.iter().enumerate().rev() {
+                let mut path = prefix.to_vec();
+                path.push(PathComponent::Index(index));
+                pending.push((child.clone(), path));
+            }
+        }
+        Value::Object(values) => {
+            for (key, child) in values.iter().rev() {
+                let mut path = prefix.to_vec();
+                path.push(PathComponent::Key(Arc::clone(key)));
+                pending.push((child.clone(), path));
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn tostream(input: &Value, limit: usize) -> Result<Vec<Value>, VmError> {
+    let mut output = Vec::new();
+    tostream_at(input, Vec::new(), true, limit, &mut output)?;
+    Ok(output)
+}
+
+fn tostream_at(
+    value: &Value,
+    path: Vec<PathComponent>,
+    root: bool,
+    limit: usize,
+    output: &mut Vec<Value>,
+) -> Result<(), VmError> {
+    if path.len() > limit {
+        return Err(resource("path-stack"));
+    }
+    let empty_container = matches!(value, Value::Array(values) if values.is_empty())
+        || matches!(value, Value::Object(values) if values.is_empty());
+    match value {
+        Value::Array(values) if !values.is_empty() => {
+            for (index, child) in values.iter().enumerate() {
+                let mut child_path = path.clone();
+                child_path.push(PathComponent::Index(index));
+                tostream_at(child, child_path, false, limit, output)?;
+            }
+        }
+        Value::Object(values) if !values.is_empty() => {
+            for (key, child) in values.iter() {
+                let mut child_path = path.clone();
+                child_path.push(PathComponent::Key(Arc::clone(key)));
+                tostream_at(child, child_path, false, limit, output)?;
+            }
+        }
+        _ => output.push(Value::array(vec![
+            path_value(&Path::new(path.clone())),
+            value.clone(),
+        ])),
+    }
+    if !root {
+        output.push(Value::array(vec![path_value(&Path::new(path))]));
+    } else if root && empty_container {
+        // Empty roots were already emitted as scalar-like stream records.
+    }
+    Ok(())
 }
 
 fn update_value(
@@ -4003,7 +4763,7 @@ mod tests {
         PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline, Value, extrema,
         sort_by_cached_key, stable_sort_values,
     };
-    use crate::{ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
+    use crate::{InputCursor, ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
 
     fn run(query: &str, input: &str) -> Vec<Result<Value, String>> {
         run_with_variables(query, input, BTreeMap::new())
@@ -4244,6 +5004,83 @@ mod tests {
     }
 
     #[test]
+    fn collection_and_scalar_utility_builtins_match_jq() {
+        assert_eq!(
+            json(run("to_entries", r#"{"z":1,"a":2}"#)),
+            [r#"[{"key":"z","value":1},{"key":"a","value":2}]"#]
+        );
+        assert_eq!(
+            json(run("with_entries(.value += 1)", r#"{"a":1,"b":2}"#)),
+            [r#"{"a":2,"b":3}"#]
+        );
+        assert_eq!(
+            json(run(
+                "group_by(.k)",
+                r#"[{"k":2,"v":"a"},{"k":1},{"k":2,"v":"b"}]"#
+            )),
+            [r#"[[{"k":1}],[{"k":2,"v":"a"},{"k":2,"v":"b"}]]"#]
+        );
+        assert_eq!(
+            json(run(
+                "[min_by(.k), max_by(.k)]",
+                r#"[{"k":2},{"k":1},{"k":3}]"#
+            )),
+            [r#"[{"k":1},{"k":3}]"#]
+        );
+        assert_eq!(json(run("[limit(2; range(0; 5))]", "null")), ["[0,1]"]);
+        assert_eq!(
+            json(run("[limit((1,2); range(0; 4))]", "null")),
+            ["[0,0,1]"]
+        );
+        assert_eq!(json(run("[limit(empty; error(\"late\"))]", "null")), ["[]"]);
+        assert_eq!(
+            json(run("[any(.[]; . > 2), all(.[]; . < 4)]", "[1,2,3]")),
+            ["[true,true]"]
+        );
+        assert_eq!(
+            json(run(
+                r#"[ltrimstr("pre"), ascii_downcase, explode, (explode | implode)]"#,
+                r#""preABCé""#,
+            )),
+            [r#"["ABCé","preabcé",[112,114,101,65,66,67,233],"preABCé"]"#]
+        );
+        assert_eq!(json(run("[floor, ceil, fabs]", "-1.5")), ["[-2,-1,1.5]"]);
+    }
+
+    #[test]
+    fn path_and_stream_builtins_match_jq_order_and_creation() {
+        assert_eq!(
+            json(run("[paths]", r#"{"a":[10],"z":{}}"#)),
+            [r#"[["a"],["a",0],["z"]]"#]
+        );
+        assert_eq!(
+            json(run("path(.a[0]), path(.missing)", r#"{"a":[10]}"#)),
+            [r#"["a",0]"#, r#"["missing"]"#]
+        );
+        assert_eq!(
+            json(run(
+                r#"[getpath(["a",0]), getpath(["x"]), setpath(["b",1]; 7)]"#,
+                r#"{"a":[10]}"#,
+            )),
+            [r#"[10,null,{"a":[10],"b":[null,7]}]"#]
+        );
+        assert_eq!(
+            json(run(r#"setpath((["a"],["b"]); (1,2))"#, "{}")),
+            [r#"{"a":1}"#, r#"{"b":1}"#, r#"{"a":2}"#, r#"{"b":2}"#]
+        );
+        assert_eq!(
+            json(run("tostream", r#"{"a":[1],"z":{}}"#)),
+            [
+                r#"[["a",0],1]"#,
+                r#"[["a",0]]"#,
+                r#"[["a"]]"#,
+                r#"[["z"],{}]"#,
+                r#"[["z"]]"#,
+            ]
+        );
+    }
+
+    #[test]
     fn keyed_sort_uses_every_value_from_its_filter() {
         assert_eq!(
             json(run(
@@ -4265,6 +5102,101 @@ mod tests {
             json(run(r#"sort_by(.a, error("bad"))"#, r#"[{"a":1}]"#,))[0]
                 .starts_with("error:runtime error: bad")
         );
+    }
+
+    #[test]
+    fn group_by_preserves_equal_key_order() {
+        assert_eq!(
+            json(run(
+                "group_by(.k)",
+                r#"[{"k":1,"v":"first"},{"k":1,"v":"second"},{"k":1,"v":"third"}]"#
+            )),
+            [r#"[[{"k":1,"v":"first"},{"k":1,"v":"second"},{"k":1,"v":"third"}]]"#]
+        );
+    }
+
+    #[test]
+    fn json_text_conversion_matches_jq() {
+        assert_eq!(
+            json(run("tojson", r#"{"z":9007199254740993,"a":"é"}"#)),
+            [r#""{\"z\":9007199254740993,\"a\":\"é\"}""#]
+        );
+        assert_eq!(
+            json(run("fromjson", r#""{\"z\":9007199254740993,\"a\":\"é\"}""#)),
+            [r#"{"z":9007199254740993,"a":"é"}"#]
+        );
+        assert_eq!(
+            json(run("fromjson", r#""{\"b\":1,\"a\":2,\"b\":3}""#)),
+            [r#"{"b":3,"a":2}"#]
+        );
+        assert!(json(run("fromjson", r#""not json""#))[0].starts_with("error:runtime error:"));
+    }
+
+    #[test]
+    fn fromjson_applies_json_depth_and_token_limits() {
+        let nested = r#""[[1]]""#;
+        let error = first_error_with_limits(
+            "fromjson",
+            nested,
+            VmLimits {
+                json_depth: 1,
+                ..VmLimits::default()
+            },
+        );
+        assert_eq!(error, crate::VmError::Resource { resource: "depth" });
+
+        let error = first_error_with_limits(
+            "fromjson",
+            r#""12345""#,
+            VmLimits {
+                json_token_bytes: 4,
+                ..VmLimits::default()
+            },
+        );
+        assert_eq!(
+            error,
+            crate::VmError::Resource {
+                resource: "token-bytes"
+            }
+        );
+    }
+
+    #[test]
+    fn with_entries_accepts_jq_key_aliases() {
+        assert_eq!(
+            json(run(
+                "with_entries(if .key == \"a\" then {Key: \"x\", Value: .value} else {name: \"y\", value: .value} end)",
+                r#"{"a":1,"b":2}"#,
+            )),
+            [r#"{"x":1,"y":2}"#]
+        );
+    }
+
+    #[test]
+    fn inputs_pull_from_one_shared_cursor() {
+        let plan = analyze(
+            resolve(
+                parse("[., limit(1; inputs)]").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let cursor = InputCursor::new(vec![
+            serde_json::from_str("2").unwrap(),
+            serde_json::from_str("3").unwrap(),
+        ]);
+        let mut first = Vm::new(
+            &plan,
+            serde_json::from_str("1").unwrap(),
+            VmLimits::default(),
+        )
+        .with_input_cursor(cursor.clone());
+        assert_eq!(first.next_result().unwrap().unwrap().to_string(), "[1,2]");
+        assert_eq!(cursor.next_value().unwrap().unwrap().to_string(), "3");
+        assert!(cursor.next_value().unwrap().is_none());
     }
 
     #[test]

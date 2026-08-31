@@ -84,12 +84,10 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             .iter()
             .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
             .collect::<BTreeSet<_>>();
-        assert_eq!(
-            adapter_ids,
-            BTreeSet::from([
-                "jq-json", "yq-json", "yq-yaml", "tq-json", "tq-yaml", "tq-toon"
-            ])
-        );
+        let expected_adapters = BTreeSet::from([
+            "jq-json", "yq-json", "yq-yaml", "tq-json", "tq-yaml", "tq-toon",
+        ]);
+        assert_eq!(adapter_ids, expected_adapters);
         for adapter in adapters.iter().filter(|adapter| adapter["tool"] == "tq") {
             let format = adapter["input_format"].as_str().expect("input format");
             let args = adapter["args"].as_array().expect("adapter args");
@@ -103,7 +101,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             }
         }
     }
-    assert_eq!(ids.len(), 18);
+    assert_eq!(ids.len(), 24);
 }
 
 #[test]
@@ -129,6 +127,12 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         "benchmark.identity-reencode",
         "benchmark.event-stream",
         "benchmark.recursive-scalars",
+        "benchmark.issue5-collection",
+        "benchmark.issue5-paths",
+        "benchmark.issue5-json-conversion",
+        "benchmark.issue5-predicate",
+        "benchmark.issue5-scalar-utilities",
+        "benchmark.issue5-inputs",
         "benchmark.user-filter-call",
         "benchmark.regex-test",
     ] {

@@ -390,6 +390,119 @@ fn ndjson_extension_enables_automatic_event_plan() {
 }
 
 #[test]
+fn inputs_consumes_one_shared_ordered_source_cursor() {
+    let all = tq(&["-ijson", "-ojsonl", "[., inputs]"], b"1\n2\n3\n");
+    assert_eq!(all.code, 0, "{}", String::from_utf8_lossy(&all.stderr));
+    assert_eq!(all.stdout, b"[1,2,3]\n");
+
+    let partial = tq(
+        &["-ijson", "-ojsonl", "[., limit(1; inputs)]"],
+        b"1\n2\n3\n",
+    );
+    assert_eq!(
+        partial.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&partial.stderr)
+    );
+    assert_eq!(partial.stdout, b"[1,2]\n[3]\n");
+
+    let directory = tempdir().unwrap();
+    let first = directory.path().join("first.json");
+    let second = directory.path().join("second.json");
+    fs::write(&first, "1\n").unwrap();
+    fs::write(&second, "2\n3\n").unwrap();
+    let files = tq(
+        &[
+            "-ojsonl",
+            "[., inputs]",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(files.code, 0, "{}", String::from_utf8_lossy(&files.stderr));
+    assert_eq!(files.stdout, b"[1,2,3]\n");
+
+    let metadata = tq(
+        &[
+            "--allow-platform",
+            "-ojsonl",
+            "[input_filename, (inputs | input_filename)]",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        metadata.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let filenames: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+    assert_eq!(filenames[0], first.display().to_string());
+    assert_eq!(filenames[1], second.display().to_string());
+
+    let malformed = tq(&["-ijson", "-ojsonl", "[., limit(0; inputs)]"], b"1\n{\n");
+    assert_ne!(malformed.code, 0);
+    assert_eq!(malformed.stdout, b"[1]\n");
+    assert!(
+        String::from_utf8_lossy(&malformed.stderr).contains("input"),
+        "{}",
+        String::from_utf8_lossy(&malformed.stderr)
+    );
+
+    let byte_limited = tq(
+        &[
+            "-ijsonl",
+            "-ojsonl",
+            "--max-input-bytes",
+            "3",
+            "[., limit(0; inputs)]",
+        ],
+        b"1\n2\n",
+    );
+    assert_ne!(byte_limited.code, 0);
+    assert_eq!(byte_limited.stdout, b"[1]\n");
+    assert!(
+        String::from_utf8_lossy(&byte_limited.stderr).contains("resource limit"),
+        "{}",
+        String::from_utf8_lossy(&byte_limited.stderr)
+    );
+}
+
+#[test]
+fn proxy_on_error_inputs_preserve_loaded_source_metadata() {
+    let directory = tempdir().unwrap();
+    let first = directory.path().join("first.json");
+    let second = directory.path().join("second.json");
+    fs::write(&first, "1\n").unwrap();
+    fs::write(&second, "2\n").unwrap();
+
+    let output = tq(
+        &[
+            "--proxy-on-error",
+            "--allow-platform",
+            "-ojsonl",
+            "[input_filename, (inputs | input_filename)]",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let filenames: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(filenames[0], first.display().to_string());
+    assert_eq!(filenames[1], second.display().to_string());
+}
+
+#[test]
 fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
     let directory = tempdir().unwrap();
     let records = directory.path().join("records.data");

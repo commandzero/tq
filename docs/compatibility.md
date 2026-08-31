@@ -7,6 +7,13 @@ updates, user filters, and modules from explicit roots. Stateful `reduce` and
 `foreach` folds preserve jq's generator order, accumulator scope, update count,
 intermediate results, and output produced before a later error.
 
+Collection and utility compatibility includes `to_entries`, `with_entries`,
+`group_by`, `min_by`, `max_by`, `limit`, `paths`, `path`, `getpath`, `setpath`,
+`tostream`, `tojson`, `fromjson`, `inputs`, two-argument `any` and `all`,
+`ltrimstr`, `ascii_downcase`, `explode`, `implode`, `floor`, `ceil`, and `fabs`.
+`inputs` advances the same ordered source cursor as top-level evaluation, so a
+value it consumes is not evaluated again as a later top-level input.
+
 Run `tq --help` for the current switches. Run `tq --explain-json FILTER` to see
 the plan and what it retains in memory.
 
