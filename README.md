@@ -1,8 +1,8 @@
 # tq
 
-`tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, and JSON Lines. It writes
-TOON Text Sequences by default and can stream JSON, JSON Lines, and TOON without
-loading the complete input.
+`tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, JSON5, and JSON Lines. It
+writes TOON Text Sequences by default and can stream JSON, JSON Lines, and TOON
+without loading the complete input.
 
 `tq` supports common jq filters, including navigation, pipes, generators,
 conditionals, operators, variables, path updates, user filters, modules, and
@@ -24,15 +24,19 @@ To build from a checkout instead, run `cargo build --release` and use
 `target/release/tq`.
 
 With no file argument, `tq` reads stdin. It processes files and `-` in argument
-order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.jsonl`, and `.ndjson`
-extensions select the parser. Other sources use bounded content detection. For
-ambiguous input, select a parser with
-`--input-format toon|yaml|json|jsonl`. `ndjson` is an alias for `jsonl`.
+order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.json5`, `.jsonl`, and
+`.ndjson` extensions select the parser. Other sources use bounded content
+detection. For ambiguous input, select a parser with
+`--input-format toon|yaml|json|json5|jsonl`. `ndjson` is an alias for `jsonl`.
+JSON5 is document-at-a-time input and accepts the literal triple-double-quoted
+multiline strings used by kibana-sync. Files ending in `.json` remain strict
+JSON, so select `-i json5` when a JSON5 producer uses that extension.
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
 tq --input-format json --output-format json -c '.features | length' feed.json
 tq --input-format yaml -r '.people[].name' people.yaml
+tq --input-format json5 -r '.attributes.title' saved-object.json
 tq -i jsonl -o jsonl '.event' events.ndjson
 unpredictable-command | tq -x -i json
 ```
@@ -59,8 +63,8 @@ exactly one TOON value.
 
 `--stream` emits jq-compatible `[path,value]` records and container-end
 `[path]` records from JSON, JSON Lines, or TOON decoder events. JSON Lines resets
-the root path for every physical record. For YAML, `tq` decodes one document at
-a time. On large inputs, streaming avoids retaining the whole document:
+the root path for every physical record. YAML and JSON5 decode one document at a
+time. On large inputs, streaming avoids retaining the whole document:
 
 ```console
 tq --stream --input-format json \

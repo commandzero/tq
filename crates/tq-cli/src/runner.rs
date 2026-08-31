@@ -270,6 +270,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
     stderr: &mut E,
 ) -> Result<ExitStatus, RunError> {
     validate_capability_policy(options)?;
+    validate_stream_input_formats(options)?;
     let (query_name, query) = load_filter(options)?;
     let variables = parse_external_arguments(options)?;
     let resolve_options = ResolveOptions {
@@ -375,6 +376,23 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
         stdout,
         stderr,
     )
+}
+
+fn validate_stream_input_formats(options: &RunOptions) -> Result<(), RunError> {
+    if !options.stream {
+        return Ok(());
+    }
+    let json5_selected = options.input_format == InputFormat::Json5
+        || (options.input_format == InputFormat::Auto
+            && options.files.iter().any(|path| {
+                path != Path::new("-") && format_from_path(path) == Some(InputFormat::Json5)
+            }));
+    if json5_selected {
+        return Err(RunError::Unsupported(
+            "JSON5 input is document-at-a-time and cannot satisfy --stream".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 struct CommonInputFormat {
@@ -1339,6 +1357,7 @@ const fn input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Toon => "override:toon",
         InputFormat::Yaml => "override:yaml",
         InputFormat::Json => "override:json",
+        InputFormat::Json5 => "override:json5",
         InputFormat::JsonLines => "override:jsonl",
         InputFormat::ToonSequence => "override:toon-sequence",
     }
@@ -1350,6 +1369,7 @@ const fn concrete_input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Toon => "toon",
         InputFormat::Yaml => "yaml",
         InputFormat::Json => "json",
+        InputFormat::Json5 => "json5",
         InputFormat::JsonLines => "jsonl",
         InputFormat::ToonSequence => "toon-sequence",
     }
@@ -1674,14 +1694,19 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detected YAML cannot execute a decoder-event plan".to_owned(),
                 )),
-                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                InputFormat::Auto
+                | InputFormat::Json5
+                | InputFormat::JsonLines
+                | InputFormat::ToonSequence => {
                     unreachable!("probe candidate")
                 }
             }
         }
-        InputFormat::Yaml | InputFormat::ToonSequence => Err(RunError::Unsupported(
-            "automatic bounded plans require JSON or TOON decoder events".to_owned(),
-        )),
+        InputFormat::Yaml | InputFormat::Json5 | InputFormat::ToonSequence => {
+            Err(RunError::Unsupported(
+                "automatic bounded plans require JSON or TOON decoder events".to_owned(),
+            ))
+        }
     }
 }
 
@@ -2456,13 +2481,19 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detection selected YAML, which is document-at-a-time and cannot satisfy --stream; use --input-format json for JSON syntax".to_owned(),
                 )),
-                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                InputFormat::Auto
+                | InputFormat::Json5
+                | InputFormat::JsonLines
+                | InputFormat::ToonSequence => {
                     unreachable!("probe candidate")
                 }
             }
         }
         InputFormat::Yaml => Err(RunError::Unsupported(
             "YAML input is document-at-a-time and cannot satisfy --stream".to_owned(),
+        )),
+        InputFormat::Json5 => Err(RunError::Unsupported(
+            "JSON5 input is document-at-a-time and cannot satisfy --stream".to_owned(),
         )),
         InputFormat::ToonSequence => Err(RunError::Unsupported(
             "TOON sequence input cannot currently be nested inside --stream".to_owned(),
@@ -3153,7 +3184,7 @@ fn produce_committed_remaining_reader<R: Read>(
             identity,
             decode_options(options, format),
         )),
-        InputFormat::Yaml | InputFormat::Toon | InputFormat::ToonSequence => {
+        InputFormat::Yaml | InputFormat::Json5 | InputFormat::Toon | InputFormat::ToonSequence => {
             let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
             Box::new(VecDocumentSource::new(decode_bytes(
                 &bytes,
@@ -3297,6 +3328,8 @@ fn format_from_path(path: &Path) -> Option<InputFormat> {
         Some(InputFormat::JsonLines)
     } else if extension.eq_ignore_ascii_case("json") {
         Some(InputFormat::Json)
+    } else if extension.eq_ignore_ascii_case("json5") {
+        Some(InputFormat::Json5)
     } else if extension.eq_ignore_ascii_case("toon") {
         Some(InputFormat::Toon)
     } else {
@@ -3672,6 +3705,81 @@ mod tests {
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[2,3]\n");
         assert!(error.is_empty());
+    }
+
+    #[test]
+    fn json5_input_runs_explicitly_and_by_extension_without_weakening_json() {
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json5",
+                "--output-format",
+                "json",
+                "--compact-output",
+                "--explain-json",
+                ".value",
+            ],
+            b"{value: 'ok',}",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"\"ok\"\n");
+        let explanation: serde_json::Value = serde_json::from_slice(&error).unwrap();
+        assert_eq!(explanation["execution"]["plan"], "document");
+
+        let directory = tempfile::tempdir().unwrap();
+        let json5 = directory.path().join("first.JSON5");
+        let json = directory.path().join("second.json");
+        let permissive_json = directory.path().join("strict.json");
+        fs::write(&json5, b"{value: 1,}").unwrap();
+        fs::write(&json, br#"{"value":2}"#).unwrap();
+        fs::write(&permissive_json, b"{value: 3,}").unwrap();
+
+        let paths = [json5.to_str().unwrap(), json.to_str().unwrap()];
+        let (status, output, error) = execute(
+            &["--output-format", "jsonl", ".value", paths[0], paths[1]],
+            b"",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"1\n2\n");
+        assert!(error.is_empty());
+
+        let strict_path = permissive_json.to_str().unwrap();
+        let (status, output, _) = execute(&[".", strict_path], b"");
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
+        assert!(output.is_empty());
+
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json5",
+                "--output-format",
+                "json",
+                "--compact-output",
+                ".value",
+                strict_path,
+            ],
+            b"",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"3\n");
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn json5_extension_rejects_stream_mode_before_opening_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.json5");
+        let command = parse_args(["--stream", ".", missing.to_str().unwrap()]).unwrap();
+        let mut input = NoRead;
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+
+        let failure = run_with_io(command, &mut input, &mut output, &mut error).unwrap_err();
+
+        assert_eq!(failure.status(), ExitStatus::Unsupported);
+        assert!(failure.to_string().contains("JSON5"));
+        assert!(failure.to_string().contains("document-at-a-time"));
+        assert!(output.is_empty());
     }
 
     #[test]

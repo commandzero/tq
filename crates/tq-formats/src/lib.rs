@@ -1,4 +1,4 @@
-//! Ordered JSON, YAML, and TOON document-source adapters for `tq`.
+//! Ordered JSON, JSON5, YAML, and TOON document-source adapters for `tq`.
 
 use std::{collections::VecDeque, io};
 
@@ -6,6 +6,7 @@ use thiserror::Error;
 use tq_core::{Diagnostic, Value};
 
 mod adapters;
+mod json5_input;
 mod output;
 mod parallel_json;
 mod stream;
@@ -13,7 +14,7 @@ mod structural;
 
 pub use adapters::{
     DecodeOptions, JsonDocumentSource, JsonLinesDocumentSource, ProbeReport, ReplayReader,
-    VecDocumentSource, decode_bytes, decode_json, decode_json_lines, decode_toon,
+    VecDocumentSource, decode_bytes, decode_json, decode_json_lines, decode_json5, decode_toon,
     decode_toon_sequence, decode_yaml, probe_format, probe_reader,
 };
 pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
@@ -42,6 +43,8 @@ pub enum InputFormat {
     Yaml,
     /// JSON text.
     Json,
+    /// One JSON5 document, including kibana-sync multiline strings.
+    Json5,
     /// One JSON value per physical line.
     JsonLines,
     /// Record Separator framed TOON sequence.
