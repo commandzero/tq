@@ -479,10 +479,14 @@ pub fn decode_json(
 ) -> Result<Vec<Document>, FormatError> {
     let identity = identity.into();
     serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<Value>()
+        .into_iter::<serde_json::Value>()
         .enumerate()
         .map(|(index, value)| {
             let value = value.map_err(|error| FormatError::Parse {
+                format: InputFormat::Json,
+                message: error.to_string(),
+            })?;
+            let value = Value::from_json(value).map_err(|error| FormatError::Parse {
                 format: InputFormat::Json,
                 message: error.to_string(),
             })?;
