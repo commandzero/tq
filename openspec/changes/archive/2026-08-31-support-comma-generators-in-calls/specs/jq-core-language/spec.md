@@ -45,3 +45,7 @@ The MVP SHALL provide compatibility-tested implementations of `empty`, `error`, 
 #### Scenario: Empty generated key
 - **WHEN** `sort_by(empty)` is evaluated against an array
 - **THEN** all elements compare with the same empty composite key and retain their stable order
+
+#### Scenario: Issue 5 filters resolve
+- **WHEN** any built-in added by issue #5 is called with its supported arity
+- **THEN** resolution succeeds before tq consumes input
