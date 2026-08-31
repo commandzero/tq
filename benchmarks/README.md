@@ -142,9 +142,10 @@ The latest full `tq`/`yq`/`jq` campaign is stored in the archive repository. It
 includes the complete standard matrix and a bounded large-corpus diagnostic.
 
 The extra-large parallel campaign is intentionally narrower than the full
-large matrix. It correctness-checks `[.features[].properties.release] | sort`,
-then records wall time, user/system CPU, peak RSS, and output digest for one,
-four, eight, and all available workers. It reuses the validated
+large matrix. It correctness-checks `[.features[].properties.release] | sort`
+against a single-process `jq` baseline, then records wall time, user/system
+CPU, peak RSS, and output digest for `jq` and `tq` with one, four, eight, and all
+available workers. It reuses the validated
 `microsoft-us-buildings-georgia` manifest and writes samples under
 `.work/parallel-selected-json/YYYY-MM-DD/`.
 
