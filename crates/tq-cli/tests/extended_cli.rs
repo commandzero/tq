@@ -473,6 +473,36 @@ fn inputs_consumes_one_shared_ordered_source_cursor() {
 }
 
 #[test]
+fn proxy_on_error_inputs_preserve_loaded_source_metadata() {
+    let directory = tempdir().unwrap();
+    let first = directory.path().join("first.json");
+    let second = directory.path().join("second.json");
+    fs::write(&first, "1\n").unwrap();
+    fs::write(&second, "2\n").unwrap();
+
+    let output = tq(
+        &[
+            "--proxy-on-error",
+            "--allow-platform",
+            "-ojsonl",
+            "[input_filename, (inputs | input_filename)]",
+            first.to_str().unwrap(),
+            second.to_str().unwrap(),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let filenames: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(filenames[0], first.display().to_string());
+    assert_eq!(filenames[1], second.display().to_string());
+}
+
+#[test]
 fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
     let directory = tempdir().unwrap();
     let records = directory.path().join("records.data");

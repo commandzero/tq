@@ -32,6 +32,7 @@ pub struct InputValue {
 
 enum InputCursorState {
     Values(VecDeque<Value>),
+    InputValues(VecDeque<InputValue>),
     Provider(Box<InputProvider>),
 }
 
@@ -66,6 +67,15 @@ impl InputCursor {
         })))
     }
 
+    /// Creates a cursor over decoded values with their source context.
+    #[must_use]
+    pub fn from_input_values(values: Vec<InputValue>) -> Self {
+        Self(Arc::new(Mutex::new(InputCursorInner {
+            source: InputCursorState::InputValues(values.into()),
+            current: None,
+        })))
+    }
+
     /// Creates a cursor backed by a pull-based source provider.
     #[must_use]
     pub fn from_provider(
@@ -90,6 +100,15 @@ impl InputCursor {
             })
             .and_then(|mut state| match &mut state.source {
                 InputCursorState::Values(values) => Ok(values.pop_front()),
+                InputCursorState::InputValues(values) => {
+                    if let Some(next) = values.pop_front() {
+                        let value = next.value.clone();
+                        state.current = Some(next);
+                        Ok(Some(value))
+                    } else {
+                        Ok(None)
+                    }
+                }
                 InputCursorState::Provider(provider) => {
                     if let Some(next) = provider()? {
                         let value = next.value.clone();
@@ -124,6 +143,10 @@ pub struct VmLimits {
     pub steps: u64,
     /// Maximum bytes in one materialized interpolation result.
     pub output_bytes: usize,
+    /// Maximum nesting depth accepted by `fromjson`.
+    pub json_depth: usize,
+    /// Maximum bytes in one `fromjson` scalar or object-key token.
+    pub json_token_bytes: usize,
     /// Maximum UTF-8 bytes admitted in one regex pattern.
     pub regex_pattern_bytes: usize,
     /// Maximum UTF-8 bytes searched by one regex operation.
@@ -141,6 +164,8 @@ impl Default for VmLimits {
             fork_stack: 4096,
             steps: 10_000_000,
             output_bytes: 8 * 1024 * 1024 * 1024,
+            json_depth: 256,
+            json_token_bytes: 8 * 1024 * 1024,
             regex_pattern_bytes: 64 * 1024,
             regex_input_bytes: 64 * 1024 * 1024,
             regex_compiled_bytes: 2 * 1024 * 1024,

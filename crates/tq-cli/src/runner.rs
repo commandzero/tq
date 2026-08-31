@@ -614,8 +614,15 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                     let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
                 }
                 LoadedInputs::Documents(inputs) => {
-                    let cursor = InputCursor::new(
-                        inputs.into_iter().map(|document| document.value).collect(),
+                    let cursor = InputCursor::from_input_values(
+                        inputs
+                            .into_iter()
+                            .map(|document| InputValue {
+                                value: document.value,
+                                identity: Arc::from(document.identity),
+                                line_number: document.index.saturating_add(1),
+                            })
+                            .collect(),
                     );
                     while let Some(input) = cursor.next_value()? {
                         if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
@@ -2671,6 +2678,8 @@ fn vm_limits(options: &RunOptions) -> VmLimits {
         path_stack: options.limits.depth,
         call_stack: options.limits.depth.saturating_mul(4),
         output_bytes: usize::try_from(options.limits.output_bytes).unwrap_or(usize::MAX),
+        json_depth: options.limits.depth,
+        json_token_bytes: options.limits.token_bytes,
         regex_pattern_bytes: options.limits.token_bytes,
         regex_input_bytes: usize::try_from(options.limits.input_bytes).unwrap_or(usize::MAX),
         ..VmLimits::default()

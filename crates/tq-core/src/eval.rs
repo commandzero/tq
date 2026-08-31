@@ -2809,7 +2809,7 @@ impl Evaluator<'_> {
                 vec![interpolation_value(input, self.limits.output_bytes).map(Value::String)]
             }
             "tojson" => vec![bounded_json(input, self.limits.output_bytes).map(Value::string)],
-            "fromjson" => vec![fromjson(input, self.limits.output_bytes)],
+            "fromjson" => vec![fromjson(input, self.limits)],
             "range" => self.range(arguments, input, environment, depth),
             "add" => fold_values(input, None, binary_add),
             "min" => extrema(input, false),
@@ -4101,14 +4101,60 @@ fn math_value(input: &Value, operation: &str, apply: fn(f64) -> f64) -> Result<V
         .map_err(|error| runtime(error.to_string()))
 }
 
-fn fromjson(input: &Value, byte_limit: usize) -> Result<Value, VmError> {
+fn fromjson(input: &Value, limits: VmLimits) -> Result<Value, VmError> {
     let Value::String(input) = input else {
         return Err(type_error("fromjson", input));
     };
-    if input.len() > byte_limit {
+    if input.len() > limits.output_bytes {
         return Err(resource("output-bytes"));
     }
-    serde_json::from_str(input).map_err(|error| runtime(format!("invalid JSON: {error}")))
+    let value: Value =
+        serde_json::from_str(input).map_err(|error| runtime(format!("invalid JSON: {error}")))?;
+    validate_fromjson_limits(&value, 0, limits)?;
+    Ok(value)
+}
+
+fn validate_fromjson_limits(value: &Value, depth: usize, limits: VmLimits) -> Result<(), VmError> {
+    match value {
+        Value::Null | Value::Bool(_) => Ok(()),
+        Value::Number(number) => {
+            if number.to_string().len() > limits.json_token_bytes {
+                Err(resource("token-bytes"))
+            } else {
+                Ok(())
+            }
+        }
+        Value::String(value) => {
+            if value.len() > limits.json_token_bytes {
+                Err(resource("token-bytes"))
+            } else {
+                Ok(())
+            }
+        }
+        Value::Array(values) => {
+            let next_depth = depth.saturating_add(1);
+            if next_depth > limits.json_depth {
+                return Err(resource("depth"));
+            }
+            for value in values.iter() {
+                validate_fromjson_limits(value, next_depth, limits)?;
+            }
+            Ok(())
+        }
+        Value::Object(values) => {
+            let next_depth = depth.saturating_add(1);
+            if next_depth > limits.json_depth {
+                return Err(resource("depth"));
+            }
+            for (key, value) in values.iter() {
+                if key.len() > limits.json_token_bytes {
+                    return Err(resource("token-bytes"));
+                }
+                validate_fromjson_limits(value, next_depth, limits)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn fold_values(
@@ -4454,6 +4500,8 @@ fn stable_merge(left: Vec<Value>, right: Vec<Value>) -> Vec<Value> {
 }
 
 fn sort_by_cached_key(values: &mut [(Value, Value)]) {
+    // `sort_by` and Rayon `par_sort_by` are stable, so equal keys retain the
+    // order in which jq produced them.
     if values.len() >= PARALLEL_SORT_THRESHOLD {
         values.par_sort_by(|left, right| left.0.cmp(&right.0));
     } else {
@@ -5033,6 +5081,17 @@ mod tests {
     }
 
     #[test]
+    fn group_by_preserves_equal_key_order() {
+        assert_eq!(
+            json(run(
+                "group_by(.k)",
+                r#"[{"k":1,"v":"first"},{"k":1,"v":"second"},{"k":1,"v":"third"}]"#
+            )),
+            [r#"[[{"k":1,"v":"first"},{"k":1,"v":"second"},{"k":1,"v":"third"}]]"#]
+        );
+    }
+
+    #[test]
     fn json_text_conversion_matches_jq() {
         assert_eq!(
             json(run("tojson", r#"{"z":9007199254740993,"a":"é"}"#)),
@@ -5042,7 +5101,51 @@ mod tests {
             json(run("fromjson", r#""{\"z\":9007199254740993,\"a\":\"é\"}""#)),
             [r#"{"z":9007199254740993,"a":"é"}"#]
         );
+        assert_eq!(
+            json(run("fromjson", r#""{\"b\":1,\"a\":2,\"b\":3}""#)),
+            [r#"{"b":3,"a":2}"#]
+        );
         assert!(json(run("fromjson", r#""not json""#))[0].starts_with("error:runtime error:"));
+    }
+
+    #[test]
+    fn fromjson_applies_json_depth_and_token_limits() {
+        let nested = r#""[[1]]""#;
+        let error = first_error_with_limits(
+            "fromjson",
+            nested,
+            VmLimits {
+                json_depth: 1,
+                ..VmLimits::default()
+            },
+        );
+        assert_eq!(error, crate::VmError::Resource { resource: "depth" });
+
+        let error = first_error_with_limits(
+            "fromjson",
+            r#""12345""#,
+            VmLimits {
+                json_token_bytes: 4,
+                ..VmLimits::default()
+            },
+        );
+        assert_eq!(
+            error,
+            crate::VmError::Resource {
+                resource: "token-bytes"
+            }
+        );
+    }
+
+    #[test]
+    fn with_entries_accepts_jq_key_aliases() {
+        assert_eq!(
+            json(run(
+                "with_entries(if .key == \"a\" then {Key: \"x\", Value: .value} else {name: \"y\", value: .value} end)",
+                r#"{"a":1,"b":2}"#,
+            )),
+            [r#"{"x":1,"y":2}"#]
+        );
     }
 
     #[test]
