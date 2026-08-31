@@ -134,6 +134,9 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
         "benchmark.issue5-scalar-utilities",
         "benchmark.issue5-inputs",
         "benchmark.user-filter-call",
+        "benchmark.user-filter-map",
+        "benchmark.user-filter-select",
+        "benchmark.user-filter-sort-by",
         "benchmark.regex-test",
     ] {
         assert!(

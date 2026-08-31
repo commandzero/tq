@@ -470,6 +470,19 @@ impl Query<Analyzed> {
     /// mandatory validation fails.
     pub fn compile(self) -> Result<Program<Compiled>, Box<Diagnostic>> {
         let bytecode = Bytecode::compile(&self.inner.ast, &self.inner.modules)?;
+        if let Some(span) = crate::eval::user_execution_gap(&bytecode) {
+            return Err(Box::new(
+                Diagnostic::new(
+                    "TQ-CAP-USER-FUNCTIONS",
+                    DiagnosticClass::Unsupported,
+                    "user filter composition is not executable by the managed runtime",
+                )
+                .at(
+                    span,
+                    "this operation has no managed user-filter execution path",
+                ),
+            ));
+        }
         Ok(Program {
             inner: self.inner,
             bytecode: Arc::new(bytecode),

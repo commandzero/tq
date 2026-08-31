@@ -5,9 +5,21 @@ use tq_core::{ResolveOptions, Value, Vm, VmLimits, analyze, parse, resolve};
 
 fuzz_target!(|data: &[u8]| {
     let depth = data.first().copied().map_or(0, u32::from).min(48);
-    let query = format!(
-        "def step(f; $n): if $n == 0 then . else f | step(f; $n - 1) end; step(. + 1; {depth})"
-    );
+    let query = match data.get(1).copied().unwrap_or_default() % 5 {
+        0 => format!(
+            "def step(f; $n): if $n == 0 then . else f | step(f; $n - 1) end; step(. + 1; {depth})"
+        ),
+        1 => format!(
+            "def step(f; $n): if $n == 0 then . else f | step(f; $n - 1) end; [0,1,2,3] | map(step(. + 1; {depth}))"
+        ),
+        2 => format!(
+            "def step(f; $n): if $n == 0 then . else f | step(f; $n - 1) end; {{a:0,b:1}} | map_values(step(. + 1; {depth}))"
+        ),
+        3 => format!(
+            "def predicate: . < {depth}; [0,1,2,3] | [.[] | select(predicate)]"
+        ),
+        _ => "def key: .; [3,1,2] | sort_by(key)".to_owned(),
+    };
     let Ok(parsed) = parse(&query) else {
         return;
     };

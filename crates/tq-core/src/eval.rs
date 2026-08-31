@@ -68,7 +68,7 @@ pub(crate) fn evaluate_stream(
     input_cursor: Option<&InputCursor>,
     mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
 ) -> VmObservations {
-    if generator_subset(bytecode) {
+    if bytecode.managed_tree_execution() {
         return evaluate_generator_stream(
             bytecode,
             input,
@@ -118,6 +118,21 @@ enum GeneratorContinuation {
     },
     Unary(UnaryOperator),
     ArrayItem(Rc<RefCell<Vec<Value>>>),
+    ArrayUpdateItem {
+        values: Rc<RefCell<Vec<Value>>>,
+        accepted: Rc<Cell<bool>>,
+    },
+    ObjectItem {
+        key: Arc<str>,
+        values: Rc<RefCell<Object>>,
+        accepted: Rc<Cell<bool>>,
+    },
+    Select(Value),
+    HasArgument {
+        input: Value,
+        container_from_result: bool,
+    },
+    SortKeyItem(Rc<RefCell<Vec<Value>>>),
     AlternativeItem(Rc<Cell<bool>>),
     Bind {
         name: Arc<str>,
@@ -190,6 +205,40 @@ enum GeneratorTask {
         environment: Arc<Environment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
+    },
+    MapArray {
+        inputs: Arc<[Value]>,
+        next: usize,
+        argument: u32,
+        values: Rc<RefCell<Vec<Value>>>,
+        first_only: bool,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    MapObject {
+        entries: Arc<[(Arc<str>, Value)]>,
+        next: usize,
+        argument: u32,
+        values: Rc<RefCell<Object>>,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    CollectSortKeys {
+        values: Arc<[Value]>,
+        next: usize,
+        argument: u32,
+        keyed_values: Rc<RefCell<Vec<(Value, Value)>>>,
+        unique: bool,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishSortKey {
+        input: Value,
+        keys: Rc<RefCell<Vec<Value>>>,
+        keyed_values: Rc<RefCell<Vec<(Value, Value)>>>,
     },
     FinishAlternative {
         matched: Rc<Cell<bool>>,
@@ -275,114 +324,206 @@ impl TraversalCursor {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the generator admission walk exhaustively covers bytecode operations"
-)]
-fn generator_subset(bytecode: &Bytecode) -> bool {
+fn managed_subset_gap(bytecode: &Bytecode) -> Option<crate::Span> {
     let mut pending = vec![bytecode.root()];
     let mut seen = vec![false; bytecode.instructions().len()];
     while let Some(node) = pending.pop() {
         let Some(instruction) = bytecode.instructions().get(node as usize) else {
-            return false;
+            return bytecode
+                .instructions()
+                .first()
+                .map(|instruction| instruction.span);
         };
         if std::mem::replace(&mut seen[node as usize], true) {
             continue;
         }
-        match &instruction.operation {
-            Operation::Identity
-            | Operation::Literal(_)
-            | Operation::Variable(_)
-            | Operation::Empty
-            | Operation::RecursiveDescent
-            | Operation::ParameterCall { .. } => {}
-            Operation::AccessField { base, .. }
-            | Operation::Iterate(base)
-            | Operation::Optional(base)
-            | Operation::Array(base)
-            | Operation::Unary { child: base, .. } => pending.push(*base),
-            Operation::AccessIndex { base, index } => {
-                pending.push(*index);
-                pending.push(*base);
-            }
-            Operation::Pipe { left, right }
-            | Operation::Comma { left, right }
-            | Operation::Binary { left, right, .. } => {
-                pending.push(*right);
-                pending.push(*left);
-            }
-            Operation::Conditional {
-                branches,
-                alternative,
-            } => {
-                pending.push(*alternative);
-                for (condition, body) in branches {
-                    pending.push(*body);
-                    pending.push(*condition);
-                }
-            }
-            Operation::Bind { value, body, .. } => {
-                pending.push(*body);
-                pending.push(*value);
-            }
-            Operation::UserCall { symbol, arguments } => {
-                let Some(function) = bytecode.functions().get(*symbol as usize) else {
-                    return false;
-                };
-                pending.push(function.body);
-                pending.extend(arguments.iter().copied());
-            }
-            Operation::TryCatch { expression, catch } => {
-                if let Some(catch) = catch {
-                    pending.push(*catch);
-                }
-                pending.push(*expression);
-            }
-            Operation::Interpolation(segments) => {
-                pending.extend(segments.iter().filter_map(|segment| match segment {
-                    InterpolationOperand::Literal(_) => None,
-                    InterpolationOperand::Expression(expression) => Some(*expression),
-                }));
-            }
-            Operation::Call { name, arguments }
-                if bytecode.string(*name).is_some_and(|name| {
-                    (name.as_ref() == "empty" && arguments.is_empty())
-                        || (name.as_ref() == "error" && arguments.len() <= 1)
-                        || (arguments.is_empty()
-                            && matches!(
-                                name.as_ref(),
-                                "arrays"
-                                    | "add"
-                                    | "booleans"
-                                    | "keys"
-                                    | "keys_unsorted"
-                                    | "length"
-                                    | "iterables"
-                                    | "max"
-                                    | "min"
-                                    | "modulemeta"
-                                    | "nulls"
-                                    | "numbers"
-                                    | "objects"
-                                    | "scalars"
-                                    | "strings"
-                                    | "tonumber"
-                                    | "values"
-                                    | "reverse"
-                                    | "sort"
-                                    | "tostring"
-                                    | "type"
-                                    | "unique"
-                                    | "utf8bytelength"
-                            ))
-                }) =>
-            {
-                pending.extend(arguments.iter().copied());
-            }
-            _ => return false,
+        if !managed_operation_supported(bytecode, &instruction.operation) {
+            return Some(instruction.span);
+        }
+        let Some(children) = operation_children(bytecode, &instruction.operation) else {
+            return Some(instruction.span);
+        };
+        pending.extend(children);
+    }
+    None
+}
+
+pub(crate) fn user_execution_gap(bytecode: &Bytecode) -> Option<crate::Span> {
+    reachable_user_call(bytecode).then(|| managed_subset_gap(bytecode))?
+}
+
+pub(crate) fn managed_execution(bytecode: &Bytecode) -> bool {
+    managed_subset_gap(bytecode).is_none()
+}
+
+fn reachable_user_call(bytecode: &Bytecode) -> bool {
+    let mut pending = vec![bytecode.root()];
+    let mut seen = vec![false; bytecode.instructions().len()];
+    while let Some(node) = pending.pop() {
+        let Some(instruction) = bytecode.instructions().get(node as usize) else {
+            continue;
+        };
+        if std::mem::replace(&mut seen[node as usize], true) {
+            continue;
+        }
+        if matches!(instruction.operation, Operation::UserCall { .. }) {
+            return true;
+        }
+        if let Some(children) = operation_children(bytecode, &instruction.operation) {
+            pending.extend(children);
         }
     }
-    true
+    false
+}
+
+fn managed_operation_supported(bytecode: &Bytecode, operation: &Operation) -> bool {
+    match operation {
+        Operation::Identity
+        | Operation::Literal(_)
+        | Operation::Variable(_)
+        | Operation::Empty
+        | Operation::RecursiveDescent
+        | Operation::ParameterCall { .. }
+        | Operation::AccessField { .. }
+        | Operation::Iterate(_)
+        | Operation::Optional(_)
+        | Operation::Array(_)
+        | Operation::Unary { .. }
+        | Operation::AccessIndex { .. }
+        | Operation::Pipe { .. }
+        | Operation::Comma { .. }
+        | Operation::Binary { .. }
+        | Operation::Conditional { .. }
+        | Operation::Bind { .. }
+        | Operation::UserCall { .. }
+        | Operation::TryCatch { .. }
+        | Operation::Interpolation(_) => true,
+        Operation::Call { name, arguments } => bytecode.string(*name).is_some_and(|name| {
+            (name.as_ref() == "empty" && arguments.is_empty())
+                || (name.as_ref() == "error" && arguments.len() <= 1)
+                || (matches!(
+                    name.as_ref(),
+                    "map" | "map_values" | "select" | "sort_by" | "unique_by" | "has" | "in"
+                ) && arguments.len() == 1)
+                || (arguments.is_empty()
+                    && matches!(
+                        name.as_ref(),
+                        "arrays"
+                            | "add"
+                            | "booleans"
+                            | "keys"
+                            | "keys_unsorted"
+                            | "length"
+                            | "iterables"
+                            | "max"
+                            | "min"
+                            | "modulemeta"
+                            | "nulls"
+                            | "numbers"
+                            | "objects"
+                            | "scalars"
+                            | "strings"
+                            | "tonumber"
+                            | "values"
+                            | "reverse"
+                            | "sort"
+                            | "tostring"
+                            | "type"
+                            | "unique"
+                            | "utf8bytelength"
+                    ))
+        }),
+        _ => false,
+    }
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "the child-edge table exhaustively covers bytecode operations"
+)]
+fn operation_children(bytecode: &Bytecode, operation: &Operation) -> Option<Vec<u32>> {
+    let mut children = Vec::new();
+    match operation {
+        Operation::AccessField { base, .. }
+        | Operation::Iterate(base)
+        | Operation::Optional(base)
+        | Operation::Array(base)
+        | Operation::Unary { child: base, .. } => children.push(*base),
+        Operation::AccessIndex { base, index } => children.extend([*base, *index]),
+        Operation::Slice { base, start, end } => {
+            children.push(*base);
+            children.extend([*start, *end].into_iter().flatten());
+        }
+        Operation::Pipe { left, right }
+        | Operation::Comma { left, right }
+        | Operation::Binary { left, right, .. } => children.extend([*left, *right]),
+        Operation::Object(entries) => {
+            for entry in entries {
+                if let KeyOperand::Computed(key) = entry.key {
+                    children.push(key);
+                }
+                children.push(entry.value);
+            }
+        }
+        Operation::Conditional {
+            branches,
+            alternative,
+        } => {
+            for (condition, body) in branches {
+                children.extend([*condition, *body]);
+            }
+            children.push(*alternative);
+        }
+        Operation::Bind { value, body, .. } => children.extend([*value, *body]),
+        Operation::UserCall { symbol, arguments } => {
+            children.extend(arguments.iter().copied());
+            children.push(bytecode.functions().get(*symbol as usize)?.body);
+        }
+        Operation::Reduce {
+            generator,
+            initial,
+            update,
+            ..
+        } => children.extend([*generator, *initial, *update]),
+        Operation::Foreach {
+            generator,
+            initial,
+            update,
+            extract,
+            ..
+        } => children.extend([*generator, *initial, *update, *extract]),
+        Operation::Call { arguments, .. } => children.extend(arguments.iter().copied()),
+        Operation::TryCatch { expression, catch } => {
+            children.push(*expression);
+            children.extend(catch.iter().copied());
+        }
+        Operation::Interpolation(segments) => {
+            children.extend(segments.iter().filter_map(|segment| match segment {
+                InterpolationOperand::Literal(_) => None,
+                InterpolationOperand::Expression(expression) => Some(*expression),
+            }));
+        }
+        Operation::Assignment { path, value, .. } => children.extend([*path, *value]),
+        Operation::LoadInput
+        | Operation::LoadConstant(_)
+        | Operation::Duplicate
+        | Operation::Pop
+        | Operation::Jump(_)
+        | Operation::Branch { .. }
+        | Operation::Fork(_)
+        | Operation::Backtrack
+        | Operation::Return
+        | Operation::Raise(_)
+        | Operation::Catch(_)
+        | Operation::EndCatch
+        | Operation::Identity
+        | Operation::Literal(_)
+        | Operation::Variable(_)
+        | Operation::Empty
+        | Operation::RecursiveDescent
+        | Operation::ParameterCall { .. } => {}
+    }
+    Some(children)
 }
 
 #[allow(
@@ -468,6 +609,179 @@ fn evaluate_generator_stream(
                 },
                 Some(Ok(Value::array(values.take()))),
             ),
+            GeneratorTask::MapArray {
+                inputs,
+                next,
+                argument,
+                values,
+                first_only,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if let Some(value) = inputs.get(next) {
+                    pending.push(GeneratorTask::MapArray {
+                        inputs: Arc::clone(&inputs),
+                        next: next + 1,
+                        argument,
+                        values: Rc::clone(&values),
+                        first_only,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut callback_continuations = continuations;
+                    callback_continuations.push(if first_only {
+                        GeneratorContinuation::ArrayUpdateItem {
+                            values,
+                            accepted: Rc::new(Cell::new(false)),
+                        }
+                    } else {
+                        GeneratorContinuation::ArrayItem(values)
+                    });
+                    (
+                        GeneratorWork {
+                            node: argument,
+                            input: value.clone(),
+                            environment,
+                            frames,
+                            continuations: callback_continuations,
+                        },
+                        None,
+                    )
+                } else {
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(Value::array(values.take()))),
+                    )
+                }
+            }
+            GeneratorTask::MapObject {
+                entries,
+                next,
+                argument,
+                values,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if let Some((key, value)) = entries.get(next) {
+                    pending.push(GeneratorTask::MapObject {
+                        entries: Arc::clone(&entries),
+                        next: next + 1,
+                        argument,
+                        values: Rc::clone(&values),
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut callback_continuations = continuations;
+                    callback_continuations.push(GeneratorContinuation::ObjectItem {
+                        key: Arc::clone(key),
+                        values,
+                        accepted: Rc::new(Cell::new(false)),
+                    });
+                    (
+                        GeneratorWork {
+                            node: argument,
+                            input: value.clone(),
+                            environment,
+                            frames,
+                            continuations: callback_continuations,
+                        },
+                        None,
+                    )
+                } else {
+                    let output = std::mem::take(&mut *values.borrow_mut());
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(Value::object(output))),
+                    )
+                }
+            }
+            GeneratorTask::CollectSortKeys {
+                values,
+                next,
+                argument,
+                keyed_values,
+                unique,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if let Some(value) = values.get(next) {
+                    pending.push(GeneratorTask::CollectSortKeys {
+                        values: Arc::clone(&values),
+                        next: next + 1,
+                        argument,
+                        keyed_values: Rc::clone(&keyed_values),
+                        unique,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let keys = Rc::new(RefCell::new(Vec::new()));
+                    pending.push(GeneratorTask::FinishSortKey {
+                        input: value.clone(),
+                        keys: Rc::clone(&keys),
+                        keyed_values,
+                    });
+                    let mut callback_continuations = continuations;
+                    callback_continuations
+                        .push(GeneratorContinuation::SortKeyItem(Rc::clone(&keys)));
+                    (
+                        GeneratorWork {
+                            node: argument,
+                            input: value.clone(),
+                            environment,
+                            frames,
+                            continuations: callback_continuations,
+                        },
+                        None,
+                    )
+                } else {
+                    let mut keyed_values = std::mem::take(&mut *keyed_values.borrow_mut());
+                    sort_by_cached_key(&mut keyed_values);
+                    if unique {
+                        keyed_values.dedup_by(|left, right| left.0 == right.0);
+                    }
+                    let output = keyed_values
+                        .into_iter()
+                        .map(|(_, value)| value)
+                        .collect::<Vec<_>>();
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(Value::array(output))),
+                    )
+                }
+            }
+            GeneratorTask::FinishSortKey {
+                input,
+                keys,
+                keyed_values,
+            } => {
+                let keys = std::mem::take(&mut *keys.borrow_mut());
+                keyed_values.borrow_mut().push((Value::array(keys), input));
+                continue;
+            }
             GeneratorTask::FinishAlternative {
                 matched,
                 right,
@@ -832,6 +1146,134 @@ fn evaluate_generator_stream(
                     }
                 }
                 Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "map") =>
+                {
+                    match (arguments.first(), &work.input) {
+                        (None, _) => Some(Err(invalid("map argument missing"))),
+                        (
+                            Some(_),
+                            value @ (Value::Null
+                            | Value::Bool(_)
+                            | Value::Number(_)
+                            | Value::String(_)
+                            | Value::Object(_)),
+                        ) => Some(Err(type_error("map", value))),
+                        (Some(argument), Value::Array(values)) => {
+                            pending.push(GeneratorTask::MapArray {
+                                inputs: Arc::clone(values),
+                                next: 0,
+                                argument: *argument,
+                                values: Rc::new(RefCell::new(Vec::new())),
+                                first_only: false,
+                                environment: Arc::clone(&work.environment),
+                                frames: Arc::clone(&work.frames),
+                                continuations: work.continuations.clone(),
+                            });
+                            None
+                        }
+                    }
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "map_values") =>
+                {
+                    match (arguments.first(), &work.input) {
+                        (None, _) => Some(Err(invalid("map_values argument missing"))),
+                        (Some(argument), Value::Object(values)) => {
+                            let entries = values
+                                .iter()
+                                .map(|(key, value)| (Arc::clone(key), value.clone()))
+                                .collect::<Vec<_>>();
+                            pending.push(GeneratorTask::MapObject {
+                                entries: Arc::from(entries),
+                                next: 0,
+                                argument: *argument,
+                                values: Rc::new(RefCell::new(Object::new())),
+                                environment: Arc::clone(&work.environment),
+                                frames: Arc::clone(&work.frames),
+                                continuations: work.continuations.clone(),
+                            });
+                            None
+                        }
+                        (Some(argument), Value::Array(values)) => {
+                            pending.push(GeneratorTask::MapArray {
+                                inputs: Arc::clone(values),
+                                next: 0,
+                                argument: *argument,
+                                values: Rc::new(RefCell::new(Vec::new())),
+                                first_only: true,
+                                environment: Arc::clone(&work.environment),
+                                frames: Arc::clone(&work.frames),
+                                continuations: work.continuations.clone(),
+                            });
+                            None
+                        }
+                        (Some(_), value) => Some(Err(type_error("map_values", value))),
+                    }
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "select") =>
+                {
+                    if let Some(argument) = arguments.first() {
+                        work.continuations
+                            .push(GeneratorContinuation::Select(work.input.clone()));
+                        work.node = *argument;
+                        pending.push(GeneratorTask::Eval(work.clone()));
+                        None
+                    } else {
+                        Some(Err(invalid("select argument missing")))
+                    }
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| matches!(name.as_ref(), "has" | "in")) =>
+                {
+                    if let Some(argument) = arguments.first() {
+                        let container_from_result = bytecode
+                            .string(*name)
+                            .is_some_and(|name| name.as_ref() == "in");
+                        work.continuations.push(GeneratorContinuation::HasArgument {
+                            input: work.input.clone(),
+                            container_from_result,
+                        });
+                        work.node = *argument;
+                        pending.push(GeneratorTask::Eval(work.clone()));
+                        None
+                    } else {
+                        Some(Err(invalid("has/in argument missing")))
+                    }
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| matches!(name.as_ref(), "sort_by" | "unique_by")) =>
+                {
+                    let name = bytecode.string(*name).map_or("sort_by", AsRef::as_ref);
+                    match (arguments.first(), &work.input) {
+                        (None, _) => Some(Err(invalid("sort key argument missing"))),
+                        (Some(argument), Value::Array(values)) => {
+                            pending.push(GeneratorTask::CollectSortKeys {
+                                values: Arc::clone(values),
+                                next: 0,
+                                argument: *argument,
+                                keyed_values: Rc::new(RefCell::new(Vec::new())),
+                                unique: name == "unique_by",
+                                environment: Arc::clone(&work.environment),
+                                frames: Arc::clone(&work.frames),
+                                continuations: work.continuations.clone(),
+                            });
+                            None
+                        }
+                        (Some(_), value) => Some(Err(type_error(name, value))),
+                    }
+                }
+                Operation::Call { name, arguments }
                     if arguments.is_empty()
                         && bytecode
                             .string(*name)
@@ -889,6 +1331,11 @@ fn evaluate_generator_stream(
                         | GeneratorContinuation::BinaryRight { .. }
                         | GeneratorContinuation::Unary(_)
                         | GeneratorContinuation::ArrayItem(_)
+                        | GeneratorContinuation::ArrayUpdateItem { .. }
+                        | GeneratorContinuation::ObjectItem { .. }
+                        | GeneratorContinuation::Select(_)
+                        | GeneratorContinuation::HasArgument { .. }
+                        | GeneratorContinuation::SortKeyItem(_)
                         | GeneratorContinuation::AlternativeItem(_)
                         | GeneratorContinuation::Bind { .. }
                         | GeneratorContinuation::Conditional { .. }
@@ -981,6 +1428,43 @@ fn evaluate_generator_stream(
                 }
                 GeneratorContinuation::ArrayItem(values) => {
                     values.borrow_mut().push(value);
+                    break;
+                }
+                GeneratorContinuation::ArrayUpdateItem { values, accepted } => {
+                    if !accepted.replace(true) {
+                        values.borrow_mut().push(value);
+                    }
+                    break;
+                }
+                GeneratorContinuation::ObjectItem {
+                    key,
+                    values,
+                    accepted,
+                } => {
+                    if !accepted.replace(true) {
+                        values.borrow_mut().insert(key, value);
+                    }
+                    break;
+                }
+                GeneratorContinuation::Select(input) => {
+                    if value.is_truthy() {
+                        result = Ok(input);
+                    } else {
+                        break;
+                    }
+                }
+                GeneratorContinuation::HasArgument {
+                    input,
+                    container_from_result,
+                } => {
+                    result = if container_from_result {
+                        has(&value, &input)
+                    } else {
+                        has(&input, &value)
+                    };
+                }
+                GeneratorContinuation::SortKeyItem(keys) => {
+                    keys.borrow_mut().push(value);
                     break;
                 }
                 GeneratorContinuation::AlternativeItem(matched) => {
@@ -5313,6 +5797,182 @@ mod tests {
                 resource: "call-stack"
             })
         ));
+    }
+
+    #[test]
+    fn user_functions_execute_inside_callback_builtins() {
+        let cases = [
+            ("def f: . + 1; map(f)", "[1,2]", "[2,3]"),
+            ("def f: ., . + 10; map(f)", "[1,2]", "[1,11,2,12]"),
+            (
+                "def f: . + 1; map_values(f)",
+                r#"{"a":1,"b":2}"#,
+                r#"{"a":2,"b":3}"#,
+            ),
+            ("def f: empty; map_values(f)", r#"{"a":1}"#, "{}"),
+            ("def f: ., . + 10; map_values(f)", "[1,2]", "[1,2]"),
+            (
+                "def f: if . == 1 then empty else . end; map_values(f)",
+                "[1,2]",
+                "[2]",
+            ),
+            ("def f: true, true; [.[] | select(f)]", "[1,2]", "[1,1,2,2]"),
+            (
+                r#"def f: "a", "missing"; [has(f)]"#,
+                r#"{"a":1}"#,
+                "[true,false]",
+            ),
+            ("def f: [1,2]; 1 | in(f)", "null", "true"),
+            (
+                "def f: .k; sort_by(f)",
+                r#"[{"k":2,"v":"a"},{"k":1,"v":"b"},{"k":2,"v":"c"}]"#,
+                r#"[{"k":1,"v":"b"},{"k":2,"v":"a"},{"k":2,"v":"c"}]"#,
+            ),
+            (
+                "def f: .k; unique_by(f)",
+                r#"[{"k":2,"v":"a"},{"k":1,"v":"b"},{"k":2,"v":"c"}]"#,
+                r#"[{"k":1,"v":"b"},{"k":2,"v":"a"}]"#,
+            ),
+            ("def f: empty; sort_by(f)", "[3,1,2]", "[3,1,2]"),
+            ("def f: ., -.; sort_by(f)", "[3,1,2]", "[1,2,3]"),
+            ("1 as $x | def f: . + $x; map(f)", "[1,2]", "[2,3]"),
+            ("def f($x): . + $x; map(f(2))", "[1,2]", "[3,4]"),
+            ("def apply(f): map(f); apply(. + 1)", "[1,2]", "[2,3]"),
+        ];
+        for (query, input, expected) in cases {
+            assert_eq!(json(run(query, input)), [expected], "query: {query}");
+        }
+    }
+
+    #[test]
+    fn trusted_compilation_rejects_unexecutable_user_function_closure() {
+        let error = analyze(
+            resolve(
+                parse("def f: .; .[0:1] | f").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap_err();
+        assert_eq!(error.code, "TQ-CAP-USER-FUNCTIONS");
+        assert_ne!(error.labels.len(), 0);
+    }
+
+    #[test]
+    fn managed_admission_covers_every_ported_callback_builtin() {
+        for query in [
+            "def f: .; map(f)",
+            "def f: .; map_values(f)",
+            "def f: true; select(f)",
+            r#"def f: "a"; has(f)"#,
+            "def f: [1]; 1 | in(f)",
+            "def f: .; sort_by(f)",
+            "def f: .; unique_by(f)",
+        ] {
+            let compiled =
+                analyze(resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap())
+                    .compile();
+            assert!(
+                compiled.is_ok(),
+                "query should use managed execution: {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn callback_user_functions_obey_errors_limits_cancellation_and_early_stop() {
+        assert_eq!(
+            json(run(
+                r#"def f: if . == 2 then error("bad") else . end; map(f)"#,
+                "[1,2,3]"
+            )),
+            ["error:runtime error: bad"]
+        );
+
+        assert!(matches!(
+            first_error_with_limits(
+                "def f: ., .; map(f)",
+                "[1,2,3]",
+                VmLimits {
+                    fork_stack: 2,
+                    ..VmLimits::default()
+                }
+            ),
+            crate::VmError::Resource {
+                resource: "fork-stack"
+            }
+        ));
+        assert!(matches!(
+            first_error_with_limits(
+                "def f: . + 1; map(f)",
+                "[1,2,3]",
+                VmLimits {
+                    steps: 2,
+                    ..VmLimits::default()
+                }
+            ),
+            crate::VmError::Resource {
+                resource: "vm-steps"
+            }
+        ));
+
+        let plan = analyze(
+            resolve(
+                parse("def down($n): if $n == 0 then 0 else $n, down($n - 1) end; map(down(3))")
+                    .unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut vm = Vm::new(
+            &plan,
+            serde_json::from_str("[null]").unwrap(),
+            VmLimits {
+                call_stack: 16,
+                ..VmLimits::default()
+            },
+        );
+        assert_eq!(
+            vm.next_result().unwrap(),
+            Some(Value::array([3, 2, 1, 0].map(|value| {
+                Value::Number(crate::Number::parse(&value.to_string()).unwrap())
+            })))
+        );
+        assert!(vm.observations().call_stack_high_water <= 16);
+        assert!(vm.observations().fork_stack_high_water <= VmLimits::default().fork_stack);
+
+        let cancellation = Arc::new(AtomicBool::new(true));
+        let mut cancelled = Vm::new(&plan, Value::array([Value::Null]), VmLimits::default())
+            .with_cancellation(cancellation);
+        assert!(matches!(
+            cancelled.next_result(),
+            Err(crate::VmError::Interrupted)
+        ));
+
+        let plan = analyze(
+            resolve(
+                parse("def f: true, true; .[] | select(f)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let mut early = Vm::new(
+            &plan,
+            Value::array([
+                Value::Number(crate::Number::parse("1").unwrap()),
+                Value::Number(crate::Number::parse("2").unwrap()),
+            ]),
+            VmLimits::default(),
+        );
+        assert!(early.next_result().unwrap().is_some());
+        drop(early);
     }
 
     #[test]

@@ -362,6 +362,10 @@ fn functions_and_modules_cover_scope_calls_loading_and_failures() {
         "functions-modules.jsonl",
         &[
             "function.definition",
+            "function.callback.collection",
+            "function.callback.predicate",
+            "function.callback.scalar",
+            "function.callback.keyed",
             "function.parameter.value",
             "function.parameter.filter",
             "function.scope",
