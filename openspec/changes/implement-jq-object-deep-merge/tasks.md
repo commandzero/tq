@@ -19,4 +19,4 @@ On the recorded local host `e7072e9dbaedb94b8a3a2538095f41b995d8c001ad34b440fe89
 ## 4. Verify compatibility and repository health
 
 - [x] 4.1 Update and review the compatibility baseline for the new cases, then run `./scripts/run-campaign.sh compatibility smoke` and verify tq matches the accepted jq results, order, error class, and exit status.
-- [ ] 4.2 Run `./scripts/preflight.sh` and verify formatting, compilation, lint checks, workspace tests, and OpenSpec validation all pass.
+- [x] 4.2 Run `./scripts/preflight.sh` and verify formatting, compilation, lint checks, workspace tests, and OpenSpec validation all pass.
