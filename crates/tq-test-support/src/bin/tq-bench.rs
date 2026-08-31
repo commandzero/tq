@@ -682,30 +682,6 @@ fn family_matches(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{DatasetTier, PreparedDataset, family_matches};
-    use std::collections::BTreeMap;
-    use tq_test_support::benchmark::DatasetFamily;
-
-    #[test]
-    fn issue5_input_sequence_has_one_disjoint_dataset_family() {
-        let dataset = PreparedDataset {
-            source_id: "issue5-input-sequence".to_owned(),
-            tier: DatasetTier::Medium,
-            logical_records: 65_536,
-            manifest_sha256: String::new(),
-            origin: "synthetic-reviewed".to_owned(),
-            formats: BTreeMap::new(),
-        };
-        assert!(family_matches(DatasetFamily::Issue5InputSequence, &dataset));
-        assert!(!family_matches(DatasetFamily::Natural, &dataset));
-        assert!(!family_matches(DatasetFamily::Usgs, &dataset));
-        assert!(!family_matches(DatasetFamily::LargeNatural, &dataset));
-        assert!(!family_matches(DatasetFamily::SyntheticHelper, &dataset));
-    }
-}
-
 fn source_tier(source: &str) -> DatasetTier {
     if source.contains("microsoft") {
         DatasetTier::Large
@@ -762,4 +738,28 @@ fn write_report(
     temporary.write_all(b"\n")?;
     temporary.persist(path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DatasetTier, PreparedDataset, family_matches};
+    use std::collections::BTreeMap;
+    use tq_test_support::benchmark::DatasetFamily;
+
+    #[test]
+    fn issue5_input_sequence_has_one_disjoint_dataset_family() {
+        let dataset = PreparedDataset {
+            source_id: "issue5-input-sequence".to_owned(),
+            tier: DatasetTier::Medium,
+            logical_records: 65_536,
+            manifest_sha256: String::new(),
+            origin: "synthetic-reviewed".to_owned(),
+            formats: BTreeMap::new(),
+        };
+        assert!(family_matches(DatasetFamily::Issue5InputSequence, &dataset));
+        assert!(!family_matches(DatasetFamily::Natural, &dataset));
+        assert!(!family_matches(DatasetFamily::Usgs, &dataset));
+        assert!(!family_matches(DatasetFamily::LargeNatural, &dataset));
+        assert!(!family_matches(DatasetFamily::SyntheticHelper, &dataset));
+    }
 }

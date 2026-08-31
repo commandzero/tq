@@ -101,7 +101,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             }
         }
     }
-    assert_eq!(ids.len(), 24);
+    assert_eq!(ids.len(), 27);
 }
 
 #[test]
