@@ -44,6 +44,10 @@ use crate::{
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 const INPUT_BUFFER_BYTES: usize = 64 * 1024;
+// A rendezvous channel forces one kernel wakeup per document. This small bound
+// keeps source read-ahead and retained values fixed while allowing the decoder
+// and evaluator to run in batches.
+const REMAINING_INPUT_BUFFER_DOCUMENTS: usize = 16;
 
 const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
@@ -586,7 +590,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             && !options.proxy_on_error
         {
             thread::scope(|scope| {
-                let (sender, receiver) = sync_channel(0);
+                let (sender, receiver) = sync_channel(REMAINING_INPUT_BUFFER_DOCUMENTS);
                 scope.spawn(move || produce_remaining_inputs(options, stdin, &sender));
                 let cursor = InputCursor::from_provider(move || match receiver.recv() {
                     Ok(RemainingInputMessage::Value(value)) => Ok(Some(value)),
@@ -3131,7 +3135,10 @@ fn produce_committed_remaining_reader<R: Read>(
     sender: &SyncSender<RemainingInputMessage>,
 ) -> Result<(), RunError> {
     let mut source: Box<dyn DocumentSource> = match format {
-        InputFormat::Json => Box::new(JsonDocumentSource::new(reader, identity)),
+        InputFormat::Json => Box::new(JsonDocumentSource::new(
+            BufReader::with_capacity(INPUT_BUFFER_BYTES, reader),
+            identity,
+        )),
         InputFormat::JsonLines => Box::new(JsonLinesDocumentSource::new(
             BufReader::new(reader),
             identity,
@@ -4009,6 +4016,35 @@ mod tests {
             run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
             ExitStatus::Success
         );
+        assert!(input.reads < 16, "source was read {} times", input.reads);
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn inputs_json_buffers_source_reads() {
+        let mut json = Vec::with_capacity(16 * 1024);
+        for _ in 0..4_000 {
+            json.extend_from_slice(b"1\n");
+        }
+        let mut input = CountingReader {
+            input: Cursor::new(json),
+            reads: 0,
+        };
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "[., inputs] | length",
+        ])
+        .unwrap();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output, b"4000\n");
         assert!(input.reads < 16, "source was read {} times", input.reads);
         assert!(error.is_empty());
     }
