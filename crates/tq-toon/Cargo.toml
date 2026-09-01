@@ -15,7 +15,7 @@ include = ["src/**", "tests/**", "LICENSE", "../../README.md"]
 [dependencies]
 serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
 thiserror = "2.0.20"
-tq-core = { version = "0.1.0", path = "../tq-core" }
+tq-core = { version = "0.2.0", path = "../tq-core" }
 
 [lints]
 workspace = true

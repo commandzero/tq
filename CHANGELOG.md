@@ -6,10 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-01
+
 ### Added
 
-- Added crates.io packaging for `tq-cli`, which installs the `tq` command.
-- Initial release
 - Added automatic format detection, block-style YAML output, stdin identity mode, and short format flags (#1).
 - Added bounded JSON Lines and NDJSON input with record-aware execution and line-framed output (#1).
 - Added the `-x/--proxy-on-error` fallback for sources rejected by structured parsing (#2).
@@ -22,6 +22,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
+- Updated Rust dependencies to the latest releases compatible with Rust 1.87.
 - Changed streamed `inputs` processing to use bounded buffering and reduce per-document scheduling overhead (#5).
 - Changed format conversion to preserve oversized JSON numbers instead of silently falling back to YAML strings (#18).
 - Changed `input_line_number` to work without `--allow-platform`, matching jq's default capability behavior (#11).
@@ -33,3 +34,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Fixed document JSON decoding to reject numeric literals outside the supported envelope (#4).
 - Fixed object multiplication to recursively merge objects for `*` and `*=`, preserving right-biased conflicts and key order (#9).
 - Fixed malformed structured input leaking an incomplete TOON sequence record to stdout (#12).
+
+## [0.1.0] - 2026-08-31
+
+### Added
+
+- Added crates.io packaging for `tq-cli`, which installs the `tq` command.
+- Initial release

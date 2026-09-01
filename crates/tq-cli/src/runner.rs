@@ -3988,7 +3988,7 @@ mod tests {
 
         let command =
             parse_args(["--input-format", "json", "--max-output-bytes", "1", "."]).unwrap();
-        let mut input = br#"1"#.as_slice();
+        let mut input = br"1".as_slice();
         let mut output = Vec::new();
         let mut error = Vec::new();
         assert_eq!(
