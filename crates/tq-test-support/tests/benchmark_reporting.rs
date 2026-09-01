@@ -228,6 +228,28 @@ fn reference_ratios_are_independent_and_have_no_composite_score() {
 }
 
 #[test]
+fn issue_6_rows_report_the_soft_jq_objective() {
+    for case_id in [
+        "benchmark.recurse-bounded",
+        "benchmark.walk-structural",
+        "benchmark.label-early-break",
+    ] {
+        let mut report = campaign("machine-a", "digest-a", 100, 1024);
+        report.cases[0].case_id = case_id.to_owned();
+        let mut jq = report.cases[0].clone();
+        jq.adapter_id = "jq-json".to_owned();
+        report.cases.push(jq);
+        populate_reference_ratios(&mut report.cases, &["jq-json"]);
+        let objective = report.cases[0]
+            .soft_performance_objective
+            .as_ref()
+            .unwrap_or_else(|| panic!("missing objective for {case_id}"));
+        assert_eq!(objective.wall_time, SoftObjectiveStatus::Met);
+        assert_eq!(objective.peak_rss, SoftObjectiveStatus::Met);
+    }
+}
+
+#[test]
 fn soft_jq_objective_rejects_incorrect_or_policy_mismatched_rows() {
     let mut report = campaign("machine-a", "digest-a", 100, 1024);
     let mut jq = report.cases[0].clone();

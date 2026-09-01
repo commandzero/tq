@@ -16,6 +16,8 @@ table before moving a filter that uses less common language or CLI features.
 | User filters and modules | `def f: .x; f`, `include "lib"` | Supported with explicit `-L` roots |
 | Folds | `reduce .items[] as $x (0; . + $x)` | Supported |
 | Recursive descent | `.. \| scalars` | Supported |
+| Recursive built-ins | `recurse(.[]?)`, `walk(.)` | Supported |
+| Lexical early exit | `label $out \| ..., break $out` | Supported |
 | Interpolation | `"name=\(.name)"` | Supported |
 | Regular expressions | `test("^prod-")` | Supported with documented engine differences |
 | UTC date/time | `fromdateiso8601`, `gmtime` | Supported |
@@ -34,7 +36,7 @@ table before moving a filter that uses less common language or CLI features.
   require `--allow-platform`.
 
 The generated report records current capability counts and raw-byte
-differences. Labels and breaks are the next unsupported language features.
+differences. Non-finite result built-ins remain deferred.
 
 The complete evidence is in [coverage-v1.json](reviews/coverage-v1.json). The
 older [reference candidate](baselines/jq-yq-mvp-v1.json) compares jq and yq

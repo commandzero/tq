@@ -473,7 +473,7 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 }
             }
         }
-        if row.case_id.starts_with("benchmark.issue5-")
+        if has_jq_soft_performance_objective(&row.case_id)
             && row.adapter_id == "tq-json"
             && reference_adapters.contains(&"jq-json")
         {
@@ -487,6 +487,16 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
             });
         }
     }
+}
+
+fn has_jq_soft_performance_objective(case_id: &str) -> bool {
+    case_id.starts_with("benchmark.issue5-")
+        || matches!(
+            case_id,
+            "benchmark.recurse-bounded"
+                | "benchmark.walk-structural"
+                | "benchmark.label-early-break"
+        )
 }
 
 fn soft_status(ratio: Option<f64>, target: f64) -> SoftObjectiveStatus {

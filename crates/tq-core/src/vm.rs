@@ -229,6 +229,13 @@ pub enum VmError {
         /// Operation name.
         operation: Arc<str>,
     },
+    /// Internal lexical exit propagated through managed control-flow boundaries.
+    #[doc(hidden)]
+    #[error("internal break to label {label}")]
+    Break {
+        /// Resolved lexical label symbol.
+        label: u32,
+    },
     /// Execution was cancelled by the caller or an interrupt handler.
     #[error("execution interrupted")]
     Interrupted,
@@ -244,7 +251,9 @@ impl VmError {
             Self::NumericRange { .. } => DiagnosticClass::NumericRange,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,
             Self::Interrupted => DiagnosticClass::Cancelled,
-            Self::Runtime { .. } | Self::InvalidProgram { .. } => DiagnosticClass::Runtime,
+            Self::Runtime { .. } | Self::InvalidProgram { .. } | Self::Break { .. } => {
+                DiagnosticClass::Runtime
+            }
         };
         Diagnostic::new("TQ-VM-001", class, self.to_string())
     }

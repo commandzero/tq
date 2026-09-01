@@ -21,7 +21,7 @@ use crate::{
 /// Output commitment selected before structural decoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TranscodeCommitment {
-    /// RS-prefixed records may publish before late input validation.
+    /// Completed RS-prefixed records publish independently.
     DirectSequence,
     /// Output targets an atomic publication buffer.
     AtomicUnframed,
@@ -55,7 +55,7 @@ pub enum TranscodeError {
 
 /// Canonical TOON consumer over query-independent structural events.
 pub struct TranscodeConsumer<W> {
-    output: W,
+    output: StagedOutput<W>,
     writer: WriterConfig,
     preparation: ArrayPreparationConfig,
     arena: PreparationArena,
@@ -69,6 +69,74 @@ pub struct TranscodeConsumer<W> {
     last_truthy: Option<bool>,
     maximum_documents: u64,
     cancellation: Option<Arc<AtomicBool>>,
+}
+
+struct StagedOutput<W> {
+    committed: W,
+    pending: Option<crate::PublicationBuffer>,
+}
+
+impl<W> StagedOutput<W> {
+    const fn new(committed: W) -> Self {
+        Self {
+            committed,
+            pending: None,
+        }
+    }
+
+    fn begin(
+        &mut self,
+        config: ArrayPreparationConfig,
+        arena: PreparationArena,
+    ) -> Result<(), TranscodeError> {
+        if self.pending.is_some() {
+            return Err(TranscodeError::Structure("nested output publication"));
+        }
+        self.pending = Some(crate::PublicationBuffer::new(config, arena));
+        Ok(())
+    }
+
+    fn commit(&mut self) -> Result<(), TranscodeError>
+    where
+        W: Write,
+    {
+        let mut pending = self
+            .pending
+            .take()
+            .ok_or(TranscodeError::Structure("missing output publication"))?;
+        pending
+            .publish(&mut self.committed)
+            .map_err(|error| match error {
+                crate::PublicationError::Cardinality(_) => {
+                    TranscodeError::Structure("invalid sequence publication cardinality")
+                }
+                crate::PublicationError::Spool(error) => TranscodeError::Spool(error),
+                crate::PublicationError::Io(error) => TranscodeError::Io(error),
+            })?;
+        self.committed.flush().map_err(TranscodeError::Io)
+    }
+
+    fn into_inner(self) -> W {
+        self.committed
+    }
+}
+
+impl<W: Write> Write for StagedOutput<W> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        if let Some(pending) = &mut self.pending {
+            pending.write(buffer)
+        } else {
+            self.committed.write(buffer)
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(pending) = &mut self.pending {
+            pending.flush()
+        } else {
+            self.committed.flush()
+        }
+    }
 }
 
 enum Frame {
@@ -155,7 +223,7 @@ impl<W: Write> TranscodeConsumer<W> {
         commitment: TranscodeCommitment,
     ) -> Self {
         Self {
-            output,
+            output: StagedOutput::new(output),
             writer,
             preparation,
             arena,
@@ -207,7 +275,7 @@ impl<W: Write> TranscodeConsumer<W> {
     /// Returns the output sink after decoding.
     #[must_use]
     pub fn into_inner(self) -> W {
-        self.output
+        self.output.into_inner()
     }
 
     fn check_cancellation(&self) -> Result<(), TranscodeError> {
@@ -689,8 +757,9 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
                 self.root_complete = false;
                 self.current_truthy = None;
                 if self.commitment == TranscodeCommitment::DirectSequence {
+                    self.output
+                        .begin(self.preparation.clone(), self.arena.clone())?;
                     self.output.write_all(b"\x1e")?;
-                    self.output.flush()?;
                 }
             }
             Event::DocumentEnd { .. } => {
@@ -699,6 +768,7 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
                 }
                 if self.commitment == TranscodeCommitment::DirectSequence {
                     self.output.write_all(b"\n")?;
+                    self.output.commit()?;
                 }
                 self.document_active = false;
                 self.documents = self.documents.saturating_add(1);

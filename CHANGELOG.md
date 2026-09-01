@@ -18,6 +18,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Added bounded `fromjson` processing under managed JSON limits (#5).
 - Added execution of user-defined filters inside supported callback builtins (#8).
 - Added jq format strings and bounded formatters such as `@base64` (#18).
+- Added JSON5 input, including kibana-sync triple-quoted multiline strings (#13).
 
 ### Changed
 
@@ -29,3 +30,4 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Fixed comma generators in function arguments, including multi-key `sort_by` and `unique_by` filters (#7).
 - Fixed document JSON decoding to reject numeric literals outside the supported envelope (#4).
 - Fixed object multiplication to recursively merge objects for `*` and `*=`, preserving right-biased conflicts and key order (#9).
+- Fixed malformed structured input leaking an incomplete TOON sequence record to stdout (#12).

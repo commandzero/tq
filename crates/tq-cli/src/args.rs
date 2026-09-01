@@ -308,7 +308,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: Some('i'),
         syntax: "-i, --input-format FORMAT",
         value: true,
-        description: "select auto, TOON, YAML, JSON, JSON Lines, or TOON sequence input",
+        description: "select auto, TOON, YAML, JSON, JSON5, JSON Lines, or TOON sequence input",
     },
     OptionSpec {
         short: Some('o'),
@@ -527,14 +527,14 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
 #[must_use]
 pub fn generated_help() -> String {
     let mut help = String::from(
-        "tq - jq-compatible queries over TOON, YAML, JSON, and JSON Lines\n\n\
+        "tq - jq-compatible queries over TOON, YAML, JSON, JSON5, and JSON Lines\n\n\
 Usage: tq [OPTIONS] [FILTER [FILE...]]\n       tq [OPTIONS] -f FILE [INPUT...]\n       tq compatibility\n\nOptions:\n",
     );
     for option in OPTION_REGISTRY {
         let _ = writeln!(help, "  {:<31} {}", option.syntax, option.description);
     }
     help.push_str(
-        "\nFormats: -i, --input-format auto|toon|yaml|json|jsonl|toon-seq\n\
+        "\nFormats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq\n\
          -o, --output-format toon|yaml|json|jsonl, --toon-sequence-input, --unframed\n\
 TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict\n\
 Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE\n\
@@ -879,9 +879,10 @@ where
             "--raw-input cannot be combined with --input-format".to_owned(),
         ));
     }
-    if stream && matches!(input_format, InputFormat::Yaml) {
+    if stream && matches!(input_format, InputFormat::Yaml | InputFormat::Json5) {
         return Err(CliError::Incompatible(
-            "--stream requires TOON/JSON event input; YAML is document-at-a-time".to_owned(),
+            "--stream requires TOON/JSON event input; YAML and JSON5 are document-at-a-time"
+                .to_owned(),
         ));
     }
     if proxy_on_error && stream_errors {
@@ -1090,6 +1091,7 @@ fn parse_input(option: &str, value: String) -> Result<InputFormat, CliError> {
         "toon" => Ok(InputFormat::Toon),
         "yaml" | "yml" => Ok(InputFormat::Yaml),
         "json" => Ok(InputFormat::Json),
+        "json5" => Ok(InputFormat::Json5),
         "jsonl" | "ndjson" => Ok(InputFormat::JsonLines),
         "toon-seq" | "toon-sequence" => Ok(InputFormat::ToonSequence),
         _ => Err(CliError::InvalidValue {
@@ -1226,6 +1228,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_json5_as_an_input_only_format() {
+        let Command::Run(run) = parse_args(["-i", "json5", "."]).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.input_format, InputFormat::Json5);
+        assert!(parse_args(["-o", "json5", "."]).is_err());
+        assert!(generated_help().contains("json|json5|jsonl"));
+    }
+
+    #[test]
     fn json_lines_rejects_output_modes_that_break_record_framing() {
         for options in [
             &["-o", "jsonl", "--pretty-output", "."][..],
@@ -1257,6 +1269,7 @@ mod tests {
             Err(CliError::Unsupported(_))
         ));
         assert!(parse_args(["--stream", "--input-format", "yaml", "."]).is_err());
+        assert!(parse_args(["--stream", "--input-format", "json5", "."]).is_err());
         assert!(parse_args(["--proxy-on-error", "--stream-errors", "."]).is_err());
         assert!(parse_args(["-c", "."]).is_err());
     }

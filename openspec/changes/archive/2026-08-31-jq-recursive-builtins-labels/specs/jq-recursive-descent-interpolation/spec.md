@@ -1,11 +1,4 @@
-# jq Recursive Descent and Interpolation Specification
-
-## Purpose
-
-Define jq-compatible recursive traversal and string interpolation semantics with
-bounded execution and stable resource behavior.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Recursive descent
 The system SHALL implement jq recursive descent over arrays and insertion-ordered objects using jq's depth-first result order. It SHALL support `..`, `recurse/0`, `recurse/1`, and `recurse/2`; `recurse/0` SHALL behave as `recurse(.[]?)`, `recurse(f)` SHALL behave as `recurse(f; true)`, and `recurse(f; condition)` SHALL emit its input before recursively visiting each output of `f` for which `condition` is truthy. Traversal MUST remain pull-driven and MUST stop work that is no longer demanded by a downstream consumer.
@@ -34,6 +27,8 @@ The system SHALL implement jq recursive descent over arrays and insertion-ordere
 - **WHEN** traversal exceeds depth, work, result, or cancellation limits
 - **THEN** execution stops with the stable limit class and releases traversal frames
 
+## ADDED Requirements
+
 ### Requirement: Post-order recursive walk
 The system SHALL implement `walk/1` with jq 1.7-compatible post-order traversal. It MUST transform array elements and object values before applying the callback to their containing value, preserve array and object encounter order, and preserve jq's callback output multiplicity, empty-output behavior, and errors.
 
@@ -52,11 +47,3 @@ The system SHALL implement `walk/1` with jq 1.7-compatible post-order traversal.
 #### Scenario: Walk fails or is interrupted
 - **WHEN** a callback errors, a configured resource limit is reached, or cancellation is requested during `walk/1`
 - **THEN** execution stops with the jq-compatible error or stable limit class and releases pending walk state
-
-### Requirement: String interpolation
-The system SHALL parse and execute jq string interpolation with nested filters,
-escaping, generator multiplicity, and source-aware errors.
-
-#### Scenario: Generator interpolation
-- **WHEN** one or more embedded filters emit multiple values
-- **THEN** the system emits the same ordered string combinations as jq

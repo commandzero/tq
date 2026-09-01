@@ -53,6 +53,8 @@ const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
 const INPUT_FILENAME: &str = "__tq_input_filename";
 const INPUT_LINE_NUMBER: &str = "__tq_input_line_number";
+const JSON5_STREAM_UNSUPPORTED: &str =
+    "JSON5 input is document-at-a-time and cannot satisfy --stream";
 
 /// Command execution failure with a stable exit category.
 #[derive(Debug, Error)]
@@ -270,6 +272,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
     stderr: &mut E,
 ) -> Result<ExitStatus, RunError> {
     validate_capability_policy(options)?;
+    validate_stream_input_formats(options)?;
     let (query_name, query) = load_filter(options)?;
     let variables = parse_external_arguments(options)?;
     let resolve_options = ResolveOptions {
@@ -375,6 +378,21 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
         stdout,
         stderr,
     )
+}
+
+fn validate_stream_input_formats(options: &RunOptions) -> Result<(), RunError> {
+    if !options.stream {
+        return Ok(());
+    }
+    let json5_selected = options.input_format == InputFormat::Json5
+        || (options.input_format == InputFormat::Auto
+            && options.files.iter().any(|path| {
+                path != Path::new("-") && format_from_path(path) == Some(InputFormat::Json5)
+            }));
+    if json5_selected {
+        return Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned()));
+    }
+    Ok(())
 }
 
 struct CommonInputFormat {
@@ -954,7 +972,9 @@ fn transcode_reader<R: Read, W: Write>(
 }
 
 fn map_transcode_message(format: InputFormat, message: String) -> RunError {
-    if message.contains("resource limit")
+    if message.contains("prepared output exceeds configured byte limit") {
+        RunError::Resource("output-bytes")
+    } else if message.contains("resource limit")
         || message.contains("limit exceeded")
         || message.contains("preparation")
         || message.contains("spool")
@@ -976,8 +996,17 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
         TranscodeError::Spool(SpoolError::Io(error))
         | TranscodeError::Writer(WriterError::Io(error))
         | TranscodeError::Io(error) => {
-            if error.to_string().contains("output resource limit exceeded") {
+            if let Some(mapped) = map_wrapped_spool_error(&error) {
+                return mapped;
+            }
+            let message = error.to_string();
+            if message.contains("output resource limit exceeded") {
                 RunError::Resource("output-bytes")
+            } else if message.contains("spool")
+                || message.contains("resource limit")
+                || message.contains("preparation")
+            {
+                RunError::Resource("transcode-preparation")
             } else {
                 RunError::Io(error)
             }
@@ -992,6 +1021,19 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
             message: message.to_owned(),
         }),
     }
+}
+
+fn map_wrapped_spool_error(error: &io::Error) -> Option<RunError> {
+    let source = error.get_ref()?.downcast_ref::<SpoolError>()?;
+    Some(match source {
+        SpoolError::OutputLimit => RunError::Resource("output-bytes"),
+        SpoolError::Cancelled => RunError::Interrupted,
+        SpoolError::MemoryLimit
+        | SpoolError::Disabled
+        | SpoolError::Limit
+        | SpoolError::NestingLimit => RunError::Resource("transcode-preparation"),
+        SpoolError::Io(_) | SpoolError::Decode(_) => return None,
+    })
 }
 
 fn map_publication_error(error: PublicationError) -> RunError {
@@ -1339,6 +1381,7 @@ const fn input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Toon => "override:toon",
         InputFormat::Yaml => "override:yaml",
         InputFormat::Json => "override:json",
+        InputFormat::Json5 => "override:json5",
         InputFormat::JsonLines => "override:jsonl",
         InputFormat::ToonSequence => "override:toon-sequence",
     }
@@ -1350,6 +1393,7 @@ const fn concrete_input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Toon => "toon",
         InputFormat::Yaml => "yaml",
         InputFormat::Json => "json",
+        InputFormat::Json5 => "json5",
         InputFormat::JsonLines => "jsonl",
         InputFormat::ToonSequence => "toon-sequence",
     }
@@ -1674,14 +1718,19 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detected YAML cannot execute a decoder-event plan".to_owned(),
                 )),
-                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                InputFormat::Auto
+                | InputFormat::Json5
+                | InputFormat::JsonLines
+                | InputFormat::ToonSequence => {
                     unreachable!("probe candidate")
                 }
             }
         }
-        InputFormat::Yaml | InputFormat::ToonSequence => Err(RunError::Unsupported(
-            "automatic bounded plans require JSON or TOON decoder events".to_owned(),
-        )),
+        InputFormat::Yaml | InputFormat::Json5 | InputFormat::ToonSequence => {
+            Err(RunError::Unsupported(
+                "automatic bounded plans require JSON or TOON decoder events".to_owned(),
+            ))
+        }
     }
 }
 
@@ -2456,7 +2505,10 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detection selected YAML, which is document-at-a-time and cannot satisfy --stream; use --input-format json for JSON syntax".to_owned(),
                 )),
-                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                InputFormat::Auto
+                | InputFormat::Json5
+                | InputFormat::JsonLines
+                | InputFormat::ToonSequence => {
                     unreachable!("probe candidate")
                 }
             }
@@ -2464,6 +2516,7 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
         InputFormat::Yaml => Err(RunError::Unsupported(
             "YAML input is document-at-a-time and cannot satisfy --stream".to_owned(),
         )),
+        InputFormat::Json5 => Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned())),
         InputFormat::ToonSequence => Err(RunError::Unsupported(
             "TOON sequence input cannot currently be nested inside --stream".to_owned(),
         )),
@@ -3164,7 +3217,7 @@ fn produce_committed_remaining_reader<R: Read>(
             identity,
             decode_options(options, format),
         )),
-        InputFormat::Yaml | InputFormat::Toon | InputFormat::ToonSequence => {
+        InputFormat::Yaml | InputFormat::Json5 | InputFormat::Toon | InputFormat::ToonSequence => {
             let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
             Box::new(VecDocumentSource::new(decode_bytes(
                 &bytes,
@@ -3308,6 +3361,8 @@ fn format_from_path(path: &Path) -> Option<InputFormat> {
         Some(InputFormat::JsonLines)
     } else if extension.eq_ignore_ascii_case("json") {
         Some(InputFormat::Json)
+    } else if extension.eq_ignore_ascii_case("json5") {
+        Some(InputFormat::Json5)
     } else if extension.eq_ignore_ascii_case("toon") {
         Some(InputFormat::Toon)
     } else {
@@ -3686,6 +3741,81 @@ mod tests {
     }
 
     #[test]
+    fn json5_input_runs_explicitly_and_by_extension_without_weakening_json() {
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json5",
+                "--output-format",
+                "json",
+                "--compact-output",
+                "--explain-json",
+                ".value",
+            ],
+            b"{value: 'ok',}",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"\"ok\"\n");
+        let explanation: serde_json::Value = serde_json::from_slice(&error).unwrap();
+        assert_eq!(explanation["execution"]["plan"], "document");
+
+        let directory = tempfile::tempdir().unwrap();
+        let json5 = directory.path().join("first.JSON5");
+        let json = directory.path().join("second.json");
+        let permissive_json = directory.path().join("strict.json");
+        fs::write(&json5, b"{value: 1,}").unwrap();
+        fs::write(&json, br#"{"value":2}"#).unwrap();
+        fs::write(&permissive_json, b"{value: 3,}").unwrap();
+
+        let paths = [json5.to_str().unwrap(), json.to_str().unwrap()];
+        let (status, output, error) = execute(
+            &["--output-format", "jsonl", ".value", paths[0], paths[1]],
+            b"",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"1\n2\n");
+        assert!(error.is_empty());
+
+        let strict_path = permissive_json.to_str().unwrap();
+        let (status, output, _) = execute(&[".", strict_path], b"");
+        assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
+        assert!(output.is_empty());
+
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json5",
+                "--output-format",
+                "json",
+                "--compact-output",
+                ".value",
+                strict_path,
+            ],
+            b"",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"3\n");
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn json5_extension_rejects_stream_mode_before_opening_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.json5");
+        let command = parse_args(["--stream", ".", missing.to_str().unwrap()]).unwrap();
+        let mut input = NoRead;
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+
+        let failure = run_with_io(command, &mut input, &mut output, &mut error).unwrap_err();
+
+        assert_eq!(failure.status(), ExitStatus::Unsupported);
+        assert!(failure.to_string().contains("JSON5"));
+        assert!(failure.to_string().contains("document-at-a-time"));
+        assert!(output.is_empty());
+    }
+
+    #[test]
     fn unexecutable_user_function_closure_fails_before_input() {
         let command = parse_args([
             "--input-format",
@@ -3741,13 +3871,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_json_transcode_rejects_a_late_duplicate_after_partial_output() {
+    fn identity_json_transcode_rejects_a_late_duplicate_without_partial_output() {
         let (status, output, explain) = execute(
             &["--input-format", "json", "--explain-json", "."],
             br#"{"b":1,"a":2,"b":3}"#,
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
-        assert_eq!(output, b"\x1eb: 1\na: 2");
+        assert_eq!(output, [] as [u8; 0]);
         let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
         assert_eq!(explain["execution"]["plan"], "transcode");
         assert_eq!(explain["execution"]["duplicate_policy"], "reject");
@@ -3854,6 +3984,19 @@ mod tests {
         );
         let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
         assert_eq!(report["execution"]["resource_outcome"], "resource-limit");
+
+        let command =
+            parse_args(["--input-format", "json", "--max-output-bytes", "1", "."]).unwrap();
+        let mut input = br#"1"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error)
+                .unwrap_err()
+                .status(),
+            ExitStatus::Resource
+        );
+        assert!(output.is_empty());
 
         for arguments in [
             ["--input-format", "json", "--output-format", "json", "."],
@@ -4163,7 +4306,7 @@ mod tests {
     }
 
     #[test]
-    fn transcode_flushes_the_sequence_prefix_before_root_payload() {
+    fn transcode_flushes_only_after_the_sequence_record_is_complete() {
         let command = parse_args(["--input-format", "json", "."]).unwrap();
         let mut input = br#"{"name":"Ada"}"#.as_slice();
         let mut output = FlushWriter::default();
@@ -4173,7 +4316,7 @@ mod tests {
             ExitStatus::Success
         );
         assert_eq!(output.bytes, b"\x1ename: Ada\n");
-        assert_eq!(output.flush_points.first(), Some(&1));
+        assert_eq!(output.flush_points.first(), Some(&output.bytes.len()));
         assert_eq!(error, [] as [u8; 0]);
     }
 

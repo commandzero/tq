@@ -49,6 +49,66 @@ fn run_tq(mut command: Command, stdin: &[u8]) -> Outcome {
 }
 
 #[test]
+fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
+    for (query, input, expected) in [
+        (
+            "label $out | foreach .[] as $item (null; $item; if . == false then break $out else . end)",
+            "[1,2,false,3,null]",
+            "1\n2\n",
+        ),
+        (
+            "label $x | 1, (label $x | 2, break $x, 3), 4",
+            "null",
+            "1\n2\n4\n",
+        ),
+        (
+            "try (label $out | 1, break $out, 2) catch \"caught\"",
+            "null",
+            "1\n",
+        ),
+        (
+            "walk(if type == \"number\" then ., . + 10 else . end)",
+            "[1]",
+            "[1,11]\n",
+        ),
+    ] {
+        let output = tq(&["-ijson", "-ojson", "-c", query], input.as_bytes());
+        assert_eq!(
+            output.code,
+            0,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected.as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+
+    let deep = format!("{}0{}", "[".repeat(64), "]".repeat(64));
+    let output = tq(
+        &[
+            "-ijson",
+            "-ojson",
+            "-c",
+            "recurse | select(type == \"number\")",
+        ],
+        deep.as_bytes(),
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"0\n");
+
+    let rejected = tq(&["-ijson", "--stream", "recurse"], b"not json");
+    assert_ne!(rejected.code, 0);
+    assert!(rejected.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("TQ-CAP-EVENT-001"));
+    assert!(!String::from_utf8_lossy(&rejected.stderr).contains("syntax"));
+}
+
+#[test]
 fn denied_ambient_access_redacts_diagnostics_and_report_observations() {
     use tq_test_support::compatibility::{
         ErrorClass, FixtureFormat, ObservationState, ProcessStatus, ToolKind, ToolObservation,
@@ -536,6 +596,29 @@ fn proxy_on_error_preserves_content_detected_automatic_event_plan() {
     assert_eq!(stdin.stdout, b"4\n5\n");
     let explain: serde_json::Value = serde_json::from_slice(&stdin.stderr).unwrap();
     assert_eq!(explain["execution"]["plan"], "events");
+}
+
+#[test]
+fn malformed_json_does_not_publish_a_partial_toon_record() {
+    let output = tq(
+        &["."],
+        b"{\n  \"a\": \"\"\"line1\nline2\"\"\",\n  \"b\": 1\n}\n",
+    );
+
+    assert_eq!(output.code, 5);
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("Json input rejected"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let later_error = tq(
+        &["-ijson", "."],
+        b"{\"ok\":1}\n{\"a\":\"\"\"line1\nline2\"\"\"}\n",
+    );
+    assert_eq!(later_error.code, 5);
+    assert_eq!(later_error.stdout, b"\x1eok: 1\n");
 }
 
 #[test]

@@ -1,0 +1,12 @@
+{
+  // Trimmed from the ESDiag Readme saved object.
+  attributes: {
+    title: "ESDiag Readme",
+    markdown: """### About
+
+Elastic Stack Diagnostics simplifies collecting and analyzing deployment health.
+Use the `Diagnostics List` to select a report.""",
+  },
+  id: "esdiag-readme",
+  type: "dashboard",
+}
