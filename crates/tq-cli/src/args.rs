@@ -410,7 +410,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: None,
         syntax: "--allow-platform",
         value: false,
-        description: "permit clock, timezone, and input metadata built-ins",
+        description: "permit clock, timezone, and input filename built-ins",
     },
     OptionSpec {
         short: None,

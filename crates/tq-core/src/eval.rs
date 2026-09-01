@@ -3923,19 +3923,19 @@ impl Evaluator<'_> {
             ),
             "now" => vec![stdlib::now(ambient_platform(environment))],
             "env" => vec![ambient_environment(environment)],
-            "input_filename" => vec![
+            "input_filename" => vec![ambient_value(
+                environment,
+                INPUT_FILENAME,
+                "input_filename",
                 self.input_cursor
                     .and_then(InputCursor::current_context)
-                    .map_or_else(
-                        || ambient_value(environment, INPUT_FILENAME, "input_filename"),
-                        |context| Ok(Value::string(context.identity)),
-                    ),
-            ],
+                    .map(|context| Value::string(context.identity)),
+            )],
             "input_line_number" => vec![
                 self.input_cursor
                     .and_then(InputCursor::current_context)
                     .map_or_else(
-                        || ambient_value(environment, INPUT_LINE_NUMBER, "input_line_number"),
+                        || input_context_value(environment, INPUT_LINE_NUMBER, "input_line_number"),
                         |context| {
                             Ok(Value::Number(
                                 Number::parse(&context.line_number.to_string())
@@ -4680,12 +4680,31 @@ fn ambient_environment(environment: &Environment) -> Result<Value, VmError> {
     }
 }
 
-fn ambient_value(environment: &Environment, key: &str, operation: &str) -> Result<Value, VmError> {
+fn ambient_value(
+    environment: &Environment,
+    key: &str,
+    operation: &str,
+    current: Option<Value>,
+) -> Result<Value, VmError> {
     if !ambient_platform(environment) {
         return Err(runtime(format!(
             "{operation} requires platform access permitted by capability policy"
         )));
     }
+    current
+        .or_else(|| environment.get(key).cloned())
+        .ok_or_else(|| {
+            runtime(format!(
+                "{operation} metadata is unavailable for this input mode"
+            ))
+        })
+}
+
+fn input_context_value(
+    environment: &Environment,
+    key: &str,
+    operation: &str,
+) -> Result<Value, VmError> {
     environment.get(key).cloned().ok_or_else(|| {
         runtime(format!(
             "{operation} metadata is unavailable for this input mode"
@@ -5788,7 +5807,7 @@ mod tests {
         PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline, Value, extrema,
         sort_by_cached_key, stable_sort_values,
     };
-    use crate::{InputCursor, ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
+    use crate::{InputCursor, InputValue, ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
 
     fn run(query: &str, input: &str) -> Vec<Result<Value, String>> {
         run_with_variables(query, input, BTreeMap::new())
@@ -5823,6 +5842,20 @@ mod tests {
             }
         }
         values
+    }
+
+    fn vm_with_input_context(query: &str, identity: &str, line_number: u64) -> Vm {
+        let query = parse(query).unwrap();
+        let query = resolve(query, &ResolveOptions::default()).unwrap();
+        let plan = analyze(query).compile().unwrap().document_plan();
+        let cursor = InputCursor::from_input_values(vec![InputValue {
+            value: serde_json::from_str("null").unwrap(),
+            identity: Arc::from(identity),
+            line_number,
+        }]);
+        let input = cursor.next_value().unwrap().unwrap();
+
+        Vm::new(&plan, input, VmLimits::default()).with_input_cursor(cursor)
     }
 
     fn first_error_with_limits(query: &str, input: &str, limits: VmLimits) -> crate::VmError {
@@ -6143,6 +6176,7 @@ mod tests {
     #[test]
     fn ambient_builtins_require_reserved_policy_admission_without_echoing_values() {
         assert!(json(run("env", "null"))[0].contains("capability policy"));
+        assert!(json(run("input_filename", "null"))[0].contains("capability policy"));
         let mut variables = BTreeMap::new();
         variables.insert(
             Arc::from(super::AMBIENT_ENVIRONMENT),
@@ -6164,6 +6198,45 @@ mod tests {
             json(run_with_variables("input_filename", "null", variables)),
             vec![r#""fixture.json""#]
         );
+    }
+
+    #[test]
+    fn input_line_number_uses_supplied_context_without_platform_admission() {
+        let mut variables = BTreeMap::new();
+        variables.insert(Arc::from(super::AMBIENT_PLATFORM), Value::Bool(false));
+        variables.insert(
+            Arc::from(super::INPUT_LINE_NUMBER),
+            serde_json::from_str("7").unwrap(),
+        );
+
+        assert_eq!(
+            json(run_with_variables("input_line_number", "null", variables)),
+            ["7"]
+        );
+    }
+
+    #[test]
+    fn input_line_number_prefers_active_cursor_context_without_platform_admission() {
+        let mut vm = vm_with_input_context("input_line_number", "fixture.json", 9);
+
+        assert_eq!(vm.next_result().unwrap().unwrap().to_string(), "9");
+    }
+
+    #[test]
+    fn input_filename_requires_platform_admission_with_active_cursor() {
+        let mut vm = vm_with_input_context("input_filename", "fixture.json", 9);
+
+        let error = vm.next_result().unwrap_err().to_string();
+        assert!(error.contains("capability policy"));
+        assert!(!error.contains("fixture.json"));
+    }
+
+    #[test]
+    fn input_line_number_without_context_reports_metadata_unavailable() {
+        let error = json(run("input_line_number", "null"));
+
+        assert!(error[0].contains("metadata is unavailable"));
+        assert!(!error[0].contains("capability policy"));
     }
 
     #[test]
