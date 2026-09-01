@@ -23,6 +23,15 @@ pub(crate) enum ExprKind {
     Variable(Arc<str>),
     Empty,
     RecursiveDescent,
+    Label {
+        name: Arc<str>,
+        symbol: Option<u32>,
+        body: Box<Expr>,
+    },
+    Break {
+        name: Arc<str>,
+        symbol: Option<u32>,
+    },
     Interpolation(Vec<InterpolationSegment>),
     Access {
         base: Box<Expr>,
@@ -225,6 +234,18 @@ fn render(expr: &Expr, output: &mut String) {
         }
         ExprKind::Empty => output.push_str("empty"),
         ExprKind::RecursiveDescent => output.push_str("recursive-descent"),
+        ExprKind::Label { name, body, .. } => {
+            output.push_str("label($");
+            output.push_str(name);
+            output.push_str("; ");
+            render(body, output);
+            output.push(')');
+        }
+        ExprKind::Break { name, .. } => {
+            output.push_str("break($");
+            output.push_str(name);
+            output.push(')');
+        }
         ExprKind::Interpolation(segments) => {
             output.push_str("interpolate(");
             for (index, segment) in segments.iter().enumerate() {

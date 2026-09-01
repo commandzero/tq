@@ -153,9 +153,11 @@ enum GeneratorContinuation {
     ApplyIndex(Value),
     OptionalBoundary,
     Catch {
+        boundary: u64,
         node: Option<u32>,
         environment: Arc<Environment>,
     },
+    Label(u32),
     Interpolate {
         segments: Arc<[InterpolationOperand]>,
         next: usize,
@@ -179,6 +181,31 @@ enum GeneratorContinuation {
         frames: UserFrames,
     },
     Raise,
+    RecurseChild {
+        filter: u32,
+        condition: Option<u32>,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+    },
+    RecurseCondition {
+        child: Value,
+        filter: u32,
+        condition: u32,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+    },
+    LimitCount {
+        expression: u32,
+        input: Value,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+    },
+    LimitItem {
+        boundary: u64,
+        remaining: Rc<Cell<usize>>,
+    },
 }
 
 #[derive(Clone)]
@@ -238,6 +265,7 @@ enum GeneratorTask {
         input: Value,
         keys: Rc<RefCell<Vec<Value>>>,
         keyed_values: Rc<RefCell<Vec<(Value, Value)>>>,
+        continuations: Vec<GeneratorContinuation>,
     },
     FinishAlternative {
         matched: Rc<Cell<bool>>,
@@ -253,6 +281,108 @@ enum GeneratorTask {
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
+    RecurseExpand {
+        input: Value,
+        filter: Option<u32>,
+        condition: Option<u32>,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    RecurseChildren {
+        input: Value,
+        next: usize,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    RecurseValue {
+        value: Value,
+        filter: Option<u32>,
+        condition: Option<u32>,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    WalkValue {
+        input: Value,
+        callback: u32,
+        depth: usize,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    WalkArray {
+        inputs: Arc<[Value]>,
+        next: usize,
+        callback: u32,
+        depth: usize,
+        values: Rc<RefCell<Vec<Value>>>,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    WalkObject {
+        entries: Arc<[(Arc<str>, Value)]>,
+        next: usize,
+        callback: u32,
+        depth: usize,
+        values: Rc<RefCell<Object>>,
+        environment: Arc<Environment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+}
+
+fn task_owned_by_label(task: &GeneratorTask, label: u32) -> bool {
+    task_has_continuation(
+        task,
+        |continuation| matches!(continuation, GeneratorContinuation::Label(symbol) if *symbol == label),
+    )
+}
+
+fn task_has_continuation(
+    task: &GeneratorTask,
+    predicate: impl Fn(&GeneratorContinuation) -> bool,
+) -> bool {
+    task_continuations(task).iter().any(predicate)
+}
+
+fn task_owned_by_catch(task: &GeneratorTask, boundary: u64) -> bool {
+    task_has_continuation(
+        task,
+        |continuation| matches!(continuation, GeneratorContinuation::Catch { boundary: candidate, .. } if *candidate == boundary),
+    )
+}
+
+fn task_owned_by_limit(task: &GeneratorTask, boundary: u64) -> bool {
+    task_has_continuation(
+        task,
+        |continuation| matches!(continuation, GeneratorContinuation::LimitItem { boundary: candidate, .. } if *candidate == boundary),
+    )
+}
+
+fn task_continuations(task: &GeneratorTask) -> &[GeneratorContinuation] {
+    match task {
+        GeneratorTask::Eval(work) => &work.continuations,
+        GeneratorTask::Iterate { continuations, .. }
+        | GeneratorTask::FinishArray { continuations, .. }
+        | GeneratorTask::MapArray { continuations, .. }
+        | GeneratorTask::MapObject { continuations, .. }
+        | GeneratorTask::CollectSortKeys { continuations, .. }
+        | GeneratorTask::FinishSortKey { continuations, .. }
+        | GeneratorTask::FinishAlternative { continuations, .. }
+        | GeneratorTask::Traverse { continuations, .. }
+        | GeneratorTask::RecurseExpand { continuations, .. }
+        | GeneratorTask::RecurseChildren { continuations, .. }
+        | GeneratorTask::RecurseValue { continuations, .. }
+        | GeneratorTask::WalkValue { continuations, .. }
+        | GeneratorTask::WalkArray { continuations, .. }
+        | GeneratorTask::WalkObject { continuations, .. } => continuations,
+    }
 }
 
 enum InterpolationWork {
@@ -323,6 +453,14 @@ impl TraversalCursor {
     }
 }
 
+fn recursive_child(value: &Value, index: usize) -> Option<Value> {
+    match value {
+        Value::Array(values) => values.get(index).cloned(),
+        Value::Object(values) => values.get_index(index).map(|(_, value)| value.clone()),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+    }
+}
+
 fn managed_subset_gap(bytecode: &Bytecode) -> Option<crate::Span> {
     let mut pending = vec![bytecode.root()];
     let mut seen = vec![false; bytecode.instructions().len()];
@@ -382,6 +520,8 @@ fn managed_operation_supported(bytecode: &Bytecode, operation: &Operation) -> bo
         | Operation::Variable(_)
         | Operation::Empty
         | Operation::RecursiveDescent
+        | Operation::Label { .. }
+        | Operation::Break(_)
         | Operation::ParameterCall { .. }
         | Operation::AccessField { .. }
         | Operation::Iterate(_)
@@ -402,8 +542,17 @@ fn managed_operation_supported(bytecode: &Bytecode, operation: &Operation) -> bo
                 || (name.as_ref() == "error" && arguments.len() <= 1)
                 || (matches!(
                     name.as_ref(),
-                    "map" | "map_values" | "select" | "sort_by" | "unique_by" | "has" | "in"
+                    "map"
+                        | "map_values"
+                        | "select"
+                        | "sort_by"
+                        | "unique_by"
+                        | "has"
+                        | "in"
+                        | "walk"
                 ) && arguments.len() == 1)
+                || (name.as_ref() == "limit" && arguments.len() == 2)
+                || (name.as_ref() == "recurse" && arguments.len() <= 2)
                 || (arguments.is_empty()
                     && matches!(
                         name.as_ref(),
@@ -457,6 +606,7 @@ fn operation_children(bytecode: &Bytecode, operation: &Operation) -> Option<Vec<
         | Operation::Optional(base)
         | Operation::Array(base)
         | Operation::Unary { child: base, .. } => children.push(*base),
+        Operation::Label { body, .. } => children.push(*body),
         Operation::AccessIndex { base, index } => children.extend([*base, *index]),
         Operation::Slice { base, start, end } => {
             children.push(*base);
@@ -529,6 +679,7 @@ fn operation_children(bytecode: &Bytecode, operation: &Operation) -> Option<Vec<
         | Operation::Variable(_)
         | Operation::Empty
         | Operation::RecursiveDescent
+        | Operation::Break(_)
         | Operation::ParameterCall { .. } => {}
     }
     Some(children)
@@ -557,6 +708,7 @@ fn evaluate_generator_stream(
         continuations: Vec::new(),
     })];
     let mut observations = VmObservations::default();
+    let mut next_boundary = 0_u64;
 
     while let Some(task) = pending.pop() {
         if stop.load(Ordering::Relaxed)
@@ -745,6 +897,7 @@ fn evaluate_generator_stream(
                         input: value.clone(),
                         keys: Rc::clone(&keys),
                         keyed_values,
+                        continuations: continuations.clone(),
                     });
                     let mut callback_continuations = continuations;
                     callback_continuations
@@ -785,6 +938,7 @@ fn evaluate_generator_stream(
                 input,
                 keys,
                 keyed_values,
+                continuations: _,
             } => {
                 let keys = std::mem::take(&mut *keys.borrow_mut());
                 keyed_values.borrow_mut().push((Value::array(keys), input));
@@ -853,6 +1007,263 @@ fn evaluate_generator_stream(
                         break;
                     }
                 }
+            }
+            GeneratorTask::RecurseExpand {
+                input,
+                filter,
+                condition,
+                depth,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if depth > limits.path_stack {
+                    let _ = emit(Err(resource("path-stack")), observations);
+                    break;
+                }
+                observations.path_stack_high_water = observations.path_stack_high_water.max(depth);
+                if let Some(filter) = filter {
+                    let mut callback_continuations = continuations;
+                    callback_continuations.push(GeneratorContinuation::RecurseChild {
+                        filter,
+                        condition,
+                        depth,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                    });
+                    (
+                        GeneratorWork {
+                            node: filter,
+                            input,
+                            environment,
+                            frames,
+                            continuations: callback_continuations,
+                        },
+                        None,
+                    )
+                } else {
+                    pending.push(GeneratorTask::RecurseChildren {
+                        input,
+                        next: 0,
+                        depth,
+                        environment,
+                        frames,
+                        continuations,
+                    });
+                    continue;
+                }
+            }
+            GeneratorTask::RecurseChildren {
+                input,
+                next,
+                depth,
+                environment,
+                frames,
+                continuations,
+            } => {
+                let Some(child) = recursive_child(&input, next) else {
+                    continue;
+                };
+                pending.push(GeneratorTask::RecurseChildren {
+                    input,
+                    next: next.saturating_add(1),
+                    depth,
+                    environment: Arc::clone(&environment),
+                    frames: Arc::clone(&frames),
+                    continuations: continuations.clone(),
+                });
+                pending.push(GeneratorTask::RecurseValue {
+                    value: child,
+                    filter: None,
+                    condition: None,
+                    depth: depth.saturating_add(1),
+                    environment,
+                    frames,
+                    continuations,
+                });
+                continue;
+            }
+            GeneratorTask::RecurseValue {
+                value,
+                filter,
+                condition,
+                depth,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if depth > limits.path_stack {
+                    let _ = emit(Err(resource("path-stack")), observations);
+                    break;
+                }
+                pending.push(GeneratorTask::RecurseExpand {
+                    input: value.clone(),
+                    filter,
+                    condition,
+                    depth,
+                    environment: Arc::clone(&environment),
+                    frames: Arc::clone(&frames),
+                    continuations: continuations.clone(),
+                });
+                (
+                    GeneratorWork {
+                        node: bytecode.root(),
+                        input: Value::Null,
+                        environment,
+                        frames,
+                        continuations,
+                    },
+                    Some(Ok(value)),
+                )
+            }
+            GeneratorTask::WalkValue {
+                input,
+                callback,
+                depth,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if depth > limits.path_stack {
+                    let _ = emit(Err(resource("path-stack")), observations);
+                    break;
+                }
+                observations.path_stack_high_water = observations.path_stack_high_water.max(depth);
+                match input {
+                    Value::Array(values) => {
+                        pending.push(GeneratorTask::WalkArray {
+                            inputs: values,
+                            next: 0,
+                            callback,
+                            depth,
+                            values: Rc::new(RefCell::new(Vec::new())),
+                            environment,
+                            frames,
+                            continuations,
+                        });
+                        continue;
+                    }
+                    Value::Object(values) => {
+                        let entries = values
+                            .iter()
+                            .map(|(key, value)| (Arc::clone(key), value.clone()))
+                            .collect::<Vec<_>>();
+                        pending.push(GeneratorTask::WalkObject {
+                            entries: Arc::from(entries),
+                            next: 0,
+                            callback,
+                            depth,
+                            values: Rc::new(RefCell::new(Object::new())),
+                            environment,
+                            frames,
+                            continuations,
+                        });
+                        continue;
+                    }
+                    input => (
+                        GeneratorWork {
+                            node: callback,
+                            input,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        None,
+                    ),
+                }
+            }
+            GeneratorTask::WalkArray {
+                inputs,
+                next,
+                callback,
+                depth,
+                values,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if let Some(value) = inputs.get(next).cloned() {
+                    pending.push(GeneratorTask::WalkArray {
+                        inputs,
+                        next: next + 1,
+                        callback,
+                        depth,
+                        values: Rc::clone(&values),
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut child_continuations = continuations;
+                    child_continuations.push(GeneratorContinuation::ArrayItem(values));
+                    pending.push(GeneratorTask::WalkValue {
+                        input: value,
+                        callback,
+                        depth: depth.saturating_add(1),
+                        environment,
+                        frames,
+                        continuations: child_continuations,
+                    });
+                    continue;
+                }
+                (
+                    GeneratorWork {
+                        node: callback,
+                        input: Value::array(values.take()),
+                        environment,
+                        frames,
+                        continuations,
+                    },
+                    None,
+                )
+            }
+            GeneratorTask::WalkObject {
+                entries,
+                next,
+                callback,
+                depth,
+                values,
+                environment,
+                frames,
+                continuations,
+            } => {
+                if let Some((key, value)) = entries.get(next).cloned() {
+                    pending.push(GeneratorTask::WalkObject {
+                        entries,
+                        next: next + 1,
+                        callback,
+                        depth,
+                        values: Rc::clone(&values),
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut child_continuations = continuations;
+                    child_continuations.push(GeneratorContinuation::ObjectItem {
+                        key,
+                        values,
+                        accepted: Rc::new(Cell::new(false)),
+                    });
+                    pending.push(GeneratorTask::WalkValue {
+                        input: value,
+                        callback,
+                        depth: depth.saturating_add(1),
+                        environment,
+                        frames,
+                        continuations: child_continuations,
+                    });
+                    continue;
+                }
+                let rebuilt = std::mem::take(&mut *values.borrow_mut());
+                (
+                    GeneratorWork {
+                        node: callback,
+                        input: Value::object(rebuilt),
+                        environment,
+                        frames,
+                        continuations,
+                    },
+                    None,
+                )
             }
         };
         observations.value_stack_high_water = observations.value_stack_high_water.max(1);
@@ -1121,7 +1532,10 @@ fn evaluate_generator_stream(
                     }
                 }
                 Operation::TryCatch { expression, catch } => {
+                    let boundary = next_boundary;
+                    next_boundary = next_boundary.saturating_add(1);
                     work.continuations.push(GeneratorContinuation::Catch {
+                        boundary,
                         node: *catch,
                         environment: Arc::clone(&work.environment),
                     });
@@ -1129,6 +1543,14 @@ fn evaluate_generator_stream(
                     pending.push(GeneratorTask::Eval(work.clone()));
                     None
                 }
+                Operation::Label { symbol, body } => {
+                    work.continuations
+                        .push(GeneratorContinuation::Label(*symbol));
+                    work.node = *body;
+                    pending.push(GeneratorTask::Eval(work.clone()));
+                    None
+                }
+                Operation::Break(symbol) => Some(Err(VmError::Break { label: *symbol })),
                 Operation::Call { name, arguments }
                     if arguments.is_empty()
                         && bytecode
@@ -1151,6 +1573,63 @@ fn evaluate_generator_stream(
                         Some(Err(VmError::Runtime {
                             message: work.input.to_string().into(),
                         }))
+                    }
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "recurse") =>
+                {
+                    let filter = arguments.first().copied();
+                    let condition = arguments.get(1).copied();
+                    pending.push(GeneratorTask::RecurseExpand {
+                        input: work.input.clone(),
+                        filter,
+                        condition,
+                        depth: 1,
+                        environment: Arc::clone(&work.environment),
+                        frames: Arc::clone(&work.frames),
+                        continuations: work.continuations.clone(),
+                    });
+                    Some(Ok(work.input))
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "limit") =>
+                {
+                    match (arguments.first(), arguments.get(1)) {
+                        (Some(count), Some(expression)) => {
+                            work.continuations.push(GeneratorContinuation::LimitCount {
+                                expression: *expression,
+                                input: work.input.clone(),
+                                environment: Arc::clone(&work.environment),
+                                frames: Arc::clone(&work.frames),
+                            });
+                            work.node = *count;
+                            pending.push(GeneratorTask::Eval(work.clone()));
+                            None
+                        }
+                        _ => Some(Err(invalid("limit arguments missing"))),
+                    }
+                }
+                Operation::Call { name, arguments }
+                    if bytecode
+                        .string(*name)
+                        .is_some_and(|name| name.as_ref() == "walk") =>
+                {
+                    if let Some(callback) = arguments.first() {
+                        pending.push(GeneratorTask::WalkValue {
+                            input: work.input.clone(),
+                            callback: *callback,
+                            depth: 1,
+                            environment: Arc::clone(&work.environment),
+                            frames: Arc::clone(&work.frames),
+                            continuations: work.continuations.clone(),
+                        });
+                        None
+                    } else {
+                        Some(Err(invalid("walk argument missing")))
                     }
                 }
                 Operation::Call { name, arguments }
@@ -1312,11 +1791,16 @@ fn evaluate_generator_stream(
                             handled = true;
                             break;
                         }
-                        GeneratorContinuation::Catch { node, environment } => {
+                        GeneratorContinuation::Catch {
+                            boundary,
+                            node,
+                            environment,
+                        } => {
+                            pending.retain(|task| !task_owned_by_catch(task, boundary));
                             if let Some(node) = node {
                                 pending.push(GeneratorTask::Eval(GeneratorWork {
                                     node,
-                                    input: Value::string(catch_value(&error)),
+                                    input: catch_value(&error),
                                     environment,
                                     frames: work.frames,
                                     continuations: work.continuations,
@@ -1324,6 +1808,13 @@ fn evaluate_generator_stream(
                             }
                             handled = true;
                             break;
+                        }
+                        GeneratorContinuation::Label(symbol) => {
+                            if matches!(error, VmError::Break { label } if label == symbol) {
+                                pending.retain(|task| !task_owned_by_label(task, symbol));
+                                handled = true;
+                                break;
+                            }
                         }
                         GeneratorContinuation::ReturnUser {
                             environment,
@@ -1351,6 +1842,10 @@ fn evaluate_generator_stream(
                         | GeneratorContinuation::ApplyIndex(_)
                         | GeneratorContinuation::Interpolate { .. }
                         | GeneratorContinuation::UserArgument { .. }
+                        | GeneratorContinuation::RecurseChild { .. }
+                        | GeneratorContinuation::RecurseCondition { .. }
+                        | GeneratorContinuation::LimitCount { .. }
+                        | GeneratorContinuation::LimitItem { .. }
                         | GeneratorContinuation::Raise => {}
                     }
                 }
@@ -1555,7 +2050,9 @@ fn evaluate_generator_stream(
                         observations.fork_stack_high_water.max(pending.len());
                     break;
                 }
-                GeneratorContinuation::OptionalBoundary | GeneratorContinuation::Catch { .. } => {
+                GeneratorContinuation::OptionalBoundary
+                | GeneratorContinuation::Catch { .. }
+                | GeneratorContinuation::Label(_) => {
                     result = Ok(value);
                 }
                 GeneratorContinuation::Interpolate {
@@ -1644,6 +2141,105 @@ fn evaluate_generator_stream(
                 } => {
                     work.environment = environment;
                     work.frames = frames;
+                    result = Ok(value);
+                }
+                GeneratorContinuation::RecurseChild {
+                    filter,
+                    condition,
+                    depth,
+                    environment,
+                    frames,
+                } => {
+                    if let Some(condition) = condition {
+                        work.continuations
+                            .push(GeneratorContinuation::RecurseCondition {
+                                child: value.clone(),
+                                filter,
+                                condition,
+                                depth,
+                                environment: Arc::clone(&environment),
+                                frames: Arc::clone(&frames),
+                            });
+                        pending.push(GeneratorTask::Eval(GeneratorWork {
+                            node: condition,
+                            input: value,
+                            environment,
+                            frames,
+                            continuations: work.continuations,
+                        }));
+                    } else {
+                        pending.push(GeneratorTask::RecurseValue {
+                            value,
+                            filter: Some(filter),
+                            condition: None,
+                            depth: depth.saturating_add(1),
+                            environment,
+                            frames,
+                            continuations: work.continuations,
+                        });
+                    }
+                    break;
+                }
+                GeneratorContinuation::RecurseCondition {
+                    child,
+                    filter,
+                    condition,
+                    depth,
+                    environment,
+                    frames,
+                } => {
+                    if value.is_truthy() {
+                        pending.push(GeneratorTask::RecurseValue {
+                            value: child,
+                            filter: Some(filter),
+                            condition: Some(condition),
+                            depth: depth.saturating_add(1),
+                            environment,
+                            frames,
+                            continuations: work.continuations,
+                        });
+                    }
+                    break;
+                }
+                GeneratorContinuation::LimitCount {
+                    expression,
+                    input,
+                    environment,
+                    frames,
+                } => {
+                    let count = match limit_count(&value) {
+                        Ok(count) => count,
+                        Err(error) => {
+                            result = Err(error);
+                            continue;
+                        }
+                    };
+                    if count > 0 {
+                        let boundary = next_boundary;
+                        next_boundary = next_boundary.saturating_add(1);
+                        work.continuations.push(GeneratorContinuation::LimitItem {
+                            boundary,
+                            remaining: Rc::new(Cell::new(count)),
+                        });
+                        pending.push(GeneratorTask::Eval(GeneratorWork {
+                            node: expression,
+                            input,
+                            environment,
+                            frames,
+                            continuations: work.continuations,
+                        }));
+                    }
+                    break;
+                }
+                GeneratorContinuation::LimitItem {
+                    boundary,
+                    remaining,
+                } => {
+                    let next = remaining.get().saturating_sub(1);
+                    remaining.set(next);
+                    if next == 0 {
+                        pending.retain(|task| !task_owned_by_limit(task, boundary));
+                    }
                     result = Ok(value);
                 }
                 GeneratorContinuation::Raise => {
@@ -2205,7 +2801,7 @@ impl Evaluator<'_> {
                         Err(error) => catch.is_none_or(|catch| {
                             self.emit_node(
                                 catch,
-                                &Value::string(catch_value(&error)),
+                                &catch_value(&error),
                                 environment,
                                 depth + 1,
                                 emit,
@@ -2214,6 +2810,17 @@ impl Evaluator<'_> {
                     },
                 )
             }
+            Operation::Label { symbol, body } => {
+                self.emit_node(body, input, environment, depth + 1, &mut |result| {
+                    if matches!(result, Err(VmError::Break { label }) if label == symbol) {
+                        false
+                    } else {
+                        emit(result)
+                    }
+                });
+                true
+            }
+            Operation::Break(symbol) => emit(Err(VmError::Break { label: symbol })),
             Operation::Call { name, arguments } => {
                 let name = match self.string(name) {
                     Ok(name) => Arc::clone(name),
@@ -2988,7 +3595,7 @@ impl Evaluator<'_> {
                             if let Some(catch) = catch {
                                 output.extend(self.node(
                                     *catch,
-                                    &Value::string(catch_value(&error)),
+                                    &catch_value(&error),
                                     environment,
                                     depth + 1,
                                 ));
@@ -2998,6 +3605,17 @@ impl Evaluator<'_> {
                 }
                 output
             }
+            Operation::Label { symbol, body } => {
+                let mut output = Vec::new();
+                for result in self.node(*body, input, environment, depth + 1) {
+                    if matches!(result, Err(VmError::Break { label }) if label == *symbol) {
+                        break;
+                    }
+                    output.push(result);
+                }
+                output
+            }
+            Operation::Break(symbol) => one_error(VmError::Break { label: *symbol }),
             Operation::Assignment {
                 operator,
                 path,
@@ -3988,10 +4606,18 @@ fn limit_count(value: &Value) -> Result<usize, VmError> {
     }
 }
 
-fn catch_value(error: &VmError) -> String {
+fn catch_value(error: &VmError) -> Value {
     match error {
-        VmError::Runtime { message } => message.to_string(),
-        _ => error.to_string(),
+        VmError::Runtime { message } => Value::string(Arc::clone(message)),
+        VmError::Break { .. } => {
+            let mut sentinel = Object::new();
+            sentinel.insert(
+                Arc::from("__jq"),
+                Value::Number(Number::parse("0").expect("zero is a valid number")),
+            );
+            Value::object(sentinel)
+        }
+        _ => Value::string(error.to_string()),
     }
 }
 
@@ -5217,6 +5843,207 @@ mod tests {
                 value.map_or_else(|error| format!("error:{error}"), |value| value.to_string())
             })
             .collect()
+    }
+
+    #[test]
+    fn lexical_labels_prune_owned_work_and_preserve_outer_work() {
+        assert_eq!(
+            json(run("label $out | 1, break $out, 2", "null")),
+            vec!["1"]
+        );
+        assert_eq!(
+            json(run(
+                "label $x | (1, (label $x | 2, break $x, 3), 4)",
+                "null"
+            )),
+            vec!["1", "2", "4"]
+        );
+        assert_eq!(
+            json(run("label $a | (label $b | 1, break $a, 2), 3", "null")),
+            vec!["1"]
+        );
+    }
+
+    #[test]
+    fn label_break_observes_try_function_and_fold_boundaries() {
+        assert_eq!(
+            json(run(
+                "label $out | try (1, break $out, 2) catch \"caught\", 3",
+                "null"
+            )),
+            vec!["1", r#""caught""#, "3"]
+        );
+        assert_eq!(
+            json(run(
+                "try (label $out | 1, break $out, 2) catch \"caught\"",
+                "null"
+            )),
+            vec!["1"]
+        );
+        assert_eq!(
+            json(run("label $x | try break $x catch .", "null")),
+            vec![r#"{"__jq":0}"#]
+        );
+        assert_eq!(
+            json(run("label $x | def f: 1, break $x, 2; f, 3", "null")),
+            vec!["1"]
+        );
+        assert_eq!(
+            json(run(
+                "label $out | foreach .[] as $item (null; $item; if . == false then break $out else . end)",
+                "[1,2,false,3,null]"
+            )),
+            vec!["1", "2"]
+        );
+    }
+
+    #[test]
+    fn recursive_builtins_match_jq_order_and_cardinality() {
+        assert_eq!(
+            json(run("[recurse(.[]?)]", r#"{"a":[1]}"#)),
+            vec![r#"[{"a":[1]},[1],1]"#]
+        );
+        assert_eq!(
+            json(run("recurse", r#"{"a":[1]}"#)),
+            vec![r#"{"a":[1]}"#, "[1]", "1"]
+        );
+        assert_eq!(json(run("recurse(.+1; . < 4)", "2")), vec!["2", "3"]);
+        assert_eq!(
+            json(run("recurse(if . < 2 then .+1, .+10 else empty end)", "0")),
+            vec!["0", "1", "2", "11", "10"]
+        );
+    }
+
+    #[test]
+    fn walk_is_post_order_and_preserves_jq_callback_cardinality() {
+        assert_eq!(
+            json(run(
+                "walk(if type == \"number\" then . + 1 else . end)",
+                r#"{"a":[1,2]}"#
+            )),
+            vec![r#"{"a":[2,3]}"#]
+        );
+        assert_eq!(json(run("walk(., .)", "[1]")), vec!["[1,1]", "[1,1]"]);
+        assert_eq!(
+            json(run(
+                "walk(if type == \"number\" then ., .+10 else . end)",
+                r#"{"a":1,"b":2}"#
+            )),
+            vec![r#"{"a":1,"b":2}"#]
+        );
+    }
+
+    #[test]
+    fn recursive_control_flow_stops_and_obeys_limits_and_cancellation() {
+        assert_eq!(
+            json(run("limit(1; recurse(error(\"late\")))", "null")),
+            vec!["null"]
+        );
+        assert_eq!(
+            json(run(
+                "limit(1; label $out | 1, error(\"late\"), break $out)",
+                "null"
+            )),
+            vec!["1"]
+        );
+
+        for (limits, resource_name) in [
+            (
+                VmLimits {
+                    steps: 1,
+                    ..VmLimits::default()
+                },
+                "vm-steps",
+            ),
+            (
+                VmLimits {
+                    call_stack: 1,
+                    ..VmLimits::default()
+                },
+                "call-stack",
+            ),
+        ] {
+            let error = first_error_with_limits("[label $out | 1, 2]", "null", limits);
+            assert_eq!(
+                error,
+                crate::VmError::Resource {
+                    resource: resource_name
+                }
+            );
+        }
+
+        for query in ["[recurse(.[]?)]", "walk(.)"] {
+            let error = first_error_with_limits(
+                query,
+                "[[[0]]]",
+                VmLimits {
+                    path_stack: 2,
+                    ..VmLimits::default()
+                },
+            );
+            assert_eq!(
+                error,
+                crate::VmError::Resource {
+                    resource: "path-stack"
+                }
+            );
+        }
+
+        let plan = analyze(
+            resolve(
+                parse("label $out | recurse(.[]?)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let cancellation = Arc::new(AtomicBool::new(true));
+        let mut vm = Vm::new(
+            &plan,
+            serde_json::from_str("[[[0]]]").unwrap(),
+            VmLimits::default(),
+        )
+        .with_cancellation(cancellation);
+        assert_eq!(vm.next_result().unwrap_err(), crate::VmError::Interrupted);
+    }
+
+    #[test]
+    fn default_recurse_pulls_wide_children_on_demand() {
+        let plan = analyze(
+            resolve(
+                parse("limit(2; recurse)").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan();
+        let source = format!(
+            "[{}]",
+            (0..128)
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let input: Value = serde_json::from_str(&source).unwrap();
+        let mut vm = Vm::new(
+            &plan,
+            input.clone(),
+            VmLimits {
+                fork_stack: 8,
+                ..VmLimits::default()
+            },
+        );
+
+        assert_eq!(vm.next_result().unwrap(), Some(input));
+        assert_eq!(
+            vm.next_result().unwrap(),
+            Some(serde_json::from_str("0").unwrap())
+        );
+        assert_eq!(vm.next_result().unwrap(), None);
     }
 
     #[test]

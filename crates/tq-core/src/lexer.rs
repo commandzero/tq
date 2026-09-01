@@ -57,6 +57,8 @@ pub(crate) enum TokenKind {
     Catch,
     Reduce,
     Foreach,
+    Label,
+    Break,
     Def,
     Include,
     Import,
@@ -74,7 +76,6 @@ pub(crate) enum TokenKind {
     InterpolationEnd,
     Number(Arc<str>),
     Format(Arc<str>),
-    Deferred(Arc<str>),
     EndOfInput,
 }
 
@@ -469,8 +470,8 @@ impl Lexer<'_> {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "null" => TokenKind::Null,
-            "label" => TokenKind::Deferred("labels".into()),
-            "break" => TokenKind::Deferred(text.into()),
+            "label" => TokenKind::Label,
+            "break" => TokenKind::Break,
             _ => TokenKind::Identifier(text.into()),
         };
         self.push(start, kind);

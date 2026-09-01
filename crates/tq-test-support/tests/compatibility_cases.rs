@@ -238,7 +238,7 @@ fn every_mvp_builtin_has_a_case_and_execution_classification() {
 }
 
 #[test]
-fn error_update_cli_and_deferred_groups_cover_the_spec() {
+fn error_update_cli_and_recursive_descent_groups_cover_the_spec() {
     assert_capabilities(
         "errors.jsonl",
         &[
@@ -313,7 +313,28 @@ fn error_update_cli_and_deferred_groups_cover_the_spec() {
             "result.partial",
         ],
     );
-    assert_capabilities("deferred.jsonl", &["deferred.labels"]);
+}
+
+#[test]
+fn recursive_builtins_labels_and_deferred_groups_cover_the_spec() {
+    assert_capabilities(
+        "recursive-labels.jsonl",
+        &[
+            "label.issue-6",
+            "label.shadowing",
+            "label.try-inside",
+            "label.try-outside",
+            "recurse.default",
+            "recurse.conditional",
+            "recurse.generator",
+            "walk.post-order",
+            "walk.cardinality",
+            "walk.empty-array-child",
+            "walk.empty-object-value",
+            "walk.empty-root",
+        ],
+    );
+    assert_capabilities("deferred.jsonl", &["deferred.nonfinite-result"]);
 
     let deferred = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))
