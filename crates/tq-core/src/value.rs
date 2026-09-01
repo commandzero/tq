@@ -151,8 +151,12 @@ impl Object {
     /// Iterates members in encounter order.
     pub fn iter(&self) -> ObjectIter<'_> {
         match &self.storage {
-            ObjectStorage::Small(values) => ObjectIter::Small(values.iter()),
-            ObjectStorage::Large(values) => ObjectIter::Large(values.iter()),
+            ObjectStorage::Small(values) => ObjectIter {
+                inner: ObjectIterInner::Small(values.iter()),
+            },
+            ObjectStorage::Large(values) => ObjectIter {
+                inner: ObjectIterInner::Large(values.iter()),
+            },
         }
     }
 
@@ -211,7 +215,11 @@ where
 }
 
 /// Borrowed encounter-order object iterator.
-pub enum ObjectIter<'a> {
+pub struct ObjectIter<'a> {
+    inner: ObjectIterInner<'a>,
+}
+
+enum ObjectIterInner<'a> {
     Small(std::slice::Iter<'a, (Arc<str>, Value)>),
     Large(indexmap::map::Iter<'a, Arc<str>, Value>),
 }
@@ -220,25 +228,25 @@ impl<'a> Iterator for ObjectIter<'a> {
     type Item = (&'a Arc<str>, &'a Value);
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Small(values) => values.next().map(|(key, value)| (key, value)),
-            Self::Large(values) => values.next(),
+        match &mut self.inner {
+            ObjectIterInner::Small(values) => values.next().map(|(key, value)| (key, value)),
+            ObjectIterInner::Large(values) => values.next(),
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::Small(values) => values.size_hint(),
-            Self::Large(values) => values.size_hint(),
+        match &self.inner {
+            ObjectIterInner::Small(values) => values.size_hint(),
+            ObjectIterInner::Large(values) => values.size_hint(),
         }
     }
 }
 
 impl DoubleEndedIterator for ObjectIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Small(values) => values.next_back().map(|(key, value)| (key, value)),
-            Self::Large(values) => values.next_back(),
+        match &mut self.inner {
+            ObjectIterInner::Small(values) => values.next_back().map(|(key, value)| (key, value)),
+            ObjectIterInner::Large(values) => values.next_back(),
         }
     }
 }
