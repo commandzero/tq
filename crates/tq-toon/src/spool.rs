@@ -305,7 +305,7 @@ pub enum PublicationError {
 }
 
 /// Result-sized bytes retained in bounded memory or private temporary storage
-/// until unframed single-result validation succeeds.
+/// until publication succeeds.
 #[derive(Debug)]
 pub struct PublicationBuffer {
     config: ArrayPreparationConfig,
@@ -370,6 +370,11 @@ impl PublicationBuffer {
             1 => {}
             _ => return Err(crate::CardinalityError::Multiple.into()),
         }
+        self.publish(output)
+    }
+
+    /// Publishes prepared bytes after the caller validates them.
+    pub(crate) fn publish<W: Write>(&mut self, output: &mut W) -> Result<(), PublicationError> {
         if self.published {
             return Err(SpoolError::Decode("publication buffer already committed").into());
         }

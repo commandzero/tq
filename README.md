@@ -73,10 +73,10 @@ and blocking.
 
 For the identity query `.` with JSON or strict TOON input and canonical TOON
 output, the planner selects `transcode`. This path bypasses jq bytecode and uses
-one bounded preparation arena. The JSON decoder writes object members as they
-arrive. If a later member repeats a name, transcode rejects the current record
-instead of applying jq's last-value normalization. Sequence output may already
-contain part of that record. Unframed output stays empty.
+one bounded preparation arena. The JSON decoder stages object members as they
+arrive. If a later member repeats a name, transcode rejects and discards the
+current record instead of applying jq's last-value normalization. Unframed
+output stays empty as well.
 
 Safe key folding, sorted keys, raw or joined output, slurp, explicit jq stream
 mode, non-TOON output, and non-identity queries use the existing plans.
@@ -84,9 +84,10 @@ mode, non-TOON output, and non-identity queries use the existing plans.
 A document plan keeps one decoded document, while slurp keeps every input
 document. Sorting, uniqueness, and final reductions need blocking state. A fold
 keeps one immutable accumulator plus bounded evaluator state. Transcode may
-write array preparation or atomic unframed output to private temporary files.
-Sequence output can preserve completed records before a later error. Unframed
-output publishes nothing until exactly one successful result is known.
+write array preparation, staged sequence records, or atomic unframed output to
+private temporary files. Sequence output preserves completed records before a
+later error. Unframed output publishes nothing until exactly one successful
+result is known.
 
 The resource controls are `--max-input-bytes`, `--max-depth`,
 `--max-token-bytes`, `--max-line-bytes`, `--max-lookahead-bytes`,

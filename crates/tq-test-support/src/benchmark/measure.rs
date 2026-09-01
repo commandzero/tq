@@ -93,9 +93,10 @@ pub enum MeasureError {
 
 /// Measures one fresh process invocation.
 ///
-/// On Unix, `/usr/bin/time` writes CPU/RSS metrics to a separate temporary
-/// file. Tool stdout and stderr are spooled to files, not held in memory or
-/// passed to the invoking terminal. Successful output files are deleted.
+/// On Unix, `/usr/bin/time` writes timing metrics and, where supported, RSS data
+/// to a separate temporary file. Tool stdout and stderr are spooled to files,
+/// not held in memory or passed to the invoking terminal. Successful output
+/// files are deleted.
 /// Failed output files are retained for diagnosis. Fields unsupported by the
 /// local implementation remain `None`.
 ///
@@ -297,8 +298,8 @@ fn measured_command(invocation: &BenchmarkInvocation, resource_path: &std::path:
     {
         let mut command = Command::new("/usr/bin/time");
         command.arg("-p");
-        #[cfg(target_os = "macos")]
-        command.arg("-l");
+        // Keep macOS on `-p`: `time -l` invokes restricted sysctl calls and can
+        // make the wrapper fail even when the measured command succeeds.
         #[cfg(all(unix, not(target_os = "macos")))]
         command.arg("-v");
         command

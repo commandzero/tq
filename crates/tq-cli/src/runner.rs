@@ -954,7 +954,9 @@ fn transcode_reader<R: Read, W: Write>(
 }
 
 fn map_transcode_message(format: InputFormat, message: String) -> RunError {
-    if message.contains("resource limit")
+    if message.contains("prepared output exceeds configured byte limit") {
+        RunError::Resource("output-bytes")
+    } else if message.contains("resource limit")
         || message.contains("limit exceeded")
         || message.contains("preparation")
         || message.contains("spool")
@@ -976,8 +978,17 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
         TranscodeError::Spool(SpoolError::Io(error))
         | TranscodeError::Writer(WriterError::Io(error))
         | TranscodeError::Io(error) => {
-            if error.to_string().contains("output resource limit exceeded") {
+            if let Some(mapped) = map_wrapped_spool_error(&error) {
+                return mapped;
+            }
+            let message = error.to_string();
+            if message.contains("output resource limit exceeded") {
                 RunError::Resource("output-bytes")
+            } else if message.contains("spool")
+                || message.contains("resource limit")
+                || message.contains("preparation")
+            {
+                RunError::Resource("transcode-preparation")
             } else {
                 RunError::Io(error)
             }
@@ -992,6 +1003,19 @@ fn map_transcode_error(error: TranscodeError) -> RunError {
             message: message.to_owned(),
         }),
     }
+}
+
+fn map_wrapped_spool_error(error: &io::Error) -> Option<RunError> {
+    let source = error.get_ref()?.downcast_ref::<SpoolError>()?;
+    Some(match source {
+        SpoolError::OutputLimit => RunError::Resource("output-bytes"),
+        SpoolError::Cancelled => RunError::Interrupted,
+        SpoolError::MemoryLimit
+        | SpoolError::Disabled
+        | SpoolError::Limit
+        | SpoolError::NestingLimit => RunError::Resource("transcode-preparation"),
+        SpoolError::Io(_) | SpoolError::Decode(_) => return None,
+    })
 }
 
 fn map_publication_error(error: PublicationError) -> RunError {
@@ -3730,13 +3754,13 @@ mod tests {
     }
 
     #[test]
-    fn identity_json_transcode_rejects_a_late_duplicate_after_partial_output() {
+    fn identity_json_transcode_rejects_a_late_duplicate_without_partial_output() {
         let (status, output, explain) = execute(
             &["--input-format", "json", "--explain-json", "."],
             br#"{"b":1,"a":2,"b":3}"#,
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
-        assert_eq!(output, b"\x1eb: 1\na: 2");
+        assert_eq!(output, [] as [u8; 0]);
         let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
         assert_eq!(explain["execution"]["plan"], "transcode");
         assert_eq!(explain["execution"]["duplicate_policy"], "reject");
@@ -3843,6 +3867,19 @@ mod tests {
         );
         let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
         assert_eq!(report["execution"]["resource_outcome"], "resource-limit");
+
+        let command =
+            parse_args(["--input-format", "json", "--max-output-bytes", "1", "."]).unwrap();
+        let mut input = br#"1"#.as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(command, &mut input, &mut output, &mut error)
+                .unwrap_err()
+                .status(),
+            ExitStatus::Resource
+        );
+        assert!(output.is_empty());
 
         for arguments in [
             ["--input-format", "json", "--output-format", "json", "."],
@@ -3957,7 +3994,7 @@ mod tests {
     }
 
     #[test]
-    fn transcode_flushes_the_sequence_prefix_before_root_payload() {
+    fn transcode_flushes_only_after_the_sequence_record_is_complete() {
         let command = parse_args(["--input-format", "json", "."]).unwrap();
         let mut input = br#"{"name":"Ada"}"#.as_slice();
         let mut output = FlushWriter::default();
@@ -3967,7 +4004,7 @@ mod tests {
             ExitStatus::Success
         );
         assert_eq!(output.bytes, b"\x1ename: Ada\n");
-        assert_eq!(output.flush_points.first(), Some(&1));
+        assert_eq!(output.flush_points.first(), Some(&output.bytes.len()));
         assert_eq!(error, [] as [u8; 0]);
     }
 
