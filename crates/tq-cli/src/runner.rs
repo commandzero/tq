@@ -561,19 +561,20 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             if let Some(flag) = cancellation() {
                 vm = vm.with_cancellation(flag);
             }
-            loop {
-                match vm.next_result() {
-                    Ok(Some(value)) => {
-                        last = Some(value.clone());
-                        result_output.emit(&value)?;
-                        result_count = result_count.saturating_add(1);
-                    }
-                    Ok(None) => break,
-                    Err(error) => {
-                        runtime_error = Some(error);
-                        break;
-                    }
+            let mut output_error = None;
+            if let Err(error) = vm.for_each_result(|value| {
+                if let Err(error) = result_output.emit(&value) {
+                    output_error = Some(error);
+                    return false;
                 }
+                last = Some(value);
+                result_count = result_count.saturating_add(1);
+                true
+            }) {
+                runtime_error = Some(error);
+            }
+            if let Some(error) = output_error {
+                return Err(error);
             }
             if options.trace_limit != 0 {
                 for entry in vm.trace() {
