@@ -3296,7 +3296,7 @@ impl Evaluator<'_> {
                 },
             ),
             "now" => vec![stdlib::now(ambient_platform(environment))],
-            "env" => vec![ambient_environment(environment)],
+            "env" => vec![ambient_environment(environment, "env")],
             "input_filename" => vec![
                 self.input_cursor
                     .and_then(InputCursor::current_context)
@@ -4037,18 +4037,18 @@ fn ambient_platform(environment: &Environment) -> bool {
     matches!(environment.get(AMBIENT_PLATFORM), Some(Value::Bool(true)))
 }
 
-fn ambient_environment(environment: &Environment) -> Result<Value, VmError> {
+fn ambient_environment(environment: &Environment, operation: &str) -> Result<Value, VmError> {
     match environment.get(AMBIENT_ENVIRONMENT) {
         Some(Value::Object(values)) => Ok(Value::Object(Arc::clone(values))),
-        _ => Err(runtime(
-            "env requires environment access permitted by capability policy".to_owned(),
-        )),
+        _ => Err(runtime(format!(
+            "{operation} requires environment access permitted by capability policy"
+        ))),
     }
 }
 
 pub(crate) fn variable_value(environment: &Environment, name: &str) -> Result<Value, VmError> {
     if name == AMBIENT_ENVIRONMENT {
-        ambient_environment(environment)
+        ambient_environment(environment, "$ENV")
     } else {
         environment
             .get(name)
@@ -5346,7 +5346,7 @@ mod tests {
     fn env_variable_uses_the_ambient_snapshot_and_policy_error() {
         let denied = json(run("$ENV", "null"));
         assert!(
-            denied[0].contains("environment access permitted by capability policy"),
+            denied[0].contains("$ENV requires environment access permitted by capability policy"),
             "{denied:?}"
         );
         assert!(!denied[0].contains("__tq_ambient_environment"));
