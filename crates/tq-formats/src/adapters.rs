@@ -13,6 +13,7 @@ use serde::{
 use tq_core::{Number, Object, SourceId, Value};
 use tq_toon::{DecoderConfig, decode_to_value};
 
+use crate::json5_input::{PreprocessError, preprocess};
 use crate::{Document, DocumentSource, FormatError, InputFormat, VecDeque};
 
 /// Structured decode controls shared by CLI sources.
@@ -164,6 +165,7 @@ pub fn decode_bytes(
         InputFormat::Toon => decode_toon(bytes, identity, options.toon),
         InputFormat::Yaml => decode_yaml(bytes, identity),
         InputFormat::Json => decode_json(bytes, identity),
+        InputFormat::Json5 => decode_json5(bytes, identity, options),
         InputFormat::JsonLines => decode_json_lines(bytes, identity, options),
         InputFormat::ToonSequence => decode_toon_sequence(bytes, identity, options.toon),
         InputFormat::Auto => {
@@ -172,7 +174,10 @@ pub fn decode_bytes(
                 InputFormat::Toon => decode_toon(bytes, identity, options.toon),
                 InputFormat::Yaml => decode_yaml(bytes, identity),
                 InputFormat::Json => decode_json(bytes, identity),
-                InputFormat::Auto | InputFormat::JsonLines | InputFormat::ToonSequence => {
+                InputFormat::Auto
+                | InputFormat::Json5
+                | InputFormat::JsonLines
+                | InputFormat::ToonSequence => {
                     unreachable!("probe candidate")
                 }
             }
@@ -539,6 +544,50 @@ pub fn decode_json(
         .collect()
 }
 
+/// Decodes one JSON5 document into tq's ordered value model.
+///
+/// # Errors
+///
+/// Returns UTF-8, JSON5 syntax, numeric-envelope, or resource-limit failures.
+pub fn decode_json5(
+    bytes: &[u8],
+    identity: impl Into<String>,
+    options: DecodeOptions,
+) -> Result<Vec<Document>, FormatError> {
+    if bytes.len() > options.maximum_source_bytes {
+        return Err(FormatError::Resource("source-bytes"));
+    }
+    let identity = identity.into();
+    let text = std::str::from_utf8(bytes).map_err(|error| FormatError::Parse {
+        format: InputFormat::Json5,
+        message: error.to_string(),
+    })?;
+    let normalized =
+        preprocess(text, options.maximum_token_bytes, options.maximum_depth).map_err(|error| {
+            match error {
+                PreprocessError::Parse { offset, message } => FormatError::Parse {
+                    format: InputFormat::Json5,
+                    message: format!(
+                        "{message} at {}",
+                        json5::Position::from_offset(offset, text)
+                    ),
+                },
+                PreprocessError::Resource(resource) => FormatError::Resource(resource),
+            }
+        })?;
+    let value =
+        json5::from_str::<Value>(normalized.text()).map_err(|error| FormatError::Parse {
+            format: InputFormat::Json5,
+            message: normalized.translate_error(&error, text),
+        })?;
+    Ok(vec![Document {
+        value,
+        identity,
+        format: InputFormat::Json5,
+        index: 0,
+    }])
+}
+
 /// Decodes a YAML stream one document at a time through `yaml_serde`.
 ///
 /// Mapping keys must deserialize as strings; duplicates and tags are rejected
@@ -788,7 +837,7 @@ mod tests {
 
     use super::{
         DecodeOptions, JsonLinesDocumentSource, decode_bytes, decode_json, decode_json_lines,
-        decode_toon_sequence, decode_yaml,
+        decode_json5, decode_toon_sequence, decode_yaml,
     };
     use crate::InputFormat;
 
@@ -824,6 +873,210 @@ mod tests {
         assert_eq!(documents[0].index, 0);
         assert_eq!(documents[1].value.to_string(), "[2,3]");
         assert_eq!(documents[1].index, 1);
+    }
+
+    #[test]
+    fn json5_document_accepts_standard_syntax_and_preserves_order() {
+        let documents = decode_json5(
+            br"{/* comment */ z: 0x20000000000001, ratio: 1.5, a: ['value',],}",
+            "document.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(documents.len(), 1);
+        assert_eq!(
+            documents[0].value.to_string(),
+            r#"{"z":9007199254740993,"ratio":1.5,"a":["value"]}"#
+        );
+        assert_eq!(documents[0].identity, "document.json5");
+        assert_eq!(documents[0].format, InputFormat::Json5);
+        assert_eq!(documents[0].index, 0);
+    }
+
+    #[test]
+    fn json5_document_accepts_required_escape_and_number_forms() {
+        let documents = decode_json5(
+            br"{escaped: '\x41\u0042', continued: 'first\
+second', leading: .5, trailing: 5., positive: +6, negative: -7, exponent: 1e2}",
+            "grammar.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            documents[0].value.to_string(),
+            r#"{"escaped":"AB","continued":"firstsecond","leading":0.5,"trailing":5,"positive":6,"negative":-7,"exponent":100}"#
+        );
+    }
+
+    #[test]
+    fn json5_document_accepts_unicode_identifiers_and_whitespace() {
+        let identifier = decode_json5(
+            "{café: 1}".as_bytes(),
+            "unicode.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(identifier[0].value.to_string(), r#"{"café":1}"#);
+
+        let whitespace = decode_json5(
+            "{\"a\":\u{00a0}1}".as_bytes(),
+            "unicode-whitespace.json5",
+            DecodeOptions {
+                maximum_token_bytes: 1,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(whitespace[0].value.to_string(), r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn json5_document_preserves_literal_triple_quoted_content() {
+        let documents = decode_json5(
+            br#"{markdown: """first line
+second \n line with "quotes""""}"#,
+            "markdown.json",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            documents[0].value.to_string(),
+            r#"{"markdown":"first line\nsecond \\n line with \"quotes\""}"#
+        );
+    }
+
+    #[test]
+    fn json5_document_enforces_token_and_depth_limits_lexically() {
+        let shallow = decode_json5(
+            br#"{/* [[[ */ value: "[not depth]"}"#,
+            "shallow.json5",
+            DecodeOptions {
+                maximum_depth: 1,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(shallow[0].value.to_string(), r#"{"value":"[not depth]"}"#);
+
+        let exact_string = decode_json5(
+            br#"{a: "abc"}"#,
+            "exact-token.json5",
+            DecodeOptions {
+                maximum_token_bytes: 3,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(exact_string[0].value.to_string(), r#"{"a":"abc"}"#);
+
+        for input in [
+            br"{long: 1}".as_slice(),
+            br#"{a: "long"}"#.as_slice(),
+            br#"{a: """long"""}"#.as_slice(),
+        ] {
+            let error = decode_json5(
+                input,
+                "token.json5",
+                DecodeOptions {
+                    maximum_token_bytes: 3,
+                    ..DecodeOptions::default()
+                },
+            )
+            .unwrap_err();
+            assert!(matches!(error, crate::FormatError::Resource("token-bytes")));
+        }
+
+        let error = decode_json5(
+            b"[[0]]",
+            "depth.json5",
+            DecodeOptions {
+                maximum_depth: 1,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, crate::FormatError::Resource("depth")));
+
+        let error = decode_json5(
+            b"{value: 1}",
+            "source.json5",
+            DecodeOptions {
+                maximum_source_bytes: 4,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            crate::FormatError::Resource("source-bytes")
+        ));
+    }
+
+    #[test]
+    fn json5_document_reports_original_locations_and_profile_errors() {
+        let quote_run = decode_json5(
+            br#"{value: """a""""}"#,
+            "quotes.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(quote_run[0].value.to_string(), r#"{"value":"a\""}"#);
+
+        let unterminated = decode_json5(
+            br#"{value: """unfinished}"#,
+            "unterminated.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(unterminated.contains("unterminated triple-quoted string"));
+        assert!(unterminated.contains("line 1 column 9"));
+
+        let translated = decode_json5(
+            b"{value: \"\"\"first\nsecond\"\"\", broken:}",
+            "location.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(translated.contains("line 2"), "{translated}");
+
+        for input in [
+            b"NaN".as_slice(),
+            b"Infinity",
+            b"-Infinity",
+            b"{} {}",
+            &[0xff],
+        ] {
+            assert!(decode_json5(input, "invalid.json5", DecodeOptions::default()).is_err());
+        }
+    }
+
+    #[test]
+    fn json5_document_decodes_esdiag_saved_object_fixture() {
+        let documents = decode_json5(
+            include_bytes!("../../../tests/fixtures/esdiag-saved-object.json"),
+            "esdiag-saved-object.json",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+        let tq_core::Value::Object(root) = &documents[0].value else {
+            panic!("saved object root")
+        };
+        let Some(tq_core::Value::Object(attributes)) = root.get("attributes") else {
+            panic!("saved object attributes")
+        };
+        let markdown = attributes.get("markdown");
+
+        assert_eq!(
+            markdown,
+            Some(&tq_core::Value::string(
+                "### About\n\nElastic Stack Diagnostics simplifies collecting and analyzing deployment health.\nUse the `Diagnostics List` to select a report."
+            ))
+        );
     }
 
     #[test]
