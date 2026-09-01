@@ -911,6 +911,28 @@ second', leading: .5, trailing: 5., positive: +6, negative: -7, exponent: 1e2}",
     }
 
     #[test]
+    fn json5_document_accepts_unicode_identifiers_and_whitespace() {
+        let identifier = decode_json5(
+            "{café: 1}".as_bytes(),
+            "unicode.json5",
+            DecodeOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(identifier[0].value.to_string(), r#"{"café":1}"#);
+
+        let whitespace = decode_json5(
+            "{\"a\":\u{00a0}1}".as_bytes(),
+            "unicode-whitespace.json5",
+            DecodeOptions {
+                maximum_token_bytes: 1,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(whitespace[0].value.to_string(), r#"{"a":1}"#);
+    }
+
+    #[test]
     fn json5_document_preserves_literal_triple_quoted_content() {
         let documents = decode_json5(
             br#"{markdown: """first line

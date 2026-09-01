@@ -127,14 +127,20 @@ pub(crate) fn preprocess(
                 output.copy(source, index, index + 1);
                 index += 1;
             }
-            byte if is_delimiter(byte) => {
-                output.copy(source, index, index + 1);
-                index += 1;
-            }
             _ => {
+                if let Some(width) = delimiter_width(source, index) {
+                    output.copy(source, index, index + width);
+                    index += width;
+                    continue;
+                }
                 let start = index;
-                while index < bytes.len() && !is_delimiter(bytes[index]) {
-                    index += 1;
+                while index < bytes.len() && delimiter_width(source, index).is_none() {
+                    let width = source[index..]
+                        .chars()
+                        .next()
+                        .expect("character boundary")
+                        .len_utf8();
+                    index += width;
                     check_token(index - start, maximum_token_bytes)?;
                 }
                 output.copy(source, start, index);
@@ -241,12 +247,21 @@ fn check_token(bytes: usize, maximum: usize) -> Result<(), PreprocessError> {
     }
 }
 
-const fn is_delimiter(byte: u8) -> bool {
-    byte.is_ascii_whitespace()
+fn delimiter_width(source: &str, index: usize) -> Option<usize> {
+    let byte = source.as_bytes()[index];
+    if byte.is_ascii_whitespace()
         || matches!(
             byte,
             b'{' | b'}' | b'[' | b']' | b',' | b':' | b'/' | b'\'' | b'"'
         )
+    {
+        return Some(1);
+    }
+    if byte.is_ascii() {
+        return None;
+    }
+    let character = source[index..].chars().next().expect("character boundary");
+    character.is_whitespace().then_some(character.len_utf8())
 }
 
 fn offset_for_position(input: &str, target: Position) -> usize {
