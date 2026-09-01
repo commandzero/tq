@@ -1,6 +1,6 @@
 //! Immutable JSON-shaped runtime values with structural sharing.
 
-use std::{cmp::Ordering, fmt, sync::Arc};
+use std::{borrow::Borrow, cmp::Ordering, fmt, hash::Hash, ops::Index, sync::Arc};
 
 use indexmap::IndexMap;
 use serde::{
@@ -8,11 +8,259 @@ use serde::{
     de::{self, MapAccess, SeqAccess, Visitor},
     ser::{SerializeMap, SerializeSeq},
 };
+use smallvec::SmallVec;
 
 use crate::{Number, NumberError};
 
+const INLINE_OBJECT_CAPACITY: usize = 3;
+
 /// Insertion-ordered immutable object storage.
-pub type Object = IndexMap<Arc<str>, Value>;
+#[derive(Clone, Debug)]
+pub struct Object {
+    storage: ObjectStorage,
+}
+
+#[derive(Clone, Debug)]
+enum ObjectStorage {
+    Small(SmallVec<[(Arc<str>, Value); INLINE_OBJECT_CAPACITY]>),
+    Large(IndexMap<Arc<str>, Value>),
+}
+
+impl Object {
+    /// Creates an empty object.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            storage: ObjectStorage::Small(SmallVec::new()),
+        }
+    }
+
+    /// Creates an empty object sized for at least `capacity` members.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        if capacity <= INLINE_OBJECT_CAPACITY {
+            Self::new()
+        } else {
+            Self {
+                storage: ObjectStorage::Large(IndexMap::with_capacity(capacity)),
+            }
+        }
+    }
+
+    /// Returns the number of members.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        match &self.storage {
+            ObjectStorage::Small(values) => values.len(),
+            ObjectStorage::Large(values) => values.len(),
+        }
+    }
+
+    /// Returns true when the object has no members.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the value for `key`.
+    #[must_use]
+    pub fn get<Q>(&self, key: &Q) -> Option<&Value>
+    where
+        Arc<str>: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        match &self.storage {
+            ObjectStorage::Small(values) => values
+                .iter()
+                .find(|(candidate, _)| candidate.borrow() == key)
+                .map(|(_, value)| value),
+            ObjectStorage::Large(values) => values.get(key),
+        }
+    }
+
+    /// Returns the mutable value for `key`.
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut Value>
+    where
+        Arc<str>: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        match &mut self.storage {
+            ObjectStorage::Small(values) => values
+                .iter_mut()
+                .find(|(candidate, _)| candidate.borrow() == key)
+                .map(|(_, value)| value),
+            ObjectStorage::Large(values) => values.get_mut(key),
+        }
+    }
+
+    /// Returns true when `key` is present.
+    #[must_use]
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        Arc<str>: Borrow<Q>,
+        Q: Eq + Hash + ?Sized,
+    {
+        self.get(key).is_some()
+    }
+
+    /// Inserts a member, retaining the first encounter position on replacement.
+    pub fn insert(&mut self, key: Arc<str>, value: Value) -> Option<Value> {
+        if let ObjectStorage::Small(values) = &mut self.storage {
+            if let Some((_, current)) = values.iter_mut().find(|(candidate, _)| candidate == &key) {
+                return Some(std::mem::replace(current, value));
+            }
+            if values.len() < INLINE_OBJECT_CAPACITY {
+                values.push((key, value));
+                return None;
+            }
+        }
+
+        if matches!(self.storage, ObjectStorage::Small(_)) {
+            let ObjectStorage::Small(values) = std::mem::replace(
+                &mut self.storage,
+                ObjectStorage::Large(IndexMap::with_capacity(INLINE_OBJECT_CAPACITY + 1)),
+            ) else {
+                unreachable!("small object selected above")
+            };
+            let ObjectStorage::Large(large) = &mut self.storage else {
+                unreachable!("object was promoted")
+            };
+            large.extend(values);
+        }
+        let ObjectStorage::Large(values) = &mut self.storage else {
+            unreachable!("full small object was promoted")
+        };
+        values.insert(key, value)
+    }
+
+    /// Returns the member at its encounter-order index.
+    #[must_use]
+    pub fn get_index(&self, index: usize) -> Option<(&Arc<str>, &Value)> {
+        match &self.storage {
+            ObjectStorage::Small(values) => values.get(index).map(|(key, value)| (key, value)),
+            ObjectStorage::Large(values) => values.get_index(index),
+        }
+    }
+
+    /// Returns the first member in encounter order.
+    #[must_use]
+    pub fn first(&self) -> Option<(&Arc<str>, &Value)> {
+        self.get_index(0)
+    }
+
+    /// Iterates members in encounter order.
+    pub fn iter(&self) -> ObjectIter<'_> {
+        match &self.storage {
+            ObjectStorage::Small(values) => ObjectIter {
+                inner: ObjectIterInner::Small(values.iter()),
+            },
+            ObjectStorage::Large(values) => ObjectIter {
+                inner: ObjectIterInner::Large(values.iter()),
+            },
+        }
+    }
+
+    /// Iterates keys in encounter order.
+    pub fn keys(&self) -> impl DoubleEndedIterator<Item = &Arc<str>> + ExactSizeIterator {
+        self.iter().map(|(key, _)| key)
+    }
+
+    /// Iterates values in encounter order.
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &Value> + ExactSizeIterator {
+        self.iter().map(|(_, value)| value)
+    }
+}
+
+impl Default for Object {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FromIterator<(Arc<str>, Value)> for Object {
+    fn from_iter<T: IntoIterator<Item = (Arc<str>, Value)>>(iter: T) -> Self {
+        let iterator = iter.into_iter();
+        let mut object = Self::with_capacity(iterator.size_hint().0);
+        for (key, value) in iterator {
+            object.insert(key, value);
+        }
+        object
+    }
+}
+
+impl From<IndexMap<Arc<str>, Value>> for Object {
+    fn from(values: IndexMap<Arc<str>, Value>) -> Self {
+        if values.len() <= INLINE_OBJECT_CAPACITY {
+            Self {
+                storage: ObjectStorage::Small(values.into_iter().collect()),
+            }
+        } else {
+            Self {
+                storage: ObjectStorage::Large(values),
+            }
+        }
+    }
+}
+
+impl<Q> Index<&Q> for Object
+where
+    Arc<str>: Borrow<Q>,
+    Q: Eq + Hash + ?Sized,
+{
+    type Output = Value;
+
+    fn index(&self, key: &Q) -> &Self::Output {
+        self.get(key).expect("object key is absent")
+    }
+}
+
+/// Borrowed encounter-order object iterator.
+pub struct ObjectIter<'a> {
+    inner: ObjectIterInner<'a>,
+}
+
+enum ObjectIterInner<'a> {
+    Small(std::slice::Iter<'a, (Arc<str>, Value)>),
+    Large(indexmap::map::Iter<'a, Arc<str>, Value>),
+}
+
+impl<'a> Iterator for ObjectIter<'a> {
+    type Item = (&'a Arc<str>, &'a Value);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            ObjectIterInner::Small(values) => values.next().map(|(key, value)| (key, value)),
+            ObjectIterInner::Large(values) => values.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.inner {
+            ObjectIterInner::Small(values) => values.size_hint(),
+            ObjectIterInner::Large(values) => values.size_hint(),
+        }
+    }
+}
+
+impl DoubleEndedIterator for ObjectIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            ObjectIterInner::Small(values) => values.next_back().map(|(key, value)| (key, value)),
+            ObjectIterInner::Large(values) => values.next_back(),
+        }
+    }
+}
+
+impl ExactSizeIterator for ObjectIter<'_> {}
+
+impl<'a> IntoIterator for &'a Object {
+    type Item = (&'a Arc<str>, &'a Value);
+    type IntoIter = ObjectIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 
 /// Stable runtime type classification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,8 +311,8 @@ impl Value {
 
     /// Creates a shared insertion-ordered object.
     #[must_use]
-    pub fn object(values: Object) -> Self {
-        Self::Object(Arc::new(values))
+    pub fn object(values: impl Into<Object>) -> Self {
+        Self::Object(Arc::new(values.into()))
     }
 
     /// Runtime kind.
@@ -251,8 +499,17 @@ impl Serialize for Value {
             }
             Self::Object(values) => {
                 let mut map = serializer.serialize_map(Some(values.len()))?;
-                for (key, value) in values.iter() {
-                    map.serialize_entry(key.as_ref(), value)?;
+                match &values.storage {
+                    ObjectStorage::Small(values) => {
+                        for (key, value) in values {
+                            map.serialize_entry(key.as_ref(), value)?;
+                        }
+                    }
+                    ObjectStorage::Large(values) => {
+                        for (key, value) in values {
+                            map.serialize_entry(key.as_ref(), value)?;
+                        }
+                    }
                 }
                 map.end()
             }
@@ -384,7 +641,7 @@ mod tests {
 
     use indexmap::IndexMap;
 
-    use super::{Value, ValueKind};
+    use super::{Object, ObjectStorage, Value, ValueKind};
     use crate::Number;
 
     #[test]
@@ -401,6 +658,29 @@ mod tests {
             (Arc::from("a"), Value::Number(Number::parse("1.0").unwrap())),
         ]));
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn small_objects_promote_without_changing_encounter_order() {
+        let mut object = Object::new();
+        for (key, value) in [("a", false), ("b", true), ("c", false)] {
+            object.insert(Arc::from(key), Value::Bool(value));
+        }
+        assert!(matches!(&object.storage, ObjectStorage::Small(_)));
+
+        object.insert(Arc::from("b"), Value::Null);
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        assert_eq!(object["b"], Value::Null);
+
+        object.insert(Arc::from("d"), Value::Bool(true));
+        assert!(matches!(&object.storage, ObjectStorage::Large(_)));
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+            ["a", "b", "c", "d"]
+        );
     }
 
     #[test]

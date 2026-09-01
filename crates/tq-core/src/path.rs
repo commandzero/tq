@@ -2,11 +2,10 @@
 
 use std::{fmt, sync::Arc};
 
-use indexmap::IndexMap;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::Value;
+use crate::{Object, Value};
 
 /// One jq path component.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
@@ -96,7 +95,7 @@ fn replace_at(
                 .get(key)
                 .ok_or_else(|| PathError::MissingKey { key: key.clone() })?;
             let replacement = replace_at(child, tail, replacement)?;
-            let mut updated: IndexMap<Arc<str>, Value> = values.as_ref().clone();
+            let mut updated: Object = values.as_ref().clone();
             *updated.get_mut(key).expect("key was just observed") = replacement;
             Ok(Value::object(updated))
         }

@@ -11,7 +11,6 @@ use std::{
     },
 };
 
-use indexmap::IndexMap;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
@@ -5773,7 +5772,7 @@ fn replace_or_create(
             PathComponent::Key(key) => {
                 let mut object = match parent {
                     Value::Object(object) => object.as_ref().clone(),
-                    Value::Null => IndexMap::new(),
+                    Value::Null => Object::new(),
                     value => return Err(type_error("object assignment", &value)),
                 };
                 object.insert(key, rebuilt);

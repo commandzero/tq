@@ -267,9 +267,10 @@ fn merge_path(
         return Ok(());
     }
 
-    let nested = object
-        .entry(Arc::clone(&key))
-        .or_insert_with(|| Value::object(Object::new()));
+    if !object.contains_key(&key) {
+        object.insert(Arc::clone(&key), Value::object(Object::new()));
+    }
+    let nested = object.get_mut(&key).expect("nested key was inserted");
     if !matches!(nested, Value::Object(_)) {
         if strict {
             return Err(DomError::PathConflict { key });
