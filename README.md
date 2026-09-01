@@ -233,11 +233,12 @@ and `gsub` built-ins use a bounded linear-time regex engine. UTC parsing,
 formatting, broken-down time, and epoch conversion support jq's date arrays for
 the documented range from year 0000 through 9999.
 
-Environment and platform data are opt-in. `--allow-environment` enables both
-`env` and jq's `$ENV` startup snapshot. `$__loc__` is always available and
+Environment and ambient platform data are opt-in. `--allow-environment` enables
+both `env` and jq's `$ENV` startup snapshot. `$__loc__` is always available and
 returns `{file, line}` for its location in the query source. Inline filters use
 `<top-level>`; filter files and modules retain their path identities.
-`--allow-platform` enables `now`, local timezone conversion, and input metadata.
+`--allow-platform` enables `now`, local timezone conversion, and `input_filename`.
+Decoder-owned `input_line_number` context is available without a capability flag.
 See [the compatibility policy](docs/jq-regex-date-platform.md) for engine
 differences, limits, redaction, and release-host classifications.
 

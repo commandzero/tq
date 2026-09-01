@@ -54,12 +54,14 @@ published by `.github/workflows/regex-date-platform.yml`.
 
 ## Environment and input metadata
 
-`env`, `$ENV`, `input_filename`, and `input_line_number` are denied by default.
-`--allow-environment` captures one startup snapshot of Unicode process
-environment pairs. `env` and `$ENV` read that same object throughout the
-invocation. `--allow-platform` admits input identity/line metadata.
-Library callers can independently deny either capability with
-`CapabilityPolicy`, even if the command requests it.
+`env` and `$ENV` are denied by default. `--allow-environment` captures one
+startup snapshot of Unicode process environment pairs, and both operations
+read that same object throughout the invocation. `input_filename` is denied by
+default and `--allow-platform` admits input source identity as well as the
+clock and timezone operations described above. `input_line_number` reads
+decoder-owned input context and requires no capability flag. Library callers
+can independently deny environment or platform access with `CapabilityPolicy`;
+those settings do not deny line context supplied with an input.
 
 Policy failures name only the requested operation and policy class. Reports do
 not serialize environment values unless the query returns them. Compatibility
@@ -71,6 +73,6 @@ Inline CLI filters use `<top-level>`. Filter files and imported modules use
 their path identity, and references inside definitions report the definition
 line rather than the call site.
 
-For multi-document decoded input, `input_line_number` currently identifies the
-first admitted logical input. Per-record physical line tracking and jq's exact
-non-Unicode environment behavior remain documented platform divergences.
+For multi-document decoded input, `input_line_number` currently reports the
+one-based logical document index. Per-record physical line tracking and jq's
+exact non-Unicode environment behavior remain documented divergences.
