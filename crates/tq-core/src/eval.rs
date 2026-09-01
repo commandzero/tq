@@ -1303,12 +1303,7 @@ fn evaluate_generator_stream(
                     bytecode
                         .string(*index)
                         .ok_or_else(|| invalid("string missing after validation"))
-                        .and_then(|name| {
-                            work.environment
-                                .get(name)
-                                .cloned()
-                                .ok_or_else(|| runtime(format!("variable ${name} has no value")))
-                        }),
+                        .and_then(|name| variable_value(&work.environment, name)),
                 ),
                 Operation::Empty => None,
                 Operation::RecursiveDescent => {
@@ -3333,10 +3328,7 @@ impl Evaluator<'_> {
                     |value| vec![Ok(value)],
                 ),
             Operation::Variable(index) => match self.string(*index) {
-                Ok(name) => environment.get(name).cloned().map_or_else(
-                    || one_error(runtime(format!("variable ${name} has no value"))),
-                    |value| vec![Ok(value)],
-                ),
+                Ok(name) => vec![variable_value(environment, name)],
                 Err(error) => one_error(error),
             },
             Operation::Empty => Vec::new(),
@@ -3922,7 +3914,7 @@ impl Evaluator<'_> {
                 },
             ),
             "now" => vec![stdlib::now(ambient_platform(environment))],
-            "env" => vec![ambient_environment(environment)],
+            "env" => vec![ambient_environment(environment, "env")],
             "input_filename" => vec![ambient_value(
                 environment,
                 INPUT_FILENAME,
@@ -4671,12 +4663,23 @@ fn ambient_platform(environment: &Environment) -> bool {
     matches!(environment.get(AMBIENT_PLATFORM), Some(Value::Bool(true)))
 }
 
-fn ambient_environment(environment: &Environment) -> Result<Value, VmError> {
+fn ambient_environment(environment: &Environment, operation: &str) -> Result<Value, VmError> {
     match environment.get(AMBIENT_ENVIRONMENT) {
         Some(Value::Object(values)) => Ok(Value::Object(Arc::clone(values))),
-        _ => Err(runtime(
-            "env requires environment access permitted by capability policy".to_owned(),
-        )),
+        _ => Err(runtime(format!(
+            "{operation} requires environment access permitted by capability policy"
+        ))),
+    }
+}
+
+pub(crate) fn variable_value(environment: &Environment, name: &str) -> Result<Value, VmError> {
+    if name == AMBIENT_ENVIRONMENT {
+        ambient_environment(environment, "$ENV")
+    } else {
+        environment
+            .get(name)
+            .cloned()
+            .ok_or_else(|| runtime(format!("variable ${name} has no value")))
     }
 }
 
@@ -5804,8 +5807,8 @@ mod tests {
     use indexmap::IndexMap;
 
     use super::{
-        PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline, Value, extrema,
-        sort_by_cached_key, stable_sort_values,
+        Operation, PARALLEL_REDUCTION_THRESHOLD, PARALLEL_SORT_THRESHOLD, StableSortPipeline,
+        Value, extrema, sort_by_cached_key, stable_sort_values,
     };
     use crate::{InputCursor, InputValue, ResolveOptions, Vm, VmLimits, analyze, parse, resolve};
 
@@ -6198,6 +6201,128 @@ mod tests {
             json(run_with_variables("input_filename", "null", variables)),
             vec![r#""fixture.json""#]
         );
+    }
+
+    #[test]
+    fn env_variable_uses_the_ambient_snapshot_and_policy_error() {
+        let denied = json(run("$ENV", "null"));
+        assert!(
+            denied[0].contains("$ENV requires environment access permitted by capability policy"),
+            "{denied:?}"
+        );
+        assert!(!denied[0].contains("__tq_ambient_environment"));
+
+        let mut variables = BTreeMap::new();
+        variables.insert(
+            Arc::from(super::AMBIENT_ENVIRONMENT),
+            Value::object(IndexMap::from([(
+                Arc::from("KNOWN_SENTINEL"),
+                Value::string("present"),
+            )])),
+        );
+        assert_eq!(
+            json(run_with_variables("$ENV.KNOWN_SENTINEL", "null", variables)),
+            vec![r#""present""#]
+        );
+    }
+
+    #[test]
+    fn env_variable_is_consistent_across_all_evaluator_routes() {
+        let variables = BTreeMap::from([(
+            Arc::from(super::AMBIENT_ENVIRONMENT),
+            Value::object(IndexMap::from([(
+                Arc::from("KNOWN_SENTINEL"),
+                Value::string("present"),
+            )])),
+        )]);
+        let compile = |query: &str| {
+            let query = resolve(
+                parse(query).unwrap(),
+                &ResolveOptions {
+                    variables: variables.keys().cloned().collect(),
+                    ..ResolveOptions::default()
+                },
+            )
+            .unwrap();
+            analyze(query).compile().unwrap()
+        };
+
+        let kernel = compile("$ENV");
+        let kernel_bytecode = kernel.bytecode();
+        assert!(matches!(
+            kernel_bytecode.instructions()[kernel_bytecode.root() as usize].operation,
+            Operation::Variable(_)
+        ));
+
+        let managed = compile("[$ENV.KNOWN_SENTINEL]");
+        assert!(managed.bytecode().managed_tree_execution());
+        assert!(!matches!(
+            managed.bytecode().instructions()[managed.bytecode().root() as usize].operation,
+            Operation::Variable(_)
+        ));
+
+        let recursive = compile("$ENV.KNOWN_SENTINEL | explode | length");
+        assert!(!recursive.bytecode().managed_tree_execution());
+
+        assert_eq!(
+            json(run_with_variables("$ENV", "null", variables.clone())),
+            [r#"{"KNOWN_SENTINEL":"present"}"#]
+        );
+        assert_eq!(
+            json(run_with_variables(
+                "[$ENV.KNOWN_SENTINEL]",
+                "null",
+                variables.clone()
+            )),
+            [r#"["present"]"#]
+        );
+        assert_eq!(
+            json(run_with_variables(
+                "$ENV.KNOWN_SENTINEL | explode | length",
+                "null",
+                variables
+            )),
+            ["7"]
+        );
+
+        for query in [
+            "$ENV",
+            "[$ENV.KNOWN_SENTINEL]",
+            "$ENV.KNOWN_SENTINEL | explode | length",
+        ] {
+            let denied = json(run(query, "null"));
+            assert!(
+                denied[0].contains("capability policy"),
+                "{query}: {denied:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn special_variables_preserve_location_and_scope_semantics() {
+        assert_eq!(
+            json(run(
+                "def location:\n  $__loc__;\n[$__loc__, location]",
+                "null"
+            )),
+            vec![r#"[{"file":"<query>","line":3},{"file":"<query>","line":2}]"#]
+        );
+        assert_eq!(json(run("1 as $ENV | $ENV", "null")), vec!["1"]);
+        assert_eq!(
+            json(run(r#""line=\($__loc__.line)""#, "null")),
+            vec![r#""line=1""#]
+        );
+
+        let variables = BTreeMap::from([
+            (Arc::from("ENV"), Value::string("external")),
+            (Arc::from("__loc__"), Value::string("external")),
+        ]);
+        let values = json(run_with_variables(
+            "[$ENV | type, $__loc__.file]",
+            "null",
+            variables,
+        ));
+        assert!(values[0].contains("capability policy"), "{values:?}");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Configurable executable discovery and identity capture.
 
 use std::{
+    collections::BTreeMap,
     env, fs, io,
     path::{Path, PathBuf},
     time::Duration,
@@ -158,6 +159,7 @@ pub fn discover_tool(
         stdin: Vec::new(),
         timeout: Duration::from_secs(5),
         current_dir: Some(repository_root.to_owned()),
+        environment: BTreeMap::new(),
     })?;
     if outcome.status != ProcessStatus::Exited || outcome.exit_code != Some(0) {
         return Err(ToolDiscoveryError::VersionFailed {
@@ -199,6 +201,7 @@ fn capture_build_features(kind: ToolKind, path: &Path, repository_root: &Path) -
         stdin: Vec::new(),
         timeout: Duration::from_secs(5),
         current_dir: Some(repository_root.to_owned()),
+        environment: BTreeMap::new(),
     }) else {
         return Vec::new();
     };

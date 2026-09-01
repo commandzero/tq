@@ -2982,7 +2982,7 @@ impl<W: Write> Write for LimitedWriter<'_, W> {
 
 fn load_filter(options: &RunOptions) -> Result<(String, Vec<u8>), RunError> {
     match &options.filter {
-        FilterSource::Inline(query) => Ok(("<command-line>".to_owned(), query.as_bytes().to_vec())),
+        FilterSource::Inline(query) => Ok(("<top-level>".to_owned(), query.as_bytes().to_vec())),
         FilterSource::File(path) => {
             let identity = path.display().to_string();
             Ok((
@@ -2997,6 +2997,7 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
     let mut values = BTreeMap::new();
     let mut named = tq_core::Object::new();
     for argument in &options.arguments {
+        validate_external_argument_name(&argument.name)?;
         let value = match argument.kind {
             ExternalArgumentKind::String => Value::string(argument.value.as_str()),
             ExternalArgumentKind::Json => {
@@ -3092,6 +3093,16 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
         Value::Number(Number::parse("1").expect("one is an admitted number")),
     );
     Ok(values)
+}
+
+fn validate_external_argument_name(name: &str) -> Result<(), RunError> {
+    if name.starts_with("__tq_") {
+        return Err(CliError::Usage(
+            "external variable names beginning with '__tq_' are reserved".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
@@ -3672,7 +3683,7 @@ mod tests {
     };
 
     use super::run_with_io;
-    use crate::{Command, ExecutionOverride, ExitStatus, parse_args};
+    use crate::{CapabilityPolicy, Command, ExecutionOverride, ExitStatus, parse_args};
     use tq_core::parallel_worker_count;
 
     struct NoRead;
@@ -4059,6 +4070,201 @@ mod tests {
         );
         assert_eq!(platform.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[\"<stdin>\",1,\"number\"]\n");
+        assert_eq!(error, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn jq_special_variables_follow_cli_source_and_capability_contracts() {
+        let (denied, output, error) =
+            execute(&["--output-format", "json", "-c", "$ENV"], b"null\n");
+        let denied = denied.expect_err("environment access should be denied by default");
+        assert_eq!(denied.status(), ExitStatus::Runtime);
+        assert!(denied.to_string().contains("capability policy"));
+        assert!(!denied.to_string().contains("__tq_"));
+        assert_eq!(output, [] as [u8; 0]);
+        assert_eq!(error, [] as [u8; 0]);
+
+        let (allowed, output, error) = execute(
+            &[
+                "--allow-environment",
+                "--arg",
+                "ENV",
+                "replacement",
+                "--output-format",
+                "json",
+                "-c",
+                "$ENV | type",
+            ],
+            b"null\n",
+        );
+        assert_eq!(allowed.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"\"object\"\n");
+        assert_eq!(error, [] as [u8; 0]);
+
+        let (location, output, error) = execute(
+            &[
+                "--arg",
+                "__loc__",
+                "replacement",
+                "--output-format",
+                "json",
+                "-c",
+                "$__loc__",
+            ],
+            b"null\n",
+        );
+        assert_eq!(location.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"{\"file\":\"<top-level>\",\"line\":1}\n");
+        assert_eq!(error, [] as [u8; 0]);
+
+        let directory = tempfile::tempdir().unwrap();
+        let filter = directory.path().join("location.jq");
+        fs::write(&filter, b"\n$__loc__\n").unwrap();
+        let (location, output, error) = execute(
+            &[
+                "--null-input",
+                "--output-format",
+                "json",
+                "-c",
+                "--from-file",
+                filter.to_str().unwrap(),
+            ],
+            b"",
+        );
+        assert_eq!(location.unwrap(), ExitStatus::Success);
+        let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(value["file"], filter.display().to_string());
+        assert_eq!(value["line"], 2);
+        assert_eq!(error, [] as [u8; 0]);
+
+        let module = directory.path().join("location.jq");
+        fs::write(&module, b"def module_location:\n  $__loc__;\n").unwrap();
+        let (location, output, error) = execute(
+            &[
+                "--null-input",
+                "--library-path",
+                directory.path().to_str().unwrap(),
+                "--output-format",
+                "json",
+                "-c",
+                "include \"location\"; module_location",
+            ],
+            b"",
+        );
+        assert_eq!(location.unwrap(), ExitStatus::Success);
+        let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            value["file"],
+            module.canonicalize().unwrap().display().to_string()
+        );
+        assert_eq!(value["line"], 2);
+        assert_eq!(error, [] as [u8; 0]);
+
+        let (stable, output, error) = execute(
+            &[
+                "--allow-environment",
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "-c",
+                "[$__loc__, ($ENV | type)]",
+            ],
+            b"null null",
+        );
+        assert_eq!(stable.unwrap(), ExitStatus::Success);
+        assert_eq!(
+            output,
+            b"[{\"file\":\"<top-level>\",\"line\":1},\"object\"]\n[{\"file\":\"<top-level>\",\"line\":1},\"object\"]\n"
+        );
+        assert_eq!(error, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn jq_special_variables_match_automatic_and_document_plans() {
+        let arguments = [
+            "--allow-environment",
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            ".items[] | [$__loc__, ($ENV | type)]",
+        ];
+        let input = br#"{"items":[null,null]}"#;
+        let automatic = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&arguments, input, ExecutionOverride::Document);
+        assert_eq!(automatic.0.unwrap(), ExitStatus::Success);
+        assert_eq!(document.0.unwrap(), ExitStatus::Success);
+        assert_eq!(automatic.1, document.1);
+        assert_eq!(
+            automatic.1,
+            b"[{\"file\":\"<top-level>\",\"line\":1},\"object\"]\n[{\"file\":\"<top-level>\",\"line\":1},\"object\"]\n"
+        );
+        assert_eq!(automatic.2, [] as [u8; 0]);
+        assert_eq!(document.2, [] as [u8; 0]);
+
+        let denied_arguments = [
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "-c",
+            ".items[] | $ENV",
+        ];
+        let automatic =
+            execute_with_override(&denied_arguments, input, ExecutionOverride::Automatic);
+        let document = execute_with_override(&denied_arguments, input, ExecutionOverride::Document);
+        assert_eq!(
+            automatic.0.unwrap_err().status(),
+            document.0.unwrap_err().status()
+        );
+        assert_eq!(automatic.1, document.1);
+        assert_eq!(automatic.2, [] as [u8; 0]);
+        assert_eq!(document.2, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn external_arguments_cannot_supply_internal_ambient_values() {
+        let (status, output, error) = execute(
+            &[
+                "--argjson",
+                "__tq_ambient_environment",
+                r#"{"FORGED":"value"}"#,
+                "--output-format",
+                "json",
+                "-c",
+                "$ENV",
+            ],
+            b"null\n",
+        );
+        let failure = status.expect_err("internal argument names must be rejected");
+        assert_ne!(failure.status(), ExitStatus::Success);
+        assert_eq!(output, [] as [u8; 0]);
+        assert_eq!(error, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn environment_policy_denial_precedes_input_for_env_variable() {
+        let mut command = parse_args(["--allow-environment", "$ENV"]).unwrap();
+        let Command::Run(options) = &mut command else {
+            panic!("expected run command")
+        };
+        options.capability_policy = CapabilityPolicy {
+            environment: false,
+            ..CapabilityPolicy::default()
+        };
+        let mut input = NoRead;
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        let failure = run_with_io(command, &mut input, &mut output, &mut error).unwrap_err();
+        assert_eq!(failure.status(), ExitStatus::Usage);
+        assert!(
+            failure
+                .to_string()
+                .contains("environment access is disabled")
+        );
+        assert_eq!(output, [] as [u8; 0]);
         assert_eq!(error, [] as [u8; 0]);
     }
 

@@ -1,6 +1,7 @@
 //! Timeout-safe subprocess execution and capture.
 
 use std::{
+    collections::BTreeMap,
     io::{self, Read, Write},
     path::PathBuf,
     process::{Command, Stdio},
@@ -25,6 +26,8 @@ pub struct Invocation {
     pub timeout: Duration,
     /// Optional working directory.
     pub current_dir: Option<PathBuf>,
+    /// Explicit environment entries added to the child process.
+    pub environment: BTreeMap<String, String>,
 }
 
 /// Classified process completion.
@@ -80,6 +83,7 @@ pub fn run_process(invocation: &Invocation) -> Result<ProcessOutcome, ProcessErr
     let mut command = Command::new(&invocation.executable);
     command
         .args(&invocation.args)
+        .envs(&invocation.environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

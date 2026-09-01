@@ -10,8 +10,8 @@ use std::{
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, ModuleInfo,
-    OptimizerRewrite, Parsed, PlanKind, Query, Resolved, SourceId, Span, Value,
+    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, ModuleInfo, Number,
+    Object, OptimizerRewrite, Parsed, PlanKind, Query, Resolved, SourceFile, SourceId, Span, Value,
     ast::{
         Access, CallTarget, Definition, Expr, ExprKind, InterpolationSegment, ObjectKey,
         ParameterKind,
@@ -19,6 +19,9 @@ use crate::{
     parser::parse_module_ast,
     phase::{automatic_stream_proof, hybrid_stream_proof},
 };
+
+use crate::diagnostic::SourceLineIndex;
+use crate::eval::AMBIENT_ENVIRONMENT;
 
 /// One versioned built-in signature.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,6 +197,32 @@ struct CachedModule {
     info: ModuleInfo,
 }
 
+#[derive(Clone)]
+struct SourceMetadata {
+    name: Arc<str>,
+    line_index: SourceLineIndex,
+}
+
+impl SourceMetadata {
+    fn new(name: impl Into<Arc<str>>, text: &str) -> Self {
+        Self {
+            name: name.into(),
+            line_index: SourceLineIndex::new(text),
+        }
+    }
+
+    fn from_source(source: &SourceFile) -> Self {
+        Self {
+            name: Arc::from(source.name()),
+            line_index: source.line_index(),
+        }
+    }
+
+    fn line(&self, byte: u64) -> u64 {
+        self.line_index.line(byte)
+    }
+}
+
 struct ModuleLoader {
     roots: Vec<PathBuf>,
     cache: BTreeMap<PathBuf, CachedModule>,
@@ -201,10 +230,11 @@ struct ModuleLoader {
     module_limit: usize,
     module_bytes: usize,
     next_source: u32,
+    sources: BTreeMap<SourceId, SourceMetadata>,
 }
 
 impl ModuleLoader {
-    fn new(options: &ResolveOptions) -> Result<Self, Box<Diagnostic>> {
+    fn new(options: &ResolveOptions, source: &SourceFile) -> Result<Self, Box<Diagnostic>> {
         let roots = options
             .module_roots
             .iter()
@@ -228,6 +258,7 @@ impl ModuleLoader {
             module_limit: options.module_limit,
             module_bytes: options.module_bytes,
             next_source: 1,
+            sources: BTreeMap::from([(source.id(), SourceMetadata::from_source(source))]),
         })
     }
 
@@ -439,7 +470,10 @@ impl ModuleLoader {
         })?;
         let source_id = SourceId::new(self.next_source);
         self.next_source = self.next_source.saturating_add(1);
-        let parsed = parse_module_ast(&canonical.display().to_string(), text, source_id)?;
+        let source_name = canonical.display().to_string();
+        let parsed = parse_module_ast(&source_name, text, source_id)?;
+        self.sources
+            .insert(source_id, SourceMetadata::new(source_name, text));
         let (metadata, parsed) = module_metadata(parsed)?;
         let metadata = enrich_module_metadata(metadata, &parsed);
         self.stack.push(canonical.clone());
@@ -847,12 +881,12 @@ pub fn resolve(
     mut query: Query<Parsed>,
     options: &ResolveOptions,
 ) -> Result<Query<Resolved>, Box<Diagnostic>> {
-    let mut loader = ModuleLoader::new(options)?;
+    let mut loader = ModuleLoader::new(options, query.source())?;
     let expanded = loader.expand(query.ast().clone())?;
     *query.ast_mut() = expanded;
     query.set_modules(loader.module_info());
 
-    Resolver::new(options).resolve_expr(query.ast_mut())?;
+    Resolver::new(options, loader.sources).resolve_expr(query.ast_mut())?;
     Ok(query.into_resolved())
 }
 
@@ -1000,24 +1034,26 @@ struct Resolver {
     registry: BuiltinRegistry,
     next_variable: u32,
     next_function: u32,
+    sources: BTreeMap<SourceId, SourceMetadata>,
     labels: Vec<(Arc<str>, u32)>,
     next_label: u32,
 }
 
 impl Resolver {
-    fn new(options: &ResolveOptions) -> Self {
+    fn new(options: &ResolveOptions, sources: BTreeMap<SourceId, SourceMetadata>) -> Self {
+        let mut outer_variables = options
+            .variables
+            .iter()
+            .map(|name| (Arc::clone(name), Arc::clone(name)))
+            .collect::<BTreeMap<_, _>>();
+        outer_variables.insert(Arc::from("ENV"), Arc::from(AMBIENT_ENVIRONMENT));
         Self {
-            variables: vec![
-                options
-                    .variables
-                    .iter()
-                    .map(|name| (Arc::clone(name), Arc::clone(name)))
-                    .collect(),
-            ],
+            variables: vec![outer_variables],
             functions: vec![BTreeMap::new()],
             registry: BuiltinRegistry,
             next_variable: 0,
             next_function: 0,
+            sources,
             labels: Vec::new(),
             next_label: 0,
         }
@@ -1030,6 +1066,25 @@ impl Resolver {
     fn resolve_expr(&mut self, expr: &mut Expr) -> Result<(), Box<Diagnostic>> {
         match &mut expr.kind {
             ExprKind::Variable(name) => {
+                if &**name == "__loc__" {
+                    let source = self.sources.get(&expr.span.source).ok_or_else(|| {
+                        error(
+                            "TQ-RESOLVE-SOURCE-001",
+                            "source metadata is unavailable for $__loc__".to_owned(),
+                            expr.span,
+                        )
+                    })?;
+                    let line = Number::parse(&source.line(expr.span.start).to_string())
+                        .expect("source line is an admitted number");
+                    *expr = Expr {
+                        kind: ExprKind::Literal(Value::object(Object::from_iter([
+                            (Arc::from("file"), Value::string(Arc::clone(&source.name))),
+                            (Arc::from("line"), Value::Number(line)),
+                        ]))),
+                        span: expr.span,
+                    };
+                    return Ok(());
+                }
                 let Some(runtime) = self
                     .variables
                     .iter()
@@ -1615,6 +1670,14 @@ mod tests {
         )
         .unwrap();
         let error = resolve(parse("$missing").unwrap(), &ResolveOptions::default()).unwrap_err();
+        assert_eq!(error.code, "TQ-RESOLVE-VARIABLE-001");
+    }
+
+    #[test]
+    fn resolves_jq_special_variables_without_external_declarations() {
+        resolve(parse("$ENV, $__loc__").unwrap(), &ResolveOptions::default()).unwrap();
+
+        let error = resolve(parse("$ordinary").unwrap(), &ResolveOptions::default()).unwrap_err();
         assert_eq!(error.code, "TQ-RESOLVE-VARIABLE-001");
     }
 

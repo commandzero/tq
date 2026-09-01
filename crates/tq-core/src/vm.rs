@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::{
     Bytecode, Compiled, Diagnostic, DiagnosticClass, Document, Events, HybridBlocking,
-    PathComponent, Plan, Value, bytecode::Operation,
+    PathComponent, Plan, Value, bytecode::Operation, eval::variable_value,
 };
 
 type InputProvider = dyn FnMut() -> Result<Option<InputValue>, VmError> + Send;
@@ -512,12 +512,10 @@ impl Vm {
                     let name = self.bytecode.string(*name).ok_or(VmError::InvalidProgram {
                         message: "variable name missing after validation",
                     })?;
-                    let value = self.variables.get(name).ok_or_else(|| VmError::Runtime {
-                        message: format!("variable ${name} has no runtime value").into(),
-                    })?;
+                    let value = variable_value(&self.variables, name)?;
                     self.done = true;
                     self.observations.results += 1;
-                    return Ok(Some(value.clone()));
+                    return Ok(Some(value));
                 }
                 Operation::Empty => {
                     self.done = true;

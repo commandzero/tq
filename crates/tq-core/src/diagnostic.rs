@@ -56,20 +56,14 @@ pub struct SourcePosition {
     pub column: u64,
 }
 
-/// Immutable source text with pre-indexed line starts.
+/// Compact byte-to-line index shared by retained and transient source metadata.
 #[derive(Clone, Debug)]
-pub struct SourceFile {
-    id: SourceId,
-    name: Arc<str>,
-    text: Arc<str>,
-    line_starts: Arc<[u64]>,
+pub(crate) struct SourceLineIndex {
+    starts: Arc<[u64]>,
 }
 
-impl SourceFile {
-    /// Creates a source and indexes line starts without copying on clones.
-    #[must_use]
-    pub fn new(id: SourceId, name: impl Into<Arc<str>>, text: impl Into<Arc<str>>) -> Self {
-        let text = text.into();
+impl SourceLineIndex {
+    pub(crate) fn new(text: &str) -> Self {
         let mut starts = vec![0];
         for (index, byte) in text.bytes().enumerate() {
             if byte == b'\n' {
@@ -77,10 +71,45 @@ impl SourceFile {
             }
         }
         Self {
+            starts: starts.into(),
+        }
+    }
+
+    pub(crate) fn line(&self, byte: u64) -> u64 {
+        u64::try_from(self.line_index(byte).saturating_add(1)).unwrap_or(u64::MAX)
+    }
+
+    fn line_index(&self, byte: u64) -> usize {
+        self.starts
+            .partition_point(|start| *start <= byte)
+            .saturating_sub(1)
+    }
+
+    fn start(&self, line_index: usize) -> u64 {
+        self.starts[line_index]
+    }
+}
+
+/// Immutable source text with pre-indexed line starts.
+#[derive(Clone, Debug)]
+pub struct SourceFile {
+    id: SourceId,
+    name: Arc<str>,
+    text: Arc<str>,
+    line_index: SourceLineIndex,
+}
+
+impl SourceFile {
+    /// Creates a source and indexes line starts without copying on clones.
+    #[must_use]
+    pub fn new(id: SourceId, name: impl Into<Arc<str>>, text: impl Into<Arc<str>>) -> Self {
+        let text = text.into();
+        let line_index = SourceLineIndex::new(&text);
+        Self {
             id,
             name: name.into(),
             text,
-            line_starts: starts.into(),
+            line_index,
         }
     }
 
@@ -102,6 +131,10 @@ impl SourceFile {
         &self.text
     }
 
+    pub(crate) fn line_index(&self) -> SourceLineIndex {
+        self.line_index.clone()
+    }
+
     /// Maps a byte offset to a line and Unicode-scalar column.
     #[must_use]
     pub fn position(&self, byte: u64) -> SourcePosition {
@@ -111,11 +144,8 @@ impl SourceFile {
             usize::try_from(byte).unwrap_or(self.text.len()),
         ))
         .unwrap_or(u64::MAX);
-        let line_index = self
-            .line_starts
-            .partition_point(|start| *start <= byte)
-            .saturating_sub(1);
-        let line_start = self.line_starts[line_index];
+        let line_index = self.line_index.line_index(byte);
+        let line_start = self.line_index.start(line_index);
         let start = usize::try_from(line_start).unwrap_or(self.text.len());
         let end = usize::try_from(byte).unwrap_or(self.text.len());
         let column = self.text[start..end].chars().count() as u64 + 1;

@@ -2,7 +2,7 @@
 
 #![cfg(unix)]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, time::Duration};
+use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
 use tq_test_support::compatibility::{
     ErrorClass, Invocation, ProcessStatus, normalize_jq, normalize_raw, run_process,
@@ -27,6 +27,7 @@ fn invoke(
         stdin: b"fixture".to_vec(),
         timeout,
         current_dir: None,
+        environment: BTreeMap::new(),
     })
     .expect("fake process")
 }
