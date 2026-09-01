@@ -32,9 +32,12 @@ proxy-on-error, non-TOON output, and non-identity filters use the existing plans
 The format detector reads a bounded prefix. It prefers canonical TOON. A JSON
 object or array opener selects JSON before YAML, while YAML document,
 directive, and root-sequence markers select YAML. `.jsonl` and `.ndjson` files
-select strict one-value-per-line JSON Lines input. Use
-`--input-format toon|yaml|json|jsonl` to select exactly one parser; `ndjson` is
-an alias for `jsonl`.
+select strict one-value-per-line JSON Lines input. A `.json5` extension selects
+document-at-a-time JSON5 input. Use
+`--input-format toon|yaml|json|json5|jsonl` to select exactly one parser;
+`ndjson` is an alias for `jsonl`. JSON5 is input-only and is never selected by
+content detection. See the [format compatibility matrix](formats.md) for the
+native formats supported by jq, yq, and tq.
 
 `-x/--proxy-on-error` retains each bounded structured source before evaluation.
 If its parser rejects the source, `tq` writes the original bytes unchanged and

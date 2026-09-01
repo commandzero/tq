@@ -113,6 +113,8 @@ single-pass transcode plan.
 
 The compatibility suite sends the same cases through jq, yq, and tq, then
 compares result order, result count, failures, and raw framing.
+See the [format compatibility matrix](docs/formats.md) for native input and
+output support in each tool.
 
 ```console
 ./scripts/run-campaign.sh compatibility smoke
