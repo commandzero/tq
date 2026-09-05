@@ -161,10 +161,7 @@ pub fn run(mut command: Command) -> ExitStatus {
         let terminal = options.capability_policy.terminal && io::stdout().is_terminal();
         let no_color = options.capability_policy.environment
             && std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
-        let json_color = NativeFormat::from_output(options.output_format)
-            .descriptor()
-            .output_controls
-            == Some(tq_formats::OutputControls::Json);
+        let json_color = options.output_format == OutputFormat::Json;
         options.color = if json_color && terminal && !no_color {
             ColorMode::Always
         } else {

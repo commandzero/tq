@@ -975,6 +975,11 @@ where
         output_controls,
         Some(tq_formats::OutputControls::Json | tq_formats::OutputControls::JsonLines)
     );
+    if output_format == OutputFormat::JsonSequence && color == ColorMode::Always {
+        return Err(CliError::Incompatible(
+            "JSON sequence output cannot use forced-color output".to_owned(),
+        ));
+    }
     if output_controls == Some(tq_formats::OutputControls::JsonLines) {
         if pretty_explicit || indent_explicit || tab_explicit {
             return Err(CliError::Incompatible(

@@ -167,6 +167,11 @@ impl NativeFormat {
                 "JSON controls are incompatible with the selected format",
             ));
         }
+        if options.format == OutputFormat::JsonSequence && options.color_json {
+            return Err(OutputError::InvalidOptions(
+                "JSON sequence output cannot use color controls",
+            ));
+        }
         if options.format != OutputFormat::Toon && options.toon_framing == ToonFraming::Unframed {
             return Err(OutputError::InvalidOptions(
                 "unframed output is a TOON control",

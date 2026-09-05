@@ -141,4 +141,12 @@ fn selected_output_rejects_incompatible_controls_before_publication() {
             })
             .is_err()
     );
+    assert!(
+        NativeFormat::JsonSequence
+            .select_output(OutputOptions {
+                color_json: true,
+                ..OutputOptions::default()
+            })
+            .is_err()
+    );
 }

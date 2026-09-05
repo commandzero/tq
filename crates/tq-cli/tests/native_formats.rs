@@ -421,6 +421,12 @@ fn seq_selects_json_sequences_and_rejects_conflicts_in_either_order() {
 }
 
 #[test]
+fn json_sequence_rejects_forced_color_output() {
+    assert!(parse_args(["-o", "json-seq", "--color-output", "."]).is_err());
+    assert!(parse_args(["-o", "json-seq", "-C", "."]).is_err());
+}
+
+#[test]
 fn json_sequence_output_uses_json_formatting_controls() {
     let command = parse_args([
         "-n",
