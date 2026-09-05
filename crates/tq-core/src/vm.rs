@@ -193,6 +193,14 @@ pub struct VmObservations {
 /// Deterministic VM failure.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum VmError {
+    /// A source can resume after this parse failure, but query input access throws it.
+    #[error("{message}")]
+    RecoverableInput {
+        /// Parse message exposed to query catch handlers.
+        message: Arc<str>,
+        /// Source context for the outer driver's recovery warning.
+        context: Arc<str>,
+    },
     /// A deferred remaining-input provider could not decode its next value.
     #[error("input error: {message}")]
     Input {
@@ -246,7 +254,7 @@ impl VmError {
     #[must_use]
     pub fn diagnostic(&self) -> Diagnostic {
         let class = match self {
-            Self::Input { .. } => DiagnosticClass::Input,
+            Self::Input { .. } | Self::RecoverableInput { .. } => DiagnosticClass::Input,
             Self::Resource { .. } => DiagnosticClass::Resource,
             Self::NumericRange { .. } => DiagnosticClass::NumericRange,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,
@@ -531,7 +539,43 @@ impl Vm {
         self.run_kernel()
     }
 
-    /// Exhausts this VM synchronously, passing each result to `emit`.
+    /// Drains results synchronously with the same direct-root shortcuts and
+    /// observations as repeated calls to [`Self::next_result`].
+    ///
+    /// Ordinary Document drivers can use this without starting a worker for
+    /// each Document. Automatic plans that charge every root operation against
+    /// a shared step budget should use [`Self::for_each_result`] instead.
+    /// Returning `false` from `emit` stops after the current result.
+    ///
+    /// # Errors
+    ///
+    /// Returns runtime and resource errors from evaluation.
+    pub fn drain_results(&mut self, mut emit: impl FnMut(Value) -> bool) -> Result<(), VmError> {
+        let direct = self
+            .bytecode
+            .instructions()
+            .get(self.bytecode.root() as usize)
+            .is_some_and(|instruction| {
+                matches!(
+                    instruction.operation,
+                    Operation::Identity
+                        | Operation::Literal(_)
+                        | Operation::Variable(_)
+                        | Operation::Empty
+                )
+            });
+        if direct {
+            if let Some(value) = self.next_result()? {
+                // Direct roots have no pending work after their sole result.
+                let _ = emit(value);
+            }
+            return Ok(());
+        }
+        self.for_each_result(emit)
+    }
+
+    /// Exhausts this VM synchronously, passing each result to `emit` and
+    /// charging even trivial tree roots against the step budget.
     ///
     /// This avoids the demand-channel worker used by [`Self::next_result`] when
     /// a caller already knows it will consume every result. It is especially
@@ -541,8 +585,8 @@ impl Vm {
     ///
     /// # Errors
     ///
-    /// Returns the same deterministic runtime or resource error as
-    /// [`Self::next_result`].
+    /// Returns deterministic runtime or resource errors, including step-budget
+    /// failures for trivial roots that [`Self::next_result`] returns directly.
     pub fn for_each_result(&mut self, mut emit: impl FnMut(Value) -> bool) -> Result<(), VmError> {
         let uses_tree = !self.tree_started
             && self.tree_receiver.is_none()

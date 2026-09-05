@@ -24,6 +24,7 @@
 **/fuzz/corpus/
 *.profraw
 *.profdata
+__pycache__/
 
 # Temporary spools and interrupted downloads
 *.part

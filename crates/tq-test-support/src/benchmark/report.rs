@@ -289,8 +289,16 @@ impl BenchmarkCampaignReport {
                         .as_ref()
                         .map_or_else(String::new, |objective| {
                             format!(
-                                ", soft jq target: time {:?}, rss {:?}",
-                                objective.wall_time, objective.peak_rss
+                                ", soft {} target: time {:?}, rss {:?}",
+                                if soft_reference(row)
+                                    .is_some_and(|reference| reference.starts_with("yq-"))
+                                {
+                                    "yq"
+                                } else {
+                                    "jq"
+                                },
+                                objective.wall_time,
+                                objective.peak_rss
                             )
                         });
                 writeln!(
@@ -473,12 +481,11 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 }
             }
         }
-        if has_jq_soft_performance_objective(&row.case_id)
-            && row.adapter_id == "tq-json"
-            && reference_adapters.contains(&"jq-json")
+        if let Some(reference) = soft_reference(row)
+            && reference_adapters.contains(&reference)
         {
-            let wall_time_ratio = row.reference_ratios.get("jq-json").copied();
-            let peak_rss_ratio = row.reference_peak_rss_ratios.get("jq-json").copied();
+            let wall_time_ratio = row.reference_ratios.get(reference).copied();
+            let peak_rss_ratio = row.reference_peak_rss_ratios.get(reference).copied();
             row.soft_performance_objective = Some(SoftPerformanceObjective {
                 wall_time_ratio,
                 peak_rss_ratio,
@@ -486,6 +493,16 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 peak_rss: soft_status(peak_rss_ratio, 1.5),
             });
         }
+    }
+}
+
+fn soft_reference(row: &BenchmarkRow) -> Option<&'static str> {
+    match (row.case_id.as_str(), row.adapter_id.as_str()) {
+        ("benchmark.native-json-seq", "tq-json-seq") => Some("jq-json-seq"),
+        ("benchmark.native-csv", "tq-csv") => Some("yq-csv"),
+        ("benchmark.native-tsv", "tq-tsv") => Some("yq-tsv"),
+        (case, "tq-json") if has_jq_soft_performance_objective(case) => Some("jq-json"),
+        _ => None,
     }
 }
 

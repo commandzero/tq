@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{self, BufReader, BufWriter, IsTerminal, Read, Write},
+    io::{self, BufWriter, IsTerminal, Read, Write},
     path::Path,
     sync::{
         Arc, OnceLock,
@@ -15,26 +15,23 @@ use std::{
 
 use thiserror::Error;
 use tq_core::{
-    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
-    HybridBlocking, HybridPreparation, InputCursor, InputValue, Number, PathComponent, Plan,
-    PlanKind, Query, ResolveOptions, Resolved, SourceId, StableSortPipeline,
-    StableSortPipelineObservations, Transcode, TranscodeCommitment, TranscodeDuplicatePolicy,
-    TranscodeInput, TranscodeLimits, TranscodeProof, Value, Vm, VmError, VmLimits, VmObservations,
-    analyze_with_context, parallel_worker_count, parse_bytes, resolve,
+    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, HybridBlocking,
+    HybridPreparation, InputCursor, InputValue, Number, PathComponent, Plan, PlanKind, Query,
+    ResolveOptions, Resolved, SourceId, StableSortPipeline, StableSortPipelineObservations,
+    Transcode, TranscodeCommitment, TranscodeDuplicatePolicy, TranscodeInput, TranscodeLimits,
+    TranscodeProof, Value, Vm, VmError, VmLimits, VmObservations, analyze_with_context,
+    parallel_worker_count, parse_bytes, resolve,
 };
 use tq_formats::{
-    DecodeOptions, DocumentSource, FormatError, InputFormat, JsonDocumentSource, JsonEventOptions,
-    JsonLinesDocumentSource, OutputError, OutputFormat, OutputOptions, ParallelJsonObservations,
-    ParallelJsonOptions, ProbeReport, SelectedStreamObservations, StreamOptions, StreamRecord,
-    StreamSelection, ToonFraming, VecDocumentSource, decode_bytes, decode_json,
-    decode_json_event_stream, decode_toon, probe_format, probe_reader, stream_json,
-    stream_json_selected_records_parallel, stream_json_selected_records_with_control, stream_toon,
-    stream_toon_selected_records_with_control, write_results,
+    DecodeOptions, FormatError, InputFormat, InputRepresentation, NativeFormat,
+    NativeInputObservation, NativeOutputSequence, OutputError, OutputFormat, OutputOptions,
+    ParallelJsonOptions, ProbeReport, StreamOptions, StreamRecord, StreamSelection, ToonFraming,
+    decode_json, decode_toon, probe_format, probe_reader,
 };
 use tq_toon::{
-    ArrayPreparationConfig, DecodeIntoError, Decoder, DuplicateKeyPolicy, KeyFolding,
-    PreparationArena, PreparationLimits, PreparationObservations, PublicationBuffer,
-    PublicationError, SpoolError, TranscodeConsumer, TranscodeError, WriterError,
+    ArrayPreparationConfig, DuplicateKeyPolicy, KeyFolding, PreparationArena, PreparationLimits,
+    PreparationObservations, PublicationBuffer, PublicationError, SpoolError, TranscodeConsumer,
+    TranscodeError, WriterError,
 };
 
 use crate::{
@@ -43,7 +40,6 @@ use crate::{
 };
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
-const INPUT_BUFFER_BYTES: usize = 64 * 1024;
 // A rendezvous channel forces one kernel wakeup per document. This small bound
 // keeps source read-ahead and retained values fixed while allowing the decoder
 // and evaluator to run in batches.
@@ -126,6 +122,7 @@ impl RunError {
             Self::Resource(_)
             | Self::ResourceSource { .. }
             | Self::Input(FormatError::Resource(_))
+            | Self::Output(OutputError::Resource(_))
             | Self::Runtime(VmError::Resource { .. }) => ExitStatus::Resource,
             Self::Interrupted | Self::Runtime(VmError::Interrupted) => ExitStatus::Interrupted,
             Self::Input(error) if error.to_string().contains("resource limit exceeded") => {
@@ -164,7 +161,8 @@ pub fn run(mut command: Command) -> ExitStatus {
         let terminal = options.capability_policy.terminal && io::stdout().is_terminal();
         let no_color = options.capability_policy.environment
             && std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
-        options.color = if terminal && !no_color {
+        let json_color = options.output_format == OutputFormat::Json;
+        options.color = if json_color && terminal && !no_color {
             ColorMode::Always
         } else {
             ColorMode::Never
@@ -245,9 +243,12 @@ pub fn run_with_io<R: Read + Send, W: Write, E: Write>(
             Ok(ExitStatus::Success)
         }
         Command::BuildConfiguration => {
+            let formats = NativeFormat::ALL
+                .map(|format| format.descriptor().name)
+                .join(",");
             writeln!(
                 stdout,
-                "target={} binary-stdio={} formats=toon,yaml,json,jsonl jq-target=1.8.x",
+                "target={} binary-stdio={} formats={formats} jq-target=1.8.x",
                 std::env::consts::OS,
                 if cfg!(windows) {
                     "requested-with--binary"
@@ -450,10 +451,18 @@ fn auto_file_common_format(options: &RunOptions) -> Result<CommonInputFormat, Ru
 }
 
 const fn decoder_events_available(format: InputFormat) -> bool {
-    matches!(
-        format,
-        InputFormat::Json | InputFormat::JsonLines | InputFormat::Toon
-    )
+    match tq_formats::NativeFormat::from_input(format) {
+        // Recoverable RS payloads need complete-document validation in normal
+        // mode. Explicit --stream can publish partial events before recovery.
+        Some(native) => {
+            native.descriptor().events
+                && !matches!(
+                    native.descriptor().framing,
+                    tq_formats::Framing::RecordSeparator
+                )
+        }
+        None => false,
+    }
 }
 
 fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
@@ -496,7 +505,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
     let analyzed = analyze_with_context(
         resolved,
         AnalysisContext {
-            event_input: options.stream,
+            event_input: false,
             whole_input: options.slurp,
             automatic_streaming,
         },
@@ -533,10 +542,6 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
         return run_transcode_filter(options, &plan, &analysis, detections, stdin, stdout);
     }
 
-    if options.stream {
-        let plan = program.event_plan().map_err(RunError::Compile)?;
-        return run_event_filter(options, &plan, variables, &analysis, stdin, stdout, stderr);
-    }
     if matches!(
         analysis.selected_plan,
         PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking
@@ -561,6 +566,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
     let mut last = None;
     let mut observations = Vec::new();
     let mut runtime_error = None;
+    let mut runtime_error_reported = false;
     {
         let mut evaluate = |input, input_cursor: Option<InputCursor>| -> Result<bool, RunError> {
             let input = match input {
@@ -569,7 +575,17 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                     result_output.proxy(&bytes)?;
                     return Ok(true);
                 }
+                StructuredInput::Failure(failure) => {
+                    render_native_failure(stderr, &failure)?;
+                    return Ok(true);
+                }
+                StructuredInput::Warning { message, context } => {
+                    render_recovery_warning(stderr, &context, &message)?;
+                    return Ok(true);
+                }
             };
+            runtime_error = None;
+            runtime_error_reported = false;
             let mut vm =
                 Vm::new_with_variables(&plan, input, vm_limits(options), variables.clone())
                     .with_trace_limit(options.trace_limit);
@@ -579,46 +595,102 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             if let Some(flag) = cancellation() {
                 vm = vm.with_cancellation(flag);
             }
+            // This driver exhausts each Document before requesting the next;
+            // it does not need a demand-channel worker for each evaluation.
             let mut output_error = None;
-            if let Err(error) = vm.for_each_result(|value| {
+            let evaluated = vm.drain_results(|value| {
+                last = Some(value.clone());
                 if let Err(error) = result_output.emit(&value) {
                     output_error = Some(error);
                     return false;
                 }
-                last = Some(value);
                 result_count = result_count.saturating_add(1);
                 true
-            }) {
-                runtime_error = Some(error);
-            }
+            });
             if let Some(error) = output_error {
                 return Err(error);
+            }
+            if let Err(error) = evaluated {
+                if matches!(error, VmError::RecoverableInput { .. }) && !options.null_input {
+                    writeln!(stderr, "tq: error: {error}")?;
+                    runtime_error_reported = true;
+                }
+                runtime_error = Some(error);
             }
             if options.trace_limit != 0 {
                 for entry in vm.trace() {
                     writeln!(stderr, "trace: {entry}")?;
                 }
             }
-            observations.push(vm.observations());
-            Ok(runtime_error.is_none())
+            // Per-Document observations are report payload, not execution
+            // state. Keep ordinary sequence processing bounded without a report.
+            if options.report_file.is_some() {
+                if options.stream
+                    && let Some(total) = observations.first_mut()
+                {
+                    merge_observations(total, vm.observations());
+                } else {
+                    observations.push(vm.observations());
+                }
+            }
+            Ok(runtime_error.is_none() || runtime_error_reported)
         };
 
-        if analysis.capabilities.whole_input
+        if options.null_input && !analysis.capabilities.whole_input {
+            let _ = evaluate(StructuredInput::Value(Value::Null), None)?;
+        } else if options.slurp && !options.raw_input {
+            let mut values = Vec::new();
+            let mut had_proxy = false;
+            let mut source_options = options.clone();
+            source_options.null_input = false;
+            for_each_structured_input(&source_options, stdin, &mut |input| match input {
+                StructuredInput::Value(value) => {
+                    values.push(value);
+                    Ok(true)
+                }
+                input @ StructuredInput::Proxy(_) => {
+                    had_proxy = true;
+                    evaluate(input, None)
+                }
+                input => evaluate(input, None),
+            })?;
+            if !had_proxy || !values.is_empty() {
+                let cursor = InputCursor::new(vec![Value::array(values)]);
+                let input = if options.null_input {
+                    Value::Null
+                } else {
+                    cursor.next_value()?.expect("slurp supplies one input")
+                };
+                let _ = evaluate(StructuredInput::Value(input), Some(cursor))?;
+            }
+        } else if analysis.capabilities.whole_input
             && !options.slurp
             && !options.raw_input
             && !options.proxy_on_error
         {
-            thread::scope(|scope| {
+            let input_result = thread::scope(|scope| {
                 let (sender, receiver) = sync_channel(REMAINING_INPUT_BUFFER_DOCUMENTS);
                 scope.spawn(move || produce_remaining_inputs(options, stdin, &sender));
                 let cursor = InputCursor::from_provider(move || match receiver.recv() {
                     Ok(RemainingInputMessage::Value(value)) => Ok(Some(value)),
+                    Ok(RemainingInputMessage::Failure(failure)) => Err(VmError::RecoverableInput {
+                        context: format!(
+                            "in '{}' at recovery segment {}",
+                            failure.identity, failure.recovery_segment_index
+                        )
+                        .into(),
+                        message: failure.message.into(),
+                    }),
                     Ok(RemainingInputMessage::Error(error)) => Err(error),
                     Ok(RemainingInputMessage::Done) | Err(_) => Ok(None),
                 });
                 let result: Result<(), RunError> = (|| {
+                    if options.null_input {
+                        evaluate(StructuredInput::Value(Value::Null), Some(cursor.clone()))?;
+                        return Ok(());
+                    }
                     while let Some(input) = pull_remaining_input(&cursor)? {
-                        if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                        if !evaluate(input, Some(cursor.clone()))? {
                             break;
                         }
                     }
@@ -626,9 +698,12 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                 })();
                 drop(cursor);
                 result
-            })?;
+            });
+            input_result?;
         } else if analysis.capabilities.whole_input && !options.slurp && !options.raw_input {
-            match load_inputs(options, stdin)? {
+            let mut source_options = options.clone();
+            source_options.null_input = false;
+            match load_inputs(&source_options, stdin)? {
                 LoadedInputs::Proxy(bytes) => {
                     let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
                 }
@@ -643,9 +718,13 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                             })
                             .collect(),
                     );
-                    while let Some(input) = cursor.next_value()? {
-                        if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
-                            break;
+                    if options.null_input {
+                        let _ = evaluate(StructuredInput::Value(Value::Null), Some(cursor))?;
+                    } else {
+                        while let Some(input) = cursor.next_value()? {
+                            if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                                break;
+                            }
                         }
                     }
                 }
@@ -697,6 +776,9 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
         )?;
     }
     if let Some(error) = runtime_error {
+        if runtime_error_reported {
+            return Ok(ExitStatus::Runtime);
+        }
         if let VmError::Input { message } = error {
             return Err(RunError::Input(FormatError::Parse {
                 format: InputFormat::Auto,
@@ -711,6 +793,33 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
 enum StructuredInput {
     Value(Value),
     Proxy(Vec<u8>),
+    Failure(tq_formats::NativeInputFailure),
+    Warning {
+        message: Arc<str>,
+        context: Arc<str>,
+    },
+}
+
+fn render_native_failure(
+    writer: &mut impl Write,
+    failure: &tq_formats::NativeInputFailure,
+) -> io::Result<()> {
+    render_recovery_warning(
+        writer,
+        &format!(
+            "in '{}' at recovery segment {}",
+            failure.identity, failure.recovery_segment_index
+        ),
+        &failure.message,
+    )
+}
+
+fn render_recovery_warning(
+    writer: &mut impl Write,
+    context: &str,
+    message: &str,
+) -> io::Result<()> {
+    writeln!(writer, "tq: ignoring parse error {context}: {message}")
 }
 
 fn transcode_proof(
@@ -941,35 +1050,20 @@ fn transcode_reader<R: Read, W: Write>(
     source: SourceId,
     consumer: &mut TranscodeConsumer<W>,
 ) -> Result<(), RunError> {
-    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
-    match format {
-        InputFormat::Json => decode_json_event_stream(
-            buffered_input(reader),
-            source,
-            consumer,
-            JsonEventOptions {
-                maximum_depth: options.limits.depth,
-                maximum_token_bytes: options.limits.token_bytes,
-            },
-        )
-        .map(|_| ())
-        .map_err(|message| map_transcode_message(InputFormat::Json, message)),
-        InputFormat::Toon => {
-            let mut decoder = Decoder::new(
-                BufReader::new(reader),
-                source,
-                decode_options(options, InputFormat::Toon).toon,
-            );
-            decoder.decode_into(consumer).map_err(|error| match error {
-                DecodeIntoError::Decode(error) => RunError::Input(FormatError::Parse {
-                    format: InputFormat::Toon,
-                    message: error.to_string(),
-                }),
-                DecodeIntoError::Consumer(error) => map_transcode_error(error),
-            })
-        }
-        _ => unreachable!("typed transcode proof admits only JSON or TOON"),
-    }
+    NativeFormat::from_input(format)
+        .expect("typed transcode proof has a committed format")
+        .select_input(decode_options(options, format), InputRepresentation::Events)?
+        .open(reader, identity)
+        .consume_codec_events(source, consumer)
+        .map_err(|error| match error {
+            tq_formats::InputDeliveryError::Input(error) => error.into(),
+            tq_formats::InputDeliveryError::Consumer(tq_formats::CodecConsumerError::Event(
+                error,
+            )) => map_transcode_error(error),
+            tq_formats::InputDeliveryError::Consumer(tq_formats::CodecConsumerError::Text(
+                message,
+            )) => map_transcode_message(format, message),
+        })
 }
 
 fn map_transcode_message(format: InputFormat, message: String) -> RunError {
@@ -1099,13 +1193,17 @@ where
 {
     if options.proxy_on_error {
         let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
-        let documents = match decode_bytes(&bytes, identity, decode_options(options, format)) {
-            Ok(documents) => documents,
-            Err(error) if proxyable_format_error(&error) => {
-                return emit(StructuredInput::Proxy(bytes));
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let (committed, documents) =
+            match native_source_documents(&bytes, identity, options, format) {
+                Ok(source) => source,
+                Err(error) if proxyable_format_error(&error) => {
+                    return emit(StructuredInput::Proxy(bytes));
+                }
+                Err(error) => return Err(error.into()),
+            };
+        if options.stream {
+            return project_committed_input(options, committed, bytes.as_slice(), identity, emit);
+        }
         for document in documents {
             if !emit(StructuredInput::Value(document.value))? {
                 return Ok(false);
@@ -1113,24 +1211,40 @@ where
         }
         return Ok(true);
     }
-    if format == InputFormat::JsonLines {
-        let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
-        let mut source = JsonLinesDocumentSource::new(
-            BufReader::new(reader),
-            identity,
-            decode_options(options, format),
-        );
-        while let Some(document) = source.next_document()? {
-            if !emit(StructuredInput::Value(document.value))? {
-                return Ok(false);
-            }
-        }
-        return Ok(true);
+    if format == InputFormat::Auto {
+        let (probe, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+        return for_each_committed_document(options, probe.selected, replay, identity, emit);
     }
+    for_each_committed_document(options, format, reader, identity, emit)
+}
 
-    let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
-    for document in decode_bytes(&bytes, identity, decode_options(options, format))? {
-        if !emit(StructuredInput::Value(document.value))? {
+fn for_each_committed_document<R: Read, F>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    emit: &mut F,
+) -> Result<bool, RunError>
+where
+    F: FnMut(StructuredInput) -> Result<bool, RunError>,
+{
+    if options.stream {
+        return project_committed_input(options, format, reader, identity, emit);
+    }
+    let selection = NativeFormat::from_input(format)
+        .expect("input is committed")
+        .select_input(
+            decode_options(options, format),
+            InputRepresentation::Documents,
+        )?;
+    let mut source = selection.open(reader, identity);
+    while let Some(observation) = source.next_observation()? {
+        let input = match observation {
+            NativeInputObservation::Document(document) => StructuredInput::Value(document.value),
+            NativeInputObservation::Failure(failure) => StructuredInput::Failure(failure),
+            NativeInputObservation::Event(_) => unreachable!("Document representation"),
+        };
+        if !emit(input)? {
             return Ok(false);
         }
     }
@@ -1299,6 +1413,7 @@ fn write_explain(
             let mut report = analyzed.explain_json();
             report["execution"] = serde_json::json!({
                 "plan": plan.to_string(),
+            "input_projection": if options.stream { "jq-stream" } else { "documents" },
                 "input_detection": detection,
                 "retained_working_set": retained,
                 "blocking": capabilities.blocking,
@@ -1329,6 +1444,8 @@ fn write_explain(
                     "depth": options.limits.depth,
                     "token_bytes": options.limits.token_bytes,
                     "line_bytes": options.limits.line_bytes,
+            "frame_bytes": options.limits.frame_bytes,
+            "fields": options.limits.fields,
                     "lookahead_bytes": options.limits.lookahead_bytes,
                     "vm_steps": options.limits.vm_steps,
                     "results": options.limits.results,
@@ -1376,96 +1493,18 @@ fn parallel_selected_decode_explain<'a>(
     (true, "static-array-prefix")
 }
 
-const fn input_format_name(format: InputFormat) -> &'static str {
-    match format {
-        InputFormat::Auto => "auto:toon/json/yaml-bounded-probe",
-        InputFormat::Toon => "override:toon",
-        InputFormat::Yaml => "override:yaml",
-        InputFormat::Json => "override:json",
-        InputFormat::Json5 => "override:json5",
-        InputFormat::JsonLines => "override:jsonl",
-        InputFormat::ToonSequence => "override:toon-sequence",
+fn input_format_name(format: InputFormat) -> String {
+    match NativeFormat::from_input(format) {
+        None => "auto:toon/json/yaml-bounded-probe".to_owned(),
+        Some(native) => format!("override:{}", native.report_name()),
     }
 }
 
 const fn concrete_input_format_name(format: InputFormat) -> &'static str {
-    match format {
-        InputFormat::Auto => "auto",
-        InputFormat::Toon => "toon",
-        InputFormat::Yaml => "yaml",
-        InputFormat::Json => "json",
-        InputFormat::Json5 => "json5",
-        InputFormat::JsonLines => "jsonl",
-        InputFormat::ToonSequence => "toon-sequence",
+    match NativeFormat::from_input(format) {
+        None => "auto",
+        Some(native) => native.report_name(),
     }
-}
-
-fn run_event_filter<R: Read, W: Write, E: Write>(
-    options: &RunOptions,
-    plan: &Plan<Compiled, Events>,
-    variables: &BTreeMap<Arc<str>, Value>,
-    analysis: &Analysis,
-    stdin: &mut R,
-    stdout: &mut W,
-    stderr: &mut E,
-) -> Result<ExitStatus, RunError> {
-    let mut executor = StreamExecutor {
-        plan,
-        variables,
-        output: ResultOutput::new(stdout, options),
-        stderr,
-        trace_remaining: options.trace_limit,
-        observations: VmObservations::default(),
-        last: None,
-        results: 0,
-    };
-    let files = if options.files.is_empty() {
-        vec![Path::new("-").to_owned()]
-    } else {
-        options.files.clone()
-    };
-    for path in files {
-        if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-            return Err(RunError::Interrupted);
-        }
-        if path == Path::new("-") {
-            stream_reader(
-                options,
-                selected_input_format(options, &path),
-                &mut *stdin,
-                "<stdin>",
-                &mut executor,
-            )?;
-        } else {
-            let identity = path.display().to_string();
-            stream_reader(
-                options,
-                selected_input_format(options, &path),
-                open_path(&path)?,
-                &identity,
-                &mut executor,
-            )?;
-        }
-    }
-    executor.output.finish()?;
-    if let Some(path) = &options.report_file {
-        write_report(
-            path,
-            &[executor.observations],
-            executor.results,
-            executor.output.written(),
-            options,
-            PlanKind::Events,
-            ReportExecution {
-                analysis,
-                retention: RetentionObservations::default(),
-                resource_outcome: "success",
-            },
-        )?;
-    }
-    Ok(executor
-        .output
-        .exit_status(options.exit_status, executor.last.as_ref()))
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -1687,197 +1726,76 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
     identity: &str,
     executor: &mut AutomaticExecutor<'_, W, E, M>,
 ) -> Result<(), RunError> {
-    let stream_options = StreamOptions {
-        maximum_depth: options.limits.depth,
-        maximum_token_bytes: options.limits.token_bytes,
-        errors_as_values: false,
-    };
-    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
-    match format {
-        InputFormat::Json => {
-            automatic_json_into(buffered_input(reader), stream_options, true, executor)?;
-            executor.finish_source()
-        }
-        InputFormat::JsonLines => {
-            automatic_json_lines_into(reader, identity, options, stream_options, executor)
-        }
-        InputFormat::Toon => {
-            automatic_toon_into(reader, options, stream_options, executor)?;
-            executor.finish_source()
-        }
-        InputFormat::Auto => {
-            let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
-            match report.selected {
-                InputFormat::Json => {
-                    automatic_json_into(buffered_input(replay), stream_options, true, executor)?;
-                    executor.finish_source()
-                }
-                InputFormat::Toon => {
-                    automatic_toon_into(replay, options, stream_options, executor)?;
-                    executor.finish_source()
-                }
-                InputFormat::Yaml => Err(RunError::Unsupported(
-                    "auto-detected YAML cannot execute a decoder-event plan".to_owned(),
-                )),
-                InputFormat::Auto
-                | InputFormat::Json5
-                | InputFormat::JsonLines
-                | InputFormat::ToonSequence => {
-                    unreachable!("probe candidate")
-                }
-            }
-        }
-        InputFormat::Yaml | InputFormat::Json5 | InputFormat::ToonSequence => {
-            Err(RunError::Unsupported(
-                "automatic bounded plans require JSON or TOON decoder events".to_owned(),
-            ))
-        }
+    if format == InputFormat::Auto {
+        let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+        let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+        return automatic_committed_reader(options, report.selected, replay, identity, executor);
     }
+    automatic_committed_reader(options, format, reader, identity, executor)
 }
 
-fn automatic_json_lines_into<R: Read, W: Write, E: Write, M>(
+fn automatic_committed_reader<R: Read, W: Write, E: Write, M>(
+    options: &RunOptions,
+    format: InputFormat,
     reader: R,
     identity: &str,
-    options: &RunOptions,
-    stream_options: StreamOptions,
     executor: &mut AutomaticExecutor<'_, W, E, M>,
 ) -> Result<(), RunError> {
-    let mut source = JsonLinesDocumentSource::new(
-        BufReader::new(reader),
-        identity,
-        decode_options(options, InputFormat::JsonLines),
+    let input = NativeFormat::from_input(format)
+        .expect("input is committed")
+        .select_input(decode_options(options, format), InputRepresentation::Events)?
+        .open(reader, identity);
+    let parallel = (executor.hybrid_suffix.is_some() && parallel_worker_count() > 1).then_some(
+        ParallelJsonOptions {
+            batch_values: options.limits.decode_batch_values,
+            batch_bytes: options.limits.decode_batch_bytes,
+            in_flight_batches: options.limits.decode_in_flight_batches,
+            in_flight_bytes: options.limits.decode_in_flight_bytes,
+        },
     );
-    while let Some((record, line)) = source.next_record()? {
-        automatic_json_into(record.as_slice(), stream_options, false, executor)
-            .map_err(|error| json_lines_record_error(error, identity, line))?;
-        executor.finish_source()?;
-    }
-    Ok(())
-}
-
-fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
-    reader: R,
-    options: StreamOptions,
-    parallel_allowed: bool,
-    executor: &mut AutomaticExecutor<'_, W, E, M>,
-) -> Result<(), RunError> {
-    let mut execution_error = None;
-    let selection = executor.stream_selection();
-    let parallel =
-        parallel_allowed && executor.hybrid_suffix.is_some() && parallel_worker_count() > 1;
-    let parallel_options = ParallelJsonOptions {
-        batch_values: executor.output.options.limits.decode_batch_values,
-        batch_bytes: executor.output.options.limits.decode_batch_bytes,
-        in_flight_batches: executor.output.options.limits.decode_in_flight_batches,
-        in_flight_bytes: executor.output.options.limits.decode_in_flight_bytes,
-    };
-    let decoded = {
-        let mut accept = |record| match executor.accept(record) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                execution_error = Some(error);
-                Err("automatic stream consumer stopped".to_owned())
+    let decoded = input.consume_selected(
+        executor.stream_selection(),
+        parallel,
+        cancellation(),
+        |observation| {
+            match observation {
+                tq_formats::SelectedInputObservation::Record(record) => executor.accept(record),
+                tq_formats::SelectedInputObservation::DocumentEnd => executor.finish_source(),
             }
-        };
-        if parallel {
-            stream_json_selected_records_parallel(
-                reader,
-                options,
-                selection,
-                parallel_options,
-                cancellation(),
-                &mut accept,
-            )
-        } else {
-            let mut selected = SelectedStreamObservations::default();
-            let result = stream_json_selected_records_with_control(
-                reader,
-                options,
-                selection,
-                cancellation(),
-                &mut selected,
-                &mut accept,
-            );
-            executor.retention.decoder_depth_high_water = executor
-                .retention
-                .decoder_depth_high_water
-                .max(selected.depth_high_water);
-            result.map(|()| ParallelJsonObservations::default())
+            .map(|()| std::ops::ControlFlow::Continue(()))
+        },
+    );
+    let observations = match decoded {
+        Ok(observations) => observations,
+        Err(tq_formats::InputDeliveryError::Consumer(error)) => return Err(error),
+        Err(tq_formats::InputDeliveryError::Input(error)) => {
+            if cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                return Err(RunError::Interrupted);
+            }
+            return Err(error.into());
         }
     };
-    if let Ok(observations) = decoded.as_ref() {
-        executor.retention.decode_batches = executor
-            .retention
-            .decode_batches
-            .saturating_add(observations.batches);
-        executor.retention.decoder_depth_high_water = executor
-            .retention
-            .decoder_depth_high_water
-            .max(observations.depth_high_water);
-        executor.retention.decode_in_flight_batches_high_water = executor
-            .retention
-            .decode_in_flight_batches_high_water
-            .max(observations.in_flight_batches_high_water);
-        executor.retention.decode_in_flight_bytes_high_water = executor
-            .retention
-            .decode_in_flight_bytes_high_water
-            .max(observations.in_flight_bytes_high_water);
-        executor.retention.decode_reordered_batches_high_water = executor
-            .retention
-            .decode_reordered_batches_high_water
-            .max(observations.reordered_batches_high_water);
-    }
-    if let Some(error) = execution_error {
-        return Err(error);
-    }
-    if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-        return Err(RunError::Interrupted);
-    }
-    decoded.map(|_| ()).map_err(RunError::Input)
-}
-
-fn automatic_toon_into<R: Read, W: Write, E: Write, M>(
-    reader: R,
-    options: &RunOptions,
-    stream_options: StreamOptions,
-    executor: &mut AutomaticExecutor<'_, W, E, M>,
-) -> Result<(), RunError> {
-    let mut execution_error = None;
-    let selection = executor.stream_selection();
-    let mut selected = SelectedStreamObservations::default();
-    let decoded = stream_toon_selected_records_with_control(
-        BufReader::new(reader),
-        tq_toon::DecoderConfig {
-            strict: options.strict,
-            maximum_depth: options.limits.depth,
-            maximum_token_bytes: options.limits.token_bytes,
-            maximum_line_bytes: options.limits.line_bytes,
-            maximum_lookahead_bytes: options.limits.lookahead_bytes,
-            ..tq_toon::DecoderConfig::default()
-        },
-        stream_options,
-        selection,
-        cancellation(),
-        &mut selected,
-        |record| match executor.accept(record) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                execution_error = Some(error);
-                Err("automatic stream consumer stopped".to_owned())
-            }
-        },
-    );
+    executor.retention.decode_batches = executor
+        .retention
+        .decode_batches
+        .saturating_add(observations.batches);
     executor.retention.decoder_depth_high_water = executor
         .retention
         .decoder_depth_high_water
-        .max(selected.depth_high_water);
-    if let Some(error) = execution_error {
-        return Err(error);
-    }
-    if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-        return Err(RunError::Interrupted);
-    }
-    decoded.map_err(RunError::Input)
+        .max(observations.depth_high_water);
+    executor.retention.decode_in_flight_batches_high_water = executor
+        .retention
+        .decode_in_flight_batches_high_water
+        .max(observations.in_flight_batches_high_water);
+    executor.retention.decode_in_flight_bytes_high_water = executor
+        .retention
+        .decode_in_flight_bytes_high_water
+        .max(observations.in_flight_bytes_high_water);
+    executor.retention.decode_reordered_batches_high_water = executor
+        .retention
+        .decode_reordered_batches_high_water
+        .max(observations.reordered_batches_high_water);
+    Ok(())
 }
 
 enum HybridCollection {
@@ -2455,103 +2373,95 @@ fn invalid_automatic_event() -> RunError {
     RunError::Unsupported("automatic decoder produced an invalid path/value event".to_owned())
 }
 
-fn stream_reader<R: Read, W: Write, E: Write>(
+fn project_committed_input<R: Read, F>(
     options: &RunOptions,
     format: InputFormat,
     reader: R,
     identity: &str,
-    executor: &mut StreamExecutor<'_, W, E>,
-) -> Result<(), RunError> {
-    if options.proxy_on_error {
-        let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
-        match validate_proxy_event_source(&bytes, identity, options, format) {
-            Ok(()) => {
-                return stream_reader_inner(options, format, bytes.as_slice(), identity, executor);
-            }
-            Err(error) if proxyable_format_error(&error) => {
-                return executor.output.proxy(&bytes);
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    stream_reader_inner(options, format, reader, identity, executor)
-}
+    emit: &mut F,
+) -> Result<bool, RunError>
+where
+    F: FnMut(StructuredInput) -> Result<bool, RunError>,
+{
+    use std::ops::ControlFlow;
+    use tq_toon::EventConsumer;
 
-fn stream_reader_inner<R: Read, W: Write, E: Write>(
-    options: &RunOptions,
-    format: InputFormat,
-    reader: R,
-    identity: &str,
-    executor: &mut StreamExecutor<'_, W, E>,
-) -> Result<(), RunError> {
-    let stream_options = StreamOptions {
-        maximum_depth: options.limits.depth,
-        maximum_token_bytes: options.limits.token_bytes,
-        errors_as_values: options.stream_errors,
+    let format = NativeFormat::from_input(format).expect("input is committed");
+    if !format.descriptor().events {
+        return Err(RunError::Unsupported(format!(
+            "{} input is document-at-a-time and cannot satisfy --stream",
+            format.descriptor().name
+        )));
+    }
+    let input = format
+        .select_input(
+            decode_options(options, format.descriptor().input),
+            InputRepresentation::Events,
+        )?
+        .open(reader, identity);
+    let execution_error = std::cell::RefCell::new(None);
+    let stopped = std::cell::Cell::new(false);
+    let emit = std::cell::RefCell::new(emit);
+    let publish = |input| match emit.borrow_mut()(input) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            stopped.set(true);
+            Err("input consumer stopped".to_owned())
+        }
+        Err(error) => {
+            execution_error.replace(Some(error));
+            Err("input consumer failed".to_owned())
+        }
     };
-    let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
-    match format {
-        InputFormat::Json => stream_json_into(buffered_input(reader), stream_options, executor),
-        InputFormat::JsonLines => {
-            stream_json_lines_into(reader, identity, options, stream_options, executor)
-        }
-        InputFormat::Toon => stream_toon_into(reader, options, stream_options, executor),
-        InputFormat::Auto => {
-            let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
-            match report.selected {
-                InputFormat::Json => {
-                    stream_json_into(buffered_input(replay), stream_options, executor)
-                }
-                InputFormat::Toon => stream_toon_into(replay, options, stream_options, executor),
-                InputFormat::Yaml => Err(RunError::Unsupported(
-                    "auto-detection selected YAML, which is document-at-a-time and cannot satisfy --stream; use --input-format json for JSON syntax".to_owned(),
-                )),
-                InputFormat::Auto
-                | InputFormat::Json5
-                | InputFormat::JsonLines
-                | InputFormat::ToonSequence => {
-                    unreachable!("probe candidate")
-                }
-            }
-        }
-        InputFormat::Yaml => Err(RunError::Unsupported(
-            "YAML input is document-at-a-time and cannot satisfy --stream".to_owned(),
-        )),
-        InputFormat::Json5 => Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned())),
-        InputFormat::ToonSequence => Err(RunError::Unsupported(
-            "TOON sequence input cannot currently be nested inside --stream".to_owned(),
-        )),
-    }
-}
-
-fn stream_json_lines_into<R: Read, W: Write, E: Write>(
-    reader: R,
-    identity: &str,
-    options: &RunOptions,
-    stream_options: StreamOptions,
-    executor: &mut StreamExecutor<'_, W, E>,
-) -> Result<(), RunError> {
-    let mut source = JsonLinesDocumentSource::new(
-        BufReader::new(reader),
-        identity,
-        decode_options(options, InputFormat::JsonLines),
+    let mut emit_record =
+        |record: StreamRecord| publish(StructuredInput::Value(record.into_value()));
+    let mut projector = tq_formats::EventProjector::new(
+        StreamOptions {
+            maximum_depth: options.limits.depth,
+            maximum_token_bytes: options.limits.token_bytes,
+            errors_as_values: options.stream_errors,
+        },
+        &mut emit_record,
     );
-    while let Some((record, line)) = source.next_record()? {
-        stream_json_into(record.as_slice(), stream_options, executor)
-            .map_err(|error| json_lines_record_error(error, identity, line))?;
-    }
-    Ok(())
-}
-
-fn json_lines_record_error(error: RunError, identity: &str, line: u64) -> RunError {
-    match error {
-        RunError::Input(FormatError::Parse { message, .. }) => {
-            RunError::Input(FormatError::Parse {
-                format: InputFormat::JsonLines,
-                message: format!("{identity}:{line}: {message}"),
-            })
+    let decoded = input.consume_events(|observation| {
+        match observation {
+            NativeInputObservation::Event(event) => projector.consume(event),
+            NativeInputObservation::Failure(failure) if options.stream_errors => {
+                projector.error_value(failure.message)
+            }
+            NativeInputObservation::Failure(failure) => {
+                projector.reset();
+                publish(StructuredInput::Failure(failure))
+            }
+            NativeInputObservation::Document(_) => unreachable!("event representation"),
         }
-        error => error,
+        .map(|()| ControlFlow::Continue(()))
+    });
+    let decoded = match decoded {
+        Err(tq_formats::InputDeliveryError::Input(FormatError::Parse { message, .. }))
+            if options.stream_errors =>
+        {
+            projector
+                .error_value(message)
+                .map_err(tq_formats::InputDeliveryError::Consumer)
+        }
+        result => result,
+    };
+    if let Some(error) = execution_error.borrow_mut().take() {
+        return Err(error);
+    }
+    if stopped.get() {
+        return Ok(false);
+    }
+    match decoded {
+        Ok(()) => Ok(true),
+        Err(tq_formats::InputDeliveryError::Input(error)) => Err(error.into()),
+        Err(tq_formats::InputDeliveryError::Consumer(message)) => {
+            Err(RunError::Input(FormatError::Parse {
+                format: format.descriptor().input,
+                message,
+            }))
+        }
     }
 }
 
@@ -2571,8 +2481,7 @@ fn validate_proxy_event_source(
     options: &RunOptions,
     format: InputFormat,
 ) -> Result<(), FormatError> {
-    let documents = decode_bytes(bytes, identity, decode_options(options, format))?;
-    let selected = documents.first().map_or(format, |document| document.format);
+    let (selected, documents) = native_source_documents(bytes, identity, options, format)?;
     if selected == InputFormat::Json && documents.len() != 1 {
         return Err(FormatError::Parse {
             format: InputFormat::Json,
@@ -2582,55 +2491,38 @@ fn validate_proxy_event_source(
     Ok(())
 }
 
-fn stream_json_into<R: Read, W: Write, E: Write>(
-    reader: R,
-    options: StreamOptions,
-    executor: &mut StreamExecutor<'_, W, E>,
-) -> Result<(), RunError> {
-    let mut execution_error = None;
-    let decoded = stream_json(reader, options, |record| match executor.accept(record) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            execution_error = Some(error);
-            Err("stream consumer stopped".to_owned())
-        }
-    });
-    if let Some(error) = execution_error {
-        return Err(error);
-    }
-    decoded.map_err(RunError::Input)
-}
-
-fn stream_toon_into<R: Read, W: Write, E: Write>(
-    reader: R,
+fn native_source_documents(
+    bytes: &[u8],
+    identity: &str,
     options: &RunOptions,
-    stream_options: StreamOptions,
-    executor: &mut StreamExecutor<'_, W, E>,
-) -> Result<(), RunError> {
-    let mut execution_error = None;
-    let decoded = stream_toon(
-        BufReader::new(reader),
-        tq_toon::DecoderConfig {
-            strict: options.strict,
-            maximum_depth: options.limits.depth,
-            maximum_token_bytes: options.limits.token_bytes,
-            maximum_line_bytes: options.limits.line_bytes,
-            maximum_lookahead_bytes: options.limits.lookahead_bytes,
-            ..tq_toon::DecoderConfig::default()
-        },
-        stream_options,
-        |record| match executor.accept(record) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                execution_error = Some(error);
-                Err("stream consumer stopped".to_owned())
+    format: InputFormat,
+) -> Result<(InputFormat, Vec<tq_formats::Document>), FormatError> {
+    let format = if format == InputFormat::Auto {
+        probe_format(bytes, options.limits.lookahead_bytes)?.selected
+    } else {
+        format
+    };
+    let mut input = NativeFormat::from_input(format)
+        .expect("input is committed")
+        .select_input(
+            decode_options(options, format),
+            InputRepresentation::Documents,
+        )?
+        .open(bytes, identity);
+    let mut documents = Vec::new();
+    while let Some(observation) = input.next_observation()? {
+        match observation {
+            NativeInputObservation::Document(document) => documents.push(document),
+            NativeInputObservation::Failure(failure) => {
+                return Err(FormatError::Parse {
+                    format,
+                    message: failure.message,
+                });
             }
-        },
-    );
-    if let Some(error) = execution_error {
-        return Err(error);
+            NativeInputObservation::Event(_) => unreachable!("Document representation"),
+        }
     }
-    decoded.map_err(RunError::Input)
+    Ok((format, documents))
 }
 
 struct LimitedReader<R> {
@@ -2678,54 +2570,6 @@ impl<R: Read> Read for LimitedReader<R> {
     }
 }
 
-struct StreamExecutor<'a, W, E> {
-    plan: &'a Plan<Compiled, Events>,
-    variables: &'a BTreeMap<Arc<str>, Value>,
-    output: ResultOutput<'a, W>,
-    stderr: &'a mut E,
-    trace_remaining: usize,
-    observations: VmObservations,
-    last: Option<Value>,
-    results: usize,
-}
-
-impl<W: Write, E: Write> StreamExecutor<'_, W, E> {
-    fn accept(&mut self, input: Value) -> Result<(), RunError> {
-        let mut vm = Vm::new_events_with_variables(
-            self.plan,
-            input,
-            vm_limits(self.output.options),
-            self.variables.clone(),
-        )
-        .with_trace_limit(self.trace_remaining);
-        if let Some(flag) = cancellation() {
-            vm = vm.with_cancellation(flag);
-        }
-        let mut output_error = None;
-        let evaluated = vm.for_each_result(|value| {
-            if let Err(error) = self.output.emit(&value) {
-                output_error = Some(error);
-                return false;
-            }
-            self.last = Some(value);
-            self.results = self.results.saturating_add(1);
-            true
-        });
-        if let Some(error) = output_error {
-            return Err(error);
-        }
-        evaluated.map_err(RunError::Runtime)?;
-        if self.trace_remaining != 0 {
-            for entry in vm.trace() {
-                writeln!(self.stderr, "trace: {entry}")?;
-            }
-            self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
-        }
-        merge_observations(&mut self.observations, vm.observations());
-        Ok(())
-    }
-}
-
 fn vm_limits(options: &RunOptions) -> VmLimits {
     VmLimits {
         steps: options.limits.vm_steps,
@@ -2754,7 +2598,7 @@ fn merge_observations(total: &mut VmObservations, item: VmObservations) {
 struct ResultOutput<'a, W> {
     writer: &'a mut W,
     options: &'a RunOptions,
-    unframed: Option<Value>,
+    native: NativeOutputSequence,
     written: u64,
     emitted: u64,
     last_was_proxy: bool,
@@ -2765,7 +2609,37 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         Self {
             writer,
             options,
-            unframed: None,
+            native: NativeOutputSequence::new(
+                NativeFormat::from_output(options.output_format)
+                    .select_output(OutputOptions {
+                        format: options.output_format,
+                        strict_conversion: options.strict_conversion,
+                        delimited_limits: tq_formats::DelimitedLimits {
+                            row_bytes: options.limits.line_bytes,
+                            field_bytes: options.limits.token_bytes,
+                            fields: options.limits.fields,
+                        },
+                        pretty_json: options.pretty_json
+                            && matches!(
+                                options.output_format,
+                                OutputFormat::Json | OutputFormat::JsonSequence
+                            ),
+                        json_indent: if matches!(
+                            options.output_format,
+                            OutputFormat::Json | OutputFormat::JsonSequence
+                        ) {
+                            options.json_indent
+                        } else {
+                            tq_formats::JsonIndent::default()
+                        },
+                        ascii_json: options.ascii_output,
+                        color_json: options.color == ColorMode::Always,
+                        yaml_document_start: false,
+                        toon_framing: options.framing,
+                        toon: options.toon_writer,
+                    })
+                    .expect("CLI output selection is validated"),
+            ),
             written: 0,
             emitted: 0,
             last_was_proxy: false,
@@ -2811,56 +2685,12 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             }
             return Ok(());
         }
-        if self.options.output_format == tq_formats::OutputFormat::Toon
-            && self.options.framing == ToonFraming::Unframed
-        {
-            if self.emitted > 1 {
-                return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
-                    tq_toon::CardinalityError::Multiple,
-                ))
-                .into());
-            }
-            if self.unframed.replace(value.clone()).is_some() {
-                return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
-                    tq_toon::CardinalityError::Multiple,
-                ))
-                .into());
-            }
-            return Ok(());
-        }
         let mut writer = LimitedWriter::new(
             &mut *self.writer,
             &mut self.written,
             self.options.limits.output_bytes,
         );
-        if matches!(
-            self.options.output_format,
-            tq_formats::OutputFormat::Json | tq_formats::OutputFormat::JsonLines
-        ) && !self.options.pretty_json
-            && !self.options.ascii_output
-            && self.options.color != ColorMode::Always
-        {
-            serde_json::to_writer(&mut writer, value)?;
-            writer.write_all(b"\n")?;
-            if self.options.unbuffered {
-                writer.flush()?;
-            }
-            return Ok(());
-        }
-        write_results(
-            &mut writer,
-            [value],
-            OutputOptions {
-                format: self.options.output_format,
-                pretty_json: self.options.pretty_json,
-                json_indent: self.options.json_indent,
-                ascii_json: self.options.ascii_output,
-                color_json: self.options.color == ColorMode::Always,
-                yaml_document_start: self.emitted > 1,
-                toon_framing: self.options.framing,
-                toon: self.options.toon_writer,
-            },
-        )?;
+        self.native.write_result(&mut writer, value)?;
         if self.options.unbuffered {
             self.writer.flush()?;
         }
@@ -2891,17 +2721,13 @@ impl<'a, W: Write> ResultOutput<'a, W> {
     }
 
     fn finish(&mut self) -> Result<(), RunError> {
-        if self.options.output_format == tq_formats::OutputFormat::Toon
-            && self.options.framing == ToonFraming::Unframed
-        {
-            if self.unframed.is_some() {
-                self.flush_unframed()?;
-            } else if !self.last_was_proxy {
-                return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
-                    tq_toon::CardinalityError::Zero,
-                ))
-                .into());
-            }
+        if !(self.options.raw_output || self.last_was_proxy && self.emitted == 0) {
+            let mut writer = LimitedWriter::new(
+                &mut *self.writer,
+                &mut self.written,
+                self.options.limits.output_bytes,
+            );
+            self.native.finish(&mut writer)?;
         }
         if self.options.unbuffered {
             self.writer.flush()?;
@@ -2919,30 +2745,6 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         } else {
             exit_status(requested, last)
         }
-    }
-
-    fn flush_unframed(&mut self) -> Result<(), RunError> {
-        let value = self.unframed.take().expect("checked unframed output");
-        let mut writer = LimitedWriter::new(
-            &mut *self.writer,
-            &mut self.written,
-            self.options.limits.output_bytes,
-        );
-        write_results(
-            &mut writer,
-            [&value],
-            OutputOptions {
-                format: self.options.output_format,
-                pretty_json: self.options.pretty_json,
-                json_indent: self.options.json_indent,
-                ascii_json: self.options.ascii_output,
-                color_json: self.options.color == ColorMode::Always,
-                yaml_document_start: false,
-                toon_framing: self.options.framing,
-                toon: self.options.toon_writer,
-            },
-        )?;
-        Ok(())
     }
 }
 
@@ -3118,6 +2920,7 @@ fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
 
 enum RemainingInputMessage {
     Value(InputValue),
+    Failure(tq_formats::NativeInputFailure),
     Error(VmError),
     Done,
 }
@@ -3140,32 +2943,20 @@ fn produce_remaining_inputs_inner<R: Read>(
     stdin: &mut R,
     sender: &SyncSender<RemainingInputMessage>,
 ) -> Result<(), RunError> {
-    if options.null_input {
-        send_remaining(
-            sender,
-            tq_formats::Document {
-                value: Value::Null,
-                identity: "<null-input>".to_owned(),
-                format: options.input_format,
-                index: 0,
-            },
-        );
-        return Ok(());
-    }
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
     } else {
         options.files.clone()
     };
     for path in files {
-        if path == Path::new("-") {
+        let keep_going = if path == Path::new("-") {
             produce_remaining_reader(
                 options,
                 options.input_format,
                 &mut *stdin,
                 "<stdin>",
                 sender,
-            )?;
+            )?
         } else {
             let identity = path.display().to_string();
             produce_remaining_reader(
@@ -3174,7 +2965,10 @@ fn produce_remaining_inputs_inner<R: Read>(
                 open_path(&path)?,
                 &identity,
                 sender,
-            )?;
+            )?
+        };
+        if !keep_going {
+            break;
         }
     }
     Ok(())
@@ -3186,7 +2980,7 @@ fn produce_remaining_reader<R: Read>(
     reader: R,
     identity: &str,
     sender: &SyncSender<RemainingInputMessage>,
-) -> Result<(), RunError> {
+) -> Result<bool, RunError> {
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     if requested == InputFormat::Auto {
         let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
@@ -3207,33 +3001,45 @@ fn produce_committed_remaining_reader<R: Read>(
     reader: R,
     identity: &str,
     sender: &SyncSender<RemainingInputMessage>,
-) -> Result<(), RunError> {
-    let mut source: Box<dyn DocumentSource> = match format {
-        InputFormat::Json => Box::new(JsonDocumentSource::new(
-            BufReader::with_capacity(INPUT_BUFFER_BYTES, reader),
-            identity,
-        )),
-        InputFormat::JsonLines => Box::new(JsonLinesDocumentSource::new(
-            BufReader::new(reader),
-            identity,
+) -> Result<bool, RunError> {
+    if options.stream {
+        let mut index = 0_u64;
+        return project_committed_input(options, format, reader, identity, &mut |input| {
+            let message = match input {
+                StructuredInput::Value(value) => {
+                    index = index.saturating_add(1);
+                    RemainingInputMessage::Value(InputValue {
+                        value,
+                        identity: Arc::from(identity),
+                        line_number: index,
+                    })
+                }
+                StructuredInput::Failure(failure) => RemainingInputMessage::Failure(failure),
+                _ => unreachable!("native projection supplies values and failures"),
+            };
+            Ok(sender.send(message).is_ok())
+        });
+    }
+    let selection = NativeFormat::from_input(format)
+        .expect("input is committed")
+        .select_input(
             decode_options(options, format),
-        )),
-        InputFormat::Yaml | InputFormat::Json5 | InputFormat::Toon | InputFormat::ToonSequence => {
-            let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
-            Box::new(VecDocumentSource::new(decode_bytes(
-                &bytes,
-                identity,
-                decode_options(options, format),
-            )?))
-        }
-        InputFormat::Auto => unreachable!("auto input is committed before decoding"),
-    };
-    while let Some(document) = source.next_document()? {
-        if !send_remaining(sender, document) {
-            break;
+            InputRepresentation::Documents,
+        )?;
+    let mut source = selection.open(reader, identity);
+    while let Some(observation) = source.next_observation()? {
+        let keep_going = match observation {
+            NativeInputObservation::Document(document) => send_remaining(sender, document),
+            NativeInputObservation::Failure(failure) => {
+                sender.send(RemainingInputMessage::Failure(failure)).is_ok()
+            }
+            NativeInputObservation::Event(_) => unreachable!("Document representation"),
+        };
+        if !keep_going {
+            return Ok(false);
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 fn send_remaining(
@@ -3249,20 +3055,26 @@ fn send_remaining(
         .is_ok()
 }
 
-fn pull_remaining_input(cursor: &InputCursor) -> Result<Option<Value>, RunError> {
-    cursor.next_value().map_err(|error| match error {
-        VmError::Input { message } => RunError::Input(FormatError::Parse {
+fn pull_remaining_input(cursor: &InputCursor) -> Result<Option<StructuredInput>, RunError> {
+    match cursor.next_value() {
+        Ok(value) => Ok(value.map(StructuredInput::Value)),
+        Err(VmError::RecoverableInput { message, context }) => {
+            Ok(Some(StructuredInput::Warning { message, context }))
+        }
+        Err(VmError::Input { message }) => Err(RunError::Input(FormatError::Parse {
             format: InputFormat::Auto,
             message: message.to_string(),
-        }),
-        error => RunError::Runtime(error),
-    })
+        })),
+        Err(error) => Err(RunError::Runtime(error)),
+    }
 }
 
 fn deferred_run_error(error: RunError) -> VmError {
     match error {
         RunError::Runtime(error) => error,
-        RunError::Resource(resource) => VmError::Resource { resource },
+        RunError::Resource(resource) | RunError::Input(FormatError::Resource(resource)) => {
+            VmError::Resource { resource }
+        }
         RunError::Interrupted => VmError::Interrupted,
         error => VmError::Input {
             message: error.to_string().into(),
@@ -3306,9 +3118,29 @@ fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInp
         if options.raw_input {
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
         } else {
-            let decode = decode_options(options, selected_input_format(options, &path));
-            match decode_bytes(&bytes, identity, decode) {
-                Ok(decoded) => documents.extend(decoded),
+            let format = selected_input_format(options, &path);
+            match native_source_documents(&bytes, &identity, options, format) {
+                Ok((committed, _)) if options.stream => {
+                    project_committed_input(
+                        options,
+                        committed,
+                        bytes.as_slice(),
+                        &identity,
+                        &mut |input| {
+                            let StructuredInput::Value(value) = input else {
+                                unreachable!("validated source");
+                            };
+                            documents.push(tq_formats::Document {
+                                value,
+                                identity: identity.clone(),
+                                format: committed,
+                                index: u64::try_from(documents.len()).unwrap_or(u64::MAX),
+                            });
+                            Ok(true)
+                        },
+                    )?;
+                }
+                Ok((_, decoded)) => documents.extend(decoded),
                 Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
                     proxy = true;
                 }
@@ -3350,25 +3182,9 @@ fn open_path(path: &Path) -> Result<File, RunError> {
     })
 }
 
-fn buffered_input<R: Read>(reader: R) -> BufReader<R> {
-    BufReader::with_capacity(INPUT_BUFFER_BYTES, reader)
-}
-
 fn format_from_path(path: &Path) -> Option<InputFormat> {
     let extension = path.extension()?.to_str()?;
-    if extension.eq_ignore_ascii_case("yaml") || extension.eq_ignore_ascii_case("yml") {
-        Some(InputFormat::Yaml)
-    } else if extension.eq_ignore_ascii_case("jsonl") || extension.eq_ignore_ascii_case("ndjson") {
-        Some(InputFormat::JsonLines)
-    } else if extension.eq_ignore_ascii_case("json") {
-        Some(InputFormat::Json)
-    } else if extension.eq_ignore_ascii_case("json5") {
-        Some(InputFormat::Json5)
-    } else if extension.eq_ignore_ascii_case("toon") {
-        Some(InputFormat::Toon)
-    } else {
-        None
-    }
+    tq_formats::NativeFormat::from_extension(extension).map(|format| format.descriptor().input)
 }
 
 fn selected_input_format(options: &RunOptions, path: &Path) -> InputFormat {
@@ -3383,9 +3199,11 @@ fn decode_options(options: &RunOptions, format: InputFormat) -> DecodeOptions {
     DecodeOptions {
         format,
         maximum_source_bytes: usize::try_from(options.limits.input_bytes).unwrap_or(usize::MAX),
+        maximum_frame_bytes: options.limits.frame_bytes,
         maximum_depth: options.limits.depth,
         maximum_token_bytes: options.limits.token_bytes,
         maximum_line_bytes: options.limits.line_bytes,
+        maximum_fields: options.limits.fields,
         toon: tq_toon::DecoderConfig {
             strict: options.strict,
             maximum_depth: options.limits.depth,
@@ -3496,6 +3314,7 @@ fn write_report(
         "output_bytes": output_bytes,
         "execution": {
             "plan": plan.to_string(),
+            "input_projection": if options.stream { "jq-stream" } else { "documents" },
             "proof": analysis.stream_proof,
             "hybrid_proof": analysis.hybrid_proof,
             "optimizer_rewrites": analysis.optimizer_rewrites,
@@ -3535,6 +3354,8 @@ fn write_report(
             "depth": options.limits.depth,
             "token_bytes": options.limits.token_bytes,
             "line_bytes": options.limits.line_bytes,
+            "frame_bytes": options.limits.frame_bytes,
+            "fields": options.limits.fields,
             "lookahead_bytes": options.limits.lookahead_bytes,
             "vm_steps": options.limits.vm_steps,
             "results": options.limits.results,
@@ -3637,6 +3458,8 @@ fn write_transcode_report(
             "depth": options.limits.depth,
             "token_bytes": options.limits.token_bytes,
             "line_bytes": options.limits.line_bytes,
+            "frame_bytes": options.limits.frame_bytes,
+            "fields": options.limits.fields,
             "lookahead_bytes": options.limits.lookahead_bytes,
             "results": options.limits.results,
             "output_bytes": options.limits.output_bytes,
@@ -3988,7 +3811,7 @@ mod tests {
 
         let command =
             parse_args(["--input-format", "json", "--max-output-bytes", "1", "."]).unwrap();
-        let mut input = br"1".as_slice();
+        let mut input = b"1".as_slice();
         let mut output = Vec::new();
         let mut error = Vec::new();
         assert_eq!(
@@ -4710,7 +4533,7 @@ mod tests {
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_ne!(stdout, [] as [u8; 0]);
         let report: serde_json::Value = serde_json::from_slice(&stderr).unwrap();
-        assert_eq!(report["execution"]["plan"], "events");
+        assert_eq!(report["execution"]["plan"], "document");
         assert_eq!(report["execution"]["input_detection"], "override:json");
         assert!(report["execution"]["limits"]["input_bytes"].is_u64());
     }

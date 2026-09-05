@@ -37,6 +37,9 @@ const RAPID_CASES: &[&str] = &[
 const RAPID_SOURCE: &str = "usgs-all-month";
 const DEEP_MERGE_ENTRIES: usize = 10_000;
 
+#[path = "tq-bench/native_rows.rs"]
+mod native_rows;
+
 fn main() -> ExitCode {
     match run() {
         Ok(status) => status,
@@ -71,7 +74,7 @@ struct PreparedDataset {
 }
 
 struct PreparedCampaign {
-    _temporary: Option<TempDir>,
+    temporary: Option<TempDir>,
     datasets: Vec<PreparedDataset>,
 }
 
@@ -82,11 +85,25 @@ struct PreparedCampaign {
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let options = options()?;
-    let prepared = if options.profile == "smoke" {
+    let mut prepared = if options.profile == "smoke" {
         prepare_smoke(&root.join("examples"))?
     } else {
         prepare_manifests(&options)?
     };
+    if options
+        .selected_cases
+        .iter()
+        .any(|id| id.starts_with("benchmark.native-"))
+        || options.selected_cases.is_empty()
+    {
+        let directory = prepared
+            .temporary
+            .as_ref()
+            .ok_or("missing fixture directory")?;
+        prepared
+            .datasets
+            .extend(native_rows::prepare(directory.path())?);
+    }
     let catalog = load_benchmark_catalog(&root.join("benchmarks/cases"))?;
     let tools = discover_tools(&root)?;
     let mut corpus = Vec::new();
@@ -132,12 +149,16 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 .ok_or_else(|| format!("{} has no reference adapter", case.id))?;
             let reference_identity = tools
                 .get(&reference_adapter.tool)
-                .ok_or("reference jq executable is unavailable")?;
+                .ok_or("reference executable is unavailable")?;
             let reference_invocation =
                 invocation(&case, reference_adapter, dataset, reference_identity)?;
             let reference = match normalize_correctness_run(
                 &reference_invocation,
-                ToolKind::Jq,
+                match reference_adapter.tool {
+                    BenchmarkTool::Jq => ToolKind::Jq,
+                    BenchmarkTool::Yq => ToolKind::Yq,
+                    BenchmarkTool::Tq => ToolKind::Tq,
+                },
                 case.output_contract.kind,
             ) {
                 Ok(reference) => Some(reference),
@@ -206,7 +227,17 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
         }
     }
-    populate_reference_ratios(&mut rows, &["jq-json", "yq-json", "yq-yaml"]);
+    populate_reference_ratios(
+        &mut rows,
+        &[
+            "jq-json",
+            "yq-json",
+            "yq-yaml",
+            "jq-json-seq",
+            "yq-csv",
+            "yq-tsv",
+        ],
+    );
     let has_failure = rows.iter().any(|row| {
         !matches!(
             row.outcome,
@@ -449,7 +480,7 @@ fn prepare_smoke(examples: &Path) -> Result<PreparedCampaign, Box<dyn std::error
     prepared.tier = DatasetTier::Startup;
     datasets.push(prepared);
     Ok(PreparedCampaign {
-        _temporary: Some(temporary),
+        temporary: Some(temporary),
         datasets,
     })
 }
@@ -575,7 +606,7 @@ fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std:
     }
     datasets.push(prepare_issue5_input_sequence(temporary.path())?);
     Ok(PreparedCampaign {
-        _temporary: Some(temporary),
+        temporary: Some(temporary),
         datasets,
     })
 }
@@ -697,7 +728,11 @@ fn corpus_identity(
         format: match format {
             "json" => InputFormat::Json,
             "yaml" => InputFormat::Yaml,
-            _ => InputFormat::Toon,
+            "toon" => InputFormat::Toon,
+            "json-seq" => InputFormat::JsonSequence,
+            "csv" => InputFormat::Csv,
+            "tsv" => InputFormat::Tsv,
+            _ => unreachable!("prepared format is registered"),
         },
         artifact: artifact.clone(),
         logical_records: dataset.logical_records,
@@ -709,7 +744,11 @@ fn family_matches(
     family: tq_test_support::benchmark::DatasetFamily,
     dataset: &PreparedDataset,
 ) -> bool {
+    if dataset.source_id.starts_with("native-rows-") {
+        return family == tq_test_support::benchmark::DatasetFamily::NativeRowSequence;
+    }
     match family {
+        tq_test_support::benchmark::DatasetFamily::NativeRowSequence => false,
         tq_test_support::benchmark::DatasetFamily::Natural => {
             dataset.tier != DatasetTier::Startup && dataset.source_id != "issue5-input-sequence"
         }
@@ -754,6 +793,9 @@ fn format_name(format: InputFormat) -> &'static str {
         InputFormat::Json => "json",
         InputFormat::Yaml => "yaml",
         InputFormat::Toon => "toon",
+        InputFormat::JsonSequence => "json-seq",
+        InputFormat::Csv => "csv",
+        InputFormat::Tsv => "tsv",
     }
 }
 fn tool_name(tool: BenchmarkTool) -> &'static str {

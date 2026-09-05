@@ -3935,6 +3935,15 @@ impl Evaluator<'_> {
                         },
                     ),
             ],
+            "input" => vec![
+                self.input_cursor
+                    .map_or(Ok(None), InputCursor::next_value)
+                    .and_then(|value| {
+                        value.ok_or_else(|| VmError::Runtime {
+                            message: "break".into(),
+                        })
+                    }),
+            ],
             "inputs" => {
                 let Some(cursor) = self.input_cursor else {
                     return Vec::new();

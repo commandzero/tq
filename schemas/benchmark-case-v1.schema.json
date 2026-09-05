@@ -14,7 +14,7 @@
       "additionalProperties": false,
       "required": ["family", "tiers"],
       "properties": {
-        "family": {"enum": ["natural", "usgs", "large-natural", "synthetic-helper", "issue5-input-sequence", "deep-merge-helper"]},
+        "family": {"enum": ["natural", "usgs", "large-natural", "synthetic-helper", "issue5-input-sequence", "deep-merge-helper", "native-row-sequence"]},
         "tiers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["small", "medium", "large", "startup"]}}
       }
     },
@@ -61,7 +61,7 @@
         "properties": {
           "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "tool": {"enum": ["jq", "yq", "tq"]},
-          "input_format": {"enum": ["json", "yaml", "toon"]},
+          "input_format": {"enum": ["json", "yaml", "toon", "json-seq", "csv", "tsv"]},
           "applicable": {"type": "boolean"},
           "args": {"type": "array", "items": {"type": "string"}},
           "query": {"type": "string"},

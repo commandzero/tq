@@ -3,7 +3,7 @@
 use std::{collections::BTreeSet, ffi::OsString, fmt::Write as _, path::PathBuf};
 
 use thiserror::Error;
-use tq_formats::{InputFormat, JsonIndent, OutputFormat, ToonFraming};
+use tq_formats::{InputFormat, JsonIndent, NativeFormat, OutputFormat, ToonFraming};
 use tq_toon::{Delimiter, KeyFolding, WriterConfig};
 
 /// Top-level CLI action.
@@ -119,6 +119,10 @@ pub struct ExternalArgument {
 pub struct ResourceLimits {
     /// Maximum bytes read from one input source.
     pub input_bytes: u64,
+    /// Maximum payload bytes in one RS recovery segment.
+    pub frame_bytes: usize,
+    /// Maximum fields in a delimited row or header.
+    pub fields: usize,
     /// Maximum structured nesting depth.
     pub depth: usize,
     /// Maximum bytes in one scalar/key token.
@@ -157,6 +161,8 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             input_bytes: 2 * 1024 * 1024 * 1024,
+            frame_bytes: 2 * 1024 * 1024 * 1024,
+            fields: 65_536,
             depth: 256,
             token_bytes: 8 * 1024 * 1024,
             line_bytes: 16 * 1024 * 1024,
@@ -232,6 +238,8 @@ pub struct RunOptions {
     pub exit_status: bool,
     /// TOON strictness.
     pub strict: bool,
+    /// Reject output normalizations that change the shared value on re-read.
+    pub strict_conversion: bool,
     /// JSON pretty-print mode.
     pub pretty_json: bool,
     /// JSON indentation style.
@@ -434,7 +442,13 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: None,
         syntax: "--seq",
         value: false,
-        description: "emit TOON Text Sequence frames",
+        description: "read and write jq-compatible JSON Text Sequences",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--strict-conversion",
+        value: false,
+        description: "reject native output that loses shared-value semantics",
     },
     OptionSpec {
         short: Some('f'),
@@ -533,13 +547,28 @@ Usage: tq [OPTIONS] [FILTER [FILE...]]\n       tq [OPTIONS] -f FILE [INPUT...]\n
     for option in OPTION_REGISTRY {
         let _ = writeln!(help, "  {:<31} {}", option.syntax, option.description);
     }
+    let inputs = NativeFormat::ALL
+        .map(|format| format.descriptor().name)
+        .join("|");
+    let outputs = NativeFormat::ALL
+        .into_iter()
+        .filter_map(|format| {
+            let descriptor = format.descriptor();
+            descriptor.output.map(|_| descriptor.name)
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let _ = writeln!(help, "\nFormats: -i, --input-format auto|{inputs}");
+    let _ = writeln!(
+        help,
+        "         -o, --output-format {outputs}, --toon-sequence-input, --unframed"
+    );
     help.push_str(
-        "\nFormats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq\n\
-         -o, --output-format toon|yaml|json|jsonl, --toon-sequence-input, --unframed\n\
-TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict\n\
+        "TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict\n\
 Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE\n\
 Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
-         --max-line-bytes N, --max-lookahead-bytes N, --max-vm-steps N,\n\
+         --max-line-bytes N, --max-frame-bytes N, --max-fields N,\n\
+         --max-lookahead-bytes N, --max-vm-steps N,\n\
          --max-results N, --max-output-bytes N, --prepare-memory-bytes N,\n\
          --hybrid-batch-values N, --hybrid-in-flight-batches N,\n\
          --hybrid-in-flight-bytes N, --decode-batch-values N,\n\
@@ -600,6 +629,10 @@ where
     let mut module_paths = Vec::new();
     let mut input_format = InputFormat::Auto;
     let mut output_format = OutputFormat::Toon;
+    let mut input_explicit = false;
+    let mut output_explicit = false;
+    let mut json_sequence = false;
+    let mut explicit_toon_sequence = false;
     let mut framing = ToonFraming::Sequence;
     let mut raw_output = false;
     let mut join_output = false;
@@ -612,6 +645,7 @@ where
     let mut proxy_on_error = false;
     let mut exit_status = false;
     let mut strict = true;
+    let mut strict_conversion = false;
     let mut pretty_json = true;
     let mut pretty_explicit = false;
     let mut json_indent = JsonIndent::default();
@@ -669,13 +703,22 @@ where
                 }
             }
             "-i" | "--input-format" => {
+                input_explicit = true;
                 input_format = parse_input(&token, next_value(&mut tokens, &token)?)?;
             }
             "-o" | "--output-format" => {
-                output_format = parse_output(&token, next_value(&mut tokens, &token)?)?;
+                output_explicit = true;
+                let value = next_value(&mut tokens, &token)?;
+                explicit_toon_sequence =
+                    NativeFormat::from_name(&value) == Some(NativeFormat::ToonSequence);
+                output_format = parse_output(&token, value)?;
             }
-            "--seq" => framing = ToonFraming::Sequence,
-            "--toon-sequence-input" => input_format = InputFormat::ToonSequence,
+            "--seq" => json_sequence = true,
+            "--strict-conversion" => strict_conversion = true,
+            "--toon-sequence-input" => {
+                input_explicit = true;
+                input_format = InputFormat::ToonSequence;
+            }
             "--unframed" => framing = ToonFraming::Unframed,
             "-r" | "--raw-output" => raw_output = true,
             "--raw-output0" => {
@@ -812,6 +855,8 @@ where
             "--max-depth" => limits.depth = parse_limit(&mut tokens, &token)?,
             "--max-token-bytes" => limits.token_bytes = parse_limit(&mut tokens, &token)?,
             "--max-line-bytes" => limits.line_bytes = parse_limit(&mut tokens, &token)?,
+            "--max-frame-bytes" => limits.frame_bytes = parse_limit(&mut tokens, &token)?,
+            "--max-fields" => limits.fields = parse_limit(&mut tokens, &token)?,
             "--max-lookahead-bytes" => {
                 limits.lookahead_bytes = parse_limit(&mut tokens, &token)?;
             }
@@ -874,14 +919,30 @@ where
         (None, None) => FilterSource::Inline(".".to_owned()),
         (Some(_), Some(_)) => unreachable!("checked above"),
     };
+    if json_sequence {
+        if input_explicit && input_format != InputFormat::JsonSequence
+            || output_explicit && output_format != OutputFormat::JsonSequence
+        {
+            return Err(CliError::Incompatible("--seq conflicts with explicit non-JSON-sequence formats; use -i toon-seq -o toon-seq for TOON sequences".to_owned()));
+        }
+        input_format = InputFormat::JsonSequence;
+        output_format = OutputFormat::JsonSequence;
+    }
     if raw_input && input_format != InputFormat::Auto {
         return Err(CliError::Incompatible(
             "--raw-input cannot be combined with --input-format".to_owned(),
         ));
     }
-    if stream && matches!(input_format, InputFormat::Yaml | InputFormat::Json5) {
+    if explicit_toon_sequence && framing == ToonFraming::Unframed {
         return Err(CliError::Incompatible(
-            "--stream requires TOON/JSON event input; YAML and JSON5 are document-at-a-time"
+            "toon-seq output cannot be unframed".to_owned(),
+        ));
+    }
+    if stream
+        && NativeFormat::from_input(input_format).is_some_and(|format| !format.descriptor().events)
+    {
+        return Err(CliError::Incompatible(
+            "--stream requires an event-capable input format; YAML and JSON5 are document-at-a-time"
                 .to_owned(),
         ));
     }
@@ -890,7 +951,36 @@ where
             "--proxy-on-error cannot be combined with --stream-errors".to_owned(),
         ));
     }
-    if output_format == OutputFormat::JsonLines {
+    let output_controls = NativeFormat::from_output(output_format)
+        .descriptor()
+        .output_controls;
+    if output_controls == Some(tq_formats::OutputControls::Delimited) {
+        if pretty_explicit
+            || indent_explicit
+            || tab_explicit
+            || raw_output
+            || join_output
+            || color != ColorMode::Auto
+            || framing == ToonFraming::Unframed
+            || toon_writer != WriterConfig::default()
+        {
+            return Err(CliError::Incompatible(
+                "CSV and TSV output cannot use JSON formatting, raw, joined, or color controls"
+                    .to_owned(),
+            ));
+        }
+        color = ColorMode::Never;
+    }
+    let json_controls = matches!(
+        output_controls,
+        Some(tq_formats::OutputControls::Json | tq_formats::OutputControls::JsonLines)
+    );
+    if output_format == OutputFormat::JsonSequence && color == ColorMode::Always {
+        return Err(CliError::Incompatible(
+            "JSON sequence output cannot use forced-color output".to_owned(),
+        ));
+    }
+    if output_controls == Some(tq_formats::OutputControls::JsonLines) {
         if pretty_explicit || indent_explicit || tab_explicit {
             return Err(CliError::Incompatible(
                 "JSON Lines output is compact and cannot use pretty, indent, or tab controls"
@@ -911,34 +1001,34 @@ where
     if let JsonIndent::Spaces(indent) = json_indent {
         json_compatible_writer.indent_size = usize::from(indent);
     }
-    if matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines)
-        && (toon_writer != json_compatible_writer || framing == ToonFraming::Unframed)
+    if json_controls && (toon_writer != json_compatible_writer || framing == ToonFraming::Unframed)
     {
         return Err(CliError::Incompatible(
             "TOON output options cannot be applied to JSON or JSON Lines output".to_owned(),
         ));
     }
-    if !matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines) && !pretty_json {
+    if !json_controls && !pretty_json {
         return Err(CliError::Incompatible(
             "--compact-output applies only to JSON or JSON Lines output".to_owned(),
         ));
     }
-    if !matches!(output_format, OutputFormat::Json | OutputFormat::JsonLines) && ascii_output {
+    if !json_controls && ascii_output {
         return Err(CliError::Incompatible(
             "--ascii-output applies only to JSON or JSON Lines output".to_owned(),
         ));
     }
-    if output_format != OutputFormat::Json && color == ColorMode::Always {
+    if output_controls != Some(tq_formats::OutputControls::Json) && color == ColorMode::Always {
         return Err(CliError::Incompatible(
             "color controls apply only to JSON output".to_owned(),
         ));
     }
-    if output_format != OutputFormat::Json && json_indent == JsonIndent::Tabs {
+    if output_controls != Some(tq_formats::OutputControls::Json) && json_indent == JsonIndent::Tabs
+    {
         return Err(CliError::Incompatible(
             "--tab applies only to JSON output".to_owned(),
         ));
     }
-    if output_format == OutputFormat::Yaml && indent_explicit {
+    if output_controls == Some(tq_formats::OutputControls::Yaml) && indent_explicit {
         return Err(CliError::Incompatible(
             "--indent is fixed for YAML flow output".to_owned(),
         ));
@@ -998,6 +1088,7 @@ where
         proxy_on_error,
         exit_status,
         strict,
+        strict_conversion,
         pretty_json,
         json_indent,
         ascii_output,
@@ -1086,32 +1177,24 @@ fn next_value(tokens: &mut impl Iterator<Item = String>, option: &str) -> Result
 }
 
 fn parse_input(option: &str, value: String) -> Result<InputFormat, CliError> {
-    match value.as_str() {
-        "auto" => Ok(InputFormat::Auto),
-        "toon" => Ok(InputFormat::Toon),
-        "yaml" | "yml" => Ok(InputFormat::Yaml),
-        "json" => Ok(InputFormat::Json),
-        "json5" => Ok(InputFormat::Json5),
-        "jsonl" | "ndjson" => Ok(InputFormat::JsonLines),
-        "toon-seq" | "toon-sequence" => Ok(InputFormat::ToonSequence),
-        _ => Err(CliError::InvalidValue {
+    if value == "auto" {
+        return Ok(InputFormat::Auto);
+    }
+    NativeFormat::from_name(&value)
+        .map(|format| format.descriptor().input)
+        .ok_or_else(|| CliError::InvalidValue {
             option: option.to_owned(),
             value,
-        }),
-    }
+        })
 }
 
 fn parse_output(option: &str, value: String) -> Result<OutputFormat, CliError> {
-    match value.as_str() {
-        "toon" => Ok(OutputFormat::Toon),
-        "json" => Ok(OutputFormat::Json),
-        "jsonl" | "ndjson" => Ok(OutputFormat::JsonLines),
-        "yaml" | "yml" => Ok(OutputFormat::Yaml),
-        _ => Err(CliError::InvalidValue {
+    NativeFormat::from_name(&value)
+        .and_then(|format| format.descriptor().output)
+        .ok_or_else(|| CliError::InvalidValue {
             option: option.to_owned(),
             value,
-        }),
-    }
+        })
 }
 
 fn parse_external(

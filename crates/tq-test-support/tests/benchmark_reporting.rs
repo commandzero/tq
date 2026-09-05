@@ -250,6 +250,35 @@ fn issue_6_rows_report_the_soft_jq_objective() {
 }
 
 #[test]
+fn native_format_objectives_use_the_matching_reference_and_require_rss() {
+    for (format, reference) in [
+        ("json-seq", "jq-json-seq"),
+        ("csv", "yq-csv"),
+        ("tsv", "yq-tsv"),
+    ] {
+        let mut report = campaign("machine-a", "digest-a", 100, 1024);
+        report.cases[0].case_id = format!("benchmark.native-{format}");
+        report.cases[0].adapter_id = format!("tq-{format}");
+        let mut peer = report.cases[0].clone();
+        peer.adapter_id = reference.to_owned();
+        report.cases.push(peer);
+        populate_reference_ratios(&mut report.cases, &[reference]);
+        let objective = report.cases[0]
+            .soft_performance_objective
+            .as_ref()
+            .expect("native objective");
+        assert_eq!(objective.wall_time, SoftObjectiveStatus::Met);
+        assert_eq!(objective.peak_rss, SoftObjectiveStatus::Met);
+
+        report.cases[1].summary.as_mut().unwrap().peak_rss_bytes = None;
+        report.cases[0].reference_peak_rss_ratios.clear();
+        populate_reference_ratios(&mut report.cases, &[reference]);
+        let objective = report.cases[0].soft_performance_objective.as_ref().unwrap();
+        assert_eq!(objective.peak_rss, SoftObjectiveStatus::NotComparable);
+    }
+}
+
+#[test]
 fn soft_jq_objective_rejects_incorrect_or_policy_mismatched_rows() {
     let mut report = campaign("machine-a", "digest-a", 100, 1024);
     let mut jq = report.cases[0].clone();

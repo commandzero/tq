@@ -97,6 +97,7 @@ const BUILTINS: &[Builtin] = &[
     builtin("input_filename", 0, 0, false),
     builtin("input_line_number", 0, 0, false),
     builtin("inputs", 0, 0, false),
+    builtin("input", 0, 0, false),
     builtin("implode", 0, 0, false),
     builtin("iterables", 0, 0, false),
     builtin("keys", 0, 0, true),
@@ -1539,7 +1540,7 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             ) {
                 add_effect(analysis, Effect::Generator, expr.span);
             }
-            if &**name == "inputs" {
+            if matches!(&**name, "input" | "inputs") {
                 add_effect(analysis, Effect::WholeInput, expr.span);
             }
             if &**name == "recurse" {

@@ -1,31 +1,55 @@
 //! Ordered JSON, JSON5, YAML, and TOON document-source adapters for `tq`.
 
-use std::{collections::VecDeque, io};
+use std::io;
 
 use thiserror::Error;
 use tq_core::{Diagnostic, Value};
 
 mod adapters;
+mod catalog;
+mod codec_input;
+pub use codec_input::CodecConsumerError;
+mod delimited_framing;
+mod delimited_input;
+mod delimited_output;
+mod delimited_profile;
+
+pub use delimited_profile::DelimitedLimits;
+mod input;
 mod json5_input;
+mod json_limits;
+mod json_recovery;
 mod output;
 mod parallel_json;
+mod rs_framing;
+mod selected_input;
+pub use selected_input::SelectedInputObservation;
 mod stream;
 mod structural;
 
 pub use adapters::{
-    DecodeOptions, JsonDocumentSource, JsonLinesDocumentSource, ProbeReport, ReplayReader,
-    VecDocumentSource, decode_bytes, decode_json, decode_json_lines, decode_json5, decode_toon,
-    decode_toon_sequence, decode_yaml, probe_format, probe_reader,
+    DecodeOptions, ProbeReport, ReplayReader, decode_bytes, decode_json, decode_json_lines,
+    decode_json5, decode_toon, decode_toon_sequence, decode_yaml, probe_format, probe_reader,
 };
-pub use output::{JsonIndent, OutputError, OutputOptions, ToonFraming, write_results};
+pub use catalog::{
+    DocumentFormat, FormatDescriptor, FormatProfile, Framing, NativeFormat, OutputControls,
+};
+pub use input::{
+    CommittedInput, InputDeliveryError, InputRepresentation, NativeInputFailure,
+    NativeInputObservation, SelectedInput,
+};
+pub use output::{
+    JsonIndent, NativeOutputSequence, OutputError, OutputOptions, SelectedOutput, ToonFraming,
+    write_results,
+};
 pub use parallel_json::{
     ParallelJsonObservations, ParallelJsonOptions, stream_json_selected_records_parallel,
 };
 pub use stream::{
-    SelectedStreamObservations, StreamOptions, StreamRecord, StreamSelection, stream_json,
-    stream_json_records, stream_json_selected_records, stream_json_selected_records_with_control,
-    stream_toon, stream_toon_records, stream_toon_selected_records,
-    stream_toon_selected_records_with_control,
+    EventProjector, SelectedStreamObservations, StreamOptions, StreamRecord, StreamSelection,
+    stream_json, stream_json_records, stream_json_selected_records,
+    stream_json_selected_records_with_control, stream_toon, stream_toon_records,
+    stream_toon_selected_records, stream_toon_selected_records_with_control,
 };
 pub use structural::{
     JsonEventOptions, decode_json_event_stream, decode_json_events,
@@ -35,6 +59,10 @@ pub use structural::{
 /// Supported structured input syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputFormat {
+    /// Header-shaped comma-separated rows.
+    Csv,
+    /// Header-shaped tab-separated rows.
+    Tsv,
     /// Bounded TOON, JSON-container, then YAML syntax probing.
     Auto,
     /// TOON document.
@@ -49,11 +77,19 @@ pub enum InputFormat {
     JsonLines,
     /// Record Separator framed TOON sequence.
     ToonSequence,
+    /// Record Separator framed JSON recovery segments.
+    JsonSequence,
 }
 
 /// Structured output syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutputFormat {
+    /// Header-shaped comma-separated rows.
+    Csv,
+    /// Header-shaped tab-separated rows.
+    Tsv,
+    /// RS-prefixed, LF-terminated JSON documents.
+    JsonSequence,
     /// Canonical TOON or TOON Text Sequence.
     Toon,
     /// Compact or pretty JSON result text.
@@ -75,16 +111,6 @@ pub struct Document {
     pub format: InputFormat,
     /// Zero-based document index for multi-document sources.
     pub index: u64,
-}
-
-/// Pull-based source that never requires all documents to be retained.
-pub trait DocumentSource {
-    /// Returns the next document or end of source.
-    ///
-    /// # Errors
-    ///
-    /// Returns a stable input or resource diagnostic.
-    fn next_document(&mut self) -> Result<Option<Document>, FormatError>;
 }
 
 /// Structured-adapter failure.

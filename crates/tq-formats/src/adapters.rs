@@ -14,7 +14,7 @@ use tq_core::{Number, Object, SourceId, Value};
 use tq_toon::{DecoderConfig, decode_to_value};
 
 use crate::json5_input::{PreprocessError, preprocess};
-use crate::{Document, DocumentSource, FormatError, InputFormat, VecDeque};
+use crate::{Document, FormatError, InputFormat};
 
 /// Structured decode controls shared by CLI sources.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,12 +23,16 @@ pub struct DecodeOptions {
     pub format: InputFormat,
     /// Maximum bytes accepted for a document-at-a-time source.
     pub maximum_source_bytes: usize,
+    /// Maximum payload bytes in one RS recovery segment.
+    pub maximum_frame_bytes: usize,
     /// Maximum structured nesting depth.
     pub maximum_depth: usize,
     /// Maximum bytes in a string, key, or numeric token.
     pub maximum_token_bytes: usize,
-    /// Maximum bytes in one physical JSON Lines record.
+    /// Maximum bytes in one physical JSON Lines record or delimited logical row.
     pub maximum_line_bytes: usize,
+    /// Maximum fields in a delimited header or row.
+    pub maximum_fields: usize,
     /// TOON decoder controls.
     pub toon: DecoderConfig,
 }
@@ -70,67 +74,86 @@ impl Default for DecodeOptions {
         Self {
             format: InputFormat::Auto,
             maximum_source_bytes: 2 * 1024 * 1024 * 1024,
+            maximum_frame_bytes: 2 * 1024 * 1024 * 1024,
             maximum_depth: 256,
             maximum_token_bytes: 8 * 1024 * 1024,
             maximum_line_bytes: 16 * 1024 * 1024,
+            maximum_fields: 65_536,
             toon: DecoderConfig::default(),
         }
     }
 }
 
-/// In-memory pull source used by document-at-a-time adapters.
-#[derive(Debug, Default)]
-pub struct VecDocumentSource {
-    documents: VecDeque<Document>,
-}
-
-impl VecDocumentSource {
-    /// Wraps documents in pull order.
-    #[must_use]
-    pub fn new(documents: Vec<Document>) -> Self {
-        Self {
-            documents: documents.into(),
+/// Preserves TOON decoder failure classifications.
+pub(crate) fn toon_input_error(error: tq_toon::DecodeError) -> FormatError {
+    match error {
+        tq_toon::DecodeError::Resource { resource } => {
+            FormatError::Resource(match resource.as_ref() {
+                "depth" => "depth",
+                "token-bytes" => "token-bytes",
+                "line-bytes" => "line-bytes",
+                "lookahead-bytes" => "lookahead-bytes",
+                _ => "toon-decoder",
+            })
         }
-    }
-}
-
-impl DocumentSource for VecDocumentSource {
-    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
-        Ok(self.documents.pop_front())
+        tq_toon::DecodeError::Io { message } => {
+            FormatError::Io(io::Error::other(message.to_string()))
+        }
+        error @ tq_toon::DecodeError::Syntax { .. } => FormatError::Parse {
+            format: InputFormat::Toon,
+            message: error.to_string(),
+        },
     }
 }
 
 /// Incremental source for whitespace-separated JSON values.
-pub struct JsonDocumentSource<R: Read> {
-    stream: serde_json::StreamDeserializer<'static, serde_json::de::IoRead<R>, serde_json::Value>,
+pub(crate) struct JsonDocumentSource<R: Read> {
+    stream: serde_json::StreamDeserializer<
+        'static,
+        serde_json::de::IoRead<std::io::BufReader<crate::json_limits::JsonLimitReader<R>>>,
+        Value,
+    >,
     identity: String,
     index: u64,
+    limit_failure: crate::json_limits::LimitFailure,
 }
 
 impl<R: Read> JsonDocumentSource<R> {
     /// Creates a pull source that parses only the next requested JSON value.
     #[must_use]
-    pub fn new(reader: R, identity: impl Into<String>) -> Self {
+    pub fn new(reader: R, identity: impl Into<String>, options: DecodeOptions) -> Self {
+        let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
+            reader,
+            options.maximum_depth,
+            options.maximum_token_bytes,
+        );
+        let mut deserializer = serde_json::Deserializer::from_reader(
+            std::io::BufReader::with_capacity(64 * 1024, reader),
+        );
+        deserializer.disable_recursion_limit();
         Self {
-            stream: serde_json::Deserializer::from_reader(reader).into_iter(),
+            stream: deserializer.into_iter(),
             identity: identity.into(),
             index: 0,
+            limit_failure,
         }
     }
 }
 
-impl<R: Read> DocumentSource for JsonDocumentSource<R> {
-    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+impl<R: Read> JsonDocumentSource<R> {
+    pub(crate) fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
         let Some(value) = self.stream.next() else {
             return Ok(None);
         };
-        let value = value.map_err(|error| FormatError::Parse {
-            format: InputFormat::Json,
-            message: error.to_string(),
-        })?;
-        let value = Value::from_json(value).map_err(|error| FormatError::Parse {
-            format: InputFormat::Json,
-            message: error.to_string(),
+        if let Some(resource) = self.limit_failure.get() {
+            return Err(FormatError::Resource(resource));
+        }
+        let value = value.map_err(|error| match error.io_error_kind() {
+            Some(kind) => FormatError::Io(io::Error::new(kind, error)),
+            None => FormatError::Parse {
+                format: InputFormat::Json,
+                message: error.to_string(),
+            },
         })?;
         let index = self.index;
         self.index = self.index.saturating_add(1);
@@ -168,13 +191,48 @@ pub fn decode_bytes(
         InputFormat::Json5 => decode_json5(bytes, identity, options),
         InputFormat::JsonLines => decode_json_lines(bytes, identity, options),
         InputFormat::ToonSequence => decode_toon_sequence(bytes, identity, options.toon),
+        InputFormat::JsonSequence | InputFormat::Csv | InputFormat::Tsv => {
+            let mut input = crate::NativeFormat::from_input(options.format)
+                .ok_or_else(|| FormatError::Parse {
+                    format: options.format,
+                    message: "native input selection is unavailable".to_owned(),
+                })?
+                .select_input(options, crate::InputRepresentation::Documents)?
+                .open(bytes, identity);
+            let mut documents = Vec::new();
+            while let Some(observation) = input.next_observation()? {
+                match observation {
+                    crate::NativeInputObservation::Document(document) => documents.push(document),
+                    crate::NativeInputObservation::Failure(failure) => {
+                        return Err(FormatError::Parse {
+                            format: options.format,
+                            message: failure.message,
+                        });
+                    }
+                    crate::NativeInputObservation::Event(_) => {
+                        unreachable!("Document representation")
+                    }
+                }
+            }
+            Ok(documents)
+        }
         InputFormat::Auto => {
             let report = probe_format(bytes, options.toon.maximum_lookahead_bytes)?;
             match report.selected {
                 InputFormat::Toon => decode_toon(bytes, identity, options.toon),
                 InputFormat::Yaml => decode_yaml(bytes, identity),
                 InputFormat::Json => decode_json(bytes, identity),
+                InputFormat::JsonSequence => decode_bytes(
+                    bytes,
+                    identity,
+                    DecodeOptions {
+                        format: InputFormat::JsonSequence,
+                        ..options
+                    },
+                ),
                 InputFormat::Auto
+                | InputFormat::Csv
+                | InputFormat::Tsv
                 | InputFormat::Json5
                 | InputFormat::JsonLines
                 | InputFormat::ToonSequence => {
@@ -187,7 +245,7 @@ pub fn decode_bytes(
 
 /// Incremental JSON Lines document source with bounded physical records.
 #[derive(Debug)]
-pub struct JsonLinesDocumentSource<R> {
+pub(crate) struct JsonLinesDocumentSource<R> {
     reader: R,
     identity: String,
     options: DecodeOptions,
@@ -285,12 +343,6 @@ impl<R: BufRead> JsonLinesDocumentSource<R> {
     }
 }
 
-impl<R: BufRead> DocumentSource for JsonLinesDocumentSource<R> {
-    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
-        Self::next_document(self)
-    }
-}
-
 /// Decodes strict one-value-per-line JSON into ordered documents.
 ///
 /// # Errors
@@ -318,21 +370,33 @@ fn decode_json_line(
     physical_line: u64,
     options: DecodeOptions,
 ) -> Result<Value, FormatError> {
-    let value = serde_json::from_slice(bytes).map_err(|error| FormatError::Parse {
+    let (mut guard, failure) = crate::json_limits::JsonLimitReader::new(
+        (),
+        options.maximum_depth,
+        options.maximum_token_bytes,
+    );
+    guard.check(bytes).map_err(|_| FormatError::ResourceLine {
+        identity: identity.to_owned(),
+        line: physical_line,
+        resource: failure.get().expect("guard records the exceeded limit"),
+    })?;
+    let mut decoder = serde_json::Deserializer::from_slice(bytes);
+    decoder.disable_recursion_limit();
+    let syntax_error = |error| FormatError::Parse {
         format: InputFormat::JsonLines,
         message: format!("{identity}:{physical_line}: {error}"),
-    })?;
-    validate_json_lines_value(&value, 0, options).map_err(|resource| {
-        FormatError::ResourceLine {
-            identity: identity.to_owned(),
-            line: physical_line,
-            resource,
-        }
+    };
+    let value = Value::deserialize(&mut decoder).map_err(syntax_error)?;
+    decoder.end().map_err(syntax_error)?;
+    validate_document_value(&value, 0, options).map_err(|resource| FormatError::ResourceLine {
+        identity: identity.to_owned(),
+        line: physical_line,
+        resource,
     })?;
     Ok(value)
 }
 
-fn validate_json_lines_value(
+pub(crate) fn validate_document_value(
     value: &Value,
     depth: usize,
     options: DecodeOptions,
@@ -359,7 +423,7 @@ fn validate_json_lines_value(
                 return Err("depth");
             }
             for value in values.iter() {
-                validate_json_lines_value(value, next, options)?;
+                validate_document_value(value, next, options)?;
             }
             Ok(())
         }
@@ -372,7 +436,7 @@ fn validate_json_lines_value(
                 if key.len() > options.maximum_token_bytes {
                     return Err("token-bytes");
                 }
-                validate_json_lines_value(value, next, options)?;
+                validate_document_value(value, next, options)?;
             }
             Ok(())
         }
@@ -391,6 +455,21 @@ pub fn probe_format(
 ) -> Result<ProbeReport, FormatError> {
     let inspected = bytes.len().min(maximum_lookahead_bytes);
     let prefix = &bytes[..inspected];
+    if let Some(index) = prefix
+        .iter()
+        .position(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        && prefix[index] == 0x1e
+    {
+        return Ok(ProbeReport {
+            selected: InputFormat::JsonSequence,
+            lookahead_bytes: inspected,
+            commitment_bytes: index + 1,
+            rejections: vec![(
+                InputFormat::Toon,
+                "leading RS selects JSON Text Sequences".to_owned(),
+            )],
+        });
+    }
     let text = match std::str::from_utf8(prefix) {
         Ok(text) => text,
         Err(error) if error.error_len().is_none() && inspected < bytes.len() => {
@@ -685,34 +764,36 @@ pub fn decode_toon_sequence(
     identity: impl Into<String>,
     config: DecoderConfig,
 ) -> Result<Vec<Document>, FormatError> {
-    if bytes.is_empty() {
-        return Ok(Vec::new());
-    }
-    if bytes.first() != Some(&0x1e) {
-        return Err(FormatError::Parse {
-            format: InputFormat::ToonSequence,
-            message: "record must begin with ASCII RS".to_owned(),
-        });
-    }
     let identity = identity.into();
     let mut documents = Vec::new();
-    for (index, record) in bytes[1..].split(|byte| *byte == 0x1e).enumerate() {
-        let Some(record) = record.strip_suffix(b"\n") else {
-            return Err(FormatError::Parse {
-                format: InputFormat::ToonSequence,
-                message: format!("record {index} is missing LF suffix"),
-            });
-        };
-        let mut decoded = decode_toon(record, identity.clone(), config)?;
-        let mut document = decoded.pop().ok_or_else(|| FormatError::Parse {
+    let mut frames = crate::rs_framing::RsFramer::new(bytes, bytes.len());
+    while let Some((index, record)) = frames.next_segment()? {
+        documents.push(decode_toon_segment(&record, &identity, config, index)?);
+    }
+    Ok(documents)
+}
+
+pub(crate) fn decode_toon_segment(
+    bytes: &[u8],
+    identity: &str,
+    config: DecoderConfig,
+    index: u64,
+) -> Result<Document, FormatError> {
+    let record = bytes
+        .strip_suffix(b"\n")
+        .ok_or_else(|| FormatError::Parse {
+            format: InputFormat::ToonSequence,
+            message: format!("record {index} is missing LF suffix"),
+        })?;
+    let mut document = decode_toon(record, identity, config)?
+        .pop()
+        .ok_or_else(|| FormatError::Parse {
             format: InputFormat::ToonSequence,
             message: format!("record {index} produced no document"),
         })?;
-        document.format = InputFormat::ToonSequence;
-        document.index = index as u64;
-        documents.push(document);
-    }
-    Ok(documents)
+    document.format = InputFormat::ToonSequence;
+    document.index = index;
+    Ok(document)
 }
 
 struct YamlRuntime(Value);
@@ -1146,6 +1227,29 @@ second \n line with "quotes""""}"#,
         let mut recovered = Vec::new();
         replay.read_to_end(&mut recovered).unwrap();
         assert_eq!(recovered, source);
+    }
+
+    #[test]
+    fn committed_native_failures_keep_the_selected_format() {
+        for (format, bytes) in [
+            (InputFormat::JsonSequence, b"\x1ebad\x1e2\n".as_slice()),
+            (InputFormat::Csv, b"a,a\n1,2\n".as_slice()),
+            (InputFormat::Tsv, b"a\ta\n1\t2\n".as_slice()),
+        ] {
+            let error = decode_bytes(
+                bytes,
+                "selected",
+                DecodeOptions {
+                    format,
+                    ..DecodeOptions::default()
+                },
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, crate::FormatError::Parse { format: actual, .. } if actual == format),
+                "{format:?}: {error}"
+            );
+        }
     }
 
     #[test]
