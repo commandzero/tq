@@ -5,7 +5,19 @@ Define jq-compatible RFC 7464 JSON Text Sequence framing, recovery, ordered inpu
 ## ADDED Requirements
 
 ### Requirement: RFC 7464 frame detection
-JSON Text Sequence input SHALL identify each ASCII RS byte as the start of one candidate JSON document frame and SHALL end that frame at the next RS or EOF. Consecutive RS bytes MUST NOT create empty documents. Explicit JSON sequence input SHALL discard bytes before the first RS, while content probing MUST select JSON sequence input only when RS is the first non-whitespace byte.
+JSON Text Sequence input SHALL identify each ASCII RS byte as the start of a recovery segment ending at the next RS or EOF. For jq compatibility, each segment MAY contain multiple JSON document frames; decoding SHALL publish each complete root in order without requiring another RS. Recovery-segment indices MUST remain distinct from document indices. Consecutive RS bytes MUST NOT create empty documents. Explicit JSON sequence input SHALL discard bytes before the first RS, while content probing MUST select JSON sequence input only when RS is the first non-whitespace byte.
+
+#### Scenario: Multiple Documents between separators
+- **WHEN** input is `RS {"a":1} {"b":2} LF RS {"c":3} LF`
+- **THEN** normal mode publishes all three Documents in order, slurp collects all three, remaining-input queries can consume each on demand, and jq event-input mode resets the root path for each Document
+
+#### Scenario: Recovery follows jq within a segment
+- **WHEN** input is `RS {"a":1} broken {"b":2} RS {"c":3} LF` in normal input mode
+- **THEN** jq-compatible parser reset preserves all three complete Documents and reports the malformed token without requiring a new RS before the second Document
+
+#### Scenario: Potentially truncated top-level number
+- **WHEN** a top-level number ends immediately at RS or EOF without a terminating separator accepted by jq
+- **THEN** tq reports a recoverable potentially-truncated-number failure instead of publishing that number; whitespace-terminated numbers remain accepted
 
 #### Scenario: Ordered framed documents
 - **WHEN** an RFC 7464 source contains three RS-prefixed valid JSON texts
@@ -24,10 +36,10 @@ JSON Text Sequence input SHALL identify each ASCII RS byte as the start of one c
 - **THEN** it does not select JSON sequence input from content probing
 
 ### Requirement: JSON sequence document decoding and recovery
-Each non-empty frame SHALL be decoded as one UTF-8 strict JSON document with no trailing non-whitespace content. A document decoding failure SHALL write a source-positioned warning to stderr, emit no input document for that frame, resume at the next RS, and remain non-fatal when no other error occurs. A framing, I/O, or resource failure that does not leave the next boundary unambiguous MUST remain fatal.
+JSON sequence decoding SHALL use strict UTF-8 JSON syntax and publish native input observations as decoding produces them. A recoverable document failure SHALL be an ordered observation with source, document, and recovery-segment context. Decoder reset and subsequent publication MUST match the pinned jq 1.8.x reference, including cases that resume within the same RS segment. Complete Documents and structural events published before the failure MUST NOT be retracted, including a complete Document followed by invalid trailing bytes. Top-level normal and `--stream` input advancement SHALL render a warning on stderr and continue; `--stream-errors` SHALL emit a jq-compatible error value and suppress that warning. A failure consumed through `input` or `inputs` SHALL instead become a query-visible input error and terminate an uncaught query with jq-compatible status. I/O and resource failures MUST remain fatal regardless of available separators; ambiguous framing outside the selected profile's recovery rules MUST remain fatal.
 
 #### Scenario: Malformed frame followed by valid frame
-- **WHEN** a malformed JSON frame is followed by an RS-prefixed valid frame
+- **WHEN** a JSON frame fails before producing a complete Document and is followed by an RS-prefixed valid frame in normal mode
 - **THEN** tq warns, skips the malformed frame, evaluates the valid document, and exits successfully unless another failure occurs
 
 #### Scenario: Invalid UTF-8 frame
@@ -35,23 +47,47 @@ Each non-empty frame SHALL be decoded as one UTF-8 strict JSON document with no 
 - **THEN** tq warns for the invalid frame and resumes at the later frame
 
 #### Scenario: Warning stays off stdout
-- **WHEN** tq recovers from a malformed JSON sequence frame
+- **WHEN** tq recovers from a malformed JSON sequence frame without `--stream-errors`
 - **THEN** stdout contains only query results and stderr contains the warning
 
+#### Scenario: Input-sequence access exposes parse failure
+- **WHEN** `-n 'inputs'` consumes a valid Document followed by a malformed sequence frame
+- **THEN** the prior result remains published, the parse failure terminates the uncaught query with status 5, and tq does not also render a top-level recovery warning
+
+#### Scenario: Query catches input failure
+- **WHEN** `try inputs catch .` encounters a malformed sequence frame
+- **THEN** the query receives the jq-compatible error message, no recovery warning is printed for that query-consumed failure, and normal query error-handling semantics apply
+
 ### Requirement: JSON sequence input modes
-Normal input mode SHALL run the query once per successfully decoded document. Slurp mode SHALL collect only successfully decoded documents into one ordered array, and jq event input mode SHALL reset the root path for each successfully decoded document.
+Normal input mode SHALL run the query once per published complete Document. Slurp mode SHALL collect those Documents into one ordered array, including Documents published before later trailing-syntax failure. Event input mode SHALL preserve already published events, and decoder state and root paths SHALL reset for subsequent documents after recovery. Recoverable failures MUST NOT invent successful document completion.
 
 #### Scenario: Normal sequence processing
 - **WHEN** JSON sequence input contains two valid frames
 - **THEN** the query receives two separate input values in order
 
 #### Scenario: Slurp skips malformed frame
-- **WHEN** slurp mode receives a valid frame, a malformed frame, and another valid frame
+- **WHEN** slurp mode receives a valid frame, a frame that fails before producing a complete Document, and another valid frame
 - **THEN** the query receives one array containing the two valid values in order and the malformed frame produces a warning
 
 #### Scenario: Event roots remain separate
 - **WHEN** `--stream` is combined with JSON sequence input containing two composite documents
 - **THEN** each document produces its own jq-compatible root event sequence
+
+#### Scenario: Event records remain ordinary query inputs
+- **WHEN** `--stream -n inputs` consumes JSON sequence input
+- **THEN** the query receives projected records from the shared input cursor, including partial records before a catchable parse failure, without requiring a core event execution plan
+
+#### Scenario: Complete Document precedes trailing failure
+- **WHEN** a recovery segment contains a complete JSON object followed by invalid trailing text
+- **THEN** normal mode preserves the published object, reports the later failure, and resumes at the next RS
+
+#### Scenario: Partial events precede recovery
+- **WHEN** `--stream` decodes nested values before encountering malformed syntax in the same frame
+- **THEN** those events remain published, a warning follows, and the next valid document begins with reset decoder state
+
+#### Scenario: Stream error observation mapping
+- **WHEN** `--stream-errors` encounters a recoverable failure after partial events
+- **THEN** the partial events precede the jq-compatible error value, no duplicate warning is written, and decoding resumes at the next RS
 
 ### Requirement: RFC 7464 output framing
 JSON sequence output SHALL encode every result as ASCII RS, one JSON document using the selected compatible JSON formatting controls, and one trailing LF. It MUST preserve exact numeric tokens supported by the shared value model and MUST emit no bytes for an empty result sequence.

@@ -42,7 +42,7 @@ CSV and TSV SHALL decode quoted fields as strings. They SHALL decode unquoted JS
 - **THEN** tq decodes it as an empty string rather than null
 
 ### Requirement: Delimited output row shape
-CSV and TSV output SHALL require object-root results. The first result SHALL establish and emit the sequence header; later results MAY omit declared keys or assign them null but MUST NOT add keys outside the row shape. Zero results SHALL produce empty output.
+CSV and TSV output SHALL require object-root results. The first result SHALL establish and emit the sequence header only after complete profile and sequence-context validation. One row shape SHALL span all input sources and intervening proxy bytes within command output. Later results MAY omit declared keys or assign them null but MUST NOT add keys outside the row shape. Zero results SHALL produce no native output bytes.
 
 #### Scenario: First result establishes header
 - **WHEN** the first result object has keys in non-lexicographic order
@@ -59,6 +59,18 @@ CSV and TSV output SHALL require object-root results. The first result SHALL est
 #### Scenario: Empty result sequence
 - **WHEN** the query emits no results under CSV or TSV output
 - **THEN** stdout is empty and no header is emitted
+
+#### Scenario: Row shape spans input sources
+- **WHEN** Results from several input sources are written as CSV or TSV
+- **THEN** the first Result establishes one header and every later Result conforms to its row shape
+
+#### Scenario: First row rejection emits no header
+- **WHEN** the first Result fails output-profile validation
+- **THEN** neither its sequence header nor its row commits any bytes
+
+#### Scenario: Proxy interruption retains row shape
+- **WHEN** proxy bytes occur between accepted row Results
+- **THEN** the bytes pass through unchanged and later rows use the original row shape without another header
 
 ### Requirement: Delimited scalar output profile
 CSV and TSV output SHALL accept string, finite number, boolean, and null fields and SHALL reject arrays or objects in field positions. Strings whose unquoted text would decode as another scalar type MUST be quoted; numbers and booleans SHALL remain unquoted, empty strings SHALL be quoted, and null SHALL be an unquoted empty field. Normal delimiter, quote, newline, and control-character escaping rules MUST still apply.

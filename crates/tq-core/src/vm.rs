@@ -193,6 +193,14 @@ pub struct VmObservations {
 /// Deterministic VM failure.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum VmError {
+    /// A source can resume after this parse failure, but query input access throws it.
+    #[error("{message}")]
+    RecoverableInput {
+        /// Parse message exposed to query catch handlers.
+        message: Arc<str>,
+        /// Source context for the outer driver's recovery warning.
+        context: Arc<str>,
+    },
     /// A deferred remaining-input provider could not decode its next value.
     #[error("input error: {message}")]
     Input {
@@ -246,7 +254,7 @@ impl VmError {
     #[must_use]
     pub fn diagnostic(&self) -> Diagnostic {
         let class = match self {
-            Self::Input { .. } => DiagnosticClass::Input,
+            Self::Input { .. } | Self::RecoverableInput { .. } => DiagnosticClass::Input,
             Self::Resource { .. } => DiagnosticClass::Resource,
             Self::NumericRange { .. } => DiagnosticClass::NumericRange,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,

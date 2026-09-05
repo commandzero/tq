@@ -59,6 +59,8 @@ pub enum DatasetFamily {
     Issue5InputSequence,
     /// Deterministic recursive object-merge fixture.
     DeepMergeHelper,
+    /// Reviewed flat rows shared by JSON sequences and delimited inputs.
+    NativeRowSequence,
 }
 
 /// Natural, non-resized dataset category.
@@ -186,6 +188,13 @@ pub enum InputFormat {
     Yaml,
     /// TOON.
     Toon,
+    /// RFC 7464 JSON Text Sequences.
+    #[serde(rename = "json-seq")]
+    JsonSequence,
+    /// Header-based CSV row Documents.
+    Csv,
+    /// Header-based TSV row Documents.
+    Tsv,
 }
 
 /// Report comparison family.

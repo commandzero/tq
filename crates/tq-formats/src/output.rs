@@ -5,9 +5,9 @@ use std::{borrow::Borrow, io::Write};
 use serde::Serialize;
 use thiserror::Error;
 use tq_core::Value;
-use tq_toon::{SequenceError, WriterConfig, write_sequence, write_unframed};
+use tq_toon::{SequenceError, WriterConfig, WriterError, write_value};
 
-use crate::OutputFormat;
+use crate::{NativeFormat, OutputFormat};
 
 /// TOON result framing choice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -43,6 +43,10 @@ impl Default for JsonIndent {
 pub struct OutputOptions {
     /// Selected structured syntax.
     pub format: OutputFormat,
+    /// Reject profile normalization that would change the decoded shared value.
+    pub strict_conversion: bool,
+    /// Logical-row, field-size, and field-count bounds for CSV and TSV output.
+    pub delimited_limits: crate::DelimitedLimits,
     /// Pretty JSON rather than compact JSON.
     pub pretty_json: bool,
     /// Pretty JSON indentation.
@@ -63,6 +67,8 @@ impl Default for OutputOptions {
     fn default() -> Self {
         Self {
             format: OutputFormat::Toon,
+            strict_conversion: false,
+            delimited_limits: crate::DelimitedLimits::default(),
             pretty_json: false,
             json_indent: JsonIndent::default(),
             ascii_json: false,
@@ -77,6 +83,21 @@ impl Default for OutputOptions {
 /// Structured output failure.
 #[derive(Debug, Error)]
 pub enum OutputError {
+    /// A native encoding resource bound was exceeded.
+    #[error("output resource limit exceeded: {0}")]
+    Resource(&'static str),
+    /// A complete Result is outside the selected output profile or row shape.
+    #[error("output profile rejection: {0}")]
+    Profile(&'static str),
+    /// The selected native format cannot encode results.
+    #[error("unsupported output format: {0}")]
+    UnsupportedFormat(&'static str),
+    /// Selected framing or controls conflict.
+    #[error("incompatible output options: {0}")]
+    InvalidOptions(&'static str),
+    /// A completed or failed sequence cannot accept another operation.
+    #[error("native output sequence is no longer active")]
+    Terminal,
     /// TOON framing/cardinality or output error.
     #[error(transparent)]
     Toon(#[from] SequenceError),
@@ -100,19 +121,283 @@ impl OutputError {
                 error.kind() == std::io::ErrorKind::BrokenPipe
             }
             Self::Json(error) => error.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe),
-            Self::Yaml(_) | Self::Toon(SequenceError::Cardinality(_)) => false,
+            Self::Yaml(_)
+            | Self::Toon(SequenceError::Cardinality(_))
+            | Self::UnsupportedFormat(_)
+            | Self::InvalidOptions(_)
+            | Self::Profile(_)
+            | Self::Resource(_)
+            | Self::Terminal => false,
         }
     }
 }
 
-/// Writes ordered results in the selected structured format.
-///
-/// JSON emits one jq-compatible JSON text plus LF per result. TOON defaults to
-/// explicit text-sequence framing and supports exactly-one unframed output.
+/// An output format whose directional capabilities have been checked.
+#[derive(Clone, Copy, Debug)]
+pub struct SelectedOutput {
+    options: OutputOptions,
+}
+
+impl NativeFormat {
+    /// Selects native output before any bytes are committed.
+    ///
+    /// # Errors
+    ///
+    /// Rejects input-only formats and incompatible explicit framing.
+    pub fn select_output(self, mut options: OutputOptions) -> Result<SelectedOutput, OutputError> {
+        options.format = self
+            .descriptor()
+            .output
+            .ok_or(OutputError::UnsupportedFormat(self.descriptor().name))?;
+        if self == Self::ToonSequence && options.toon_framing == ToonFraming::Unframed {
+            return Err(OutputError::InvalidOptions("toon-seq cannot be unframed"));
+        }
+        let json = matches!(
+            options.format,
+            OutputFormat::Json | OutputFormat::JsonSequence
+        );
+        let json_lines = options.format == OutputFormat::JsonLines;
+        if (!json
+            && (options.pretty_json
+                || options.color_json
+                || options.json_indent != JsonIndent::default()))
+            || (!json && !json_lines && options.ascii_json)
+        {
+            return Err(OutputError::InvalidOptions(
+                "JSON controls are incompatible with the selected format",
+            ));
+        }
+        if options.format != OutputFormat::Toon && options.toon_framing == ToonFraming::Unframed {
+            return Err(OutputError::InvalidOptions(
+                "unframed output is a TOON control",
+            ));
+        }
+        if options.format != OutputFormat::Yaml && options.yaml_document_start {
+            return Err(OutputError::InvalidOptions(
+                "YAML document markers require YAML output",
+            ));
+        }
+        let mut compatible_toon = WriterConfig::default();
+        if json {
+            if let JsonIndent::Spaces(count) = options.json_indent {
+                compatible_toon.indent_size = usize::from(count);
+            }
+        }
+        if options.format != OutputFormat::Toon
+            && options.toon != WriterConfig::default()
+            && options.toon != compatible_toon
+        {
+            return Err(OutputError::InvalidOptions(
+                "TOON controls are incompatible with the selected format",
+            ));
+        }
+        Ok(SelectedOutput { options })
+    }
+}
+
+/// One native document sequence spanning all structured Results of a command.
+pub struct NativeOutputSequence {
+    options: OutputOptions,
+    count: u64,
+    active: bool,
+    unframed: Option<Value>,
+    delimited: Option<crate::delimited_output::DelimitedOutput>,
+}
+
+impl NativeOutputSequence {
+    /// Starts a sequence without writing any bytes.
+    #[must_use]
+    pub const fn new(selection: SelectedOutput) -> Self {
+        Self {
+            options: selection.options,
+            count: 0,
+            active: true,
+            unframed: None,
+            delimited: None,
+        }
+    }
+
+    /// Encodes one Result using the sequence's framing and context.
+    ///
+    /// # Errors
+    ///
+    /// Returns encoding or I/O failure. Any failure terminates the sequence.
+    pub fn write_result(
+        &mut self,
+        writer: &mut impl Write,
+        value: &Value,
+    ) -> Result<(), OutputError> {
+        if !self.active {
+            return Err(OutputError::Terminal);
+        }
+        self.active = false;
+        if self.options.format == OutputFormat::Toon
+            && self.options.toon_framing == ToonFraming::Unframed
+        {
+            if self.count != 0 {
+                self.unframed = None;
+                return Err(SequenceError::Cardinality(tq_toon::CardinalityError::Multiple).into());
+            }
+            self.unframed = Some(value.clone());
+            self.count = 1;
+            self.active = true;
+            return Ok(());
+        }
+        let mut options = self.options;
+        options.yaml_document_start |= self.count > 0;
+        if options.strict_conversion && options.format == OutputFormat::Yaml {
+            let mut encoded = Vec::new();
+            // Validate the YAML parser path even for the first Result. A later
+            // document marker disables the input's whole-source JSON shortcut.
+            write_document(
+                &mut encoded,
+                value,
+                OutputOptions {
+                    yaml_document_start: true,
+                    ..options
+                },
+            )?;
+            let decoded =
+                crate::adapters::decode_yaml(&encoded, "strict conversion").map_err(|_| {
+                    OutputError::Profile("strict conversion cannot decode the YAML representation")
+                })?;
+            if decoded.len() != 1 || decoded[0].value != *value {
+                return Err(OutputError::Profile(
+                    "strict conversion would change the shared value through YAML",
+                ));
+            }
+        }
+        if matches!(options.format, OutputFormat::Csv | OutputFormat::Tsv) {
+            let delimiter = if options.format == OutputFormat::Csv {
+                b','
+            } else {
+                b'\t'
+            };
+            self.delimited
+                .get_or_insert_with(|| crate::delimited_output::DelimitedOutput::new(delimiter))
+                .write_result(
+                    writer,
+                    value,
+                    options.strict_conversion,
+                    options.delimited_limits,
+                )?;
+        } else {
+            write_document(writer, value, options)?;
+        }
+        self.count = self.count.saturating_add(1);
+        self.active = true;
+        Ok(())
+    }
+
+    /// Completes the sequence. Callers own flushing and the shared byte budget.
+    ///
+    /// # Errors
+    ///
+    /// Rejects completion after an earlier failure or successful completion.
+    pub fn finish(&mut self, writer: &mut impl Write) -> Result<(), OutputError> {
+        if !self.active {
+            return Err(OutputError::Terminal);
+        }
+        self.active = false;
+        if self.options.format == OutputFormat::Toon
+            && self.options.toon_framing == ToonFraming::Unframed
+        {
+            let value = self
+                .unframed
+                .take()
+                .ok_or(SequenceError::Cardinality(tq_toon::CardinalityError::Zero))?;
+            write_value(writer, &value, self.options.toon)
+                .map_err(|WriterError::Io(error)| OutputError::Io(error))?;
+        }
+        Ok(())
+    }
+}
+
+fn write_document(
+    writer: &mut impl Write,
+    value: &Value,
+    options: OutputOptions,
+) -> Result<(), OutputError> {
+    match options.format {
+        OutputFormat::Csv | OutputFormat::Tsv => {
+            unreachable!("delimited output requires its command-scoped row shape")
+        }
+        OutputFormat::Toon => {
+            crate::rs_framing::write_frame(writer, |writer| {
+                write_value(writer, value, options.toon)
+                    .map_err(|WriterError::Io(error)| OutputError::Io(error))
+            })?;
+        }
+        OutputFormat::JsonSequence => {
+            crate::rs_framing::write_frame(writer, |writer| {
+                write_json_document(writer, value, options)
+            })?;
+        }
+        OutputFormat::Json | OutputFormat::JsonLines => {
+            let mut options = options;
+            if options.format == OutputFormat::JsonLines {
+                options.pretty_json = false;
+                options.color_json = false;
+            }
+            write_json_document(writer, value, options)?;
+            writer.write_all(b"\n")?;
+        }
+        OutputFormat::Yaml => {
+            if options.yaml_document_start {
+                writer.write_all(b"---\n")?;
+            }
+            write_yaml_value(writer, value, 0)?;
+            writer.write_all(b"\n")?;
+        }
+    }
+    Ok(())
+}
+
+fn write_json_document(
+    writer: &mut impl Write,
+    value: &Value,
+    options: OutputOptions,
+) -> Result<(), OutputError> {
+    if options.color_json {
+        writer.write_all(b"\x1b[36m")?;
+    }
+    if options.ascii_json {
+        let mut encoded = Vec::new();
+        write_json_value(&mut encoded, value, options)?;
+        writer.write_all(&escape_non_ascii(&encoded))?;
+    } else {
+        write_json_value(writer, value, options)?;
+    }
+    if options.color_json {
+        writer.write_all(b"\x1b[0m")?;
+    }
+    Ok(())
+}
+
+fn write_json_value(
+    writer: &mut impl Write,
+    value: &Value,
+    options: OutputOptions,
+) -> Result<(), serde_json::Error> {
+    if options.pretty_json {
+        let indentation = match options.json_indent {
+            JsonIndent::Spaces(count) => vec![b' '; usize::from(count)],
+            JsonIndent::Tabs => vec![b'\t'],
+        };
+        let formatter = serde_json::ser::PrettyFormatter::with_indent(&indentation);
+        value.serialize(&mut serde_json::Serializer::with_formatter(
+            writer, formatter,
+        ))
+    } else {
+        serde_json::to_writer(writer, value)
+    }
+}
+
+/// Writes an iterator of Results through one native output sequence.
 ///
 /// # Errors
 ///
-/// Returns serialization, framing/cardinality, or output I/O failures.
+/// Returns format selection, cardinality, encoding, or I/O failures.
 pub fn write_results<W, I, V>(
     mut writer: W,
     values: I,
@@ -123,60 +408,12 @@ where
     I: IntoIterator<Item = V>,
     V: Borrow<Value>,
 {
-    match options.format {
-        OutputFormat::Toon => match options.toon_framing {
-            ToonFraming::Sequence => write_sequence(writer, values, options.toon)?,
-            ToonFraming::Unframed => write_unframed(writer, values, options.toon)?,
-        },
-        OutputFormat::Json => {
-            for value in values {
-                let mut encoded = Vec::new();
-                if options.pretty_json {
-                    let indentation = match options.json_indent {
-                        JsonIndent::Spaces(count) => vec![b' '; usize::from(count)],
-                        JsonIndent::Tabs => vec![b'\t'],
-                    };
-                    let formatter = serde_json::ser::PrettyFormatter::with_indent(&indentation);
-                    let mut serializer =
-                        serde_json::Serializer::with_formatter(&mut encoded, formatter);
-                    value.borrow().serialize(&mut serializer)?;
-                } else {
-                    serde_json::to_writer(&mut encoded, value.borrow())?;
-                }
-                if options.ascii_json {
-                    encoded = escape_non_ascii(&encoded);
-                }
-                if options.color_json {
-                    writer.write_all(b"\x1b[36m")?;
-                }
-                writer.write_all(&encoded)?;
-                if options.color_json {
-                    writer.write_all(b"\x1b[0m")?;
-                }
-                writer.write_all(b"\n")?;
-            }
-        }
-        OutputFormat::JsonLines => {
-            for value in values {
-                let mut encoded = serde_json::to_vec(value.borrow())?;
-                if options.ascii_json {
-                    encoded = escape_non_ascii(&encoded);
-                }
-                writer.write_all(&encoded)?;
-                writer.write_all(b"\n")?;
-            }
-        }
-        OutputFormat::Yaml => {
-            for value in values {
-                if options.yaml_document_start {
-                    writer.write_all(b"---\n")?;
-                }
-                write_yaml_value(&mut writer, value.borrow(), 0)?;
-                writer.write_all(b"\n")?;
-            }
-        }
+    let selection = NativeFormat::from_output(options.format).select_output(options)?;
+    let mut sequence = NativeOutputSequence::new(selection);
+    for value in values {
+        sequence.write_result(&mut writer, value.borrow())?;
     }
-    Ok(())
+    sequence.finish(&mut writer)
 }
 
 fn write_yaml_value(
@@ -352,8 +589,6 @@ mod tests {
             &values,
             OutputOptions {
                 format: OutputFormat::JsonLines,
-                pretty_json: true,
-                color_json: true,
                 ..OutputOptions::default()
             },
         )

@@ -101,11 +101,10 @@ fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
     );
     assert_eq!(output.stdout, b"0\n");
 
-    let rejected = tq(&["-ijson", "--stream", "recurse"], b"not json");
-    assert_ne!(rejected.code, 0);
-    assert!(rejected.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("TQ-CAP-EVENT-001"));
-    assert!(!String::from_utf8_lossy(&rejected.stderr).contains("syntax"));
+    let projected = tq(&["-ijson", "-ojson", "-c", "--stream", "recurse"], b"1");
+    assert_eq!(projected.code, 0);
+    assert_eq!(projected.stdout, b"[[],1]\n[]\n1\n");
+    assert!(projected.stderr.is_empty());
 }
 
 #[test]

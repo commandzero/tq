@@ -107,6 +107,40 @@ When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file pat
 
 ## ADDED Requirements
 
+### Requirement: Native output lifecycle and command budget
+The CLI SHALL maintain one native output sequence across all structured Results for a command. Raw and proxy bytes SHALL bypass native encoding without resetting sequence context. Command output SHALL apply one shared output-byte budget and flushing policy to native, raw, and proxy bytes. Native output SHALL validate each complete Result against its output profile and sequence context before committing that Document's bytes. Any native output write failure SHALL terminate the sequence; later writes MUST be rejected. I/O or resource failures after commitment MAY leave partial bytes.
+
+#### Scenario: Shared byte limit across proxy and native output
+- **WHEN** native output and proxy bytes together exceed the command output-byte limit
+- **THEN** command output reports a resource failure even if each path individually remains below that limit
+
+#### Scenario: Profile rejection is terminal
+- **WHEN** a Result fails profile validation after earlier Results were written
+- **THEN** its Document commits no bytes, earlier bytes remain, and no later Result is encoded
+
+#### Scenario: Writer failure after commitment
+- **WHEN** the writer fails after committing part of a validated Document
+- **THEN** tq stops with the classified failure without promising to retract those bytes or successfully finish the sequence
+
+### Requirement: Committed native input delivery
+Committed native input SHALL supply on-demand complete Document observations and incremental structural-event consumption through a shared native-format module. Format selections and representation capabilities SHALL be validated before semantic input consumption. Recoverable failures SHALL preserve observation order and source/frame context; rendering and jq input-mode semantics SHALL remain caller responsibilities.
+
+#### Scenario: Remaining input preserves observation order
+- **WHEN** `input` or `inputs` requests later Documents across a recoverable JSON sequence failure
+- **THEN** the same ordered native observations are used without retaining all remaining Documents, but a query-consumed failure becomes a catchable input error rather than a top-level recovery warning, matching jq
+
+#### Scenario: Unsupported representation fails before decoding
+- **WHEN** a selected native format cannot supply the requested structural events
+- **THEN** tq rejects that selection before consuming semantic input
+
+#### Scenario: jq stream records use ordinary query evaluation
+- **WHEN** `--stream` or `--stream-errors` projects structural observations into path/value records
+- **THEN** each record is an ordinary query input, with no core event-plan restriction on updates, reductions, `input`, or `inputs`
+
+#### Scenario: Projected records share the remaining-input cursor
+- **WHEN** a query uses `input` or `inputs` with `--stream`
+- **THEN** top-level advancement and the query consume the same ordered projected records, and `-n` evaluates null once without consuming those records
+
 ### Requirement: Strict conversion option
 Default native-format conversion SHALL permit every normalization declared by the selected output profile. `--strict-conversion` SHALL reject a result if encoding and decoding it through the selected profiles would not return an equal shared value. The check MUST complete before committing the affected document or row, but earlier complete frames MAY remain on stdout.
 

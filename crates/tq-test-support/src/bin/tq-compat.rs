@@ -20,6 +20,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut profile = CampaignProfile::Smoke;
     let mut json_path = None;
+    let mut case_prefix = None;
     let mut timeout = Duration::from_secs(10);
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -38,6 +39,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     arguments.next().ok_or("--json requires a path")?,
                 ));
             }
+            "--case-prefix" => {
+                case_prefix = Some(arguments.next().ok_or("--case-prefix requires a prefix")?);
+            }
             "--timeout-seconds" => {
                 let seconds = arguments
                     .next()
@@ -47,7 +51,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-compat run [--profile smoke|full] [--json PATH] [--timeout-seconds N]"
+                    "Usage: tq-compat run [--profile smoke|full] [--case-prefix PREFIX] [--json PATH] [--timeout-seconds N]"
                 );
                 return Ok(ExitCode::SUCCESS);
             }
@@ -55,7 +59,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }
     }
 
-    let catalog = load_catalog(&root.join("tests/compatibility/cases"))?;
+    let mut catalog = load_catalog(&root.join("tests/compatibility/cases"))?;
+    if let Some(prefix) = case_prefix {
+        catalog.cases.retain(|case| case.id.starts_with(&prefix));
+        if catalog.cases.is_empty() {
+            return Err(format!("no compatibility cases match prefix: {prefix}").into());
+        }
+    }
     let report = run_campaign(
         &catalog,
         profile,

@@ -216,3 +216,41 @@ fn compatibility_ids(root: &Path) -> BTreeSet<String> {
     }
     ids
 }
+
+#[test]
+fn native_format_workloads_have_separate_correctness_gated_reference_pairs() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema: Value = serde_json::from_slice(
+        &fs::read(root.join("schemas/benchmark-case-v1.schema.json")).unwrap(),
+    )
+    .unwrap();
+    let validator = jsonschema::Validator::new(&schema).unwrap();
+    let gates = compatibility_ids(&root);
+    let catalog =
+        tq_test_support::benchmark::load_benchmark_catalog(&root.join("benchmarks/cases")).unwrap();
+    for (id, reference, candidate) in [
+        ("benchmark.native-json-seq", "jq-json-seq", "tq-json-seq"),
+        ("benchmark.native-csv", "yq-csv", "tq-csv"),
+        ("benchmark.native-tsv", "yq-tsv", "tq-tsv"),
+    ] {
+        let case = catalog.cases.iter().find(|case| case.id == id).expect(id);
+        assert!(validator.is_valid(&serde_json::to_value(case).unwrap()));
+        assert!(gates.contains(&case.compatibility_gate));
+        assert_eq!(case.output_contract.reference_adapter, reference);
+        assert_eq!(
+            case.adapters
+                .iter()
+                .map(|adapter| adapter.id.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([reference, candidate])
+        );
+        assert!(case.adapters.iter().all(|adapter| adapter.applicable));
+        assert_eq!(
+            case.dataset_selector.tiers,
+            vec![
+                tq_test_support::benchmark::DatasetTier::Small,
+                tq_test_support::benchmark::DatasetTier::Large
+            ]
+        );
+    }
+}

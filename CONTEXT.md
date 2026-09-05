@@ -84,6 +84,22 @@ _Avoid_: Document object, payload
 The ordered documents represented by a source's frames. Each document remains a separate top-level query input unless an input mode combines or transforms the sequence.
 _Avoid_: Record stream, input stream
 
+**Committed native input**:
+The processing of one source after format commitment. It applies the selected framing and input profile to yield ordered native input observations.
+_Avoid_: Parser session, decoder pipeline
+
+**Native input observation**:
+An ordered document, structural event, or recoverable document failure yielded by committed native input. Callers decide how to evaluate documents or events and where to render failures.
+_Avoid_: Parser callback, warning side effect
+
+**Native output sequence**:
+The mapping of all structured results for one command output into one document sequence under a selected framing and output profile. It retains sequence context across input sources and intervening proxy bytes, and defines output commitment through completion.
+_Avoid_: Writer session, output stream
+
+**Command output**:
+The complete ordered stdout bytes for one invocation under one output-byte budget. It may contain native output sequence bytes, bypass bytes produced by raw output or proxy-on-error behavior, or both.
+_Avoid_: Native output sequence, output stream
+
 **Row document**:
 A document in a row-framed native format whose root value is an object. The sequence header supplies the object keys, and the row supplies their values.
 _Avoid_: Record, table document
@@ -104,8 +120,16 @@ _Avoid_: Record splitting, error recovery
 A byte segment identified by framing as exactly one candidate document. A frame still exists when its contents fail to decode into a document.
 _Avoid_: Record, message
 
+**Recovery boundary**:
+A byte position where the selected input profile permits decoding to resume after a document failure. A record separator provides an explicit recovery boundary; jq-compatible profiles may also permit a decoder reset within the same recovery segment.
+_Avoid_: Document boundary, frame boundary
+
+**Recovery segment**:
+The bytes from one record separator to the next or EOF in JSON sequence input. A segment may contain multiple document frames for jq compatibility, or no complete document.
+_Avoid_: Frame, document
+
 **Recoverable document failure**:
-A document decoding failure where framing still identifies the next frame unambiguously. RFC 7464 input warns, emits no document for the failed frame, resumes at the next record separator, and does not fail the source or command.
+A document decoding failure after which the selected input profile permits further decoding without retracting prior observations. Recovery capability is separate from caller policy: top-level sequence input may warn and continue, while input-sequence access may expose the failure to the query.
 _Avoid_: Parse recovery, malformed frame
 
 **Document decoder**:
@@ -125,7 +149,7 @@ The source representation that establishes sequence context without becoming a d
 _Avoid_: Header document, first record
 
 **Sequence preamble**:
-Bytes before the first frame delimiter in an explicitly selected framed input. RFC 7464 mode discards its preamble for jq compatibility, but content probing recognizes the format only when record separator is the first non-whitespace byte.
+Bytes before the first framing delimiter in an explicitly selected framed input. RFC 7464 mode discards its preamble for jq compatibility, but content probing recognizes the format only when record separator is the first non-whitespace byte.
 _Avoid_: Leading junk, first frame
 
 **Row shape**:
@@ -217,7 +241,7 @@ The point where a selected native input format becomes final. A later decoding f
 _Avoid_: Output commitment, fallback
 
 **Output commitment**:
-The point where encoded bytes become externally visible and cannot be withdrawn after a later failure.
+The point where encoded bytes for one output document become externally visible and cannot be withdrawn. Output-profile and sequence-context validation precede commitment, but an I/O or resource failure may leave partial bytes afterward.
 _Avoid_: Format commitment, flush
 
 **Format profile**:

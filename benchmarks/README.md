@@ -167,6 +167,83 @@ available workers. It reuses the validated
 ./scripts/run-campaign.sh benchmark extra-large
 ```
 
+## Native format reference campaign
+
+The separate `cases/native-formats.jsonl` manifest compares RFC 7464 input
+against jq 1.8.x and CSV/TSV input against yq 4.53.x. These pairs never share a
+reference ratio. Reviewed synthetic fixtures contain 8 or 131,072 flat row
+Documents. Generation validates every decoded field before any timing; the
+process correctness gate then compares ordered row-ID output byte-for-byte.
+The plain labels and typed scalar fields avoid the deliberate yq profile
+differences documented in the compatibility review.
+
+Build release binaries first, then run the complete command elevated outside
+the sandbox. It uses the shared `/usr/bin/time -l` measurement implementation.
+
+```console
+TQ_JQ=/path/to/jq-1.8.1 TQ_YQ=/path/to/yq-4.53.2 TQ_BIN="$PWD/target/release/tq" \
+  target/release/tq-bench run --profile smoke \
+  --case benchmark.native-json-seq --case benchmark.native-csv \
+  --case benchmark.native-tsv --output /path/to/tq-benchmarks/.work/native-formats.json
+```
+
+Each tq row reports the soft objectives of at most 2.0 times its reference's
+median time and 1.5 times its maximum peak RSS. Missing RSS is not comparable.
+These synthetic new-format comparisons do not replace the existing-workload
+refactor checks below or any natural-corpus release requirements.
+
+## Native format refactor regression campaign
+
+The native-format refactor uses a frozen synthetic workload matrix covering
+existing input formats, document and event execution, remaining input, and
+multi-source native output. Run both phases elevated outside the sandbox.
+Every sample retains `/usr/bin/time -l` output and authoritative peak RSS;
+high-resolution wall time includes the timing wrapper's process lifetime.
+
+```console
+python3 benchmarks/cases/native-format-regression.py baseline \
+  /path/to/tq-benchmarks/.work/native-format-refactor target/release/tq \
+  --reference /path/to/jq-1.8.1
+# Rebuild the candidate with the same release settings, then:
+python3 benchmarks/cases/native-format-regression.py candidate \
+  /path/to/tq-benchmarks/.work/native-format-refactor target/release/tq
+```
+
+The baseline directory must be new. The candidate reuses its fixture hashes,
+correctness digests, and seven-sample policy. The campaign retains incorrect
+rows without timing them. Keep the measurement script unchanged between phases;
+its hash, host, toolchain, and measurement policy must match. Timeouts terminate
+the measured process group, and failed gates and samples retain their output
+and failure classification rather than contributing to comparisons.
+
+To recheck target misses with 21 alternating baseline/candidate pairs:
+
+```console
+python3 benchmarks/cases/native-format-regression.py investigate \
+  /path/to/tq-benchmarks/.work/native-format-refactor target/release/tq
+```
+
+Investigation validates the same fixtures, metadata, and frozen binary hashes.
+Review individual workloads against the refactor's
+less-than-10% targets for both median time and maximum peak RSS. Investigate
+every increase above 25%, including repeat measurements to distinguish noise
+from reproducible degradation. Small workloads include process startup and
+need particular care when interpreting percentage changes.
+
+For a focused diagnosis after changing one suspected cause, reuse the frozen
+measurement wrapper and name the affected workloads:
+
+```console
+python3 benchmarks/cases/native-format-probe.py \
+  /path/to/tq-benchmarks/.work/native-format-refactor target/release/tq \
+  /path/to/tq-benchmarks/.work/native-format-probe-1 large-json-events
+```
+
+The probe requires a new report directory, performs correctness-gated warmups,
+and records seven alternating pairs by default. It also requires elevated
+execution and `/usr/bin/time -l`. Keep checkpoint binaries and reports; a
+focused probe does not replace the final full-matrix comparison.
+
 ## Streaming transcode campaign
 
 The identity-transcode campaign compares automatic structural transcode with

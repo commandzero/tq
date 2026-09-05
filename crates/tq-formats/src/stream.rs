@@ -115,7 +115,9 @@ impl StreamRecord {
         (self.path, self.value)
     }
 
-    fn into_value(self) -> Value {
+    /// Materializes the jq path/value record, or its error value.
+    #[must_use]
+    pub fn into_value(self) -> Value {
         if self.raw {
             return self.value.unwrap_or(Value::Null);
         }
@@ -320,7 +322,14 @@ where
         emit,
     );
     projector.cancellation = cancellation;
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
+        reader,
+        options.maximum_depth,
+        options.maximum_token_bytes,
+    );
+    let mut deserializer =
+        serde_json::Deserializer::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader));
+    deserializer.disable_recursion_limit();
     let result = StreamSeed {
         projector: &mut projector,
     }
@@ -329,22 +338,30 @@ where
     observations.depth_high_water = observations
         .depth_high_water
         .max(projector.depth_high_water.get());
-    result.map_err(|error| FormatError::Parse {
-        format: InputFormat::Json,
-        message: error.to_string(),
+    result.map_err(|error| {
+        limit_failure.get().map_or_else(
+            || crate::structural::classify_json_error(error),
+            FormatError::Resource,
+        )
     })
 }
 
 fn jq_stream_error(error: &serde_json::Error) -> String {
-    let message = error.to_string();
-    if message.starts_with("expected value at line ") {
+    jq_stream_error_message(error.to_string())
+}
+
+fn jq_stream_error_message(message: String) -> String {
+    if let Some(position) = message.strip_prefix("expected value at line ")
+        && let Some((line, column)) = position.split_once(" column ")
+        && let Ok(column) = column.parse::<usize>()
+    {
         // jq consumes the invalid bare token before reporting its endpoint.
         // serde_json stops at the first byte; the MVP stream-error grammar's
         // only bare-token class is a three-byte JSON literal prefix.
         return format!(
             "Invalid numeric literal at line {}, column {}",
-            error.line(),
-            error.column().saturating_add(3)
+            line,
+            column.saturating_add(3)
         );
     }
     message
@@ -481,15 +498,12 @@ where
     observations.depth_high_water = observations
         .depth_high_water
         .max(consumer.projector.depth_high_water.get());
-    result.map_err(|error| {
-        let message = match error {
-            DecodeIntoError::Decode(error) => error.to_string(),
-            DecodeIntoError::Consumer(error) => error,
-        };
-        FormatError::Parse {
+    result.map_err(|error| match error {
+        DecodeIntoError::Decode(error) => crate::adapters::toon_input_error(error),
+        DecodeIntoError::Consumer(message) => FormatError::Parse {
             format: InputFormat::Toon,
             message,
-        }
+        },
     })
 }
 
@@ -1123,8 +1137,39 @@ fn is_resource_error(error: &serde_json::Error) -> bool {
     error.to_string().contains("input resource limit exceeded")
 }
 
-struct EventProjector<'a, F> {
+/// Projects native structural events into jq path/value records.
+///
+/// Source decoding and the caller's warning/error policy remain separate.
+pub struct EventProjector<'a, F> {
     projector: Projector<'a, F>,
+}
+
+impl<'a, F> EventProjector<'a, F>
+where
+    F: FnMut(StreamRecord) -> Result<(), String>,
+{
+    /// Starts a projection without consuming input or emitting a record.
+    pub fn new(options: StreamOptions, emit: &'a mut F) -> Self {
+        Self {
+            projector: Projector::new(options.maximum_depth, options.maximum_token_bytes, emit),
+        }
+    }
+
+    /// Emits a jq error value at the next expected value path.
+    ///
+    /// # Errors
+    /// Returns the output consumer's failure. Recovery clears the failed path.
+    pub fn error_value(&mut self, message: String) -> Result<(), String> {
+        let result = self.projector.error_value(jq_stream_error_message(message));
+        self.reset();
+        result
+    }
+
+    /// Clears a failed Document's path without publishing successful completion.
+    pub fn reset(&mut self) {
+        self.projector.frames.clear();
+        self.projector.last_path.clear();
+    }
 }
 
 impl<F> EventConsumer for EventProjector<'_, F>
@@ -1136,7 +1181,11 @@ where
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
         self.projector.check_cancellation()?;
         match event {
-            Event::DocumentStart { .. } | Event::DocumentEnd { .. } => Ok(()),
+            Event::DocumentStart { .. } => {
+                self.reset();
+                Ok(())
+            }
+            Event::DocumentEnd { .. } => Ok(()),
             Event::ObjectStart { .. } => self.projector.begin(ContainerKind::Object),
             Event::ObjectEnd { .. } => self.projector.end(ContainerKind::Object),
             Event::ArrayStart { .. } => self.projector.begin(ContainerKind::Array),

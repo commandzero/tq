@@ -37,7 +37,9 @@ document-at-a-time JSON5 input. Use
 `--input-format toon|yaml|json|json5|jsonl` to select exactly one parser;
 `ndjson` is an alias for `jsonl`. JSON5 is input-only and is never selected by
 content detection. See the [format compatibility matrix](formats.md) for the
-native formats supported by jq, yq, and tq.
+native formats supported by jq, yq, and tq, and the
+[native-format campaign review](../tests/compatibility/reviews/native-formats-v1.md)
+for jq sequence agreement and deliberate yq row-profile differences.
 
 `-x/--proxy-on-error` retains each bounded structured source before evaluation.
 If its parser rejects the source, `tq` writes the original bytes unchanged and
@@ -80,8 +82,12 @@ Ordinary document filters retain one decoded document. `--slurp` retains every
 input document. Sorting, uniqueness, final reductions, and output-heavy
 construction are blocking. A fold retains one immutable accumulator plus
 bounded managed evaluation state; `foreach` can release extracted results as
-each update completes. `--stream` has a separate event plan for JSON and TOON
-and is the bounded-memory large-input mode; YAML remains document-at-a-time.
+each update completes. `--stream` is jq-compatible input projection for JSON,
+JSON Lines, JSON sequences, and TOON. It turns decoder events into path/value
+records that ordinary queries can transform or consume through `input` and
+`inputs`. It does not select an automatic decoder-event execution plan.
+Projection retains bounded decoder state, but a query such as `[inputs]` can
+still collect every projected record. YAML remains document-at-a-time.
 
 Limits are explicit: input/depth/token/line/lookahead bounds, VM steps and
 result count, output bytes, and TOON preparation/spool ceilings. A resource

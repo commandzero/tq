@@ -2,6 +2,7 @@
 
 use std::{fmt, io::Read};
 
+use crate::{FormatError, InputFormat};
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use tq_core::{SourceId, Span};
 use tq_toon::{DecoderCapabilities, Event, EventConsumer};
@@ -62,9 +63,33 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
+    decode_json_events_classified(reader, source, consumer, options).map_err(legacy_event_error)
+}
+
+pub(crate) fn decode_json_events_classified<R: Read, C: EventConsumer>(
+    reader: R,
+    source: SourceId,
+    consumer: &mut C,
+    options: JsonEventOptions,
+) -> Result<(), FormatError>
+where
+    C::Error: fmt::Display,
+{
     let span = Span::new(source, 0, 0);
-    emit(consumer, Event::DocumentStart { span })?;
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    emit(consumer, Event::DocumentStart { span }).map_err(event_failure)?;
+    let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
+        reader,
+        options.maximum_depth,
+        options.maximum_token_bytes,
+    );
+    let classify = |error| {
+        limit_failure
+            .get()
+            .map_or_else(|| classify_json_error(error), FormatError::Resource)
+    };
+    let mut deserializer =
+        serde_json::Deserializer::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader));
+    deserializer.disable_recursion_limit();
     EventSeed {
         consumer,
         source,
@@ -72,9 +97,9 @@ where
         depth: 0,
     }
     .deserialize(&mut deserializer)
-    .map_err(|error| error.to_string())?;
-    deserializer.end().map_err(|error| error.to_string())?;
-    emit(consumer, Event::DocumentEnd { span })
+    .map_err(classify)?;
+    deserializer.end().map_err(classify)?;
+    emit(consumer, Event::DocumentEnd { span }).map_err(event_failure)
 }
 
 /// Emits a whitespace-separated stream of bounded JSON documents.
@@ -93,7 +118,40 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    decode_json_event_stream_classified(reader, source, consumer, options)
+        .map_err(legacy_event_error)
+}
+
+fn legacy_event_error(error: FormatError) -> String {
+    match error {
+        FormatError::Resource("depth") => {
+            "JSON nesting depth limit exceeded: input resource limit exceeded: depth".to_owned()
+        }
+        FormatError::Resource("token-bytes") => {
+            "JSON token byte limit exceeded: input resource limit exceeded: token-bytes".to_owned()
+        }
+        FormatError::Parse { message, .. } => message,
+        error => error.to_string(),
+    }
+}
+
+pub(crate) fn decode_json_event_stream_classified<R: Read, C: EventConsumer>(
+    reader: R,
+    source: SourceId,
+    consumer: &mut C,
+    options: JsonEventOptions,
+) -> Result<u64, FormatError>
+where
+    C::Error: fmt::Display,
+{
+    let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
+        reader,
+        options.maximum_depth,
+        options.maximum_token_bytes,
+    );
+    let mut deserializer =
+        serde_json::Deserializer::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader));
+    deserializer.disable_recursion_limit();
     let mut documents = 0_u64;
     loop {
         let mut document = LazyDocumentConsumer::new(consumer, source);
@@ -106,13 +164,50 @@ where
         .deserialize(&mut deserializer);
         match result {
             Ok(()) => {
-                document.finish()?;
+                document.finish().map_err(event_failure)?;
                 documents = documents.saturating_add(1);
             }
             Err(error) if error.is_eof() && !document.started => return Ok(documents),
-            Err(error) => return Err(error.to_string()),
+            Err(error) => {
+                return Err(limit_failure
+                    .get()
+                    .map_or_else(|| classify_json_error(error), FormatError::Resource));
+            }
         }
     }
+}
+
+fn event_failure(message: String) -> FormatError {
+    FormatError::Parse {
+        format: InputFormat::Json,
+        message,
+    }
+}
+
+pub(crate) fn classify_json_error(error: serde_json::Error) -> FormatError {
+    if let Some(kind) = error.io_error_kind() {
+        return FormatError::Io(std::io::Error::new(kind, error));
+    }
+    let message = error.to_string();
+    // serde erases visitor error types. Only our exact data-error prefixes
+    // identify these limits; syntax errors and source text are not classified.
+    if error.is_data() {
+        if message.starts_with("input resource limit exceeded: token-bytes")
+            || message.starts_with(
+                "JSON token byte limit exceeded: input resource limit exceeded: token-bytes",
+            )
+        {
+            return FormatError::Resource("token-bytes");
+        }
+        if message.starts_with("stream depth limit exceeded")
+            || message.starts_with(
+                "JSON nesting depth limit exceeded: input resource limit exceeded: depth",
+            )
+        {
+            return FormatError::Resource("depth");
+        }
+    }
+    event_failure(message)
 }
 
 struct LazyDocumentConsumer<'a, C> {
