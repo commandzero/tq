@@ -4,6 +4,139 @@ use tq_cli::{Command, parse_args};
 use tq_formats::{OutputFormat, ToonFraming};
 
 #[test]
+fn sequence_evaluation_publishes_generator_results_before_runtime_failure() {
+    for (format, input) in [
+        ("csv", "id\n1\n2\n"),
+        ("tsv", "id\n1\n2\n"),
+        ("jsonl", "{\"id\":1}\n{\"id\":2}\n"),
+        ("json-seq", "\x1e{\"id\":1}\n\x1e{\"id\":2}\n"),
+        ("toon-seq", "\x1eid: 1\n\x1eid: 2\n"),
+    ] {
+        let command = parse_args([
+            "-i",
+            format,
+            "-o",
+            "json",
+            "-c",
+            ".id, (.id + 10), error(\"stop\")",
+        ])
+        .unwrap();
+        let mut output = Vec::new();
+        let error =
+            tq_cli::run_with_io(command, &mut input.as_bytes(), &mut output, &mut Vec::new())
+                .unwrap_err();
+        assert_eq!(output, b"1\n11\n", "{format}");
+        assert_eq!(error.status(), tq_cli::ExitStatus::Runtime);
+        assert!(error.to_string().contains("stop"));
+    }
+}
+
+#[test]
+fn sequence_output_limit_stops_a_large_generator() {
+    let command = parse_args([
+        "-i",
+        "jsonl",
+        "-o",
+        "json",
+        "-c",
+        "--max-output-bytes",
+        "2",
+        ".id, range(0; 100000000)",
+    ])
+    .unwrap();
+    let mut output = Vec::new();
+    let error = tq_cli::run_with_io(
+        command,
+        &mut b"{\"id\":1}\n".as_slice(),
+        &mut output,
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert_eq!(output, b"1\n");
+    assert_eq!(error.status(), tq_cli::ExitStatus::Resource);
+    assert!(error.to_string().contains("output"));
+}
+
+#[test]
+fn sequence_reports_keep_per_document_observations_when_requested() {
+    let directory = tempfile::tempdir().unwrap();
+    let report = directory.path().join("report.json");
+    let command = parse_args([
+        "-i",
+        "jsonl",
+        "-o",
+        "json",
+        "-c",
+        "--report-file",
+        report.to_str().unwrap(),
+        ".id, (.id + 10)",
+    ])
+    .unwrap();
+    let mut output = Vec::new();
+    tq_cli::run_with_io(
+        command,
+        &mut b"{\"id\":1}\n{\"id\":2}\n".as_slice(),
+        &mut output,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(output, b"1\n11\n2\n12\n");
+    let report: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(report).unwrap()).unwrap();
+    assert_eq!(report["documents"], 2);
+    assert_eq!(report["results"], 4);
+    let observations = report["observations"].as_array().unwrap();
+    assert_eq!(observations.len(), 2);
+    for observation in observations {
+        assert_eq!(observation["results"], 2);
+        assert!(observation["steps"].as_u64().unwrap() > 0);
+    }
+}
+
+#[test]
+fn sequence_reports_preserve_trivial_query_observations() {
+    let directory = tempfile::tempdir().unwrap();
+    let report = directory.path().join("report.json");
+    for (query, expected, results) in [
+        (".", "1\n2\n", 1),
+        ("42", "42\n42\n", 1),
+        ("$n", "7\n7\n", 1),
+        ("empty", "", 0),
+    ] {
+        let command = parse_args([
+            "-i",
+            "jsonl",
+            "-o",
+            "json",
+            "-c",
+            "--argjson",
+            "n",
+            "7",
+            "--report-file",
+            report.to_str().unwrap(),
+            query,
+        ])
+        .unwrap();
+        let mut output = Vec::new();
+        tq_cli::run_with_io(
+            command,
+            &mut b"1\n2\n".as_slice(),
+            &mut output,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(output, expected.as_bytes(), "{query}");
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap();
+        assert_eq!(report["documents"], 2);
+        for observation in report["observations"].as_array().unwrap() {
+            assert_eq!(observation["steps"], 0, "{query}");
+            assert_eq!(observation["results"], results, "{query}");
+        }
+    }
+}
+
+#[test]
 fn proxy_stream_inputs_accepts_a_detected_empty_json_sequence() {
     let command = parse_args(["-x", "--stream", "inputs"]).unwrap();
     let mut output = Vec::new();

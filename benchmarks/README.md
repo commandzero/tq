@@ -244,6 +244,23 @@ and records seven alternating pairs by default. It also requires elevated
 execution and `/usr/bin/time -l`. Keep checkpoint binaries and reports; a
 focused probe does not replace the final full-matrix comparison.
 
+For paired CSV, TSV, JSON-sequence, TOON-sequence, and JSONL extraction checks:
+
+```console
+python3 benchmarks/cases/native-sequence-perf.py \
+  /path/to/tq-benchmarks/.work/native-sequence-perf \
+  /path/to/frozen/tq-baseline target/release/tq
+```
+
+Run elevated outside the sandbox, with no concurrent builds or benchmarks.
+Every sample uses `/usr/bin/time -l` and requires nonzero peak RSS. The command
+creates a fresh report directory, validates all ordered fixture Documents, and
+checks exact result bytes for every warmup and alternating sample. Defaults are
+131,072 Documents and seven pairs. The focused improvement gate requires at
+least 10% less time on all five workloads, at least 10% less JSON-sequence RSS,
+and no more than 10% RSS growth elsewhere. This is a local comparison against
+the supplied frozen binary, not a portable absolute-time threshold.
+
 ## Streaming transcode campaign
 
 The identity-transcode campaign compares automatic structural transcode with

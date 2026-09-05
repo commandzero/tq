@@ -598,16 +598,21 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             if let Some(flag) = cancellation() {
                 vm = vm.with_cancellation(flag);
             }
+            // This driver exhausts each Document before requesting the next;
+            // it does not need a demand-channel worker for each evaluation.
             let mut output_error = None;
-            let evaluated = vm.for_each_result(|value| {
+            let evaluated = vm.drain_results(|value| {
+                last = Some(value.clone());
                 if let Err(error) = result_output.emit(&value) {
                     output_error = Some(error);
                     return false;
                 }
-                last = Some(value);
                 result_count = result_count.saturating_add(1);
                 true
             });
+            if let Some(error) = output_error {
+                return Err(error);
+            }
             if let Err(error) = evaluated {
                 if matches!(error, VmError::RecoverableInput { .. }) && !options.null_input {
                     writeln!(stderr, "tq: error: {error}")?;
@@ -615,20 +620,21 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                 }
                 runtime_error = Some(error);
             }
-            if let Some(error) = output_error {
-                return Err(error);
-            }
             if options.trace_limit != 0 {
                 for entry in vm.trace() {
                     writeln!(stderr, "trace: {entry}")?;
                 }
             }
-            if options.stream
-                && let Some(total) = observations.first_mut()
-            {
-                merge_observations(total, vm.observations());
-            } else {
-                observations.push(vm.observations());
+            // Per-Document observations are report payload, not execution
+            // state. Keep ordinary sequence processing bounded without a report.
+            if options.report_file.is_some() {
+                if options.stream
+                    && let Some(total) = observations.first_mut()
+                {
+                    merge_observations(total, vm.observations());
+                } else {
+                    observations.push(vm.observations());
+                }
             }
             Ok(runtime_error.is_none() || runtime_error_reported)
         };

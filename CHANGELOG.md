@@ -26,6 +26,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Changed
 
 - Updated Rust dependencies to the latest releases compatible with Rust 1.87.
+- Reduced per-Document evaluation overhead for native input sequences and stopped retaining report observations when no report is requested.
 - Changed streamed `inputs` processing to use bounded buffering and reduce per-document scheduling overhead (#5).
 - Changed format conversion to preserve oversized JSON numbers instead of silently falling back to YAML strings (#18).
 - Changed `input_line_number` to work without `--allow-platform`, matching jq's default capability behavior (#11).
