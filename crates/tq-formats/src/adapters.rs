@@ -205,7 +205,7 @@ pub fn decode_bytes(
                     crate::NativeInputObservation::Document(document) => documents.push(document),
                     crate::NativeInputObservation::Failure(failure) => {
                         return Err(FormatError::Parse {
-                            format: InputFormat::JsonSequence,
+                            format: options.format,
                             message: failure.message,
                         });
                     }
@@ -1227,6 +1227,29 @@ second \n line with "quotes""""}"#,
         let mut recovered = Vec::new();
         replay.read_to_end(&mut recovered).unwrap();
         assert_eq!(recovered, source);
+    }
+
+    #[test]
+    fn committed_native_failures_keep_the_selected_format() {
+        for (format, bytes) in [
+            (InputFormat::JsonSequence, b"\x1ebad\x1e2\n".as_slice()),
+            (InputFormat::Csv, b"a,a\n1,2\n".as_slice()),
+            (InputFormat::Tsv, b"a\ta\n1\t2\n".as_slice()),
+        ] {
+            let error = decode_bytes(
+                bytes,
+                "selected",
+                DecodeOptions {
+                    format,
+                    ..DecodeOptions::default()
+                },
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, crate::FormatError::Parse { format: actual, .. } if actual == format),
+                "{format:?}: {error}"
+            );
+        }
     }
 
     #[test]
