@@ -49,6 +49,62 @@ fn run_tq(mut command: Command, stdin: &[u8]) -> Outcome {
 }
 
 #[test]
+fn label_break_stops_upstream_iteration_after_the_first_result() {
+    let output = tq(
+        &[
+            "-ijson",
+            "-ojson",
+            "-c",
+            "label $out | (.[] | ., break $out)",
+        ],
+        b"[1,2]",
+    );
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, b"1\n");
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn pipe_comma_precedence_preserves_generators_bindings_and_updates() {
+    for (query, input, expected) in [
+        (".[] | ., . + 10", "[1,2]", "1\n11\n2\n12\n"),
+        ("1, 2 | . + 10", "null", "11\n12\n"),
+        (".[] | . as $x | $x, $x + 10", "[1,2]", "1\n11\n2\n12\n"),
+        (".[0 | . + 1]", "[1,2]", "2\n"),
+        (".a = 1 | .a, .b", r#"{"a":0,"b":2}"#, "1\n2\n"),
+    ] {
+        let output = tq(&["-ijson", "-ojson", "-c", query], input.as_bytes());
+        assert_eq!(
+            output.code,
+            0,
+            "{query}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected.as_bytes(), "{query}");
+        assert!(output.stderr.is_empty(), "{query}");
+    }
+}
+
+#[test]
+fn try_only_catches_an_explicitly_grouped_pipeline() {
+    let caught = tq(
+        &["-ijson", "-ojson", "-c", "try (.[] | error(\"x\")) catch ."],
+        b"[1,2]",
+    );
+    assert_eq!(caught.code, 0);
+    assert_eq!(caught.stdout, b"\"x\"\n");
+    assert!(caught.stderr.is_empty());
+
+    let uncaught = tq(
+        &["-ijson", "-ojson", "-c", "try .[] | error(\"x\")"],
+        b"[1,2]",
+    );
+    assert_eq!(uncaught.code, 5);
+    assert!(uncaught.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&uncaught.stderr).contains("runtime error: x"));
+}
+
+#[test]
 fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
     for (query, input, expected) in [
         (

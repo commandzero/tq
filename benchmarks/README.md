@@ -25,6 +25,13 @@ The catalog in `cases/workloads.jsonl` runs jq on JSON, yq on JSON and YAML, and
 tq on JSON, YAML, and TOON. It reports native-format views separately. The
 runner checks ordered values before it times a row.
 
+The `format-*` cases exercise jq-style formatting operators inside queries,
+including `@json`, `@csv`, and `@uri`. They run tq on JSON, YAML, and TOON
+inputs against a jq JSON reference. These are query-formatting workloads,
+not tests of the CLI's output-format option. An adapter marked inapplicable
+in the catalog is excluded from measurement; the report's `unsupported`
+status does not establish a missing product capability.
+
 Profiles keep their natural source sizes. Smoke uses checked-in examples.
 Rapid uses the cached `usgs-all-month` USGS snapshot with the five high-signal
 cases and one measured sample per row. Standard uses cached USGS feeds. Large
