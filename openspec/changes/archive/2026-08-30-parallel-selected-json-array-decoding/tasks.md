@@ -19,7 +19,7 @@
 ## 4. Performance validation
 
 - [x] 4.1 Build the release candidate and correctness-gate it on the largest catalogued JSON file
-- [x] 4.2 Record one-worker and fourteen-worker wall, CPU, peak-RSS, worker-count, and output-digest results in `~/Development/commandzero/tq-benchmarks`
+- [x] 4.2 Record one-worker and fourteen-worker wall, CPU, peak-RSS, worker-count, and output-digest results in the separate `tq-benchmarks` repository
 - [x] 4.3 Compare the candidate with the accepted serial fast-discard baseline and document whether the wall-time gate is met
 
 ## 5. Verification remediation

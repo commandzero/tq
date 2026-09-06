@@ -44,7 +44,7 @@
 - [x] 6.2 Make the harness reject or relabel a blocking benchmark when machine-readable explain output says the measured operator was removed
 - [x] 6.3 Run jq, the document-plan tq baseline, single-thread hybrid tq, and multi-thread hybrid tq against the largest catalogue input with identical correctness gates
 - [x] 6.4 Capture wall, user, system, and total CPU time, peak RSS, worker count, exact commands, corpus identity, plan classification, and correctness digests
-- [x] 6.5 Store the benchmark report and raw samples under `~/Development/commandzero/tq-benchmarks` and compare hybrid wall time and memory with the accepted document baseline
+- [x] 6.5 Store the benchmark report and raw samples in the separate `tq-benchmarks` repository and compare hybrid wall time and memory with the accepted document baseline
 - [x] 6.6 Run workspace formatting, checks, clippy, unit tests, compatibility tests, OpenSpec strict validation, and the relevant benchmark smoke tests
 
 ## 7. Remove discarded-subtree construction
