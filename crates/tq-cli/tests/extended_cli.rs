@@ -86,6 +86,25 @@ fn pipe_comma_precedence_preserves_generators_bindings_and_updates() {
 }
 
 #[test]
+fn try_only_catches_an_explicitly_grouped_pipeline() {
+    let caught = tq(
+        &["-ijson", "-ojson", "-c", "try (.[] | error(\"x\")) catch ."],
+        b"[1,2]",
+    );
+    assert_eq!(caught.code, 0);
+    assert_eq!(caught.stdout, b"\"x\"\n");
+    assert!(caught.stderr.is_empty());
+
+    let uncaught = tq(
+        &["-ijson", "-ojson", "-c", "try .[] | error(\"x\")"],
+        b"[1,2]",
+    );
+    assert_eq!(uncaught.code, 5);
+    assert!(uncaught.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&uncaught.stderr).contains("runtime error: x"));
+}
+
+#[test]
 fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
     for (query, input, expected) in [
         (

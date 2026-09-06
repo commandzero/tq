@@ -634,7 +634,7 @@ impl Parser<'_> {
     }
 
     fn try_catch(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
-        let expression = self.expression()?;
+        let expression = self.assignment()?;
         let catch = if self.take(|kind| matches!(kind, TokenKind::Catch)).is_some() {
             Some(Box::new(self.assignment()?))
         } else {
@@ -1045,7 +1045,6 @@ mod tests {
             "if .a then 1 elif .b then 2 else 3 end",
             ".[] as $item | $item.name",
             "try error(\"bad\") catch .",
-            "try .a | .b catch .c",
             "(.a, .b) |= . + 10",
         ];
         for query in cases {
