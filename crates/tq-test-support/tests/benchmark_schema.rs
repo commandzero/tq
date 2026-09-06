@@ -200,7 +200,10 @@ fn format_workloads_separate_startup_and_throughput_jq_tq_comparisons() {
             .filter(|adapter| adapter["applicable"] == true)
             .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
             .collect::<BTreeSet<_>>();
-        assert_eq!(applicable, BTreeSet::from(["jq-json", "tq-json"]));
+        assert_eq!(
+            applicable,
+            BTreeSet::from(["jq-json", "tq-json", "tq-yaml", "tq-toon"])
+        );
     }
 }
 
