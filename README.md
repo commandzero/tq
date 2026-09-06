@@ -141,67 +141,119 @@ with the required permissions.
 ./scripts/run-campaign.sh benchmark large  # opt-in; uses the natural ~1 GB-class corpus
 ```
 
-### Benchmark snapshot, 2026-08-30
+### Benchmark snapshot, 2026-09-05
 
-The runner collected these results from release builds on an Apple M4 Pro with
-14 logical CPUs. The rapid campaign used the cached `usgs-all-month`
-corpus with 11,081 records and one timed sample per row. The parallel campaign
-used the cached 1.12 GB Microsoft US building-footprint GeoJSON, two warmups,
-and three measured samples for each worker count. The tables report medians.
-Peak RSS came from macOS `/usr/bin/time -l`. `U` means that the adapter does not
-support the case.
+Ironhide ran release-built tq 0.2.0 at commit `f5c008b`, jq 1.8.1, and
+yq 4.53.2 on Linux x86_64 with an AMD Ryzen 7 7700 and 16 logical CPUs.
+The tables below use the largest standard snapshot, `usgs-all-month`, with
+11,274 records. Each timed row passed an ordered semantic correctness check,
+then ran two warmups and ten measured samples.
 
-Rapid wall time is in milliseconds. Lower is better.
+Column formats identify **input**, not output. These workloads use jq JSON,
+yq compact JSON, and tq TOON output, so serialization costs and byte counts
+differ. The JSON, YAML, and TOON inputs contain 8,013,185, 8,001,913, and
+9,490,992 bytes respectively. YAML uses compact JSON-subset syntax here,
+not block YAML. `U` means excluded by the benchmark catalog; it does not by
+itself establish a missing tool capability.
 
-| Scenario | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| event-stream | 330.7 | U | U | 580.5 | U | 610.1 |
-| identity-reencode | 324.3 | 539.8 | 718.9 | 274.6 | 326.3 | 336.9 |
-| parse-discard | 113.5 | 177.5 | 345.4 | 127.3 | 287.0 | 171.5 |
-| path-update | 343.1 | 557.6 | 705.9 | 160.5 | 336.3 | 238.8 |
-| scalar-extraction | 114.5 | 234.1 | 381.9 | 111.5 | 274.3 | 174.8 |
-
-Rapid CPU time is user plus system time in milliseconds. Lower is better.
+Median wall time is in milliseconds. Lower is better.
 
 | Scenario | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| event-stream | 240 | U | U | 490 | U | 540 |
-| identity-reencode | 290 | 660 | 930 | 230 | 260 | 270 |
-| parse-discard | 60 | 200 | 480 | 60 | 220 | 110 |
-| path-update | 280 | 670 | 940 | 110 | 270 | 160 |
-| scalar-extraction | 60 | 220 | 500 | 60 | 220 | 110 |
+| blocking-sort | 125.9 | 361.7 | 1021.5 | 86.0 | 203.5 | 158.4 |
+| event-stream | 303.6 | U | U | 781.4 | U | 815.8 |
+| format-json | 272.4 | U | U | 200.0 | 237.9 | 236.4 |
+| identity-reencode | 237.3 | 779.3 | 1382.7 | 323.0 | 239.1 | 342.1 |
+| object-construction | 161.7 | 24654.2 | 23844.0 | 937.2 | 976.3 | 981.3 |
+| parse-discard | 125.7 | 282.2 | 908.2 | 124.6 | 201.6 | 198.0 |
+| path-update | 237.8 | 767.8 | 1359.9 | 163.2 | 240.0 | 238.3 |
+| recursive-scalars | 382.4 | U | U | 220.0 | 276.9 | 275.4 |
+| scalar-extraction | 123.5 | 282.4 | 944.1 | 126.7 | 201.9 | 200.1 |
+| string-reduction | 123.8 | 359.6 | 911.8 | 344.7 | 236.7 | 237.2 |
 
-Rapid peak RSS is in MiB. Lower is better.
+Reported peak RSS is in MiB, taking the maximum across measured samples.
+Lower is better.
 
 | Scenario | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| event-stream | 4.0 | U | U | 5.2 | U | 5.2 |
-| identity-reencode | 65.3 | 503.5 | 661.4 | 5.1 | 157.1 | 5.2 |
-| parse-discard | 61.3 | 290.9 | 399.6 | 71.0 | 157.5 | 72.8 |
-| path-update | 66.4 | 500.4 | 671.0 | 72.1 | 157.5 | 73.0 |
-| scalar-extraction | 61.3 | 290.1 | 399.4 | 70.4 | 156.1 | 72.7 |
+| blocking-sort | 61.0 | 331.4 | 1303.3 | 19.4 | 88.4 | 7.8 |
+| event-stream | 4.0 | U | U | 7.0 | U | 6.9 |
+| format-json | 63.7 | U | U | 66.5 | 88.4 | 82.6 |
+| identity-reencode | 64.8 | 479.6 | 1363.1 | 14.8 | 88.3 | 14.5 |
+| object-construction | 65.8 | 490.9 | 1475.8 | 71.2 | 88.4 | 82.6 |
+| parse-discard | 60.3 | 293.3 | 1298.0 | 66.4 | 88.3 | 82.8 |
+| path-update | 64.9 | 486.0 | 1362.6 | 66.6 | 88.3 | 82.7 |
+| recursive-scalars | 64.9 | U | U | 66.5 | 88.5 | 82.8 |
+| scalar-extraction | 60.3 | 293.4 | 1301.5 | 66.5 | 88.3 | 82.6 |
+| string-reduction | 60.9 | 333.6 | 1229.6 | 68.2 | 88.4 | 82.5 |
 
-In this run, `tq` beats `jq` on identity re-encoding, path updates, and scalar
-extraction. `tq` uses far less memory than `yq` in every document case. Event
-streaming is still slower: `tq` JSON takes 1.8x as long as `jq` on this corpus,
-while keeping RSS near 5 MiB.
+On this snapshot, tq beats yq in time and memory on all 13 shared JSON
+workloads and all 13 shared YAML workloads. Against jq, tq JSON is faster
+on sorting, path updates, and recursive scalar traversal. Identity reencoding
+takes 1.36x jq time but uses 0.23x its reported RSS. Event streaming,
+object construction, and string reduction miss the 2x time target at
+2.57x, 5.79x, and 2.78x respectively. This is not a universal performance pass.
 
-The parallel run compared a single-process `jq` baseline with `tq` using
-Rayon. Every run produced the same correctness digest.
+The formatter follow-up filled 56 previously excluded YAML/TOON rows, with
+112 timed rows and no incorrect results across seven queries and four USGS
+snapshots. A separate startup case also passed for all three tq input formats.
+All eight `format-*` cases now cover tq JSON, YAML, and TOON. They exercise
+query operators such as `@json`, `@csv`, and `@uri`, not the CLI output
+serializer. The `format-json` row above uses the fresh follow-up measurements;
+other rows retain the original run.
 
-| Tool and workers | Wall time (s) | CPU time (s) | Peak RSS (MiB) | Speedup vs jq |
-| --- | ---: | ---: | ---: | ---: |
-| jq, 1 process | 28.26 | 25.79 | 14,015.3 | 1.00x |
-| tq, 1 worker | 12.18 | 15.39 | 1,383.5 | 2.32x |
-| tq, 4 workers | 4.86 | 19.52 | 1,472.3 | 5.81x |
-| tq, 8 workers | 4.05 | 21.14 | 1,447.2 | 6.98x |
-| tq, 14 workers | 3.93 | 22.32 | 1,452.8 | 7.19x |
+#### Early-break correctness follow-up
 
-Parallel decoding cuts wall time by 86% against `jq` at 14 workers, but this
-workload still uses about 1.4 GiB. Moving from eight to 14 workers saves only
-0.12 seconds while increasing CPU time.
+The original standard campaign had four incorrect tq JSON rows for
+`label $out | (.features[] | .id, break $out)`, one per USGS snapshot.
+A pipe/comma precedence fix makes the query stop after its first ID.
+A separately rebuilt candidate passed all four gates on the same frozen
+inputs, with fresh jq references and 120 measured samples in total.
 
-Raw reports and replay data are in the separate `tq-benchmarks` checkout.
+| Snapshot | tq correctness | jq ms | tq ms | tq/jq RSS |
+| --- | --- | ---: | ---: | ---: |
+| all-hour | Pass | 47.41 | 47.51 | 1.693x |
+| all-day | Pass | 49.79 | 50.74 | 1.849x |
+| all-week | Pass | 48.03 | 48.56 | 1.285x |
+| all-month | Pass | 121.91 | 124.09 | 1.105x |
+
+All four meet the strict 2x time target. Week and month meet the strict
+1.5x RSS target; hour and day do not. This follow-up is not a full
+remeasurement of the patched binary. The original campaign's four incorrect
+rows and six empty-result resource-limit classifications remain in its raw
+report.
+
+#### Native formats and measurement limits
+
+On 131,072 synthetic records, native CSV and TSV extraction take 121.3 and
+121.8 ms with tq versus 2,412.3 and 2,431.4 ms with yq, about 20x faster.
+Reported tq RSS is about 6.5 MiB versus yq's 598–599 MiB. JSON sequence
+extraction takes 230.0 ms versus jq's 121.3 ms, meeting the 2x time target
+but missing the 1.5x RSS target at 1.63x.
+
+Wall time includes startup, output capture, and RSS-sampler shutdown.
+Short runs cluster near 48 ms, so small differences there are not reliable
+execution-speed differences. Reported RSS combines GNU time and sampled
+process-group RSS; it is not necessarily executable-only memory.
+CPU fields were unavailable because the runner did not parse GNU time's
+verbose CPU labels, so this snapshot has no CPU comparison.
+
+These results are not directly comparable with the earlier Apple M4 Pro
+run: host, tool versions, corpus, and YAML representation differ. The
+roughly 1 GB parallel-decoding benchmark was not rerun on Ironhide.
+
+Raw reports and the detailed `2026-09-05-ironhide-tq-yq-jq.md` analysis remain
+in the separate `tq-benchmarks` checkout:
+
+- `.work/ironhide-f5c008b-standard.json`
+- `.work/ironhide-f5c008b-format-coverage.json`
+- `.work/ironhide-f5c008b-format-startup.json`
+- `.work/ironhide-label-early-break-fixed.json`
+
+The original tq executable SHA-256 is
+`c645e35a7640f6af8f605975aa593cdf3930745d9b5afb1885cf034651eeef63`.
+The early-break candidate is
+`1bda5710e878a5950481b7a250ef18c6244d889db5375dfeedf3868ba4d4d3aa`.
 
 The case-first workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). See the
 [benchmark guide](benchmarks/README.md) for campaign details, the
@@ -244,8 +296,10 @@ differences, limits, redaction, and release-host classifications.
 
 ## Current boundaries
 
-`tq` does not implement labels, breaks, or many less common jq CLI switches. It
-reports them as unsupported capabilities.
+`tq` supports lexical `label` and `break`, including early exit from a
+generator. Some less common jq capabilities remain unsupported; see the
+[compatibility guide](docs/compatibility.md) for the supported CLI switches
+and known differences.
 
 The numeric model preserves accepted input literals as written. Arithmetic uses
 jq-compatible binary64 behavior when needed. Digit, exponent-expansion, and
