@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "corpus": {
-    "path": "/Users/reno/Development/commandzero/worktrees/tq/bravo/tq/crates/tq-test-support/../../tests/compatibility/cases",
+    "path": "tests/compatibility/cases",
     "bytes": 152056,
     "sha256": "8be218e8a167b603993304635ce384f46dc5b181288b272654e92b661ba8701a"
   },
   "tools": [
     {
       "tool": "jq",
-      "path": "/private/tmp/tq-native-format-reference.ZJWV9T/jq",
+      "path": "jq",
       "version": "jq-1.8.1",
       "executable": {
-        "path": "/private/tmp/tq-native-format-reference.ZJWV9T/jq",
+        "path": "jq",
         "bytes": 841408,
         "sha256": "a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603"
       },
@@ -21,10 +21,10 @@
     },
     {
       "tool": "yq",
-      "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+      "path": "yq",
       "version": "yq (https://github.com/mikefarah/yq/) version v4.53.2",
       "executable": {
-        "path": "/opt/homebrew/Cellar/yq/4.53.2/bin/yq",
+        "path": "yq",
         "bytes": 12996258,
         "sha256": "b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952"
       },
@@ -38,10 +38,10 @@
     },
     {
       "tool": "tq",
-      "path": "/Users/reno/Development/commandzero/worktrees/tq/bravo/tq/target/release/tq",
+      "path": "tq",
       "version": "tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)",
       "executable": {
-        "path": "/Users/reno/Development/commandzero/worktrees/tq/bravo/tq/target/release/tq",
+        "path": "tq",
         "bytes": 7936208,
         "sha256": "9ab2c14a6a458d39fde97f60cd2f72862fbada453be7a8b981fa57b6ad1e0227"
       },

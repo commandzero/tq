@@ -1,10 +1,10 @@
 # Benchmark evidence
 
-The focused smoke campaign ran on 2026-08-31 on an Apple M4 Pro with macOS
-26.6, using release tq and the manifest-recorded jq 1.7.1 binary. Each tool and
-case used one warmup and 30 measured samples against the same generated JSON
-input and output sink. The raw report is
-`/Users/reno/Development/commandzero/tq-benchmarks/.work/jq-recursive-builtins-labels/smoke.json`
+The focused smoke campaign ran on 2026-08-31 using release tq and the
+manifest-recorded jq 1.7.1 binary. Each tool and case used one warmup and 30
+measured samples against the same generated JSON input and output sink. The raw
+report is
+`tq-benchmarks/.work/jq-recursive-builtins-labels/smoke.json`
 and remains intentionally outside the repository.
 
 The campaign ran outside the restricted sandbox with elevated child-process
