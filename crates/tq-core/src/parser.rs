@@ -62,9 +62,21 @@ struct Parser<'a> {
 
 impl Parser<'_> {
     fn complete(mut self) -> Result<Expr, Box<Diagnostic>> {
-        let expression = self.comma()?;
+        let expression = self.expression()?;
         if !matches!(self.current().kind, TokenKind::EndOfInput) {
             return Err(self.unexpected("end of query"));
+        }
+        Ok(expression)
+    }
+
+    fn expression(&mut self) -> Result<Expr, Box<Diagnostic>> {
+        // jq's comma binds more tightly than pipe. Keep pipelines left-associated
+        // so planning passes can still recognize adjacent stages.
+        let mut expression = self.comma()?;
+        while self.take(|kind| matches!(kind, TokenKind::Pipe)).is_some() {
+            let right = self.comma()?;
+            let span = joined(expression.span, right.span);
+            expression = Expr::new(ExprKind::Pipe(Box::new(expression), Box::new(right)), span);
         }
         Ok(expression)
     }
@@ -105,7 +117,7 @@ impl Parser<'_> {
     }
 
     fn binding(&mut self) -> Result<Expr, Box<Diagnostic>> {
-        let value = self.pipe()?;
+        let value = self.alternative()?;
         if self.take(|kind| matches!(kind, TokenKind::As)).is_none() {
             return Ok(value);
         }
@@ -121,7 +133,7 @@ impl Parser<'_> {
             |kind| matches!(kind, TokenKind::Pipe),
             "'|' after variable binding",
         )?;
-        let body = self.comma()?;
+        let body = self.expression()?;
         let span = joined(value.span, body.span);
         Ok(Expr::new(
             ExprKind::Bind {
@@ -294,13 +306,13 @@ impl Parser<'_> {
         let start = if matches!(self.current().kind, TokenKind::Colon) {
             None
         } else {
-            Some(Box::new(self.assignment()?))
+            Some(Box::new(self.expression()?))
         };
         let access = if self.take(|kind| matches!(kind, TokenKind::Colon)).is_some() {
             let end = if matches!(self.current().kind, TokenKind::RightBracket) {
                 None
             } else {
-                Some(Box::new(self.assignment()?))
+                Some(Box::new(self.expression()?))
             };
             Access::Slice { start, end }
         } else {
@@ -364,7 +376,7 @@ impl Parser<'_> {
             TokenKind::Identifier(name) => self.call_or_name(name, token.span),
             TokenKind::Format(name) => self.format(name, token.span),
             TokenKind::LeftParen => {
-                let expression = self.comma()?;
+                let expression = self.expression()?;
                 let close = self.expect(
                     |kind| matches!(kind, TokenKind::RightParen),
                     "')' after grouped expression",
@@ -410,7 +422,7 @@ impl Parser<'_> {
                             self.current().span,
                         ));
                     }
-                    let expression = self.comma()?;
+                    let expression = self.expression()?;
                     self.expect(
                         |kind| matches!(kind, TokenKind::InterpolationEnd),
                         "')' after string interpolation",
@@ -490,7 +502,7 @@ impl Parser<'_> {
         {
             if !matches!(self.current().kind, TokenKind::RightParen) {
                 loop {
-                    arguments.push(self.comma()?);
+                    arguments.push(self.expression()?);
                     if self
                         .take(|kind| matches!(kind, TokenKind::Semicolon))
                         .is_none()
@@ -520,7 +532,7 @@ impl Parser<'_> {
         let body = if matches!(self.current().kind, TokenKind::RightBracket) {
             Expr::new(ExprKind::Empty, self.current().span)
         } else {
-            self.comma()?
+            self.expression()?
         };
         let close = self.expect(
             |kind| matches!(kind, TokenKind::RightBracket),
@@ -541,7 +553,7 @@ impl Parser<'_> {
                     (ObjectKey::Static(key.clone()), Some(key))
                 }
                 TokenKind::LeftParen => {
-                    let key = self.comma()?;
+                    let key = self.expression()?;
                     self.expect(
                         |kind| matches!(kind, TokenKind::RightParen),
                         "')' after computed object key",
@@ -557,7 +569,7 @@ impl Parser<'_> {
                 }
             };
             let value = if self.take(|kind| matches!(kind, TokenKind::Colon)).is_some() {
-                self.assignment()?
+                self.object_value()?
             } else if let Some(name) = shorthand {
                 Expr::new(
                     ExprKind::Access {
@@ -585,20 +597,32 @@ impl Parser<'_> {
         ))
     }
 
+    // Object-entry commas are delimiters; a grouped value can still generate
+    // multiple results through the full expression parser.
+    fn object_value(&mut self) -> Result<Expr, Box<Diagnostic>> {
+        let mut expression = self.assignment()?;
+        while self.take(|kind| matches!(kind, TokenKind::Pipe)).is_some() {
+            let right = self.assignment()?;
+            let span = joined(expression.span, right.span);
+            expression = Expr::new(ExprKind::Pipe(Box::new(expression), Box::new(right)), span);
+        }
+        Ok(expression)
+    }
+
     fn conditional(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
         let mut branches = Vec::new();
-        let condition = self.comma()?;
+        let condition = self.expression()?;
         self.expect(|kind| matches!(kind, TokenKind::Then), "'then'")?;
-        let body = self.comma()?;
+        let body = self.expression()?;
         branches.push((condition, body));
         while self.take(|kind| matches!(kind, TokenKind::Elif)).is_some() {
-            let condition = self.comma()?;
+            let condition = self.expression()?;
             self.expect(|kind| matches!(kind, TokenKind::Then), "'then'")?;
-            let body = self.comma()?;
+            let body = self.expression()?;
             branches.push((condition, body));
         }
         self.expect(|kind| matches!(kind, TokenKind::Else), "'else'")?;
-        let alternative = self.comma()?;
+        let alternative = self.expression()?;
         let end = self.expect(|kind| matches!(kind, TokenKind::End), "'end'")?;
         Ok(Expr::new(
             ExprKind::Conditional {
@@ -644,18 +668,18 @@ impl Parser<'_> {
             |kind| matches!(kind, TokenKind::LeftParen),
             "'(' before fold initializer",
         )?;
-        let initial = self.comma()?;
+        let initial = self.expression()?;
         self.expect(
             |kind| matches!(kind, TokenKind::Semicolon),
             "';' after fold initializer",
         )?;
-        let update = self.comma()?;
+        let update = self.expression()?;
         let extract = if foreach {
             self.expect(
                 |kind| matches!(kind, TokenKind::Semicolon),
                 "';' after foreach update",
             )?;
-            Some(self.comma()?)
+            Some(self.expression()?)
         } else {
             None
         };
@@ -695,7 +719,7 @@ impl Parser<'_> {
             |kind| matches!(kind, TokenKind::Pipe),
             "'|' after label variable",
         )?;
-        let body = self.comma()?;
+        let body = self.expression()?;
         let span = joined(open, body.span);
         Ok(Expr::new(
             ExprKind::Label {
@@ -773,7 +797,7 @@ impl Parser<'_> {
             |kind| matches!(kind, TokenKind::Colon),
             "':' before definition body",
         )?;
-        let definition_body = self.comma()?;
+        let definition_body = self.expression()?;
         let semicolon = self.expect(
             |kind| matches!(kind, TokenKind::Semicolon),
             "';' after definition body",
@@ -888,7 +912,7 @@ impl Parser<'_> {
         if matches!(self.current().kind, TokenKind::EndOfInput) {
             Ok(Expr::new(ExprKind::Empty, empty_span))
         } else {
-            self.comma()
+            self.expression()
         }
     }
 
@@ -981,7 +1005,7 @@ mod tests {
     fn precedence_and_associativity_are_stable() {
         assert_eq!(
             parse(".a, .b | .c // 1 + 2 * 3").unwrap().hir(),
-            "comma(access(., field:a), pipe(access(., field:b), alternative(access(., field:c), add(1, multiply(2, 3)))))"
+            "pipe(comma(access(., field:a), access(., field:b)), alternative(access(., field:c), add(1, multiply(2, 3))))"
         );
         assert_eq!(
             parse(".a = .b = 1").unwrap().hir(),

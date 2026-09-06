@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Changed
+
+- Changed comma and pipe precedence to match jq, so `label $out | (.[] | ., break $out)` stops after its first result.
+
 ## [0.2.0] - 2026-09-01
 
 ### Added
