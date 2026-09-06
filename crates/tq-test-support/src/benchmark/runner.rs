@@ -305,10 +305,10 @@ fn failed_outcome(case: &BenchmarkCase, measured: &MeasuredOutcome) -> Option<Be
             if case.measure_first_result && measured.first_result_micros.is_none() {
                 return Some(BenchmarkOutcome::ResourceLimit);
             }
-            if let (Some(limit), Some(actual)) = (case.limits.rss_bytes, measured.peak_rss_bytes) {
-                if actual > limit {
-                    return Some(BenchmarkOutcome::ResourceLimit);
-                }
+            if let (Some(limit), Some(actual)) = (case.limits.rss_bytes, measured.peak_rss_bytes)
+                && actual > limit
+            {
+                return Some(BenchmarkOutcome::ResourceLimit);
             }
             None
         }

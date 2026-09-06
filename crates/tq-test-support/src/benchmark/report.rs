@@ -578,13 +578,12 @@ pub fn evaluate_regression(
         if let (Some(old), Some(new)) = (
             baseline_summary.peak_rss_bytes,
             candidate_summary.peak_rss_bytes,
-        ) {
-            if percent_change(old as f64, new as f64) > thresholds.peak_rss_percent {
-                failures.push(format!(
-                    "{}/{} peak RSS regressed",
-                    candidate_row.case_id, candidate_row.adapter_id
-                ));
-            }
+        ) && percent_change(old as f64, new as f64) > thresholds.peak_rss_percent
+        {
+            failures.push(format!(
+                "{}/{} peak RSS regressed",
+                candidate_row.case_id, candidate_row.adapter_id
+            ));
         }
     }
     RegressionGate {
