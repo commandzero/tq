@@ -183,10 +183,8 @@ impl NativeFormat {
             ));
         }
         let mut compatible_toon = WriterConfig::default();
-        if json {
-            if let JsonIndent::Spaces(count) = options.json_indent {
-                compatible_toon.indent_size = usize::from(count);
-            }
+        if json && let JsonIndent::Spaces(count) = options.json_indent {
+            compatible_toon.indent_size = usize::from(count);
         }
         if options.format != OutputFormat::Toon
             && options.toon != WriterConfig::default()
