@@ -181,4 +181,9 @@ jq-compatible binary64 behavior when needed. Digit, exponent-expansion, and
 index limits return resource or range errors instead of silently losing data.
 These errors and TOON sequence framing are known differences from jq.
 
+## Contributing
+
+See the [contributor guide](docs/contributing.md) for setup, validation, and
+development requirements.
+
 Licensed under MIT.
