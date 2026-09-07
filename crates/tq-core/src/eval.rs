@@ -7022,7 +7022,10 @@ mod tests {
                 r#""https://x.test?q=%3C%26""#,
             ]
         );
-        assert!(run(r#"@uri "x=\(empty)""#, "null").is_empty());
+        assert_eq!(
+            run(r#"@uri "x=\(empty)""#, "null"),
+            Vec::<Result<Value, String>>::new()
+        );
         assert_eq!(
             json(run("@csv, @tsv, @sh", r#"["a b",1,null,true]"#)),
             [
