@@ -75,7 +75,5 @@ jobs:
       - name: Check minimum supported Rust
         if: steps.scope.outputs.mode != 'docs'
         run: |
-          rustup toolchain install 1.87.0 --profile minimal
-          rustup run 1.87.0 cargo check --workspace --exclude tq-test-support --lib --bins --locked
           rustup toolchain install 1.88.0 --profile minimal
           rustup run 1.88.0 cargo check --workspace --all-targets --locked

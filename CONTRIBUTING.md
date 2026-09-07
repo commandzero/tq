@@ -1,7 +1,6 @@
 # Contributing to tq
 
-The unpublished test and benchmark tooling requires Rust 1.88 or newer. The
-published crates retain their Rust 1.87 minimum. Use the repository's pinned
+All workspace crates require Rust 1.88 or newer. Use the repository's pinned
 toolchain for preflight checks.
 
 Run the repository preflight before submitting a change:

@@ -13,7 +13,7 @@ supported syntax and known differences.
 
 ## Install and use
 
-Rust 1.87 or newer is required.
+Rust 1.88 or newer is required.
 
 ```console
 cargo install tq-cli

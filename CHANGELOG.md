@@ -7,6 +7,10 @@ Historical release entries retain their original ordering.
 
 ## [Unreleased]
 
+### Changed
+
+- Corrected the declared minimum Rust version to 1.88. Existing let-chain syntax in tq and its JSON5 dependency does not compile on 1.87; upgrade the compiler to build from source.
+
 ## [0.3.0] - 2026-09-06
 
 ### Added
