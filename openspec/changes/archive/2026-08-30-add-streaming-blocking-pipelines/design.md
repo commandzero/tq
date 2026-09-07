@@ -120,7 +120,7 @@ The existing input byte, nesting, token, VM stack, result, output, execution-ste
 
 Differential tests compare forced document execution with hybrid execution for empty collections, absent projected fields, mixed jq values, equal-comparing objects, multiple input documents, duplicate keys inside selected and discarded subtrees, malformed late input, limits, and cancellation. Plan tests prove that dynamic paths, mutation, cross-item dependencies, slurp, and unsupported formats fall back before semantic input consumption.
 
-The large benchmark has separate jq, forced single-thread tq, and configured multi-thread tq rows. A sort case must expose sorted content in its result digest and confirm `hybrid-streaming-blocking` plus an executed sort through machine-readable explain output. Reports go to `~/Development/commandzero/tq-benchmarks` and include wall time, user and system CPU, total CPU, peak RSS, worker count, exact command lines, corpus identity, and correctness digests.
+The large benchmark has separate jq, forced single-thread tq, and configured multi-thread tq rows. A sort case must expose sorted content in its result digest and confirm `hybrid-streaming-blocking` plus an executed sort through machine-readable explain output. Reports go to the separate `tq-benchmarks` repository and include wall time, user and system CPU, total CPU, peak RSS, worker count, exact command lines, corpus identity, and correctness digests.
 
 ## Risks / Trade-offs
 
@@ -145,6 +145,6 @@ The large benchmark has separate jq, forced single-thread tq, and configured mul
 3. Add structural-event execution and differential tests, then enable the plan for JSON and strict TOON when its proof succeeds.
 4. Add bounded batch preparation and stable sort runs behind the existing Rayon thread configuration.
 5. Add the resolved-HIR rewrite and optimizer-aware benchmark checks.
-6. Run the large benchmark campaign and store the report in `~/Development/commandzero/tq-benchmarks`.
+6. Run the large benchmark campaign and store the report in the separate `tq-benchmarks` repository.
 
 Rollback consists of disabling hybrid selection so every affected query returns to its existing document plan. The document executor and query semantics remain intact throughout the change.

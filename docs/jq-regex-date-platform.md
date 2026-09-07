@@ -11,9 +11,9 @@ generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
 
 The cases cover syntax, Unicode scalar offsets, optional captures, match order,
 flags, splitting and substitution, UTC arrays, epoch ranges, environment shape,
-and input metadata. The 2026-08-10 exploratory run used Apple jq 1.7.1 on arm64
-macOS 26.5. The full campaign uses the repository's pinned jq 1.8.x binary and
-records its exact identity in `tests/compatibility/reviews/coverage-v1.json`.
+and input metadata. The exploratory run used jq 1.7.1. The full campaign uses
+the repository's pinned jq 1.8.x binary and records its exact identity in
+`tests/compatibility/reviews/coverage-v1.json`.
 
 ## Selected dependencies and limits
 
