@@ -1,3 +1,10 @@
+---
+type: Policy
+title: "Performance review policy"
+description: "Benchmark correctness gates, baseline comparisons, and measurement limits."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # Performance review policy
 
 Keep corpus files, generated formats, full sample collections, and reviewed

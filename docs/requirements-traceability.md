@@ -1,3 +1,10 @@
+---
+type: Reference
+title: "Requirements traceability"
+description: "Routes from specification scenarios to implementation and test evidence."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # Requirements traceability
 
 This index covers the eight `build-tq-mvp` capability specifications. The

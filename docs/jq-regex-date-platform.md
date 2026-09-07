@@ -1,3 +1,10 @@
+---
+type: Contract
+title: "jq regex, date, and platform compatibility"
+description: "Regex and date behavior, platform capabilities, and resource limits."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # jq regex, date, and platform compatibility
 
 ## Reviewed baseline

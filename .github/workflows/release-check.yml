@@ -1,0 +1,63 @@
+name: Release candidate checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Reviewed v-prefixed tag to validate before publication
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows-contract:
+    name: Windows source contract
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Check the existing Windows platform contract before publication
+        run: |
+          rustup show active-toolchain
+          cargo test --locked -p tq-core regex_date_platform_release_host_contract
+          cargo test --locked -p tq-cli ambient
+  native:
+    name: Native release / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install validation tools
+        run: |
+          source scripts/tool-versions.sh
+          rustup show active-toolchain
+          cargo install okf --version "$OKF_VERSION" --locked
+          npm install --global "@fission-ai/openspec@$OPENSPEC_VERSION"
+          GOBIN="$PWD/target/tools/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@v$ACTIONLINT_VERSION"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            brew install shellcheck
+          else
+            sudo apt-get update
+            sudo apt-get install --yes shellcheck
+          fi
+      - name: Build and smoke-test native archive
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: ./scripts/package-release.sh "$RELEASE_TAG"
+      - name: Retain verified archives for release review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-${{ matrix.os }}
+          path: target/release-artifacts/*
+          if-no-files-found: error

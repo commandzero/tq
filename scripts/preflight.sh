@@ -5,10 +5,13 @@ repository_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository_root"
 
 cargo_bin=${CARGO:-cargo}
-openspec_bin=${OPENSPEC:-openspec}
+./scripts/check-repository.sh
+if [ "${1:-}" = --docs ]; then exit 0; fi
 
 "$cargo_bin" fmt --all --check
-"$cargo_bin" check --workspace --all-targets
-"$cargo_bin" clippy --workspace --all-targets --all-features -- -D warnings
-"$cargo_bin" test --workspace
-OPENSPEC_TELEMETRY=0 "$openspec_bin" validate --all --strict
+"$cargo_bin" check --workspace --all-targets --locked
+"$cargo_bin" clippy --workspace --all-targets --all-features --locked -- -D warnings
+"$cargo_bin" test --workspace --locked
+# Main specifications are the repository contract. Associated active changes are
+# selected and checked separately by check-openspec.sh at the PR boundary.
+./scripts/check-openspec.sh
