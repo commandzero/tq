@@ -3561,7 +3561,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[2,3]\n");
-        assert!(error.is_empty());
+        assert_eq!(error, Vec::<u8>::new());
     }
 
     #[test]
@@ -3598,12 +3598,12 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"1\n2\n");
-        assert!(error.is_empty());
+        assert_eq!(error, Vec::<u8>::new());
 
         let strict_path = permissive_json.to_str().unwrap();
         let (status, output, _) = execute(&[".", strict_path], b"");
         assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
-        assert!(output.is_empty());
+        assert_eq!(output, Vec::<u8>::new());
 
         let (status, output, error) = execute(
             &[
@@ -3619,7 +3619,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"3\n");
-        assert!(error.is_empty());
+        assert_eq!(error, Vec::<u8>::new());
     }
 
     #[test]
@@ -3636,7 +3636,7 @@ mod tests {
         assert_eq!(failure.status(), ExitStatus::Unsupported);
         assert!(failure.to_string().contains("JSON5"));
         assert!(failure.to_string().contains("document-at-a-time"));
-        assert!(output.is_empty());
+        assert_eq!(output, Vec::<u8>::new());
     }
 
     #[test]
@@ -3655,7 +3655,7 @@ mod tests {
         let failure = run_with_io(command, &mut input, &mut output, &mut error).unwrap_err();
         assert_eq!(failure.status(), ExitStatus::Compile);
         assert!(failure.to_string().contains("TQ-CAP-USER-FUNCTIONS"));
-        assert!(output.is_empty());
+        assert_eq!(output, Vec::<u8>::new());
     }
 
     #[test]
@@ -3820,7 +3820,7 @@ mod tests {
                 .status(),
             ExitStatus::Resource
         );
-        assert!(output.is_empty());
+        assert_eq!(output, Vec::<u8>::new());
 
         for arguments in [
             ["--input-format", "json", "--output-format", "json", "."],
@@ -4273,7 +4273,7 @@ mod tests {
         );
         assert_eq!(output, b"4000\n");
         assert!(input.reads < 16, "source was read {} times", input.reads);
-        assert!(error.is_empty());
+        assert_eq!(error, Vec::<u8>::new());
     }
 
     #[test]
