@@ -251,7 +251,7 @@ fn spawn_rss_sampler(
     })
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 fn process_group_rss(process_group: u32) -> Option<u64> {
     let output = Command::new("ps")
         .args(["-axo", "pgid=,rss="])
@@ -260,7 +260,12 @@ fn process_group_rss(process_group: u32) -> Option<u64> {
     if !output.status.success() {
         return None;
     }
-    let kibibytes = String::from_utf8_lossy(&output.stdout)
+    process_group_rss_from_report(&String::from_utf8_lossy(&output.stdout), process_group)
+}
+
+#[cfg(unix)]
+fn process_group_rss_from_report(report: &str, process_group: u32) -> Option<u64> {
+    let kibibytes = report
         .lines()
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
@@ -268,22 +273,6 @@ fn process_group_rss(process_group: u32) -> Option<u64> {
             let rss = fields.next()?.parse::<u64>().ok()?;
             (group == process_group).then_some(rss)
         })
-        .sum::<u64>();
-    (kibibytes > 0).then(|| kibibytes.saturating_mul(1024))
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn process_group_rss(process_group: u32) -> Option<u64> {
-    let output = Command::new("ps")
-        .args(["-o", "rss=", "-g", &process_group.to_string()])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let kibibytes = String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .filter_map(|value| value.parse::<u64>().ok())
         .sum::<u64>();
     (kibibytes > 0).then(|| kibibytes.saturating_mul(1024))
 }
@@ -346,10 +335,23 @@ fn resource_seconds(report: &str, label: &str) -> Option<u128> {
     report.lines().find_map(|line| {
         let line = line.trim();
         let prefix = format!("{label} ");
-        let seconds = line.strip_prefix(&prefix).map(str::trim).or_else(|| {
-            line.strip_suffix(label)
-                .and_then(|value| value.split_whitespace().last())
-        })?;
+        let verbose_prefix = match label {
+            "user" => Some("User time (seconds):"),
+            "sys" => Some("System time (seconds):"),
+            _ => None,
+        };
+        let seconds = line
+            .strip_prefix(&prefix)
+            .map(str::trim)
+            .or_else(|| {
+                verbose_prefix
+                    .and_then(|prefix| line.strip_prefix(prefix))
+                    .map(str::trim)
+            })
+            .or_else(|| {
+                line.strip_suffix(label)
+                    .and_then(|value| value.split_whitespace().last())
+            })?;
         parse_seconds_micros(seconds)
     })
 }
@@ -399,4 +401,37 @@ fn infer_signal(status: std::process::ExitStatus, report: &str) -> Option<i32> {
 #[cfg(not(unix))]
 fn infer_signal(_status: std::process::ExitStatus, _report: &str) -> Option<i32> {
     None
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rss_includes_only_members_of_the_requested_process_group() {
+        let report = " 10 100\n 21 2048\n 21 4096\n 22 8192\n";
+        assert_eq!(process_group_rss_from_report(report, 21), Some(6144 * 1024));
+        assert_eq!(process_group_rss_from_report(report, 99), None);
+    }
+
+    #[test]
+    fn gnu_verbose_cpu_metrics_are_not_lost() {
+        let report = "\tUser time (seconds): 0.12\n\tSystem time (seconds): 0.03\n\tMaximum resident set size (kbytes): 8192\n";
+        assert_eq!(resource_seconds(report, "user"), Some(120_000));
+        assert_eq!(resource_seconds(report, "sys"), Some(30_000));
+        assert_eq!(resource_rss(report), Some(8 * 1024 * 1024));
+    }
+
+    #[test]
+    fn portable_cpu_metrics_remain_supported() {
+        assert_eq!(
+            resource_seconds("user 0.12\nsys 0.03\n", "user"),
+            Some(120_000)
+        );
+        assert_eq!(
+            resource_seconds("user 0.12\nsys 0.03\n", "sys"),
+            Some(30_000)
+        );
+    }
 }

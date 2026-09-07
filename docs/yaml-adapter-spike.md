@@ -1,3 +1,10 @@
+---
+type: Research
+title: "`yaml_serde` adapter spike"
+description: "YAML adapter findings and implementation constraints."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # `yaml_serde` adapter spike
 
 The MVP adapter uses `yaml_serde` 0.10.x. Its streaming `Deserializer` yields

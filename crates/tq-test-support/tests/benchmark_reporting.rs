@@ -292,10 +292,10 @@ fn soft_jq_objective_rejects_incorrect_or_policy_mismatched_rows() {
         .expect("issue 5 objective");
     assert_eq!(objective.wall_time, SoftObjectiveStatus::NotComparable);
     assert_eq!(objective.peak_rss, SoftObjectiveStatus::NotComparable);
-    assert!(report.cases[0].reference_ratios.is_empty());
+    assert_eq!(report.cases[0].reference_ratios, BTreeMap::new());
 
     report.cases[1].outcome = BenchmarkOutcome::Timed;
     report.cases[1].limits.output_bytes += 1;
     populate_reference_ratios(&mut report.cases, &["jq-json"]);
-    assert!(report.cases[0].reference_ratios.is_empty());
+    assert_eq!(report.cases[0].reference_ratios, BTreeMap::new());
 }

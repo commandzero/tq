@@ -340,10 +340,10 @@ impl<R: Read> JsonRecoveryDecoder<R> {
                         return Err(parse_error("Objects must consist of key:value pairs"));
                     }
                     self.insert(value)?;
-                } else if let Some(Container::Object { count, .. }) = self.containers.last() {
-                    if *count != 0 {
-                        return Err(parse_error("Expected another key-value pair"));
-                    }
+                } else if let Some(Container::Object { count, .. }) = self.containers.last()
+                    && *count != 0
+                {
+                    return Err(parse_error("Expected another key-value pair"));
                 }
                 let Some(Container::Object { values, .. }) = self.containers.pop() else {
                     return Err(parse_error("Unmatched '}'"));

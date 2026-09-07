@@ -1,3 +1,10 @@
+---
+type: Design
+title: "TOON event boundary"
+description: "Event decoding and the boundary between TOON and query execution."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # TOON event boundary
 
 `tq-toon::Decoder` keeps TOON parsing out of the tq execution engine. It reads

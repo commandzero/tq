@@ -13,7 +13,7 @@ supported syntax and known differences.
 
 ## Install and use
 
-Rust 1.87 or newer is required.
+Rust 1.88 or newer is required.
 
 ```console
 cargo install tq-cli
@@ -180,5 +180,10 @@ The numeric model preserves accepted input literals as written. Arithmetic uses
 jq-compatible binary64 behavior when needed. Digit, exponent-expansion, and
 index limits return resource or range errors instead of silently losing data.
 These errors and TOON sequence framing are known differences from jq.
+
+## Contributing
+
+See the [contributor guide](docs/contributing.md) for setup, validation, and
+development requirements.
 
 Licensed under MIT.

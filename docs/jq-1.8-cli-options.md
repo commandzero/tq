@@ -1,3 +1,10 @@
+---
+type: Reference
+title: "jq 1.8.x CLI option inventory"
+description: "Classification of jq command-line options and tq behavior."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # jq 1.8.x CLI option inventory
 
 This table records which jq command-line options `tq` accepts. It comes from jq

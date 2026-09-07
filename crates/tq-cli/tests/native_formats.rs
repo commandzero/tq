@@ -145,8 +145,8 @@ fn proxy_stream_inputs_accepts_a_detected_empty_json_sequence() {
         tq_cli::run_with_io(command, &mut b"\x1e".as_slice(), &mut output, &mut errors).unwrap(),
         tq_cli::ExitStatus::Success
     );
-    assert!(output.is_empty());
-    assert!(errors.is_empty());
+    assert_eq!(output, Vec::<u8>::new());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn json_sequence_input_stream_records_share_the_query_cursor() {
         let mut errors = Vec::new();
         tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap();
         assert_eq!(output, expected.as_bytes(), "{query}");
-        assert!(errors.is_empty());
+        assert_eq!(errors, Vec::<u8>::new());
     }
 }
 
@@ -183,7 +183,7 @@ fn json_sequence_input_stream_errors_reset_paths_between_recoverable_failures() 
     )
     .unwrap();
     assert_eq!(output, b"[[0],1]\n[\"Invalid numeric literal at line 1, column 11 (need RS to resync)\",[1]]\n[\"Invalid numeric literal at line 1, column 13 (need RS to resync)\",[]]\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn delimited_output_preserves_header_across_sources_and_proxy_bytes_with_one_bud
             assert!(output.starts_with(b"a,b\n1,2\ninvalid\n"));
             assert!(output.len() <= 19);
         }
-        assert!(errors.is_empty());
+        assert_eq!(errors, Vec::<u8>::new());
     }
 }
 
@@ -283,7 +283,7 @@ fn json_sequence_input_stream_slurp_is_one_input_in_the_shared_cursor() {
         )
         .unwrap();
         assert_eq!(output, expected.as_bytes(), "{query}");
-        assert!(errors.is_empty());
+        assert_eq!(errors, Vec::<u8>::new());
     }
 }
 
@@ -310,7 +310,7 @@ fn json_sequence_input_stream_errors_are_values_on_the_remaining_cursor() {
     )
     .unwrap();
     assert_eq!(output, b"[[[0],1],[\"Invalid numeric literal at line 1, column 11 (need RS to resync)\",[1]],[[],2]]\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn json_sequence_input_frame_limit_is_fatal_even_with_a_later_separator() {
     let mut output = Vec::new();
     let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut Vec::new()).unwrap_err();
     assert_eq!(error.status(), tq_cli::ExitStatus::Resource);
-    assert!(output.is_empty());
+    assert_eq!(output, Vec::<u8>::new());
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn seq_selects_json_sequences_and_rejects_conflicts_in_either_order() {
     let mut errors = Vec::new();
     tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap();
     assert_eq!(output, b"\x1e{\"a\":1}\n\x1e{\"b\":2}\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -443,7 +443,7 @@ fn json_sequence_output_uses_json_formatting_controls() {
     let mut errors = Vec::new();
     tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap();
     assert_eq!(output, b"\x1e{\n \"a\": \"\\u00e9\"\n}\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -476,7 +476,7 @@ fn null_input_runs_once_but_leaves_documents_available_to_input_functions() {
             tq_cli::ExitStatus::Success
         );
         assert_eq!(String::from_utf8(output).unwrap(), expected, "{query}");
-        assert!(errors.is_empty());
+        assert_eq!(errors, Vec::<u8>::new());
     }
 }
 
@@ -491,7 +491,7 @@ fn event_input_resets_paths_for_each_json_document() {
         String::from_utf8(output).unwrap(),
         "[[\"a\"],1]\n[[\"a\"]]\n[[\"b\"],2]\n[[\"b\"]]\n"
     );
-    assert!(errors.is_empty());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -505,7 +505,7 @@ fn event_input_retains_jq_error_value_mapping() {
         String::from_utf8(output).unwrap(),
         "[[0],1]\n[\"Invalid numeric literal at line 1, column 8\",[1]]\n"
     );
-    assert!(errors.is_empty());
+    assert_eq!(errors, Vec::<u8>::new());
 }
 
 #[test]
@@ -534,7 +534,7 @@ fn json_sequence_input_functions_raise_parse_failures() {
     let mut errors = Vec::new();
     let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap_err();
     assert_eq!(error.status(), tq_cli::ExitStatus::Runtime);
-    assert!(output.is_empty());
+    assert_eq!(output, Vec::<u8>::new());
     assert!(
         errors.is_empty(),
         "query errors must not also emit recovery warnings"
@@ -627,7 +627,7 @@ fn json_sequence_input_keeps_prior_warnings_before_a_fatal_resource_error() {
     let mut errors = Vec::new();
     let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap_err();
     assert_eq!(error.status(), tq_cli::ExitStatus::Resource);
-    assert!(output.is_empty());
+    assert_eq!(output, Vec::<u8>::new());
     assert!(
         String::from_utf8(errors)
             .unwrap()

@@ -1,3 +1,10 @@
+---
+type: Reference
+title: "Format compatibility"
+description: "Supported native formats, framing, and conversion behavior."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # Format compatibility
 
 This table compares native document input and output. It does not count formats

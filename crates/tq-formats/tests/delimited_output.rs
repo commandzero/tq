@@ -35,7 +35,7 @@ fn delimited_output_enforces_row_field_and_count_limits_before_header() {
                 .to_string()
                 .contains("resource limit exceeded")
         );
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, Vec::<u8>::new());
     }
 }
 
@@ -52,7 +52,7 @@ fn delimited_output_validates_the_whole_row_before_committing_bytes() {
                 .write_result(&mut bytes, &serde_json::from_str::<Value>(invalid).unwrap())
                 .is_err()
         );
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, Vec::<u8>::new());
         assert!(output.finish(&mut bytes).is_err());
     }
     for invalid in [r#"{"a":1,"b":2}"#, r#"{"a":{}}"#] {

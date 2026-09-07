@@ -673,28 +673,26 @@ impl<W: Write> TranscodeConsumer<W> {
             } => (parent_key.clone(), *depth, *wrote_member, *header_published),
             _ => return Err(TranscodeError::Structure("member outside direct object")),
         };
-        if !header_published {
-            if let Some(ref key) = parent_key {
-                let parent = index
-                    .checked_sub(1)
-                    .ok_or(TranscodeError::Structure("nested object without parent"))?;
-                self.prepare_direct_member_line(parent)?;
-                self.output.write_all(render_key(key).as_bytes())?;
-                self.output.write_all(b":")?;
-                let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
-                    return Err(TranscodeError::Structure(
-                        "nested object parent is not direct",
-                    ));
-                };
-                *wrote_member = true;
-                let Frame::DirectObject {
-                    header_published, ..
-                } = &mut self.frames[index]
-                else {
-                    unreachable!()
-                };
-                *header_published = true;
-            }
+        if !header_published && let Some(ref key) = parent_key {
+            let parent = index
+                .checked_sub(1)
+                .ok_or(TranscodeError::Structure("nested object without parent"))?;
+            self.prepare_direct_member_line(parent)?;
+            self.output.write_all(render_key(key).as_bytes())?;
+            self.output.write_all(b":")?;
+            let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
+                return Err(TranscodeError::Structure(
+                    "nested object parent is not direct",
+                ));
+            };
+            *wrote_member = true;
+            let Frame::DirectObject {
+                header_published, ..
+            } = &mut self.frames[index]
+            else {
+                unreachable!()
+            };
+            *header_published = true;
         }
         let nested_header = parent_key.is_some();
         if wrote_member || nested_header {

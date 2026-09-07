@@ -1,3 +1,10 @@
+---
+type: Contract
+title: "jq compatibility"
+description: "jq semantics, supported behavior, and deliberate compatibility differences."
+generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+---
+
 # jq compatibility
 
 `tq` follows jq 1.8.x semantics for the features it supports. That includes
@@ -110,7 +117,7 @@ small:
 | `regex.unsupported-lookaround` | result/exit/error | the linear-time regex engine rejects Oniguruma look-around |
 
 Features outside the MVP report a stable unsupported or deferred status.
-Labels and breaks are deferred. Regex and UTC date built-ins work without extra
+Lexical labels and breaks support early exit from generators. Regex and UTC date built-ins work without extra
 permissions. Environment, clock, local-timezone, and input-metadata access need
 capability flags. See [regex, date, and platform compatibility](jq-regex-date-platform.md)
 for engine and release-host differences.

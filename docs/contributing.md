@@ -1,8 +1,14 @@
+---
+type: Guide
+title: "Contributing to tq"
+description: "Contributor setup, validation, and development requirements."
+generated: { by: codex/gpt-6, at: 2026-09-07T18:25:59Z }
+---
+
 # Contributing to tq
 
-The unpublished test and benchmark tooling requires Rust 1.88 or newer. The
-published crates retain their Rust 1.87 minimum. Use the repository's pinned
-toolchain for preflight checks.
+All workspace crates require Rust 1.88 or newer. Use the repository's pinned
+toolchain for preflight checks. Run all commands below from the repository root.
 
 Run the repository preflight before submitting a change:
 
@@ -10,8 +16,19 @@ Run the repository preflight before submitting a change:
 ./scripts/preflight.sh
 ```
 
-The script checks formatting, compilation, lint rules, workspace tests, and all
-OpenSpec specifications. New automation should call this script.
+The script checks documentation, shell scripts, repository governance tests,
+Rust formatting, compilation, lint rules, workspace tests, and main OpenSpec
+specifications. New automation should call this script.
+
+For tool installation, documentation-only checks, and PR OpenSpec completion,
+see [contributor checks](contributor-checks.md).
+Use the [release playbook](releasing.md) for coordinated publication and the
+[changelog policy](changelog-policy.md) for new history entries.
+
+Shared standards come from the repo-man bundle selected by the nearest workspace
+AGENTS.md. In this workspace it starts at
+`/Users/reno/Development/commandzero/repo-man/index.md`.
+For another checkout, configure the parent AGENTS.md with the local bundle path.
 
 The campaign runner handles compatibility, benchmark, and fuzz programs:
 

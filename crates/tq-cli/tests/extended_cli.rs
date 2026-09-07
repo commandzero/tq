@@ -61,7 +61,7 @@ fn label_break_stops_upstream_iteration_after_the_first_result() {
     );
     assert_eq!(output.code, 0);
     assert_eq!(output.stdout, b"1\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, Vec::<u8>::new());
 }
 
 #[test]
@@ -93,14 +93,14 @@ fn try_only_catches_an_explicitly_grouped_pipeline() {
     );
     assert_eq!(caught.code, 0);
     assert_eq!(caught.stdout, b"\"x\"\n");
-    assert!(caught.stderr.is_empty());
+    assert_eq!(caught.stderr, Vec::<u8>::new());
 
     let uncaught = tq(
         &["-ijson", "-ojson", "-c", "try .[] | error(\"x\")"],
         b"[1,2]",
     );
     assert_eq!(uncaught.code, 5);
-    assert!(uncaught.stdout.is_empty());
+    assert_eq!(uncaught.stdout, Vec::<u8>::new());
     assert!(String::from_utf8_lossy(&uncaught.stderr).contains("runtime error: x"));
 }
 
@@ -136,7 +136,7 @@ fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(output.stdout, expected.as_bytes());
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, Vec::<u8>::new());
     }
 
     let deep = format!("{}0{}", "[".repeat(64), "]".repeat(64));
@@ -160,7 +160,7 @@ fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
     let projected = tq(&["-ijson", "-ojson", "-c", "--stream", "recurse"], b"1");
     assert_eq!(projected.code, 0);
     assert_eq!(projected.stdout, b"[[],1]\n[]\n1\n");
-    assert!(projected.stderr.is_empty());
+    assert_eq!(projected.stderr, Vec::<u8>::new());
 }
 
 #[test]
@@ -1037,7 +1037,7 @@ fn sort_by_accepts_a_comma_generator_as_one_argument() {
         br#"[{"a":1,"b":1},{"a":1,"b":2}]
 "#
     );
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, Vec::<u8>::new());
 }
 
 #[cfg(unix)]

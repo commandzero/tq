@@ -1,3 +1,10 @@
+---
+type: Reference
+title: "Requirements traceability"
+description: "Routes from specification scenarios to implementation and test evidence."
+generated: { by: codex/gpt-6, at: 2026-09-07T06:22:04Z }
+---
+
 # Requirements traceability
 
 This index covers the eight `build-tq-mvp` capability specifications. The
@@ -39,7 +46,7 @@ Release review checks the following without suppressing failures:
    digested incrementally rather than accumulated as a complete result vector.
 4. The natural-large explicit stream stays within its 128 MiB RSS envelope;
    blocking/document cases retain their observed outcome even when unfavorable.
-5. Stable and Rust 1.87 workspace tests, strict OpenSpec validation, Clippy,
+5. Stable workspace tests and a Rust 1.88 compilation check, strict OpenSpec validation, Clippy,
    rustdoc, and all six bounded fuzz targets pass.
 
 ## Native format architecture
