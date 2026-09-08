@@ -4,13 +4,16 @@ use std::{collections::BTreeMap, fs, io, io::Write, path::Path, time::Duration};
 
 use thiserror::Error;
 
+mod comparison;
+pub use comparison::compare_manual;
+
 use super::{
     CapabilityCounts, CapabilityDisposition, CaseAdapter, CaseClassification, CaseReport,
     CaseStatus, CompatibilityCase, CompatibilityCatalog, CompatibilityReport, ContractKind,
     CoverageCount, ExecutableConfig, FinalStatus, FixtureFormat, Invocation, InvocationMode,
     NormalizationError, ObservationState, ProcessError, SemanticDiff, ToolIdentity, ToolKind,
     ToolObservation, discover_tool, encode_hex, normalize_jq, normalize_raw,
-    normalize_toon_sequence, normalize_yq, run_process,
+    normalize_toon_sequence, normalize_yq, run_process_with_environment,
 };
 
 /// Compatibility campaign size.
@@ -220,10 +223,11 @@ fn run_case(
                 repository_root,
                 timeout,
                 fixture,
+                false,
             )?);
         }
     }
-    let semantic_diffs = semantic_diffs(&observations);
+    let semantic_diffs = semantic_diffs(&observations, case.expected.compare_stderr);
     Ok(CaseReport {
         id: case.id.clone(),
         capabilities: case.capabilities.clone(),
@@ -239,6 +243,7 @@ fn execute(
     repository_root: &Path,
     timeout: Duration,
     fixture: ExecutionFixture,
+    json_output: bool,
 ) -> Result<ToolObservation, io::Error> {
     let ExecutionFixture {
         format: input_format,
@@ -247,6 +252,7 @@ fn execute(
     } = fixture;
     let mut temporary = None;
     let mut args = adapter.args.clone();
+    let module_directory = materialize_json_module(case, repository_root, &mut args)?;
     if pin_input_format {
         match identity.tool {
             ToolKind::Jq => {}
@@ -271,7 +277,10 @@ fn execute(
     {
         args.extend(["--output-format=json".to_owned(), "--indent=0".to_owned()]);
     }
-    args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
+    if !adapter.omit_query {
+        args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
+    }
+    args.extend(adapter.trailing_args.iter().cloned());
     let stdin = match case.invocation_mode {
         InvocationMode::Stdin => bytes,
         InvocationMode::NullInput => Vec::new(),
@@ -283,18 +292,22 @@ fn execute(
             Vec::new()
         }
     };
-    let process = run_process(&Invocation {
-        executable: identity.path.clone(),
-        args,
-        stdin,
-        timeout,
-        current_dir: Some(repository_root.to_owned()),
-    });
+    let process = run_process_with_environment(
+        &Invocation {
+            executable: identity.path.clone(),
+            args,
+            stdin,
+            timeout,
+            current_dir: Some(repository_root.to_owned()),
+        },
+        &adapter.env,
+    );
     let outcome = match process {
         Ok(outcome) => outcome,
         Err(error) => return Ok(harness_error(identity.tool, input_format, &error)),
     };
     drop(temporary);
+    drop(module_directory);
     let normalized = match case.expected.contract {
         ContractKind::RawBytes | ContractKind::ExitStatus => {
             Ok(normalize_raw(identity.tool, &outcome))
@@ -302,6 +315,10 @@ fn execute(
         ContractKind::ResultSequence | ContractKind::Error => match identity.tool {
             ToolKind::Jq => normalize_jq(&outcome),
             ToolKind::Yq => normalize_yq(&outcome),
+            ToolKind::Tq if json_output => normalize_jq(&outcome).map(|mut value| {
+                value.error_class = super::classify_process(ToolKind::Tq, &outcome);
+                value
+            }),
             ToolKind::Tq => normalize_toon_sequence(&outcome),
         },
     };
@@ -327,6 +344,30 @@ fn execute(
             &outcome,
         )),
     }
+}
+
+fn materialize_json_module(
+    case: &CompatibilityCase,
+    repository_root: &Path,
+    args: &mut [String],
+) -> io::Result<Option<tempfile::TempDir>> {
+    if case.id != "manual.modules.import-json" {
+        return Ok(None);
+    }
+    let directory = tempfile::tempdir()?;
+    let value: serde_json::Value = crate::fixture_data::read(
+        &repository_root.join("tests/fixtures/manual-modules/data.toon"),
+    )?;
+    fs::write(
+        directory.path().join("data.json"),
+        serde_json::to_vec(&value)?,
+    )?;
+    for argument in args {
+        if argument == "tests/fixtures/manual-modules" {
+            *argument = directory.path().display().to_string();
+        }
+    }
+    Ok(Some(directory))
 }
 
 fn fixture_bytes(case: &CompatibilityCase, repository_root: &Path) -> Result<Vec<u8>, io::Error> {
@@ -404,7 +445,7 @@ fn normalization_error(
     }
 }
 
-fn semantic_diffs(observations: &[ToolObservation]) -> Vec<SemanticDiff> {
+fn semantic_diffs(observations: &[ToolObservation], compare_stderr: bool) -> Vec<SemanticDiff> {
     let executed = observations
         .iter()
         .filter(|observation| observation.state == ObservationState::Executed)
@@ -421,6 +462,9 @@ fn semantic_diffs(observations: &[ToolObservation]) -> Vec<SemanticDiff> {
             }
             if left.raw_stdout_hex != right.raw_stdout_hex {
                 fields.push("raw stdout");
+            }
+            if compare_stderr && left.stderr_hex != right.stderr_hex {
+                fields.push("raw stderr");
             }
             if left.exit_code != right.exit_code {
                 fields.push("exit code");

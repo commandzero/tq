@@ -91,7 +91,7 @@ query. SIGINT is cooperative and a closed downstream pipe is successful.
 ## Reviewed differences
 
 The current jq 1.8.2, yq, and tq report is
-`tests/compatibility/reviews/coverage-v1.json`. Its jq/tq difference allowlist is
+`tests/compatibility/reviews/coverage-v1.toon`. Its jq/tq difference allowlist is
 small:
 
 | Case | Difference | Reason |

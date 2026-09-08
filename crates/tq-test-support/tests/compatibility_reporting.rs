@@ -2,7 +2,6 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     path::PathBuf,
 };
 
@@ -116,10 +115,9 @@ fn baseline_candidate_requires_exact_explicit_case_reviews() {
 #[test]
 fn published_full_report_has_only_reviewed_jq_target_divergences() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/compatibility/reviews/coverage-v1.json");
+        .join("../../tests/compatibility/reviews/coverage-v1.toon");
     let report: CompatibilityReport =
-        serde_json::from_slice(&fs::read(path).expect("published compatibility report"))
-            .expect("valid compatibility report");
+        tq_test_support::fixture_data::read(&path).expect("valid compatibility report");
     let actual = report
         .cases
         .iter()

@@ -1057,8 +1057,16 @@ second \n line with "quotes""""}"#,
 
     #[test]
     fn json5_document_decodes_esdiag_saved_object_fixture() {
+        let fixture = tq_toon::decode_to_value(
+            include_bytes!("../../../tests/fixtures/esdiag-saved-object.toon").as_slice(),
+            tq_core::SourceId::new(0),
+            tq_toon::DecoderConfig::default(),
+        )
+        .unwrap()
+        .to_json()
+        .unwrap();
         let documents = decode_json5(
-            include_bytes!("../../../tests/fixtures/esdiag-saved-object.json"),
+            fixture["source_text"].as_str().unwrap().as_bytes(),
             "esdiag-saved-object.json",
             DecodeOptions::default(),
         )

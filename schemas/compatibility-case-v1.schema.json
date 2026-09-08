@@ -152,6 +152,9 @@
         "error_class": {
           "type": "string",
           "minLength": 1
+        },
+        "compare_stderr": {
+          "type": "boolean"
         }
       }
     }
@@ -172,6 +175,17 @@
         },
         "supported": {
           "type": "boolean"
+        },
+        "trailing_args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "omit_query": {
+          "type": "boolean"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
         },
         "note": {
           "type": "string"

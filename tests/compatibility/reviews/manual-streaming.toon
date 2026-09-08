@@ -1,0 +1,29 @@
+schema_version: 2
+section: streaming
+source: jq-manual/streaming.md
+examples[6]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  streaming.stream-form-error-literal,24,inline,"[\"error message\"]","null",new,Exact concrete error-form representation; null is a representative input because the literal ignores input.,manual.streaming.stream-error-literal
+  streaming.truncate-table,30,table,"truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]])","1",new,Exact table query and input.,manual.streaming.truncate-stream
+  streaming.fromstream-table,41,table,"fromstream(1|truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]]))","null",new,Exact table query and input.,manual.streaming.fromstream-truncate
+  streaming.tostream-table,51,table,. as $dot|fromstream($dot|tostream)|.==$dot,"[0,[1,{\"a\":1},{\"b\":2}]]",new,Exact table query and input.,manual.streaming.tostream-roundtrip
+  streaming.witness.manual.streaming.stream-option,16,witness,.,"[\"a\",[\"b\"]]",covered,Executable witness for source passage streaming.stream-option-prose.,manual.streaming.stream-option
+  streaming.witness.manual.streaming.stream-errors-form,24,witness,.,"[1, bad, 2]\n",covered,Executable witness for source passage streaming.stream-form-error.,manual.streaming.stream-errors-form
+coverage_summary:
+  total_entries: 13
+  new_example_entries: 4
+  adapted_entries: 3
+  covered_entries: 3
+  non_executable_entries: 3
+  fenced_blocks[0]:
+  fenced_blocks_with_case_ids[0]:
+harness_limitations[2]: The --stream prose uses a 1GB example; the case uses the exact small nested-array stream shown later in the section.,"The error-form prose uses a generic message placeholder; exact parser wording is implementation-dependent, so the malformed-input --stream-errors case compares result structure through the compatibility harness."
+coverage_notes[9]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  streaming.stream-option-prose,16,prose-option,.,"[\"a\",[\"b\"]]",adapted,The --stream capability is exercised with the manual's small nested-array example in place of the prose's impractical 1GB input.,manual.streaming.stream-option
+  streaming.stream-input-shape,18,prose-syntax,"[<path>, <leaf-value>]",null,non-executable,"<path> and <leaf-value> are grammar placeholders, not a complete jq filter or concrete fixture.",null
+  streaming.streamed-form,22,prose-example,.,"[\"a\",[\"b\"]]",new,"The exact concrete streamed form is produced by the --stream case: [[0],\"a\"], [[1,0],\"b\"], [[1,0]], [[1]].",manual.streaming.stream-option
+  streaming.stream-form-path-leaf,24,prose-syntax,"[<path>, <leaf-value>]",null,non-executable,The path and leaf-value placeholders describe a form but do not provide executable syntax.,null
+  streaming.stream-form-path-end,24,prose-syntax,"[<path>]",null,non-executable,<path> is a grammar placeholder; the concrete end markers are covered by the streamed-form case.,null
+  streaming.stream-form-error,24,prose-example,.,"[1, bad, 2]\n",adapted,"The manual uses the generic [\"error message\"] placeholder; a malformed JSON stream provides an executable witness for --stream-errors.",manual.streaming.stream-errors-form
+  streaming.truncate-description,28,prose-definition,"truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]])","1",covered,The exact table case exercises consuming a number and truncating that many path elements.,manual.streaming.truncate-stream
+  streaming.fromstream-description,39,prose-definition,"fromstream(1|truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]]))","null",covered,The exact table case exercises reconstructing values from the truncated stream expression.,manual.streaming.fromstream-truncate
+  streaming.tostream-description,49,prose-definition,. as $dot|fromstream($dot|tostream)|.==$dot,"[0,[1,{\"a\":1},{\"b\":2}]]",covered,The roundtrip table case exercises tostream producing the streamed form and fromstream reconstructing the original.,manual.streaming.tostream-roundtrip

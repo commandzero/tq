@@ -6,7 +6,7 @@ The cases cover syntax, Unicode scalar offsets, optional captures, match order,
 flags, splitting and substitution, UTC arrays, epoch ranges, environment shape,
 and input metadata. The 2026-08-10 exploratory run used Apple jq 1.7.1 on arm64
 macOS 26.5. The full campaign uses the repository's pinned jq 1.8.x binary and
-records its exact identity in `tests/compatibility/reviews/coverage-v1.json`.
+records its exact identity in `tests/compatibility/reviews/coverage-v1.toon`.
 
 ## Selected dependencies and limits
 
@@ -41,7 +41,7 @@ weekday fields.
 `--allow-platform`; otherwise evaluation fails without consulting the clock or
 timezone. Local results use the release host's configured timezone and are
 classified as platform-dependent in
-`tests/platform/regex-date-platform-v1.json`.
+`tests/platform/regex-date-platform-v1.toon`.
 Run the UTC boundary and ambient-policy checks locally during PR preflight:
 
 ```console

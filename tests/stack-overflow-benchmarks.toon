@@ -1,0 +1,310 @@
+[50]:
+  - query: .name
+    input:
+      name: lambda
+      id: 1
+      nested:
+        text: My status
+  - query: .name
+    input:
+      name: Google
+      id: 1
+  - query: ".[] | select(.location == \"Stockholm\") | .name"
+    input:
+      FOO:
+        name: Donald
+        location: Stockholm
+      BAR:
+        name: Walt
+        location: Stockholm
+      BAZ:
+        name: Jack
+        location: Whereever
+  - query: ".users[] | \"\\(.first) \\(.last)\""
+    input:
+      users[2]{first,last}:
+        Stevie,Wonder
+        Michael,Jackson
+  - query: ".[] | select(.Names[] == \"foo_data\") | .Id"
+    input[4]:
+      - Id: a1
+        Names[2]: condescending_jones,loving_hoover
+      - Id: a2
+        Names[1]: foo_data
+      - Id: a3
+        Names[1]: jovial_wozniak
+      - Id: a4
+        Names[1]: bar_data
+  - query: length
+    input[2]{cid,l10n}:
+      49,cent million
+      50,100 millions
+  - query: .
+    input:
+      name: jq
+      platform: macOS
+  - query: "{\"login\": .login, \"id\": .id}"
+    input:
+      login: dmaxfield
+      id: 7449977
+      email: d@example.test
+  - query: "keys | sort | .[]"
+    input:
+      email: madireddy@test.com
+      id: "2323"
+      name: test
+      date: "02-03-2014-13:41"
+      type: application
+  - query: ".[] | select((.processedBarsVolume <= 5) and .processedBars > 0)"
+    input[2]{processedBarsVolume,processedBars}:
+      4,2
+      8,3
+  - query: ".resource[] | select(.username == \"myemail@hotmail.com\") | .id"
+    input:
+      resource[2]{username,id}:
+        myemail@hotmail.com,42
+        other@example.com,7
+  - query: ".[] | .value"
+    input[2]:
+      - value1: 200
+        value:
+          aaa:
+            value1: v1
+          bbb:
+            value1: v1
+      - status: 200
+        value:
+          aaa:
+            value3: v3
+          ddd:
+            value3: v3
+  - query: "map({\"code\": .code, \"name\": .name, \"level\": .level, \"country\": .country})"
+    input[4]{code,name,level,country}:
+      NSW,New South Wales,state,AU
+      AB,Alberta,province,CA
+      ABD,Aberdeenshire,council area,GB
+      AK,Alaska,state,US
+  - query: .
+    input:
+      repos[2]{name,stars}:
+        jq,1
+        tq,2
+  - query: .shipping
+    input:
+      shipping:
+        local: true
+        us: true
+        us_rate:
+          amount: "0.00"
+          currency: USD
+          symbol: $
+  - query: .c
+    input:
+      a: 1
+      b: 2
+      c: "{\"id\":\"9ee\",\"parent\":\"abc\"}"
+  - query: ".[0].City == .[1].City"
+    input[2]:
+      - People[2]: John,Bryan
+        City: Boston
+        State: MA
+      - People[2]: Bryan,John
+        State: MA
+        City: Boston
+  - query: ".issues[] | {\"key\": .key, \"status\": .fields.status.name, \"assignee\": .fields.assignee.emailAddress}"
+    input:
+      issues[2]:
+        - key: SEA-739
+          fields:
+            status:
+              name: Open
+            assignee:
+              emailAddress: null
+        - key: SEA-738
+          fields:
+            status:
+              name: Resolved
+            assignee:
+              emailAddress: user2@mycompany.com
+  - query: ".Actions[] | .properties.other"
+    input:
+      Actions[2]:
+        - value: "1"
+          properties:
+            name: abc
+            age: "2"
+            other: test1
+        - value: "2"
+          properties:
+            name: def
+            age: "3"
+            other: test2
+  - query: "{\"channel\": (.profile_type + \".\" + .channel)}"
+    input:
+      channel: youtube
+      profile_type: video
+      member_key: hello
+  - query: .components.rows | sort_by(.id)
+    input:
+      components:
+        rows[2]{id,name}:
+          kjalajsdjf,Value1
+          CHARTS,Charts
+  - query: ".address = \"abcde\""
+    input:
+      address: old
+      city: Boston
+  - query: ".[] | [.id, .name]"
+    input[3]{name,id,email}:
+      George,12,george@domain.example
+      Jack,18,jack@domain.example
+      Joe,19,joe@domain.example
+  - query: "keys[]"
+    input:
+      host1:
+        ip: 10.1.2.3
+      host2:
+        ip: 10.1.2.2
+      host3:
+        ip: 10.1.18.1
+  - query: ".example[\"sub-example\"][] | .name"
+    input:
+      example:
+        "sub-example"[3]{name,tag}:
+          123-345,100
+          234-456,100
+          4a7-a07a5,100
+  - query: .
+    input:
+      name: jq
+      platform: windows
+  - query: "map({\"name\": .name, \"email\": .email})"
+    input[2]{name,email,extra}:
+      John,john@company.com,1
+      Brad,brad@company.com,2
+  - query: ".data.messages += [{\"date\":\"2010-01-07T19:55:99.999Z\",\"xml\":\"new.xml\",\"status\":\"OKKK\",\"message\":\"added\"}]"
+    input:
+      report: "1.0"
+      data:
+        date: 2010-01-07
+        messages[2]{date,xml,status,message}:
+          "2010-01-07T19:58:42.949Z",old.xml,OK,loaded
+          "2010-01-07T20:22:46.949Z",old2.xml,NOK,duplicated
+  - query: ".[] | .number | tostring"
+    input[2]{number,string}:
+      3,three
+      7,seven
+  - query: ".[0]"
+    input[3]{a}:
+      x
+      y
+      z
+  - query: .key
+    input:
+      key: value
+  - query: ".[]"
+    input[3]{original_name,changed_name}:
+      pdf_convert,pdf_convert_1
+      video_encode,video_encode_1
+      video_transcode,video_transcode_1
+  - query: ".result | select(.property_history != null) | .property_history | map(select(.event_name == \"Sold\"))[0].date"
+    input:
+      result:
+        property_history[2]{event_name,date}:
+          Listed,2020-01-01
+          Sold,2020-02-02
+  - query: ".theList[] | select(.id == 2 or .id == 4)"
+    input:
+      theList[4]{id,name}:
+        1,Horst
+        2,Fritz
+        3,Walter
+        4,Gerhart
+  - query: .geo != null
+    input:
+      geo:
+        lat: 1
+        lon: 2
+      name: place
+  - query: ".[] | .aux[] | .[\"def\"]"
+    input[1]:
+      - id: 123
+        name: John
+        aux[1]{abc,def}:
+          random,I want this
+        blah: 23.11
+  - query: .
+    input:
+      name: John
+      age: 31
+      city: New York
+  - query: map(.a)
+    input[2]:
+      - a: green
+        b: white
+      - a: red
+        c: purple
+  - query: .status
+    input:
+      status: ok
+      hostname: 0b0b495a46db
+      "component-status"[2]{"status-code",component,status}:
+        200,Service1,OK
+        200,Service2,OK
+  - query: .response.text
+    input:
+      requestType: POST
+      response:
+        size: 78
+        text: "{\"recordID\":123,\"title\":\"Hello World\",\"content\":\"Lorem ipsum...\"}"
+  - query: ".[].AssetId"
+    input[3]{AssetId,Name}:
+      14462955,Cultural Item
+      114385498,Redspybot
+      29715011,American Cowboy
+  - query: ".[] | .name"
+    input[3]:
+      - name: one
+        imageTags[2]: latest,stable
+      - name: two
+        imageTags[2]: foo,latest
+      - name: three
+        imageTags[0]:
+  - query: .
+    input:
+      name: jq
+      color: terminal
+  - query: ".[].group"
+    input[2]{timestamp,group,uid}:
+      1448369447295,employees,elgalu
+      1448369447296,services,pacts
+  - query: .USD.price
+    input:
+      OPEN.BTC:
+        volume24: 0.932166
+        price: 0.09995
+        updated: "2016-05-04T03:03:29.000Z"
+      USD:
+        price: 1
+  - query: ".[].username"
+    input[2]{username,name}:
+      jdoe,John Doe
+      jadoe,Jane Doe
+  - query: ".fruit[] | select(. == \"orange\")"
+    input:
+      fruit[5]: apple,orange,pomegranate,apricot,mango
+  - query: ".[] | select(.name == \"foo\")"
+    input[3]{name,id}:
+      foo,1
+      bar,2
+      foo,3
+  - query: ".response[] | select(has(\"text\")) | .text"
+    input:
+      response[3]:
+        - text: first
+        - status: 200
+        - text: second
+  - query: ".[].user, .[].date, .[].email"
+    input[2]{user,date,email}:
+      danielrvt,11/10/1988,myemail@domain.com
+      second,12/11/1989,second@domain.com

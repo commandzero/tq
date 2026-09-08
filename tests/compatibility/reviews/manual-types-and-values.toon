@@ -1,0 +1,45 @@
+schema_version: 2
+section: types-and-values
+source: jq-manual/types-and-values.md
+examples[23]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  types.table-001,32,table,"[.user, .projects[]]","{\"user\":\"stedolan\", \"projects\": [\"jq\", \"wikiflow\"]}",new,Exact table query and input.,manual.types.table-001
+  types.table-002,38,table,"[ .[] | . * 2]","[1, 2, 3]",new,Exact table query and input.,manual.types.table-002
+  types.table-003,107,table,"{user, title: .titles[]}","{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}",new,Exact table query and input.,manual.types.table-003
+  types.table-004,114,table,"{(.user): .titles}","{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}",new,Exact table query and input.,manual.types.table-004
+  types.table-005,126,table,.. | .a?,"[[{\"a\":1}]]",new,Exact table query and input.,manual.types.table-005
+  types.fence-001,52,fenced,"{foo: .bar}","{\"bar\":42,\"baz\":43}",new,Exact runnable fenced query; input is the prose fixture immediately following the block.,manual.types.fence-object-field
+  types.fence-002,58,fenced,"{user: .user, title: .title}","{\"user\":\"stedolan\",\"title\":\"JQ Primer\",\"id\":1,\"content\":\"example\"}",adapted,Exact runnable query; representative object fixture synthesized from the prose-required user/title/id/content fields.,manual.types.fence-object-selection
+  types.fence-008,97,fenced,"\"f o o\" as $foo | \"b a r\" as $bar | {$foo, $bar:$foo}","null",new,Exact runnable variable-key query; the input is irrelevant and represented as null. tq uses an equivalent static-key spelling because its object-key parser does not accept the jq shorthand form.,manual.types.fence-variable-key
+  types.inline-001,18,inline,"42","null",new,Runnable literal-value example; null is a representative input because the filter ignores input.,manual.types.inline-literal-number
+  types.inline-002,24,inline,"[]","null",new,Runnable empty-array constructor example; null is a representative input.,manual.types.inline-empty-array
+  types.inline-003,26,inline,"[1,2,3]","null",new,Runnable array literal example; null is a representative input.,manual.types.inline-array-literal
+  types.inline-005,26,inline,"[.foo, .bar, .baz]","{\"foo\":1,\"bar\":2,\"baz\":3}",adapted,Exact runnable query; representative object fixture synthesized because the prose names fields without giving a concrete input.,manual.types.inline-array-fields
+  types.inline-006,26,inline,"[.items[].name]","{\"items\":[{\"name\":\"alpha\"},{\"name\":\"beta\"}]}",adapted,Exact runnable query; representative nested-items fixture synthesized because the prose names the shape without giving values.,manual.types.inline-array-names
+  types.inline-009,44,inline,"{}","null",new,Runnable empty-object constructor syntax; null is a representative input.,manual.types.inline-empty-object
+  types.inline-011,46,inline,"{\"a\": 42, \"b\": 17}","null",new,Runnable JSON object literal example; null is a representative input.,manual.types.inline-object-literal
+  types.inline-012,48,inline,"{a:42, b:17}","null",new,Runnable identifier-like-key object example; null is a representative input.,manual.types.inline-object-identifier-keys
+  types.inline-013,48,inline,"{(\"a\"+\"b\"):59}","null",new,Runnable parenthesized key-expression example; null is a representative input.,manual.types.inline-object-expression-key
+  types.inline-014,62,inline,"{user, title}","{\"user\":\"stedolan\",\"title\":\"JQ Primer\",\"id\":1,\"content\":\"example\"}",adapted,Exact runnable shortcut query; representative object fixture synthesized from the prose-described fields.,manual.types.inline-object-shorthand
+  types.inline-015,120,inline,..,"{\"a\":[1]}",adapted,Runnable recursive-descent expression; representative nested object fixture synthesized because no concrete input is supplied.,manual.types.inline-recursive-descent
+  types.inline-016,122,inline,.,"{\"a\":1}",adapted,Runnable current-value filter mentioned in the recursive-descent prose; representative object fixture synthesized.,manual.types.inline-current-value
+  types.inline-017,122,inline,recurse,"{\"a\":1}",adapted,Runnable zero-argument recurse example; representative object fixture synthesized from the prose description.,manual.types.inline-recurse-builtin
+  types.inline-018,122,inline,..a,"[[{\"a\":1}]]",new,Documented negative syntax example; exact query is retained as a required compile-error test.,manual.types.inline-invalid-recursive
+  types.inline-019,122,inline,.. | .a,"null",adapted,Runnable replacement expression; null is a representative input because the prose gives no concrete fixture.,manual.types.inline-recursive-pipe
+coverage_notes[14]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  types.fence-003,66,fenced-fixture,null,"{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}",covered,Input-only fixture reused by the following exact object-construction queries.,null
+  types.fence-004,72,fenced,"{user, title: .titles[]}","{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}",covered,Exact fenced query and fixture are covered by the matching table case.,manual.types.table-003
+  types.fence-005,78,fenced-output,null,null,covered,Output-only block is produced by the preceding exact query case.,manual.types.table-003
+  types.fence-006,85,fenced,"{(.user): .titles}","{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}",covered,Exact fenced query and fixture are covered by the matching table case.,manual.types.table-004
+  types.fence-007,91,fenced-output,null,null,covered,Output-only block is produced by the preceding exact query case.,manual.types.table-004
+  types.fence-009,103,fenced-output,null,null,covered,Output-only block is produced by the preceding exact query case.,manual.types.fence-variable-key
+  types.inline-004,26,inline,"[]","null",covered,Repeated empty-array constructor syntax is covered by the exact case.,manual.types.inline-empty-array
+  types.inline-007,28,inline,"[1,2,3]","null",covered,Repeated array expression is covered by the exact literal-array case.,manual.types.inline-array-literal
+  types.inline-008,30,inline,"[X]",null,non-executable,"X is an explicit placeholder for an unspecified filter, so this is not a complete executable query.",null
+  types.inline-010,46,inline,"{}","null",covered,Repeated empty-object constructor syntax is covered by the exact case.,manual.types.inline-empty-object
+  types.inline-020,122,inline,.. | .a?,"[[{\"a\":1}]]",covered,Exact optional-field recursive query is covered by the matching table case.,manual.types.table-005
+  types.inline-021,122,inline,//,null,non-executable,"This is XPath notation used only for comparison, not a complete jq filter.",null
+  types.inline-022,124,inline,path(EXP),null,non-executable,EXP is an explicit placeholder rather than a complete executable expression.,null
+  types.inline-023,124,inline,?,null,non-executable,The optional operator is shown as syntax only and is not a complete filter by itself.,null
+coverage_evidence[2]{note_id,case_id}:
+  types.fence-003,manual.types.table-003
+  types.fence-003,manual.types.table-004

@@ -3,6 +3,7 @@
 mod baseline;
 mod case;
 mod discovery;
+mod manual;
 mod normalization;
 mod process;
 mod report;
@@ -19,14 +20,18 @@ pub use case::{
     InvocationMode, ToolAdapters, load_catalog,
 };
 pub use discovery::{ExecutableConfig, ToolDiscoveryError, ToolIdentity, ToolKind, discover_tool};
+pub use manual::{manual_case_ids, read_manual_ledger};
 pub use normalization::{
     ErrorClass, NormalizationError, NormalizationNote, NormalizedObservation, classify_process,
     normalize_jq, normalize_raw, normalize_toon_sequence, normalize_yq,
 };
-pub use process::{Invocation, ProcessError, ProcessOutcome, ProcessStatus, run_process};
+pub use process::{
+    Invocation, ProcessError, ProcessOutcome, ProcessStatus, run_process,
+    run_process_with_environment,
+};
 pub use report::{
     CapabilityCounts, CapabilityDisposition, CaseReport, CompatibilityReport, CoverageCount,
     FinalStatus, ObservationState, REPORT_SCHEMA_VERSION, SemanticDiff, ToolObservation,
     encode_hex,
 };
-pub use runner::{CampaignProfile, RunnerError, run_campaign};
+pub use runner::{CampaignProfile, RunnerError, compare_manual, run_campaign};

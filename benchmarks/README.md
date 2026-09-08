@@ -99,7 +99,7 @@ cargo run --quiet -p tq-test-support --bin tq-stack-overflow-scenarios -- \
   --patch /tmp/stack-overflow.patch
 ```
 
-The generator reads `tests/stack-overflow-benchmarks.json` and emits a patch. It
+The generator reads `tests/stack-overflow-benchmarks.toon` and emits a patch. It
 does not modify the scenario directory.
 
 For an explicit reproducible run, first build tq in release mode and pass the

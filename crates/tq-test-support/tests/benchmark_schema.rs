@@ -209,7 +209,10 @@ fn compatibility_ids(root: &Path) -> BTreeSet<String> {
     for entry in fs::read_dir(root.join("tests/compatibility/cases")).expect("compatibility cases")
     {
         let path = entry.expect("case entry").path();
-        for line in fs::read_to_string(path).expect("case file").lines() {
+        for line in tq_test_support::fixture_data::case_lines(&path)
+            .expect("case file")
+            .lines()
+        {
             let case: Value = serde_json::from_str(line).expect("case JSON");
             ids.insert(case["id"].as_str().expect("case ID").to_owned());
         }

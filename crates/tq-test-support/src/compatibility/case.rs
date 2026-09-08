@@ -1,6 +1,6 @@
 //! Typed compatibility-case catalog loading.
 
-use std::{fs, io, path::Path};
+use std::{collections::BTreeMap, fs, io, path::Path};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -94,6 +94,15 @@ pub struct CaseAdapter {
     /// Tool-specific CLI arguments before the query.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Arguments after the query, such as values for `--args`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trailing_args: Vec<String>,
+    /// Commands such as `--help` and `--from-file` need no query argument.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub omit_query: bool,
+    /// Per-process environment overrides, without mutating the test environment.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
     /// Whether the case applies to this tool.
     #[serde(default)]
     pub supported: bool,
@@ -136,6 +145,9 @@ pub struct ExpectedContract {
     pub baseline: BaselinePolicy,
     /// Expected stable error class.
     pub error_class: Option<String>,
+    /// Compare stderr bytes for observable I/O such as `debug` and `stderr`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compare_stderr: bool,
 }
 
 /// Output contract.
@@ -194,7 +206,7 @@ pub enum CatalogError {
     DuplicateId(String),
 }
 
-/// Loads every `.jsonl` file in lexical order and rejects duplicate IDs.
+/// Loads TOON case arrays and legacy JSONL files, rejecting duplicate IDs.
 ///
 /// # Errors
 ///
@@ -203,7 +215,10 @@ pub fn load_catalog(directory: &Path) -> Result<CompatibilityCatalog, CatalogErr
     let mut paths = fs::read_dir(directory)?
         .map(|entry| entry.map(|value| value.path()))
         .collect::<Result<Vec<_>, _>>()?;
-    paths.retain(|path| path.extension().is_some_and(|ext| ext == "jsonl"));
+    paths.retain(|path| {
+        path.extension()
+            .is_some_and(|ext| ext == "toon" || ext == "jsonl")
+    });
     paths.sort();
 
     let mut cases = Vec::new();
@@ -216,7 +231,12 @@ pub fn load_catalog(directory: &Path) -> Result<CompatibilityCatalog, CatalogErr
         digest.update(path.file_name().unwrap_or_default().as_encoded_bytes());
         digest.update([0]);
         digest.update(&contents);
-        for (index, line) in contents.split(|byte| *byte == b'\n').enumerate() {
+        let records = if path.extension().is_some_and(|ext| ext == "toon") {
+            crate::fixture_data::case_lines(&path)?.into_bytes()
+        } else {
+            contents
+        };
+        for (index, line) in records.split(|byte| *byte == b'\n').enumerate() {
             if line.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }

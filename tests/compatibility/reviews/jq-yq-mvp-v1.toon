@@ -1,0 +1,184 @@
+schema_version: 1
+reviewed_at: "2026-08-01T17:55:00Z"
+catalog_identity:
+  path: tests/compatibility/cases
+  bytes: 77678
+  sha256: aa58227330d93adb9859a759a09fcd433b9a3d31850e89f61b5967089045a0bc
+tools[2]:
+  - tool: jq
+    path: jq
+    version: jq-1.8.2-8-g603db3f
+    executable:
+      path: jq
+      bytes: 527680
+      sha256: d25a7231a8cd3ab48ecaab2854d56161860c95d8e3ff067dff0065814218691e
+    build_features[1]: "--with-oniguruma --disable-maintainer-mode --disable-shared --enable-static"
+  - tool: yq
+    path: yq
+    version: "yq (https://github.com/mikefarah/yq/) version v4.53.2"
+    executable:
+      path: yq
+      bytes: 12996258
+      sha256: b5f92791237c5da19094b7453428218374017bb114fca740dc5ff6980d8d4952
+    build_features[5]: # Use the '-p/--input-format' flag to specify a format type.,"-p, --input-format string               [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|lua|l|ini|i] parse format for input. (default \"auto\")","-o, --output-format string              [auto|a|yaml|y|kyaml|ky|json|j|props|p|csv|c|tsv|t|xml|x|base64|uri|toml|hcl|h|shell|s|lua|l|ini|i] output format type. (default \"auto\")","-c, --yaml-compact-seq-indent           Use compact sequence indentation where '- ' is considered part of the indentation.","--yaml-fix-merge-anchor-to-spec     Fix merge anchor to match YAML spec. Will default to true in late 2025"
+summary:
+  "jq-target-divergence": 56
+  "common-agreement": 54
+  unsupported: 22
+  "cli-adaptation": 10
+  deferred: 12
+entries[154]{case_id,catalog_classification,review_classification,jq_yq_difference,jq_state,yq_state,rationale}:
+  builtin.add,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.arrays,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.booleans,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.empty,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.error,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.flatten,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.has,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.in,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.iterables,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.keys,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.keys-unsorted,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.length,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.map,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.map-values,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.max,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.min,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.nulls,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.numbers,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.objects,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.range,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.reverse,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.scalars,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.select,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.sort,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.sort-by,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.strings,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.tonumber,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.tostring,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  builtin.type,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.unique,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.unique-by,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.utf8bytelength,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  builtin.values,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  cli.ambiguous-json-yaml,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.arg,cli,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.argjson,cli,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.argtoon,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.detect-order,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.exit-empty,cli,cli-adaptation,true,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.exit-false,cli,cli-adaptation,false,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.file,cli,cli-adaptation,false,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.invalid-option,cli,cli-adaptation,true,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.join-output,cli,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.late-failure,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.null-input,cli,cli-adaptation,false,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.override-json,cli,cli-adaptation,false,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.override-toon,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.override-yaml,cli,cli-adaptation,false,unsupported,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.raw-input,cli,unsupported,false,executed,unsupported,yq has no jq-compatible raw-input mode
+  cli.raw-output,cli,cli-adaptation,false,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.raw-slurp,cli,unsupported,false,executed,unsupported,yq -s means split output rather than slurp input
+  cli.sequence-framing,cli,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.stdin,cli,cli-adaptation,false,executed,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  cli.stream,cli,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.stream-errors,cli,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.strict-toon,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.structured-slurp,cli,unsupported,false,executed,unsupported,yq -s means split output rather than slurp input
+  cli.unframed-single,cli,unsupported,false,unsupported,unsupported,The yq adapter does not provide this jq-compatible capability.
+  cli.yaml-multi-document,cli,cli-adaptation,false,unsupported,executed,The tools expose different command-line contracts; each applicable observation is retained without redefining tq semantics.
+  common.cardinality.many,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.cardinality.one-null,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.cardinality.zero-empty,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  common.identity.array,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.identity.false,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.identity.null,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.identity.number,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.identity.object-order,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.identity.string,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  common.identity.true,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  composition.comma,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  composition.downstream-multiplicity,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  composition.nested-iteration,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  composition.parentheses,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  composition.pipe,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  construction.array,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  construction.object-computed-key,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  construction.object-duplicate-key,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  construction.object-explicit,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  construction.object-shorthand,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  deferred.dates,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.environment,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.foreach,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.function,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.include,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.interpolation,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.labels,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.modules,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.platform-io,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.recursive-descent,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.reduce,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  deferred.regex,deferred,deferred,false,executed,unsupported,The capability is explicitly outside the MVP and remains a visible marker.
+  error.after-output,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  error.empty,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  error.explicit,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  error.optional-suppression,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  error.source-location,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  error.try-catch,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  navigation.computed-field,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.field.missing,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.field.present,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.index.negative,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.index.out-of-range,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.index.zero,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.invalid-index-type,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  navigation.iteration.array,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.iteration.object,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.optional.type,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  navigation.slice.middle,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  numeric.arithmetic-invalidates-literal,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.division-by-zero,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.exponent-input,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  numeric.large-exact-identity,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  numeric.negative-zero,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.ordinary,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  numeric.out-of-envelope-digits,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.out-of-envelope-exponent,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-digits-max,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-digits-over,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-exponent-max,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-exponent-over,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-index-max,jq-target,unsupported,false,executed,unsupported,yq attempts unbounded index materialization for this policy probe
+  numeric.policy-index-over,jq-target,unsupported,false,executed,unsupported,yq attempts unbounded index materialization for this policy probe
+  numeric.policy-nonfinite-result,jq-target,unsupported,false,executed,unsupported,The yq adapter does not provide this jq-compatible capability.
+  numeric.policy-overflow,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-scientific-output,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  numeric.policy-underflow,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  numeric.precision-boundary,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  operator.add.overloads,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  operator.alternative,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  operator.arithmetic.numeric,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  operator.arithmetic.type-error,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  operator.boolean.and-short-circuit,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  operator.boolean.not,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  operator.boolean.or-short-circuit,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  operator.comparison.deep-equality,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  operator.comparison.total-order,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  operator.conditional.falsey,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  operator.conditional.truthy,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  update.add,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  update.alternative,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  update.assignment,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  update.divide,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  update.invalid-lvalue,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  update.multi-path,jq-target,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  update.multiply,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  update.pipe,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  update.subtract,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  variable.binding,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  variable.cli-json,cli,unsupported,false,executed,unsupported,yq has no jq-compatible --argjson option
+  variable.cli-string,cli,unsupported,false,executed,unsupported,yq has no jq-compatible --arg option
+  variable.cli-toon,cli,unsupported,false,unsupported,unsupported,yq does not accept TOON-valued arguments
+  variable.generator-binding,common,common-agreement,false,executed,executed,jq and yq produce the same normalized ordered result and failure contract for this case.
+  variable.shadowing,common,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.
+  variable.unknown,jq-target,jq-target-divergence,true,executed,executed,jq 1.8.x is authoritative for the jq-compatible runtime; the differing yq observation is retained as comparative evidence.

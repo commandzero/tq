@@ -247,13 +247,12 @@ fn load_scenarios(directory: &Path) -> Result<Vec<ScenarioRecord>, Box<dyn std::
         .collect::<Result<Vec<_>, _>>()?;
     paths.retain(|path| {
         path.extension()
-            .is_some_and(|extension| extension == "json")
+            .is_some_and(|extension| extension == "toon")
     });
     paths.sort();
     let mut records = Vec::with_capacity(paths.len());
     for path in paths {
-        let bytes = fs::read(&path)?;
-        let scenario: Scenario = serde_json::from_slice(&bytes)?;
+        let scenario: Scenario = tq_test_support::fixture_data::read(&path)?;
         let input = serde_json::to_vec(&scenario.benchmark.input)?;
         records.push(ScenarioRecord {
             scenario,
@@ -699,4 +698,14 @@ fn bytes_to_mib(value: Option<f64>) -> f64 {
 
 fn escape_table(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stored_toon_scenarios_load_without_losing_entries() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/stack-overflow");
+        assert_eq!(super::load_scenarios(&path).unwrap().len(), 50);
+    }
 }

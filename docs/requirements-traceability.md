@@ -13,7 +13,7 @@ path, and verifies that each named symbol or review heading exists.
 | Capability spec | Scenarios | Primary automated evidence | Release evidence or manual check |
 | --- | ---: | --- | --- |
 | `benchmark-corpus` | 16 | `crates/tq-test-support/tests/corpus_*.rs` | Corpus source descriptors under `tests/corpus/`; generated corpus data stays ignored |
-| `cross-tool-compatibility` | 20 | `crates/tq-test-support/tests/compatibility_*.rs` | `tests/compatibility/reviews/coverage-v1.json`; exact jq/tq divergence allowlist test |
+| `cross-tool-compatibility` | 20 | `crates/tq-test-support/tests/compatibility_*.rs` | `tests/compatibility/reviews/coverage-v1.toon`; exact jq/tq divergence allowlist test |
 | `jq-core-language` | 37 | `crates/tq-core/src/` unit/property tests and compatibility cases | Full compatibility report; unsupported/deferred capability matrix entries |
 | `performance-benchmarks` | 26 | `crates/tq-test-support/tests/benchmark_*.rs` | Reviewed date-named report under `benchmarks/`; local collection data stays ignored |
 | `query-runtime` | 21 | `crates/tq-core/src/` bytecode, compiler, evaluator, plan, and VM tests | Parser/bytecode/VM fuzz targets; `--explain-json` CLI tests |

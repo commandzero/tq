@@ -1,6 +1,7 @@
 //! Timeout-safe subprocess execution and capture.
 
 use std::{
+    collections::BTreeMap,
     io::{self, Read, Write},
     path::PathBuf,
     process::{Command, Stdio},
@@ -76,10 +77,23 @@ pub enum ProcessError {
 /// Returns an I/O or capture-worker error. Nonzero exits, signals, and timeouts
 /// are successful observations rather than harness errors.
 pub fn run_process(invocation: &Invocation) -> Result<ProcessOutcome, ProcessError> {
+    run_process_with_environment(invocation, &BTreeMap::new())
+}
+
+/// Runs a subprocess with environment overrides confined to that child.
+///
+/// # Errors
+///
+/// Returns the same process and capture errors as [`run_process`].
+pub fn run_process_with_environment(
+    invocation: &Invocation,
+    environment: &BTreeMap<String, String>,
+) -> Result<ProcessOutcome, ProcessError> {
     let started = Instant::now();
     let mut command = Command::new(&invocation.executable);
     command
         .args(&invocation.args)
+        .envs(environment)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
