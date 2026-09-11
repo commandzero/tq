@@ -103,6 +103,9 @@ pub struct CaseAdapter {
     /// Per-process environment overrides, without mutating the test environment.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+    /// Environment path values resolved relative to the fixture repository root.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_paths: BTreeMap<String, std::path::PathBuf>,
     /// Whether the case applies to this tool.
     #[serde(default)]
     pub supported: bool,
@@ -148,6 +151,55 @@ pub struct ExpectedContract {
     /// Compare stderr bytes for observable I/O such as `debug` and `stderr`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compare_stderr: bool,
+    /// Explicit tq-only assertions for truthful CLI contracts whose output is
+    /// intentionally not jq-identical, such as help and build metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tq_contract: Option<TqContract>,
+}
+
+/// Named tq-native CLI identity contract.
+///
+/// These are deliberately fixed contracts rather than an arbitrary assertion
+/// language. They are valid only for the corresponding no-query CLI option.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TqContract {
+    /// `tq --version` identity output.
+    Version,
+    /// `tq --build-configuration` target output.
+    BuildConfiguration,
+    /// `tq --help` documented option output.
+    Help,
+}
+
+impl TqContract {
+    /// Returns whether this contract is attached to its corresponding CLI
+    /// identity invocation.
+    #[must_use]
+    pub fn is_valid_for_case(self, case: &CompatibilityCase) -> bool {
+        if case.expected.contract != ContractKind::RawBytes
+            || case.fixture.format != FixtureFormat::None
+            || case.invocation_mode != InvocationMode::NullInput
+            || !case.query.is_empty()
+        {
+            return false;
+        }
+        let adapter = &case.adapters.tq;
+        if !adapter.supported
+            || !adapter.omit_query
+            || !adapter.trailing_args.is_empty()
+            || !adapter.env.is_empty()
+            || !adapter.env_paths.is_empty()
+            || adapter.args.len() != 1
+        {
+            return false;
+        }
+        match self {
+            Self::Version => matches!(adapter.args[0].as_str(), "--version" | "-V"),
+            Self::BuildConfiguration => adapter.args[0] == "--build-configuration",
+            Self::Help => matches!(adapter.args[0].as_str(), "--help" | "-h"),
+        }
+    }
 }
 
 /// Output contract.

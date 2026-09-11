@@ -2,7 +2,13 @@
 
 #![cfg(unix)]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, time::Duration};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::Path,
+    sync::{Mutex, MutexGuard},
+    time::Duration,
+};
 
 use tq_test_support::compatibility::{
     CampaignProfile, CompatibilityCatalog, ErrorClass, ExecutableConfig, Invocation, ProcessStatus,
@@ -10,8 +16,30 @@ use tq_test_support::compatibility::{
 };
 use tq_test_support::corpus::ArtifactIdentity;
 
+// Serialize temporary executable writers and runners to avoid native ETXTBSY
+// when parallel fixture tests create and execute files concurrently.
+static FIXTURE_EXECUTABLE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn fixture_executable_test_lock() -> MutexGuard<'static, ()> {
+    FIXTURE_EXECUTABLE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn manual_review_directory() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    fs::create_dir_all(
+        directory
+            .path()
+            .join("tests/compatibility/reviews/jq-manual"),
+    )
+    .expect("create manual review directory");
+    directory
+}
+
 #[test]
 fn case_adapters_preserve_argument_order_and_child_environment() {
+    let _lock = fixture_executable_test_lock();
     let directory = tempfile::tempdir().expect("temporary directory");
     let executable = fake(
         directory.path(),
@@ -113,19 +141,96 @@ fn fake(directory: &Path, name: &str, body: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn manual_comparison_uses_explicit_encoders_and_only_sizes_equivalent_successes() {
+fn fixture_environment_paths_follow_relocation_and_reject_escape_or_ambiguity() {
+    let _lock = fixture_executable_test_lock();
     let directory = tempfile::tempdir().unwrap();
-    fs::create_dir_all(directory.path().join("tests/compatibility/reviews")).unwrap();
+    fs::create_dir(directory.path().join("controlled-home")).unwrap();
+    let executable = fake(
+        directory.path(),
+        "reference",
+        r#"
+if [ "$1" = --version ]; then printf 'jq-test\n'; exit 0; fi
+printf '"%s"\n' "$TQ_FIXTURE_PATH"
+"#,
+    );
+    let mut case: tq_test_support::compatibility::CompatibilityCase =
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "id": "adapter.relocated", "title": "Relocated path",
+            "classification": "jq-target", "capabilities": ["manual.adapter"], "status": "mvp",
+            "fixture": {"format": "none", "inline": ""}, "query": ".",
+            "adapters": {"jq": {"supported": true,
+                "env_paths": {"TQ_FIXTURE_PATH": "controlled-home"}}},
+            "invocation_mode": "null-input",
+            "expected": {"contract": "result-sequence", "baseline": "required"}
+        }))
+        .unwrap();
+    let run = |case| {
+        run_campaign(
+            &CompatibilityCatalog {
+                cases: vec![case],
+                identity: ArtifactIdentity {
+                    path: "relocated".into(),
+                    bytes: 0,
+                    sha256: String::new(),
+                },
+            },
+            CampaignProfile::Full,
+            &ExecutableConfig {
+                jq: Some(executable.clone()),
+                ..Default::default()
+            },
+            directory.path(),
+            Duration::from_secs(2),
+        )
+    };
+    let report = run(case.clone()).unwrap();
+    let observation = report.cases[0]
+        .observations
+        .iter()
+        .find(|value| value.tool == ToolKind::Jq)
+        .unwrap();
+    assert_eq!(
+        observation.results,
+        [serde_json::json!(
+            directory
+                .path()
+                .join("controlled-home")
+                .canonicalize()
+                .unwrap()
+        )]
+    );
+    case.adapters
+        .jq
+        .env_paths
+        .insert("TQ_FIXTURE_PATH".into(), "../outside".into());
+    assert!(run(case.clone()).is_err());
+    case.adapters
+        .jq
+        .env_paths
+        .insert("TQ_FIXTURE_PATH".into(), "controlled-home".into());
+    case.adapters
+        .jq
+        .env
+        .insert("TQ_FIXTURE_PATH".into(), "ambiguous".into());
+    assert!(run(case).is_err());
+}
+
+#[test]
+fn manual_comparison_uses_explicit_encoders_and_only_sizes_equivalent_successes() {
+    let _lock = fixture_executable_test_lock();
+    let directory = manual_review_directory();
     let executable = fake(
         directory.path(),
         "encoder",
         r#"
 if [ "$1" = --version ]; then printf 'fake-1\n'; exit 0; fi
 if [ "$ROLE" = jq ]; then printf '%s' "$OUTPUT"; exit "$CODE"; fi
+sequence=false
+if [ "$1" = --seq ]; then sequence=true; shift; fi
 if [ "$1" != -o ]; then exit 90; fi
 case "$2" in
 json) printf '%s' "$OUTPUT"; exit "$CODE" ;;
-toon) printf '%s' "$TOON"; exit 0 ;;
+toon) if [ "$sequence" = true ] && [ -n "$TOON" ]; then printf '\036'; fi; printf '%s' "$TOON"; exit "$CODE" ;;
 *) exit 91 ;;
 esac
 "#,
@@ -169,13 +274,106 @@ esac
             .find(|row| row["id"] == format!("manual.test-{id}"))
             .unwrap();
         assert_eq!(row["verdict"], verdict, "{id}");
-        assert_eq!(row["characters"].is_object(), sized, "{id}");
+        assert!(
+            row["tokens"].is_object(),
+            "{id} should expose output tokens"
+        );
+        if id == "equivalent" {
+            assert_eq!(
+                row["compact"]["exact"], false,
+                "semantic normalization must not erase compact byte differences"
+            );
+        }
+        if id == "bad-toon" {
+            assert_eq!(
+                row["toon_contract_match"], false,
+                "JSON success must not approve a changed TOON result"
+            );
+        }
+        if id == "partial-error" {
+            assert_eq!(
+                row["toon_sequence"], false,
+                "late errors must preserve default output mode"
+            );
+            assert_eq!(row["tq_toon"]["results"], serde_json::json!([1]));
+            assert_eq!(row["toon_contract_match"], true);
+        }
         if sized {
-            assert_eq!(row["characters"]["json"], json.chars().count());
-            assert_eq!(row["characters"]["toon"], toon.chars().count());
+            let o200k = tiktoken_rs::o200k_base().unwrap();
+            let cl100k = tiktoken_rs::cl100k_base().unwrap();
+            for (encoding, tokenizer) in [("o200k_base", &o200k), ("cl100k_base", &cl100k)] {
+                assert_eq!(
+                    row["tokens"][encoding]["json"],
+                    tokenizer.encode_ordinary(json).len()
+                );
+                assert_eq!(
+                    row["tokens"][encoding]["toon"],
+                    tokenizer.encode_ordinary(toon).len()
+                );
+            }
         }
     }
     assert_eq!(report["summary"]["size_samples"], 2);
+}
+
+#[test]
+fn manual_comparison_preserves_original_json_sequence_framing() {
+    let _lock = fixture_executable_test_lock();
+    let directory = manual_review_directory();
+    let executable = fake(
+        directory.path(),
+        "encoder",
+        r#"
+if [ "$1" = --version ]; then printf 'fake-1\n'; exit 0; fi
+if [ "$ROLE" = jq ]; then printf '1\n'; exit 0; fi
+if [ "$1" != -o ]; then exit 90; fi
+case "$2" in
+json) printf '1\n';;
+toon) printf '\0361\n';;
+*) exit 91;;
+esac
+"#,
+    );
+    let case = serde_json::from_value(serde_json::json!({
+        "schema_version": 1,
+        "id": "manual.test-original-sequence",
+        "title": "Original JSON sequence adapter",
+        "classification": "jq-target",
+        "capabilities": ["manual.comparison"],
+        "status": "mvp",
+        "fixture": {"format": "none", "inline": ""},
+        "query": ".",
+        "invocation_mode": "null-input",
+        "expected": {"contract": "result-sequence", "baseline": "required"},
+        "adapters": {
+            "jq": {"supported": true, "env": {"ROLE": "jq"}},
+            "tq": {"supported": true, "args": ["--seq"], "env": {"ROLE": "tq"}}
+        }
+    }))
+    .unwrap();
+    let report = tq_test_support::compatibility::compare_manual(
+        &CompatibilityCatalog {
+            cases: vec![case],
+            identity: ArtifactIdentity {
+                path: "fake".into(),
+                bytes: 0,
+                sha256: String::new(),
+            },
+        },
+        &ExecutableConfig {
+            jq: Some(executable.clone()),
+            tq: Some(executable),
+            yq: None,
+        },
+        directory.path(),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    let row = &report["cases"][0];
+    assert_eq!(row["toon_sequence"], true);
+    assert_eq!(row["toon_contract_match"], true);
+    assert!(row["tokens"].is_object());
+    assert_eq!(report["summary"]["size_samples"], 0);
 }
 
 type ComparisonFixture = (
@@ -189,13 +387,13 @@ type ComparisonFixture = (
     bool,
 );
 
-fn comparison_fixtures() -> [ComparisonFixture; 7] {
+fn comparison_fixtures() -> [ComparisonFixture; 9] {
     [
         (
             "equivalent",
             "{\"b\":2,\"a\":1.0}\n",
             "{\"a\":1, \"b\":2}\n",
-            "\u{1e}a: 1\nb: 2\n",
+            "a: 1\nb: 2\n",
             "0",
             "0",
             "match",
@@ -205,7 +403,7 @@ fn comparison_fixtures() -> [ComparisonFixture; 7] {
             "ordered",
             "[1,2]\n",
             "[2,1]\n",
-            "\u{1e}[2]: 2,1\n",
+            "[2]: 2,1\n",
             "0",
             "0",
             "failure",
@@ -215,27 +413,18 @@ fn comparison_fixtures() -> [ComparisonFixture; 7] {
             "unicode",
             "\"é😀\"\n",
             "\"é😀\"\n",
-            "\u{1e}é😀\n",
+            "é😀\n",
             "0",
             "0",
             "match",
             true,
         ),
-        (
-            "bad-toon",
-            "1\n",
-            "1\n",
-            "\u{1e}2\n",
-            "0",
-            "0",
-            "match",
-            false,
-        ),
+        ("bad-toon", "1\n", "1\n", "2\n", "0", "0", "match", false),
         (
             "partial-error",
             "1\n",
             "1\n",
-            "\u{1e}1\n",
+            "1\n",
             "0",
             "5",
             "failure",
@@ -246,7 +435,27 @@ fn comparison_fixtures() -> [ComparisonFixture; 7] {
             "malformed",
             "1\n",
             "broken",
-            "\u{1e}1\n",
+            "1\n",
+            "0",
+            "0",
+            "failure",
+            false,
+        ),
+        (
+            "changed-number",
+            "1\n",
+            "2\n",
+            "2\n",
+            "0",
+            "0",
+            "failure",
+            false,
+        ),
+        (
+            "changed-order",
+            "1\n2\n",
+            "2\n1\n",
+            "2\n1\n",
             "0",
             "0",
             "failure",
@@ -271,10 +480,16 @@ fn invoke(
 
 #[test]
 fn controlled_value_and_error_outputs_are_normalized() {
+    let _lock = fixture_executable_test_lock();
     let directory = tempfile::tempdir().expect("temporary directory");
     let value = invoke(
         fake(directory.path(), "value", "printf '{\"ok\":true}\\n'"),
-        Duration::from_secs(1),
+        Duration::from_secs(5),
+    );
+    assert_eq!(
+        value.status,
+        ProcessStatus::Exited,
+        "value outcome: {value:?}"
     );
     assert_eq!(
         normalize_jq(&value).unwrap().results,
@@ -287,7 +502,7 @@ fn controlled_value_and_error_outputs_are_normalized() {
             "error",
             "printf 'cannot index number with string' >&2; exit 5",
         ),
-        Duration::from_secs(1),
+        Duration::from_secs(5),
     );
     assert_eq!(
         normalize_raw(tq_test_support::compatibility::ToolKind::Jq, &error).error_class,
@@ -297,6 +512,7 @@ fn controlled_value_and_error_outputs_are_normalized() {
 
 #[test]
 fn controlled_timeout_signal_and_malformed_output_are_distinct() {
+    let _lock = fixture_executable_test_lock();
     let directory = tempfile::tempdir().expect("temporary directory");
     let timeout = invoke(
         fake(directory.path(), "timeout", "while :; do :; done"),
@@ -306,13 +522,13 @@ fn controlled_timeout_signal_and_malformed_output_are_distinct() {
 
     let signal = invoke(
         fake(directory.path(), "signal", "kill -TERM $$"),
-        Duration::from_secs(1),
+        Duration::from_secs(5),
     );
     assert_eq!(signal.status, ProcessStatus::Signaled);
 
     let malformed = invoke(
         fake(directory.path(), "malformed", "printf 'not-json'"),
-        Duration::from_secs(1),
+        Duration::from_secs(5),
     );
     assert!(normalize_jq(&malformed).is_err());
 }

@@ -155,6 +155,13 @@
         },
         "compare_stderr": {
           "type": "boolean"
+        },
+        "tq_contract": {
+          "enum": [
+            "version",
+            "build-configuration",
+            "help"
+          ]
         }
       }
     }
@@ -186,6 +193,11 @@
         "env": {
           "type": "object",
           "additionalProperties": { "type": "string" }
+        },
+        "env_paths": {
+          "type": "object",
+          "description": "Existing repository-relative paths resolved for the child environment; cannot overlap env keys.",
+          "additionalProperties": { "type": "string", "minLength": 1 }
         },
         "note": {
           "type": "string"

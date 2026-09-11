@@ -79,6 +79,9 @@ pub struct ToolIdentity {
     pub executable: ArtifactIdentity,
     /// Build-feature observations; empty until tool-specific probes add them.
     pub build_features: Vec<String>,
+    /// Hashes of dynamically linked runtime libraries, when the platform exposes them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtime_libraries: Vec<ArtifactIdentity>,
 }
 
 /// Stable discovery and identity failures.
@@ -173,6 +176,7 @@ pub fn discover_tool(
     };
     let version = String::from_utf8_lossy(version_bytes).trim().to_owned();
     let build_features = capture_build_features(kind, &path, repository_root);
+    let runtime_libraries = capture_runtime_libraries(kind, &path, repository_root);
     Ok(Some(ToolIdentity {
         tool: kind,
         path: path.clone(),
@@ -184,7 +188,85 @@ pub fn discover_tool(
             sha256,
         },
         build_features,
+        runtime_libraries,
     }))
+}
+
+fn capture_runtime_libraries(
+    kind: ToolKind,
+    path: &Path,
+    repository_root: &Path,
+) -> Vec<ArtifactIdentity> {
+    if kind != ToolKind::Jq {
+        return Vec::new();
+    }
+    #[cfg(target_os = "linux")]
+    let probe = ("ldd", vec![path.display().to_string()]);
+    #[cfg(target_os = "macos")]
+    let probe = ("otool", vec!["-L".to_owned(), path.display().to_string()]);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let _ = (path, repository_root);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    return Vec::new();
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let Ok(outcome) = run_process(&Invocation {
+        executable: PathBuf::from(probe.0),
+        args: probe.1,
+        stdin: Vec::new(),
+        timeout: Duration::from_secs(5),
+        current_dir: Some(repository_root.to_owned()),
+    }) else {
+        return Vec::new();
+    };
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if outcome.status != ProcessStatus::Exited || outcome.exit_code != Some(0) {
+        return Vec::new();
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let paths = runtime_paths(&outcome.stdout);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    paths
+        .into_iter()
+        .filter_map(|path| artifact_identity(&path))
+        .collect()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn runtime_paths(output: &[u8]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for (line_number, line) in String::from_utf8_lossy(output).lines().enumerate() {
+        #[cfg(target_os = "linux")]
+        let _ = line_number;
+        #[cfg(target_os = "linux")]
+        let candidate = line
+            .split_once("=>")
+            .map_or(line, |(_, rest)| rest)
+            .split_whitespace()
+            .next();
+        #[cfg(target_os = "macos")]
+        let candidate = (line_number > 0)
+            .then(|| line.split_whitespace().next())
+            .flatten();
+        if let Some(candidate) = candidate.filter(|path| path.starts_with('/')) {
+            let path = PathBuf::from(candidate);
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+    }
+    paths
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn artifact_identity(path: &Path) -> Option<ArtifactIdentity> {
+    let canonical = fs::canonicalize(path).ok()?;
+    let bytes = fs::read(&canonical).ok()?;
+    Some(ArtifactIdentity {
+        path: canonical.display().to_string(),
+        bytes: u64::try_from(bytes.len()).ok()?,
+        sha256: crate::compatibility::encode_hex(&Sha256::digest(&bytes)),
+    })
 }
 
 fn capture_build_features(kind: ToolKind, path: &Path, repository_root: &Path) -> Vec<String> {

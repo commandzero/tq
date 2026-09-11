@@ -43,6 +43,44 @@ fn jq_accepts_multiline_structured_values_as_one_result() {
 }
 
 #[test]
+fn semantic_numbers_never_use_runtime_projection_or_binary64_rounding() {
+    let normalized = |text: &str| normalize_jq(&outcome(text.as_bytes())).unwrap().results;
+    for (left, right) in [
+        ("1e1234567890", "2e1234567890"),
+        ("-1e1234567890", "-2e1234567890"),
+        ("1e-1234567890", "2e-1234567890"),
+        ("1e9223372036854775808", "1e9223372036854775809"),
+        ("1e-9223372036854775808", "1e-9223372036854775809"),
+        ("0.1", "0.01"),
+        ("0.01", "1"),
+        ("0.00123", "123"),
+        ("9007199254740992", "9007199254740993"),
+        ("0.123456789012345678901", "0.123456789012345678902"),
+    ] {
+        assert_ne!(
+            normalized(left),
+            normalized(right),
+            "distinct decimals: {left}, {right}"
+        );
+    }
+    for (left, right) in [
+        ("1", "1.000"),
+        ("1000", "1e3"),
+        ("-0", "0.000"),
+        ("1e1234567890", "10e1234567889"),
+        ("0.1", "1e-1"),
+        ("0.01", "1e-2"),
+        ("0.00123", "123e-5"),
+    ] {
+        assert_eq!(
+            normalized(left),
+            normalized(right),
+            "equivalent decimals: {left}, {right}"
+        );
+    }
+}
+
+#[test]
 fn yq_preserves_document_sequence_and_records_yaml_boundary() {
     let normalized = normalize_yq(&outcome(b"a: 1\n---\na: 2\n")).unwrap();
     assert_eq!(normalized.results, [json!({"a": 1}), json!({"a": 2})]);
@@ -150,5 +188,24 @@ fn tq_unsupported_range_and_policy_diagnostics_have_distinct_classes() {
     assert_eq!(
         normalize_raw(ToolKind::Tq, &unsupported_option).error_class,
         Some(ErrorClass::CliUsage)
+    );
+}
+
+#[test]
+fn jq_exit_four_preserves_an_earlier_runtime_diagnostic() {
+    let mut process = outcome(b"");
+    process.exit_code = Some(4);
+    process.stderr =
+        b"jq: error (at <stdin>:1): string (\"x\") and number (1) cannot be added\n".to_vec();
+    let normalized = normalize_raw(ToolKind::Jq, &process);
+    assert_eq!(normalized.exit_code, Some(4));
+    assert_eq!(normalized.error_class, Some(ErrorClass::RuntimeTypePath));
+    assert_eq!(normalized.stderr, process.stderr);
+    process
+        .stderr
+        .extend_from_slice(b"jq: parse error: unfinished JSON term\n");
+    assert_eq!(
+        normalize_raw(ToolKind::Jq, &process).error_class,
+        Some(ErrorClass::InputParse)
     );
 }

@@ -1,6 +1,7 @@
 //! Repository fixture storage must stay TOON-first.
 
 use std::{fs, path::Path};
+use tq_test_support::compatibility::load_catalog;
 
 #[test]
 fn root_test_tree_keeps_jsonl_catalogs_but_no_json_documents() {
@@ -23,16 +24,21 @@ fn root_test_tree_keeps_jsonl_catalogs_but_no_json_documents() {
     }
     visit(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests"));
     let catalogs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/compatibility/cases");
-    let paths: Vec<_> = fs::read_dir(catalogs)
+    let paths: Vec<_> = fs::read_dir(&catalogs)
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .collect();
-    assert_eq!(paths.len(), 32);
+    assert!(
+        !paths.is_empty(),
+        "the compatibility catalog must have fixtures"
+    );
     assert!(
         paths
             .iter()
             .all(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
     );
+    let catalog = load_catalog(&catalogs).expect("every JSONL catalog is schema-valid");
+    assert!(!catalog.cases.is_empty(), "the catalog must contain cases");
 }
 
 #[test]

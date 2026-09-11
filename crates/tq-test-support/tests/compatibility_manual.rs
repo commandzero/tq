@@ -9,22 +9,43 @@ use std::{
 
 use serde_json::Value;
 use tq_test_support::compatibility::{
-    CaseStatus, Invocation, ProcessOutcome, ProcessStatus, load_catalog, manual_case_ids,
-    normalize_jq, read_manual_ledger, run_process_with_environment,
+    BaselinePolicy, CaseStatus, ContractKind, Invocation, InvocationMode, ProcessOutcome,
+    ProcessStatus, load_catalog, manual_case_ids, normalize_jq, read_manual_ledger,
+    run_process_with_environment,
 };
 
 #[test]
 #[ignore = "requires the jq 1.8 reference binary; run explicitly after downloading it"]
 fn jq_reference_matches_the_published_manual_results() {
     let source: Value = tq_test_support::fixture_data::from_toon(include_bytes!(
-        "../../../tests/compatibility/reviews/manual-source-examples.toon"
+        "../../../tests/compatibility/reviews/jq-manual/source-examples.toon"
     ))
     .expect("manual source inventory");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let executable = std::env::var_os("TQ_JQ").map_or_else(
         || root.join("target/reference-build/jq/jq"),
-        std::path::PathBuf::from,
+        |path| root.join(path),
     );
+    let pin = tq_test_support::fixture_data::read(
+        &root.join("tests/compatibility/reviews/jq-manual/reference-pin.toon"),
+    )
+    .expect("reviewed manual reference pin");
+    let identity = tq_test_support::compatibility::discover_tool(
+        tq_test_support::compatibility::ToolKind::Jq,
+        &tq_test_support::compatibility::ExecutableConfig {
+            jq: Some(executable.clone()),
+            ..Default::default()
+        },
+        &root,
+    )
+    .expect("discover jq")
+    .expect("jq reference is required");
+    tq_test_support::compatibility::validate_manual_reference(
+        &pin,
+        &identity,
+        &tq_test_support::compatibility::manual_host_target(),
+    )
+    .expect("reference must match the reviewed build");
     let mut failures = Vec::new();
     for section in source["sections"].as_array().expect("sections") {
         for example in section["table_examples"].as_array().expect("examples") {
@@ -84,7 +105,7 @@ fn jq_reference_matches_the_published_manual_results() {
 #[test]
 fn every_manual_input_output_example_has_an_executable_case() {
     let source: Value = tq_test_support::fixture_data::from_toon(include_bytes!(
-        "../../../tests/compatibility/reviews/manual-source-examples.toon"
+        "../../../tests/compatibility/reviews/jq-manual/source-examples.toon"
     ))
     .expect("manual source inventory");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -135,7 +156,7 @@ fn every_manual_input_output_example_has_an_executable_case() {
 #[test]
 fn every_section_audit_accounts_for_fences_and_references_real_cases() {
     let source: Value = tq_test_support::fixture_data::from_toon(include_bytes!(
-        "../../../tests/compatibility/reviews/manual-source-examples.toon"
+        "../../../tests/compatibility/reviews/jq-manual/source-examples.toon"
     ))
     .expect("manual source inventory");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -151,7 +172,7 @@ fn every_section_audit_accounts_for_fences_and_references_real_cases() {
         .chain(std::iter::once(&introduction))
     {
         let name = section["section"].as_str().expect("section name");
-        let path = root.join(format!("tests/compatibility/reviews/manual-{name}.toon"));
+        let path = root.join(format!("tests/compatibility/reviews/jq-manual/{name}.toon"));
         let audit = read_manual_ledger(&path).expect("section audit ledger");
         let examples = audit["examples"].as_array().expect("audit examples");
         for fence in section["fenced_examples"].as_array().expect("fences") {
@@ -185,6 +206,11 @@ fn every_section_audit_accounts_for_fences_and_references_real_cases() {
                 Some("new" | "covered" | "adapted")
             ) {
                 assert!(
+                    !ids.is_empty(),
+                    "{name}: {} claims coverage without executable case evidence",
+                    example["id"]
+                );
+                assert!(
                     ids.iter().any(|id| catalog.cases.iter().any(|case| {
                         case.id == *id
                             && case.status == CaseStatus::Mvp
@@ -216,7 +242,7 @@ fn every_section_audit_accounts_for_fences_and_references_real_cases() {
 #[test]
 fn corrected_math_model_is_tabular_equivalent_and_preserves_case_coverage() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let path = root.join("tests/compatibility/reviews/manual-math.toon");
+    let path = root.join("tests/compatibility/reviews/jq-manual/math.toon");
     let toon = read_manual_ledger(&path).unwrap();
     let json: Value = serde_json::from_slice(&serde_json::to_vec(&toon).unwrap()).unwrap();
     assert_eq!(json, toon, "comparison JSON must mirror canonical TOON");
@@ -292,7 +318,7 @@ fn every_section_uses_scalar_examples_notes_and_explicit_evidence() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let catalog = load_catalog(&root.join("tests/compatibility/cases")).unwrap();
     let mut sections = 0;
-    for entry in fs::read_dir(root.join("tests/compatibility/reviews")).unwrap() {
+    for entry in fs::read_dir(root.join("tests/compatibility/reviews/jq-manual")).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_none_or(|ext| ext != "toon") {
             continue;
@@ -301,7 +327,7 @@ fn every_section_uses_scalar_examples_notes_and_explicit_evidence() {
         let Some(examples) = ledger["examples"].as_array() else {
             continue;
         };
-        sections += 1;
+        sections += usize::from(ledger["section"].is_string());
         assert_eq!(ledger["schema_version"], 2, "{}", path.display());
         let text = fs::read_to_string(&path).unwrap();
         let mut ids = BTreeSet::new();
@@ -353,7 +379,10 @@ fn every_section_uses_scalar_examples_notes_and_explicit_evidence() {
         for note in notes {
             assert!(note.get("evidence_case_id").is_some());
             if let Some(id) = note["evidence_case_id"].as_str() {
-                assert!(cases.contains(id));
+                assert!(
+                    cases.contains(id) || catalog.cases.iter().any(|case| case.id == id),
+                    "{path:?}: missing evidence case {id}"
+                );
             }
         }
         let mut edges = BTreeSet::new();
@@ -373,4 +402,129 @@ fn every_section_uses_scalar_examples_notes_and_explicit_evidence() {
         }
     }
     assert_eq!(sections, 14, "all 13 manual sections plus introduction");
+}
+
+#[test]
+fn source_corrections_retain_invalid_math_probes_and_add_valid_arities() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root.join("tests/compatibility/cases")).unwrap();
+    let ledger =
+        read_manual_ledger(&root.join("tests/compatibility/reviews/jq-manual/math.toon")).unwrap();
+    let examples = ledger["examples"].as_array().unwrap();
+
+    for (name, invalid_id, valid_id, invalid_query, valid_input) in [
+        (
+            "frexp",
+            "manual.math.frexp-reference-unavailable",
+            "manual.math.frexp-actual-arity",
+            "frexp(8;0)",
+            "8",
+        ),
+        (
+            "modf",
+            "manual.math.modf-reference-unavailable",
+            "manual.math.modf-actual-arity",
+            "modf(3;0)",
+            "3.5",
+        ),
+    ] {
+        let invalid = catalog
+            .cases
+            .iter()
+            .find(|case| case.id == invalid_id)
+            .unwrap_or_else(|| panic!("missing invalid {name}/2 case"));
+        assert_eq!(invalid.query, invalid_query);
+        assert_eq!(invalid.expected.contract, ContractKind::Error);
+        assert_eq!(invalid.expected.baseline, BaselinePolicy::Required);
+        assert_eq!(
+            invalid.expected.error_class.as_deref(),
+            Some("query-compile")
+        );
+        assert!(
+            invalid
+                .capabilities
+                .iter()
+                .any(|capability| capability == "manual.math.invalid-arity")
+        );
+        assert!(invalid.adapters.jq.supported);
+        assert!(invalid.adapters.tq.supported);
+
+        let valid = catalog
+            .cases
+            .iter()
+            .find(|case| case.id == valid_id)
+            .unwrap_or_else(|| panic!("missing valid {name}/0 case"));
+        assert_eq!(valid.query, name);
+        assert_eq!(valid.fixture.inline.as_deref(), Some(valid_input));
+        assert_eq!(valid.expected.contract, ContractKind::ResultSequence);
+        assert_eq!(valid.expected.baseline, BaselinePolicy::Required);
+        assert!(
+            valid
+                .capabilities
+                .iter()
+                .any(|capability| capability == "manual.math.arity-correction")
+        );
+        assert!(valid.adapters.jq.supported);
+        assert!(valid.adapters.tq.supported);
+
+        for id in [invalid_id, valid_id] {
+            assert!(examples.iter().any(|example| example["case_id"] == id));
+        }
+    }
+}
+
+#[test]
+fn source_whitespace_corrections_keep_published_and_reference_values() {
+    let source: Value = tq_test_support::fixture_data::from_toon(include_bytes!(
+        "../../../tests/compatibility/reviews/jq-manual/source-examples.toon"
+    ))
+    .expect("manual source inventory");
+    let corrections = source["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|section| section["table_examples"].as_array().into_iter().flatten())
+        .filter(|example| example.get("reference_note").is_some())
+        .collect::<Vec<_>>();
+    assert_eq!(corrections.len(), 2);
+    for (line, query, published, observed) in [
+        (
+            1122,
+            "join(\" \")",
+            "\"a 1 2.3 true false\"\n",
+            "\"a 1 2.3 true  false\"\n",
+        ),
+        (
+            117,
+            "match(\"foo (?<bar123>bar)? foo\"; \"ig\")",
+            "{\"offset\": 0, \"length\": 11, \"string\": \"foo bar foo\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"bar\", \"name\": \"bar123\"}]}\n{\"offset\": 12, \"length\": 8, \"string\": \"foo foo\", \"captures\": [{\"offset\": -1, \"length\": 0, \"string\": null, \"name\": \"bar123\"}]}\n",
+            "{\"offset\": 0, \"length\": 11, \"string\": \"foo bar foo\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"bar\", \"name\": \"bar123\"}]}\n{\"offset\": 12, \"length\": 8, \"string\": \"foo  foo\", \"captures\": [{\"offset\": -1, \"length\": 0, \"string\": null, \"name\": \"bar123\"}]}\n",
+        ),
+    ] {
+        let example = corrections
+            .iter()
+            .find(|example| example["line"] == line && example["query"] == query)
+            .unwrap_or_else(|| panic!("missing whitespace correction at line {line}"));
+        assert_eq!(example["expected_stdout"], published);
+        assert_eq!(example["reference_stdout"], observed);
+        assert_ne!(published, observed);
+        let note = example["reference_note"].as_str().unwrap();
+        assert!(note.contains("Verified locally"));
+        assert!(note.contains("published text remains"));
+    }
+}
+
+#[test]
+fn regex_null_input_fences_preserve_their_explicit_jq_n_mode() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = load_catalog(&root.join("tests/compatibility/cases")).unwrap();
+    for id in [
+        "manual.regex.fence-whitespace-extended",
+        "manual.regex.fence-inline-flags",
+    ] {
+        let case = catalog.cases.iter().find(|case| case.id == id).unwrap();
+        assert_eq!(case.invocation_mode, InvocationMode::NullInput);
+        assert_eq!(case.adapters.jq.args, ["-n"]);
+        assert_eq!(case.adapters.tq.args, ["-n"]);
+    }
 }

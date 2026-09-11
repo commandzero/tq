@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, fs, io, io::Write, path::Path, time::Duration};
 use thiserror::Error;
 
 mod comparison;
-pub use comparison::compare_manual;
+pub use comparison::{
+    compare_manual, compare_manual_with_disparities, summarize_manual_comparison,
+};
 
 use super::{
     CapabilityCounts, CapabilityDisposition, CaseAdapter, CaseClassification, CaseReport,
@@ -13,7 +15,7 @@ use super::{
     CoverageCount, ExecutableConfig, FinalStatus, FixtureFormat, Invocation, InvocationMode,
     NormalizationError, ObservationState, ProcessError, SemanticDiff, ToolIdentity, ToolKind,
     ToolObservation, discover_tool, encode_hex, normalize_jq, normalize_raw,
-    normalize_toon_sequence, normalize_yq, run_process_with_environment,
+    normalize_toon_document, normalize_toon_sequence, normalize_yq, run_process_with_environment,
 };
 
 /// Compatibility campaign size.
@@ -223,7 +225,13 @@ fn run_case(
                 repository_root,
                 timeout,
                 fixture,
-                false,
+                OutputMode {
+                    json_output: false,
+                    toon_sequence: matches!(
+                        case.expected.contract,
+                        ContractKind::ResultSequence | ContractKind::Error
+                    ),
+                },
             )?);
         }
     }
@@ -236,6 +244,9 @@ fn run_case(
     })
 }
 
+// One execution owns fixture materialization, process invocation, and output
+// normalization so temporary files and subprocess observations stay paired.
+#[allow(clippy::too_many_lines)]
 fn execute(
     case: &CompatibilityCase,
     adapter: &CaseAdapter,
@@ -243,7 +254,7 @@ fn execute(
     repository_root: &Path,
     timeout: Duration,
     fixture: ExecutionFixture,
-    json_output: bool,
+    output_mode: OutputMode,
 ) -> Result<ToolObservation, io::Error> {
     let ExecutionFixture {
         format: input_format,
@@ -277,6 +288,9 @@ fn execute(
     {
         args.extend(["--output-format=json".to_owned(), "--indent=0".to_owned()]);
     }
+    if identity.tool == ToolKind::Tq && output_mode.toon_sequence {
+        prepare_toon_sequence_args(&mut args);
+    }
     if !adapter.omit_query {
         args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
     }
@@ -292,6 +306,14 @@ fn execute(
             Vec::new()
         }
     };
+    let empty_home = tempfile::tempdir()?;
+    let mut environment = fixture_environment(adapter, repository_root)?;
+    if !environment.contains_key("HOME") {
+        environment.insert(
+            "HOME".to_owned(),
+            empty_home.path().to_string_lossy().into_owned(),
+        );
+    }
     let process = run_process_with_environment(
         &Invocation {
             executable: identity.path.clone(),
@@ -300,7 +322,7 @@ fn execute(
             timeout,
             current_dir: Some(repository_root.to_owned()),
         },
-        &adapter.env,
+        &environment,
     );
     let outcome = match process {
         Ok(outcome) => outcome,
@@ -315,11 +337,12 @@ fn execute(
         ContractKind::ResultSequence | ContractKind::Error => match identity.tool {
             ToolKind::Jq => normalize_jq(&outcome),
             ToolKind::Yq => normalize_yq(&outcome),
-            ToolKind::Tq if json_output => normalize_jq(&outcome).map(|mut value| {
+            ToolKind::Tq if output_mode.json_output => normalize_jq(&outcome).map(|mut value| {
                 value.error_class = super::classify_process(ToolKind::Tq, &outcome);
                 value
             }),
-            ToolKind::Tq => normalize_toon_sequence(&outcome),
+            ToolKind::Tq if output_mode.toon_sequence => normalize_toon_sequence(&outcome),
+            ToolKind::Tq => normalize_toon_document(&outcome),
         },
     };
     match normalized {
@@ -344,6 +367,71 @@ fn execute(
             &outcome,
         )),
     }
+}
+
+fn use_document_input_for_toon_sequence(args: &mut [String]) {
+    let mut index = 0;
+    while index < args.len() {
+        if matches!(args[index].as_str(), "-i" | "--input-format") {
+            if args.get(index + 1).is_some_and(|value| value == "json") {
+                "auto".clone_into(&mut args[index + 1]);
+            }
+            index += 2;
+        } else if args[index] == "--input-format=json" {
+            "--input-format=auto".clone_into(&mut args[index]);
+            index += 1;
+        } else {
+            index += 1;
+        }
+    }
+}
+
+fn prepare_toon_sequence_args(args: &mut Vec<String>) {
+    if args.iter().any(|argument| argument == "--seq") {
+        return;
+    }
+    use_document_input_for_toon_sequence(args);
+    args.insert(0, "--seq".to_owned());
+}
+
+fn fixture_environment(
+    adapter: &CaseAdapter,
+    repository_root: &Path,
+) -> Result<BTreeMap<String, String>, io::Error> {
+    let mut environment = adapter.env.clone();
+    let root = repository_root.canonicalize()?;
+    for (name, relative) in &adapter.env_paths {
+        if environment.contains_key(name)
+            || relative.as_os_str().is_empty()
+            || relative
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("invalid or conflicting fixture environment path: {name}"),
+            ));
+        }
+        let path = root.join(relative).canonicalize()?;
+        if !path.starts_with(&root) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("fixture environment path escapes repository: {name}"),
+            ));
+        }
+        environment.insert(
+            name.clone(),
+            path.to_str()
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "fixture environment path is not UTF-8",
+                    )
+                })?
+                .to_owned(),
+        );
+    }
+    Ok(environment)
 }
 
 fn materialize_json_module(
@@ -499,6 +587,12 @@ struct ExecutionFixture {
     pin_format: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct OutputMode {
+    json_output: bool,
+    toon_sequence: bool,
+}
+
 fn cross_format_variants(case: &CompatibilityCase, source: &[u8]) -> Option<CrossFormatVariants> {
     if case.fixture.format != FixtureFormat::Json
         || case.classification == CaseClassification::Cli
@@ -632,7 +726,10 @@ fn coverage(reports: &[CaseReport]) -> BTreeMap<String, CoverageCount> {
 mod tests {
     use std::path::Path;
 
-    use super::{FixtureFormat, ToolKind, cross_format_variants, fixture_bytes, formats_for};
+    use super::{
+        FixtureFormat, ToolKind, cross_format_variants, fixture_bytes, formats_for,
+        prepare_toon_sequence_args,
+    };
     use crate::compatibility::load_catalog;
 
     #[test]
@@ -675,5 +772,41 @@ mod tests {
                 .chain(&tq)
                 .all(|value| !value.bytes.is_empty())
         );
+    }
+
+    #[test]
+    fn toon_sequence_output_keeps_document_json_input() {
+        let mut args = vec![
+            "--input-format".to_owned(),
+            "json".to_owned(),
+            "--input-format=json".to_owned(),
+            "--input-format=toon".to_owned(),
+        ];
+
+        prepare_toon_sequence_args(&mut args);
+
+        assert_eq!(
+            args,
+            [
+                "--seq",
+                "--input-format",
+                "auto",
+                "--input-format=auto",
+                "--input-format=toon",
+            ]
+        );
+    }
+
+    #[test]
+    fn toon_sequence_preparation_keeps_existing_framing() {
+        let mut args = vec![
+            "--seq".to_owned(),
+            "--input-format".to_owned(),
+            "json".to_owned(),
+        ];
+
+        prepare_toon_sequence_args(&mut args);
+
+        assert_eq!(args, ["--seq", "--input-format", "json"]);
     }
 }
