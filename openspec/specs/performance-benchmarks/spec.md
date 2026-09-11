@@ -93,11 +93,23 @@ The suite SHALL separately report the native-format end-to-end comparison of jq 
 - **THEN** it presents them in separate labeled tables and does not combine their ratios into one ranking
 
 ### Requirement: Resource and latency metrics
-Each valid benchmark sample SHALL capture wall-clock duration and process exit status. Supported local benchmark hosts MUST additionally capture user CPU, system CPU, peak resident memory, output bytes, and time to first result for cases where the harness can observe it without changing semantics. Every accepted benchmark campaign MUST run outside restricted sandboxes with permission to inspect child processes. On macOS, every authoritative peak RSS sample MUST come from the measured process's `maximum resident set size` reported by `/usr/bin/time -l`; harness process-group sampling MAY supplement but MUST NOT replace that measurement.
+Each valid benchmark sample SHALL capture wall-clock duration and process exit status. Supported local benchmark hosts MUST additionally capture user CPU, system CPU, peak resident memory, output bytes, and time to first result for cases where the harness can observe it without changing semantics. Every benchmark campaign MUST run outside restricted sandboxes with permission to inspect child processes and MUST complete an RSS preflight before corpus preparation or benchmark rows begin. The preflight MUST verify a positive resident allocation through both the authoritative `/usr/bin/time` implementation and the complete measured process-group inspector. Linux hosts MUST use GNU `/usr/bin/time -v` and record the explicit `gnu-time-v` RSS provenance. macOS hosts MUST use BSD `/usr/bin/time -l` and record the explicit `bsd-time-l` RSS provenance. A campaign SHALL abort immediately, before writing a benchmark report, when preflight fails or any measured invocation lacks a positive authoritative RSS value and explicit provenance. The harness MUST NOT infer provenance from the host OS or a positive byte count. Failed or timed-out process diagnostics may be retained separately, but missing metrics MUST NOT be fabricated or published as valid measurements. Process-group sampling MAY supplement the authoritative time value and MUST be available for configured RSS-limit enforcement.
 
 #### Scenario: Restricted process inspection
-- **WHEN** a sandbox or permission policy prevents child-process inspection or `/usr/bin/time -l` collection on macOS
-- **THEN** the benchmark run is invalid and must be rerun with elevated permissions rather than accepted with unavailable RSS
+- **WHEN** a sandbox or permission policy prevents child-process inspection or authoritative `/usr/bin/time` RSS collection on any supported host
+- **THEN** the benchmark run aborts before campaign work or report publication and must be rerun after the sandbox or host environment is repaired
+
+#### Scenario: Linux GNU time provenance
+- **WHEN** a Linux benchmark invokes the authoritative measurement wrapper
+- **THEN** it uses GNU `/usr/bin/time -v`, records `gnu-time-v`, and rejects output that lacks a positive `Maximum resident set size (kbytes)` value
+
+#### Scenario: macOS BSD time provenance
+- **WHEN** a macOS benchmark invokes the authoritative measurement wrapper
+- **THEN** it uses BSD `/usr/bin/time -l`, records `bsd-time-l`, and rejects output that lacks a positive `maximum resident set size` value
+
+#### Scenario: Measured RSS disappears
+- **WHEN** a preflight-passing campaign receives a measured invocation without positive authoritative RSS or explicit provenance
+- **THEN** the harness aborts immediately without writing a partial benchmark report
 
 #### Scenario: Large stream case
 - **WHEN** an explicit stream benchmark runs
@@ -105,7 +117,7 @@ Each valid benchmark sample SHALL capture wall-clock duration and process exit s
 
 #### Scenario: Metric unavailable
 - **WHEN** an operating system cannot provide a requested metric
-- **THEN** the report marks that metric unavailable rather than substituting zero, except that missing macOS RSS caused by restricted permissions invalidates the run
+- **THEN** the report marks non-RSS metrics unavailable where the specification permits it, while missing authoritative RSS invalidates the entire run on every supported host
 
 ### Requirement: Statistically useful sampling
 The harness SHALL use warmups and repeated samples appropriate to the natural input size. The default policy MUST run at least 30 measured samples for startup/small cases, 10 for medium cases, and 3 for large cases unless a reviewed campaign time budget explicitly lowers the count.

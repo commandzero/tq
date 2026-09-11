@@ -8,9 +8,9 @@ use tq_test_support::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
         BenchmarkRow, BenchmarkSample, Comparability, ComparisonFamily, CorrectnessDecision,
         CorrectnessObservation, CorrectnessPayload, ExecutionClass, InputFormat,
-        OutputContractKind, RegressionGate, RegressionThresholds, SoftObjectiveStatus,
-        collect_environment, compare_reports, correctness_gate, evaluate_regression,
-        populate_reference_ratios, semantic_digest, summarize_samples,
+        OutputContractKind, RegressionGate, RegressionThresholds, RssProvenance,
+        SoftObjectiveStatus, collect_environment, compare_reports, correctness_gate,
+        evaluate_regression, populate_reference_ratios, semantic_digest, summarize_samples,
     },
     compatibility::ProcessStatus,
     corpus::ArtifactIdentity,
@@ -135,6 +135,8 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
             user_cpu_micros: Some(1),
             system_cpu_micros: Some(1),
             peak_rss_bytes: Some(rss),
+            rss_provenance: None,
+            process_group_peak_rss_bytes: None,
             first_result_micros: Some(1),
             output_bytes: 1,
         })
@@ -183,6 +185,7 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
             reference_ratios: BTreeMap::new(),
             reference_peak_rss_ratios: BTreeMap::new(),
             soft_performance_objective: None,
+            diagnostic: None,
         }],
         comparability: Comparability::default(),
         regression_gate: RegressionGate::default(),
@@ -269,4 +272,24 @@ fn soft_jq_objective_rejects_incorrect_or_policy_mismatched_rows() {
     report.cases[1].limits.output_bytes += 1;
     populate_reference_ratios(&mut report.cases, &["jq-json"]);
     assert!(report.cases[0].reference_ratios.is_empty());
+}
+
+#[test]
+fn new_reports_reject_missing_or_zero_rss_provenance() {
+    let mut report = campaign("machine-a", "digest-a", 100, 1024);
+    let error = report
+        .validate_authoritative_rss()
+        .expect_err("legacy-style samples must not validate as new measurements");
+    assert!(error.contains("RSS provenance"));
+
+    for sample in &mut report.cases[0].samples {
+        sample.rss_provenance = Some(RssProvenance::GnuTimeV);
+    }
+    assert!(report.validate_authoritative_rss().is_ok());
+
+    report.cases[0].samples[0].peak_rss_bytes = Some(0);
+    let error = report
+        .validate_authoritative_rss()
+        .expect_err("zero RSS must not validate");
+    assert!(error.contains("positive authoritative RSS"));
 }

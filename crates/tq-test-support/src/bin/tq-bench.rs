@@ -13,12 +13,13 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tq_test_support::{
     benchmark::{
-        BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus,
-        BenchmarkInvocation, BenchmarkOutcome, BenchmarkSampling, BenchmarkTool, Comparability,
-        DatasetTier, InputFormat, RegressionGate, RegressionThresholds, collect_environment,
-        compare_reports, evaluate_regression, is_correctness_output_limit, load_benchmark_catalog,
-        normalize_correctness_run, populate_reference_ratios, run_correctness_limit_probe,
-        run_gated_row, unsupported_row,
+        BenchmarkAdapter, BenchmarkCampaignReport, BenchmarkCase, BenchmarkCorpusIdentity,
+        BenchmarkFinalStatus, BenchmarkInvocation, BenchmarkOutcome, BenchmarkRow,
+        BenchmarkSampling, BenchmarkTool, Comparability, DatasetTier, InputFormat, RegressionGate,
+        RegressionThresholds, collect_environment, compare_reports, evaluate_regression,
+        is_correctness_output_limit, load_benchmark_catalog, normalize_correctness_run,
+        populate_reference_ratios, preflight_rss, render_markdown_pages,
+        run_correctness_limit_probe, run_gated_row, unsupported_row,
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
     corpus::{
@@ -58,6 +59,8 @@ struct Options {
     rss_limit_bytes: Option<u64>,
     selected_cases: Vec<String>,
     baseline: Option<PathBuf>,
+    markdown_dir: Option<PathBuf>,
+    render_only: Option<PathBuf>,
     regression_thresholds: RegressionThresholds,
 }
 
@@ -82,6 +85,22 @@ struct PreparedCampaign {
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let options = options()?;
+    if let Some(report_path) = &options.render_only {
+        let markdown_dir = options
+            .markdown_dir
+            .as_deref()
+            .ok_or("--render-only requires --markdown-dir")?;
+        let report: BenchmarkCampaignReport =
+            serde_json::from_reader(fs::File::open(report_path)?)?;
+        render_markdown_pages(markdown_dir, &report)?;
+        print!("{}", report.render_human());
+        return Ok(ExitCode::SUCCESS);
+    }
+    let rss_preflight = preflight_rss()?;
+    eprintln!(
+        "tq-bench: RSS preflight passed ({})",
+        rss_preflight.provenance.label()
+    );
     let prepared = if options.profile == "smoke" {
         prepare_smoke(&root.join("examples"))?
     } else {
@@ -165,27 +184,39 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     retain_output: false,
                 };
                 let Some(identity) = tools.get(&adapter.tool) else {
-                    rows.push(unsupported_row(
+                    record_row(
+                        &mut rows,
                         &case,
+                        dataset,
                         adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &placeholder,
-                    ));
+                        unsupported_row(
+                            &case,
+                            adapter,
+                            &corpus_identity,
+                            dataset.tier,
+                            &placeholder,
+                        ),
+                    );
                     continue;
                 };
                 let invocation = invocation(&case, adapter, dataset, identity)?;
                 if !adapter.applicable {
-                    rows.push(unsupported_row(
+                    record_row(
+                        &mut rows,
                         &case,
+                        dataset,
                         adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &invocation,
-                    ));
+                        unsupported_row(
+                            &case,
+                            adapter,
+                            &corpus_identity,
+                            dataset.tier,
+                            &invocation,
+                        ),
+                    );
                     continue;
                 }
-                rows.push(if let Some(reference) = &reference {
+                let row = if let Some(reference) = &reference {
                     run_gated_row(
                         &case,
                         adapter,
@@ -202,7 +233,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         dataset.tier,
                         &invocation,
                     )?
-                });
+                };
+                record_row(&mut rows, &case, dataset, adapter, row);
             }
         }
     }
@@ -238,9 +270,38 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             report.final_status = BenchmarkFinalStatus::Regression;
         }
     }
+    report
+        .validate_authoritative_rss()
+        .map_err(|error| format!("benchmark report RSS validation failed: {error}"))?;
     write_report(&options.output, &report)?;
+    if let Some(markdown_dir) = &options.markdown_dir {
+        render_markdown_pages(markdown_dir, &report)?;
+    }
     print!("{}", report.render_human());
-    Ok(ExitCode::SUCCESS)
+    Ok(exit_code_for_status(report.final_status))
+}
+
+fn exit_code_for_status(status: BenchmarkFinalStatus) -> ExitCode {
+    match status {
+        BenchmarkFinalStatus::Passed => ExitCode::SUCCESS,
+        BenchmarkFinalStatus::ObservedFailures | BenchmarkFinalStatus::Regression => {
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn record_row(
+    rows: &mut Vec<BenchmarkRow>,
+    case: &BenchmarkCase,
+    dataset: &PreparedDataset,
+    adapter: &BenchmarkAdapter,
+    row: BenchmarkRow,
+) {
+    eprintln!(
+        "tq-bench: workload={} dataset={} adapter={} outcome={:?}",
+        case.id, dataset.source_id, adapter.id, row.outcome
+    );
+    rows.push(row);
 }
 
 #[allow(
@@ -260,6 +321,8 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut rss_limit_bytes = None;
     let mut selected_cases = Vec::new();
     let mut baseline = None;
+    let mut markdown_dir = None;
+    let mut render_only = None;
     let mut wall_time_percent: f64 = 50.0;
     let mut peak_rss_percent: f64 = 20.0;
     let mut minimum_samples = 5;
@@ -306,6 +369,24 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
                     arguments.next().ok_or("--baseline needs a path")?,
                 ));
             }
+            "--markdown-dir" => {
+                if markdown_dir.is_some() {
+                    return Err("--markdown-dir may be supplied only once".into());
+                }
+                markdown_dir = Some(PathBuf::from(
+                    arguments.next().ok_or("--markdown-dir needs a directory")?,
+                ));
+            }
+            "--render-only" => {
+                if render_only.is_some() {
+                    return Err("--render-only may be supplied only once".into());
+                }
+                render_only = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--render-only needs a report path")?,
+                ));
+            }
             "--wall-regression-percent" => {
                 wall_time_percent = arguments
                     .next()
@@ -326,7 +407,7 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
+                    "Usage: tq-bench run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N] [--markdown-dir DIRECTORY] [--render-only REPORT --markdown-dir DIRECTORY]"
                 );
                 std::process::exit(0);
             }
@@ -336,23 +417,25 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if !matches!(profile.as_str(), "smoke" | "rapid" | "standard" | "large") {
         return Err(format!("invalid profile: {profile}").into());
     }
-    if profile == "rapid" {
-        if max_samples.is_none() {
-            max_samples = Some(1);
+    if render_only.is_none() {
+        if profile == "rapid" {
+            if max_samples.is_none() {
+                max_samples = Some(1);
+            }
+            if selected_cases.is_empty() {
+                selected_cases.extend(RAPID_CASES.iter().map(|case| (*case).to_owned()));
+            }
         }
-        if selected_cases.is_empty() {
-            selected_cases.extend(RAPID_CASES.iter().map(|case| (*case).to_owned()));
+        if profile != "smoke" && manifests.is_empty() {
+            if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
+                manifests.extend(env::split_paths(&paths));
+            } else {
+                manifests = discover_latest_validated_manifests(&cache_root)?;
+            }
         }
-    }
-    if profile != "smoke" && manifests.is_empty() {
-        if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
-            manifests.extend(env::split_paths(&paths));
-        } else {
-            manifests = discover_latest_validated_manifests(&cache_root)?;
+        if profile != "smoke" && manifests.is_empty() {
+            return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
         }
-    }
-    if profile != "smoke" && manifests.is_empty() {
-        return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
     }
     if !matches!(origin.as_str(), "refreshed" | "frozen") {
         return Err(format!("invalid origin: {origin}").into());
@@ -372,6 +455,9 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if rss_limit_bytes == Some(0) {
         return Err("--rss-limit-bytes must be at least 1".into());
     }
+    if render_only.is_some() && markdown_dir.is_none() {
+        return Err("--render-only requires --markdown-dir".into());
+    }
     Ok(Options {
         profile,
         output,
@@ -383,6 +469,8 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
         rss_limit_bytes,
         selected_cases,
         baseline,
+        markdown_dir,
+        render_only,
         regression_thresholds: RegressionThresholds {
             wall_time_percent,
             peak_rss_percent,
@@ -792,7 +880,9 @@ fn write_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{DatasetTier, PreparedDataset, family_matches};
+    use super::{
+        BenchmarkFinalStatus, DatasetTier, PreparedDataset, exit_code_for_status, family_matches,
+    };
     use std::collections::BTreeMap;
     use tq_test_support::benchmark::DatasetFamily;
 
@@ -811,5 +901,18 @@ mod tests {
         assert!(!family_matches(DatasetFamily::Usgs, &dataset));
         assert!(!family_matches(DatasetFamily::LargeNatural, &dataset));
         assert!(!family_matches(DatasetFamily::SyntheticHelper, &dataset));
+    }
+
+    #[test]
+    fn failed_final_statuses_return_a_failure_exit_code() {
+        for status in [
+            BenchmarkFinalStatus::ObservedFailures,
+            BenchmarkFinalStatus::Regression,
+        ] {
+            assert_eq!(
+                exit_code_for_status(status),
+                std::process::ExitCode::from(1)
+            );
+        }
     }
 }

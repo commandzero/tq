@@ -28,6 +28,19 @@ benchmark_archive_root="${benchmark_archive_root:-benchmarks}"
 work_root="$benchmark_archive_root/.work"
 
 case "$campaign:$profile" in
+    compatibility:strict)
+        mkdir -p target/compatibility
+        cargo build --quiet --release --locked -p tq-cli -p tq-test-support
+        TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
+        export TQ_BIN
+        # The preflight refuses PATH/package-manager jq substitutions. The
+        # Rust comparator then validates the executable and runtime identity
+        # against the host-specific reviewed pin before executing any case.
+        exec ./scripts/reference-jq-provision.sh \
+            cargo run --quiet --release --locked -p tq-test-support --bin tq-manual-compare -- \
+            --markdown-dir "target/compatibility/jq-manual" \
+            "target/compatibility/strict.toon"
+        ;;
     compatibility:smoke|compatibility:full)
         mkdir -p target/compatibility
         cargo build --quiet --release -p tq-cli
@@ -70,10 +83,14 @@ case "$campaign:$profile" in
             rm -f "$refresh_json"
             trap - EXIT HUP INT TERM
         fi
+        set --
+        if [ "$profile" = standard ]; then
+            set -- --markdown-dir "$PWD/docs/tests/comparison"
+        fi
         exec cargo run --quiet --release -p tq-test-support --bin tq-bench -- run \
             --profile "$profile" --output "$work_root/$profile.json" \
             --cache-root "$cache_root" \
-            --origin "$corpus_origin"
+            --origin "$corpus_origin" "$@"
         ;;
     benchmark:extra-large)
         mkdir -p "$work_root"

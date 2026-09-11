@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     BenchmarkLimits, ComparisonFamily, EnvironmentManifest, ExecutionClass, InputFormat,
-    MeasuredOutcome,
+    MeasuredOutcome, RssProvenance,
 };
 use crate::{compatibility::ToolIdentity, corpus::ArtifactIdentity};
 
@@ -95,6 +95,9 @@ pub struct BenchmarkRow {
     /// Soft jq-relative targets for tq JSON rows.
     #[serde(default)]
     pub soft_performance_objective: Option<SoftPerformanceObjective>,
+    /// Bounded correctness-gate detail for an incorrect or unnormalized row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
 }
 
 /// Informational jq-relative time and memory assessment.
@@ -151,6 +154,13 @@ pub struct BenchmarkSample {
     pub system_cpu_micros: Option<u128>,
     /// Peak resident bytes.
     pub peak_rss_bytes: Option<u64>,
+    /// Explicit source of the authoritative peak RSS value. `None` is only
+    /// valid for legacy reports that predate the provenance field.
+    #[serde(default)]
+    pub rss_provenance: Option<RssProvenance>,
+    /// Peak resident bytes observed separately by process-group sampling.
+    #[serde(default)]
+    pub process_group_peak_rss_bytes: Option<u64>,
     /// Time to first stdout byte.
     pub first_result_micros: Option<u128>,
     /// Exact output bytes.
@@ -164,9 +174,49 @@ impl From<&MeasuredOutcome> for BenchmarkSample {
             user_cpu_micros: value.user_cpu_micros,
             system_cpu_micros: value.system_cpu_micros,
             peak_rss_bytes: value.peak_rss_bytes,
+            rss_provenance: Some(value.rss_provenance),
+            process_group_peak_rss_bytes: value.process_group_peak_rss_bytes,
             first_result_micros: value.first_result_micros,
             output_bytes: value.output_bytes,
         }
+    }
+}
+
+impl BenchmarkCampaignReport {
+    /// Validates the RSS contract for a newly collected campaign report.
+    ///
+    /// Historical reports may omit provenance and remain readable, but a new
+    /// report must never publish a measured sample without positive RSS and an
+    /// explicit authoritative source.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a measured sample lacks positive authoritative RSS
+    /// or explicit provenance, or when a timed row has no samples.
+    pub fn validate_authoritative_rss(&self) -> Result<(), String> {
+        for row in &self.cases {
+            for (index, sample) in row.samples.iter().enumerate() {
+                if sample.peak_rss_bytes.is_none_or(|bytes| bytes == 0) {
+                    return Err(format!(
+                        "{} {} sample {} has no positive authoritative RSS",
+                        row.case_id, row.adapter_id, index
+                    ));
+                }
+                if sample.rss_provenance.is_none() {
+                    return Err(format!(
+                        "{} {} sample {} has no RSS provenance",
+                        row.case_id, row.adapter_id, index
+                    ));
+                }
+            }
+            if row.outcome == BenchmarkOutcome::Timed && row.samples.is_empty() {
+                return Err(format!(
+                    "{} {} is timed without a measured sample",
+                    row.case_id, row.adapter_id
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -561,13 +611,12 @@ pub fn evaluate_regression(
         if let (Some(old), Some(new)) = (
             baseline_summary.peak_rss_bytes,
             candidate_summary.peak_rss_bytes,
-        ) {
-            if percent_change(old as f64, new as f64) > thresholds.peak_rss_percent {
-                failures.push(format!(
-                    "{}/{} peak RSS regressed",
-                    candidate_row.case_id, candidate_row.adapter_id
-                ));
-            }
+        ) && percent_change(old as f64, new as f64) > thresholds.peak_rss_percent
+        {
+            failures.push(format!(
+                "{}/{} peak RSS regressed",
+                candidate_row.case_id, candidate_row.adapter_id
+            ));
         }
     }
     RegressionGate {

@@ -16,7 +16,31 @@
     },
     "corpus": {"type": "array"},
     "tools": {"type": "array"},
-    "cases": {"type": "array"},
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "diagnostic": {"type": "string", "maxLength": 1024},
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
+                "process_group_peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
+                "rss_provenance": {
+                  "anyOf": [
+                    {"enum": ["gnu-time-v", "bsd-time-l"]},
+                    {"type": "null"}
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "comparability": {"type": "object"},
     "regression_gate": {"type": "object"},
     "final_status": {"enum": ["passed", "observed-failures", "regression"]}

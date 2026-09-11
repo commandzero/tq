@@ -63,6 +63,7 @@
           "tool": {"enum": ["jq", "yq", "tq"]},
           "input_format": {"enum": ["json", "yaml", "toon"]},
           "applicable": {"type": "boolean"},
+          "unsupported_reason": {"type": "string", "minLength": 1},
           "args": {"type": "array", "items": {"type": "string"}},
           "query": {"type": "string"},
           "comparison_families": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["same-format", "native-format", "parser-specific"]}}

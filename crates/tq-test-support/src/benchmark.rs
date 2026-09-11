@@ -3,6 +3,7 @@
 mod correctness;
 mod environment;
 mod manifest;
+mod markdown;
 mod measure;
 mod report;
 mod runner;
@@ -19,8 +20,13 @@ pub use manifest::{
     DatasetTier, ExecutionClass, InputFormat, OutputContract, OutputContractKind,
     load_benchmark_catalog,
 };
+pub use markdown::{
+    MarkdownRenderError, RESULTS_END_MARKER, RESULTS_START_MARKER, render_markdown_pages,
+    workload_filename,
+};
 pub use measure::{
-    BenchmarkInvocation, MeasureError, MeasuredOutcome, MeasuredStatus, measure_process,
+    BenchmarkInvocation, MeasureError, MeasuredOutcome, MeasuredStatus, RssPreflight,
+    RssProvenance, measure_process, preflight_rss,
 };
 pub use report::{
     BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,

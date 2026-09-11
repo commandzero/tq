@@ -315,6 +315,7 @@ fn adapter(tool: BenchmarkTool) -> BenchmarkAdapter {
         tool,
         input_format: InputFormat::Json,
         applicable: true,
+        unsupported_reason: None,
         args: Vec::new(),
         query: None,
         comparison_families: vec![ComparisonFamily::SameFormat],

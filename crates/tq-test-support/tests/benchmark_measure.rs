@@ -3,7 +3,8 @@
 use std::{path::PathBuf, time::Duration};
 
 use tq_test_support::benchmark::{
-    BenchmarkInvocation, BenchmarkSample, MeasuredStatus, measure_process, summarize_samples,
+    BenchmarkInvocation, BenchmarkSample, MeasuredStatus, RssProvenance, measure_process,
+    summarize_samples,
 };
 
 fn invocation(args: &[&str], output_limit: u64, timeout: Duration) -> BenchmarkInvocation {
@@ -29,6 +30,11 @@ fn sleeper_timeout_is_preserved_as_a_row_outcome() {
     .expect("sleeper measurement");
     assert_eq!(outcome.status, MeasuredStatus::Timeout);
     assert!(outcome.wall_time_micros < 1_000_000);
+    assert!(outcome.peak_rss_bytes.expect("timeout RSS") > 0);
+    assert!(matches!(
+        outcome.rss_provenance,
+        RssProvenance::GnuTimeV | RssProvenance::BsdTimeL
+    ));
 }
 
 #[test]
@@ -41,6 +47,7 @@ fn output_limit_and_first_result_are_measured_without_reframing() {
     .expect("output measurement");
     assert_eq!(limited.status, MeasuredStatus::OutputLimit);
     assert!(limited.output_bytes > 1024);
+    assert!(limited.peak_rss_bytes.expect("output-limit RSS") > 0);
     let stdout_path = limited.stdout_path.as_deref().expect("saved stdout");
     assert!(stdout_path.exists());
     assert!(
@@ -64,7 +71,7 @@ fn output_limit_and_first_result_are_measured_without_reframing() {
 }
 
 #[test]
-fn cpu_and_memory_metrics_are_values_or_explicitly_unavailable() {
+fn cpu_and_memory_metrics_include_authoritative_rss_provenance() {
     let outcome = measure_process(&invocation(
         &["memory", "8388608"],
         1024,
@@ -74,9 +81,11 @@ fn cpu_and_memory_metrics_are_values_or_explicitly_unavailable() {
     assert_eq!(outcome.status, MeasuredStatus::Exited);
     assert!(outcome.user_cpu_micros.is_some());
     assert!(outcome.system_cpu_micros.is_some());
-    if let Some(rss) = outcome.peak_rss_bytes {
-        assert!(rss >= 8 * 1024 * 1024);
-    }
+    assert!(outcome.peak_rss_bytes.expect("authoritative RSS") > 0);
+    assert!(matches!(
+        outcome.rss_provenance,
+        RssProvenance::GnuTimeV | RssProvenance::BsdTimeL
+    ));
 }
 
 #[test]
@@ -84,6 +93,11 @@ fn rss_limit_stops_the_process_when_host_sampling_is_available() {
     let mut request = invocation(&["memory", "8388608"], 1024, Duration::from_secs(2));
     request.rss_limit = Some(1);
     let outcome = measure_process(&request).expect("RSS-limited measurement");
+    #[cfg(target_os = "linux")]
+    {
+        assert!(outcome.peak_rss_bytes.is_some());
+        assert_eq!(outcome.status, MeasuredStatus::RssLimit);
+    }
     if outcome.peak_rss_bytes.is_some() {
         assert_eq!(outcome.status, MeasuredStatus::RssLimit);
     }
@@ -98,6 +112,8 @@ fn summary_reports_median_dispersion_throughput_and_output() {
             user_cpu_micros: Some(wall_time_micros / 2),
             system_cpu_micros: Some(10),
             peak_rss_bytes: Some(1024),
+            rss_provenance: None,
+            process_group_peak_rss_bytes: None,
             first_result_micros: Some(20),
             output_bytes: 7,
         })
