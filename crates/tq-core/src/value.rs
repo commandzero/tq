@@ -38,7 +38,7 @@ pub enum Value {
     Null,
     /// Boolean scalar.
     Bool(bool),
-    /// Hybrid finite number.
+    /// Hybrid number, including computed non-finite values.
     Number(Number),
     /// Shared immutable UTF-8 string.
     String(Arc<str>),
@@ -124,7 +124,11 @@ impl Value {
         })
     }
 
-    /// Converts to serde JSON, retaining exact numeric tokens and encounter order.
+    /// Converts to serde JSON with numeric projection and encounter order.
+    ///
+    /// Finite numeric values retain their precision, but serde JSON may
+    /// normalize their spelling. Serialize this value directly when jq-style
+    /// literal spelling (such as uppercase exponent notation) must be retained.
     ///
     /// # Errors
     ///
@@ -133,6 +137,16 @@ impl Value {
         Ok(match self {
             Self::Null => serde_json::Value::Null,
             Self::Bool(value) => serde_json::Value::Bool(*value),
+            Self::Number(value) if value.as_f64().is_nan() => serde_json::Value::Null,
+            Self::Number(value)
+                if value.exact_literal().is_none()
+                    && value.as_f64() == 0.0
+                    && value.as_f64().is_sign_negative() =>
+            {
+                serde_json::Value::Number(
+                    serde_json::Number::from_f64(-0.0).ok_or(NumberError::Invalid)?,
+                )
+            }
             Self::Number(value) => serde_json::Value::Number(
                 value
                     .to_string()
@@ -517,7 +531,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&value).unwrap(),
-            r#"{"z":9007199254740993,"a":[1e+1000000,0,"x"]}"#
+            r#"{"z":9007199254740993,"a":[1E+1000000,-0.0,"x"]}"#
         );
 
         let oversized = "1".repeat(4097);

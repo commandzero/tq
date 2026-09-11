@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    io::{Cursor, Read},
     path::{Component, Path, PathBuf},
     sync::Arc,
 };
@@ -10,11 +11,12 @@ use std::{
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, ModuleInfo,
-    OptimizerRewrite, Parsed, PlanKind, Query, Resolved, SourceId, Span, Value,
+    Analysis, Analyzed, CapabilityCause, Diagnostic, DiagnosticClass, Effect, JsonInput,
+    JsonInputError, JsonInputOptions, ModuleInfo, Number, OptimizerRewrite, Parsed, PlanKind,
+    Query, Resolved, SourceId, Span, Value,
     ast::{
-        Access, CallTarget, Definition, Expr, ExprKind, InterpolationSegment, ObjectKey,
-        ParameterKind,
+        Access, BindingPattern, CallTarget, Definition, Expr, ExprKind, InterpolationSegment,
+        ObjectKey, ParameterKind,
     },
     parser::parse_module_ast,
     phase::{automatic_stream_proof, hybrid_stream_proof},
@@ -39,7 +41,7 @@ pub struct BuiltinRegistry;
 
 impl BuiltinRegistry {
     /// Registry semantic version.
-    pub const VERSION: u32 = 3;
+    pub const VERSION: u32 = 4;
 
     /// Returns the signature for a supported built-in.
     #[must_use]
@@ -67,87 +69,198 @@ const BUILTINS: &[Builtin] = &[
     builtin("@text", 0, 0, false),
     builtin("@tsv", 0, 0, false),
     builtin("@uri", 0, 0, false),
-    builtin("add", 0, 0, true),
-    builtin("all", 2, 2, false),
-    builtin("any", 2, 2, false),
+    builtin("@urid", 0, 0, false),
+    builtin("add", 0, 1, true),
+    builtin("abs", 0, 0, false),
+    builtin("all", 0, 2, false),
+    builtin("any", 0, 2, false),
     builtin("arrays", 0, 0, false),
+    builtin("bsearch", 1, 1, false),
+    builtin("builtins", 0, 0, false),
     builtin("ascii_downcase", 0, 0, false),
+    builtin("ascii_upcase", 0, 0, false),
+    builtin("acos", 0, 0, false),
+    builtin("acosh", 0, 0, false),
+    builtin("asin", 0, 0, false),
+    builtin("asinh", 0, 0, false),
+    builtin("atan", 0, 0, false),
+    builtin("atan2", 2, 2, false),
+    builtin("atanh", 0, 0, false),
     builtin("booleans", 0, 0, false),
     builtin("capture", 1, 2, false),
+    builtin("cbrt", 0, 0, false),
     builtin("ceil", 0, 0, false),
+    builtin("contains", 1, 1, false),
+    builtin("combinations", 0, 1, true),
+    builtin("copysign", 2, 2, false),
+    builtin("cos", 0, 0, false),
+    builtin("cosh", 0, 0, false),
+    builtin("del", 1, 1, false),
+    builtin("delpaths", 1, 1, false),
+    builtin("debug", 0, 1, false),
+    builtin("drem", 2, 2, false),
     builtin("empty", 0, 0, false),
+    builtin("isempty", 1, 1, false),
     builtin("env", 0, 0, false),
     builtin("error", 0, 1, false),
+    builtin("erf", 0, 0, false),
+    builtin("erfc", 0, 0, false),
+    builtin("exp", 0, 0, false),
+    builtin("exp10", 0, 0, false),
+    builtin("exp2", 0, 0, false),
+    builtin("expm1", 0, 0, false),
     builtin("explode", 0, 0, false),
     builtin("fabs", 0, 0, false),
+    builtin("fdim", 2, 2, false),
+    builtin("finites", 0, 0, false),
+    builtin("fma", 3, 3, false),
+    builtin("fmax", 2, 2, false),
+    builtin("fmin", 2, 2, false),
+    builtin("fmod", 2, 2, false),
     builtin("flatten", 0, 1, true),
     builtin("floor", 0, 0, false),
+    builtin("first", 0, 1, false),
+    builtin("frexp", 0, 0, false),
     builtin("fromdate", 0, 0, false),
     builtin("fromdateiso8601", 0, 0, false),
     builtin("fromjson", 0, 0, false),
+    builtin("from_entries", 0, 0, true),
+    builtin("fromstream", 1, 1, false),
     builtin("getpath", 1, 1, false),
+    builtin("gamma", 0, 0, false),
     builtin("gmtime", 0, 0, false),
     builtin("group_by", 1, 1, true),
     builtin("gsub", 2, 3, false),
     builtin("has", 1, 1, false),
+    builtin("halt", 0, 0, false),
+    builtin("halt_error", 0, 1, false),
+    builtin("have_decnum", 0, 0, false),
+    builtin("have_literal_numbers", 0, 0, false),
     builtin("in", 1, 1, false),
+    builtin("IN", 1, 2, false),
+    builtin("INDEX", 1, 2, false),
+    builtin("infinite", 0, 0, false),
+    builtin("input", 0, 0, false),
     builtin("input_filename", 0, 0, false),
     builtin("input_line_number", 0, 0, false),
     builtin("inputs", 0, 0, false),
     builtin("implode", 0, 0, false),
+    builtin("inside", 1, 1, false),
+    builtin("indices", 1, 1, false),
+    builtin("index", 1, 1, false),
     builtin("iterables", 0, 0, false),
+    builtin("isfinite", 0, 0, false),
+    builtin("isinfinite", 0, 0, false),
+    builtin("isnan", 0, 0, false),
+    builtin("isnormal", 0, 0, false),
+    builtin("hypot", 2, 2, false),
+    builtin("j0", 0, 0, false),
+    builtin("j1", 0, 0, false),
+    builtin("jn", 2, 2, false),
     builtin("keys", 0, 0, true),
     builtin("keys_unsorted", 0, 0, false),
+    builtin("last", 0, 1, false),
+    builtin("ldexp", 2, 2, false),
     builtin("length", 0, 0, false),
     builtin("limit", 2, 2, false),
     builtin("localtime", 0, 0, false),
+    builtin("lgamma", 0, 0, false),
     builtin("ltrimstr", 1, 1, false),
+    builtin("ltrim", 0, 0, false),
+    builtin("rtrim", 0, 0, false),
+    builtin("trimstr", 1, 1, false),
+    builtin("rtrimstr", 1, 1, false),
+    builtin("startswith", 1, 1, false),
+    builtin("endswith", 1, 1, false),
+    builtin("join", 1, 1, false),
+    builtin("JOIN", 2, 4, false),
+    builtin("trim", 0, 0, false),
+    builtin("log", 0, 0, false),
+    builtin("log10", 0, 0, false),
+    builtin("log1p", 0, 0, false),
+    builtin("log2", 0, 0, false),
+    builtin("logb", 0, 0, false),
     builtin("map", 1, 1, true),
     builtin("map_values", 1, 1, true),
     builtin("max", 0, 0, true),
     builtin("match", 1, 2, false),
     builtin("min", 0, 0, true),
     builtin("max_by", 1, 1, true),
+    builtin("modf", 0, 0, false),
     builtin("min_by", 1, 1, true),
     builtin("mktime", 0, 0, false),
     builtin("modulemeta", 0, 0, false),
     builtin("nulls", 0, 0, false),
+    builtin("normals", 0, 0, false),
+    builtin("not", 0, 0, false),
     builtin("now", 0, 0, false),
+    builtin("nan", 0, 0, false),
+    builtin("nearbyint", 0, 0, false),
+    builtin("nextafter", 2, 2, false),
+    builtin("nexttoward", 2, 2, false),
     builtin("numbers", 0, 0, false),
+    builtin("nth", 1, 2, false),
     builtin("objects", 0, 0, false),
     builtin("path", 1, 1, false),
-    builtin("paths", 0, 0, false),
+    builtin("paths", 0, 1, false),
+    builtin("pick", 1, 1, false),
     builtin("range", 1, 3, false),
+    builtin("pow", 2, 2, false),
     builtin("recurse", 0, 2, false),
     builtin("reverse", 0, 0, true),
+    builtin("remainder", 2, 2, false),
+    builtin("rint", 0, 0, false),
+    builtin("rindex", 1, 1, false),
+    builtin("round", 0, 0, false),
     builtin("scan", 1, 2, false),
+    builtin("scalb", 2, 2, false),
+    builtin("scalbln", 2, 2, false),
     builtin("scalars", 0, 0, false),
     builtin("select", 1, 1, false),
     builtin("setpath", 2, 2, false),
+    builtin("significand", 0, 0, false),
+    builtin("sin", 0, 0, false),
+    builtin("sinh", 0, 0, false),
     builtin("sort", 0, 0, true),
     builtin("sort_by", 1, 1, true),
+    builtin("skip", 2, 2, false),
     builtin("split", 1, 2, false),
     builtin("splits", 1, 2, false),
     builtin("strftime", 1, 1, false),
     builtin("strflocaltime", 1, 1, false),
     builtin("strptime", 1, 1, false),
     builtin("strings", 0, 0, false),
+    builtin("sqrt", 0, 0, false),
+    builtin("stderr", 0, 0, false),
     builtin("sub", 2, 3, false),
     builtin("test", 1, 2, false),
+    builtin("tan", 0, 0, false),
+    builtin("tanh", 0, 0, false),
+    builtin("tgamma", 0, 0, false),
     builtin("todate", 0, 0, false),
     builtin("todateiso8601", 0, 0, false),
     builtin("to_entries", 0, 0, true),
+    builtin("toboolean", 0, 0, false),
     builtin("tojson", 0, 0, false),
     builtin("tostream", 0, 0, false),
+    builtin("truncate_stream", 1, 1, false),
     builtin("tonumber", 0, 0, false),
     builtin("tostring", 0, 0, false),
+    builtin("transpose", 0, 0, true),
     builtin("type", 0, 0, false),
+    builtin("trunc", 0, 0, false),
     builtin("unique", 0, 0, true),
     builtin("unique_by", 1, 1, true),
     builtin("utf8bytelength", 0, 0, false),
     builtin("values", 0, 0, false),
+    builtin("while", 2, 2, false),
+    builtin("until", 2, 2, false),
+    builtin("repeat", 1, 1, false),
     builtin("with_entries", 1, 1, true),
     builtin("walk", 1, 1, true),
+    builtin("y0", 0, 0, false),
+    builtin("y1", 0, 0, false),
+    builtin("yn", 2, 2, false),
 ];
 
 const fn builtin(
@@ -188,53 +301,91 @@ impl Default for ResolveOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CachedModule {
     ast: Expr,
     info: ModuleInfo,
 }
 
-struct ModuleLoader {
+#[derive(Clone, Debug)]
+struct CachedData {
+    value: Value,
+    info: ModuleInfo,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExpandPairKind {
+    Comma,
+    Pipe,
+    Binary(crate::ast::BinaryOperator),
+    Assignment(crate::ast::AssignmentOperator),
+}
+
+impl ExpandPairKind {
+    fn build(self, left: Box<Expr>, right: Box<Expr>) -> ExprKind {
+        match self {
+            Self::Comma => ExprKind::Comma(left, right),
+            Self::Pipe => ExprKind::Pipe(left, right),
+            Self::Binary(operator) => ExprKind::Binary {
+                operator,
+                left,
+                right,
+            },
+            Self::Assignment(operator) => ExprKind::Assignment {
+                operator,
+                path: left,
+                value: right,
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ModuleLoader {
     roots: Vec<PathBuf>,
+    allowed_roots: Vec<PathBuf>,
     cache: BTreeMap<PathBuf, CachedModule>,
+    data_cache: BTreeMap<PathBuf, CachedData>,
+    order: Vec<PathBuf>,
     stack: Vec<PathBuf>,
+    search_stack: Vec<Vec<Option<PathBuf>>>,
     module_limit: usize,
     module_bytes: usize,
     next_source: u32,
 }
 
 impl ModuleLoader {
-    fn new(options: &ResolveOptions) -> Result<Self, Box<Diagnostic>> {
+    pub(crate) fn new(options: &ResolveOptions) -> Self {
         let roots = options
             .module_roots
             .iter()
-            .map(|root| {
-                fs::canonicalize(root).map_err(|error| {
-                    module_error(
-                        "TQ-MODULE-ROOT-001",
-                        format!(
-                            "module root '{}' cannot be canonicalized: {error}",
-                            root.display()
-                        ),
-                        Span::new(SourceId::new(0), 0, 0),
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self {
+            .filter_map(|root| fs::canonicalize(root).ok())
+            .collect::<Vec<_>>();
+        Self {
+            allowed_roots: roots.clone(),
             roots,
             cache: BTreeMap::new(),
+            data_cache: BTreeMap::new(),
+            order: Vec::new(),
             stack: Vec::new(),
+            search_stack: Vec::new(),
             module_limit: options.module_limit,
             module_bytes: options.module_bytes,
-            next_source: 1,
-        })
+            // Source ID 0 belongs to the command-line query and source ID 1
+            // may belong to a separately parsed startup file.
+            next_source: 2,
+        }
     }
 
     fn module_info(&self) -> Vec<ModuleInfo> {
-        self.cache
-            .values()
-            .map(|module| module.info.clone())
+        self.order
+            .iter()
+            .filter_map(|path| {
+                self.cache
+                    .get(path)
+                    .map(|module| module.info.clone())
+                    .or_else(|| self.data_cache.get(path).map(|module| module.info.clone()))
+            })
             .collect()
     }
 
@@ -247,7 +398,7 @@ impl ModuleLoader {
             } => {
                 validate_metadata(metadata.as_deref(), expr.span)?;
                 let body = self.expand(*body)?;
-                let module = self.load(&path, expr.span)?;
+                let module = self.load(&path, metadata.as_deref(), expr.span)?;
                 splice_module(module.ast, body, expr.span)
             }
             ExprKind::Import {
@@ -257,10 +408,17 @@ impl ModuleLoader {
                 body,
             } => {
                 validate_metadata(metadata.as_deref(), expr.span)?;
-                let body = self.expand(*body)?;
-                let mut module = self.load(&path, expr.span)?.ast;
-                qualify_module(&mut module, &alias);
-                splice_module(module, body, expr.span)
+                let mut body = self.expand(*body)?;
+                if let Some(data_alias) = alias.strip_prefix('$') {
+                    let data = self.load_data(&path, metadata.as_deref(), expr.span)?;
+                    let qualified = format!("{data_alias}::{data_alias}");
+                    replace_data_binding(&mut body, &qualified, &data.value);
+                    Ok(body)
+                } else {
+                    let mut module = self.load(&path, metadata.as_deref(), expr.span)?.ast;
+                    qualify_module(&mut module, &alias);
+                    splice_module(module, body, expr.span)
+                }
             }
             ExprKind::Module { metadata, body } => {
                 validate_metadata(Some(&metadata), expr.span)?;
@@ -304,18 +462,27 @@ impl ModuleLoader {
             ExprKind::Optional(expression)
             | ExprKind::Array(expression)
             | ExprKind::Unary { expression, .. } => {
-                **expression = self.expand((**expression).clone())?;
+                self.expand_child(expression)?;
             }
-            ExprKind::Pipe(left, right)
-            | ExprKind::Comma(left, right)
-            | ExprKind::Binary { left, right, .. }
-            | ExprKind::Assignment {
-                path: left,
-                value: right,
-                ..
+            ExprKind::Comma(left, right) => {
+                self.expand_pair_spine(left, right, ExpandPairKind::Comma)?;
+            }
+            ExprKind::Pipe(left, right) => {
+                self.expand_pair_spine(left, right, ExpandPairKind::Pipe)?;
+            }
+            ExprKind::Binary {
+                operator,
+                left,
+                right,
             } => {
-                **left = self.expand((**left).clone())?;
-                **right = self.expand((**right).clone())?;
+                self.expand_pair_spine(left, right, ExpandPairKind::Binary(*operator))?;
+            }
+            ExprKind::Assignment {
+                operator,
+                path,
+                value,
+            } => {
+                self.expand_pair_spine(path, value, ExpandPairKind::Assignment(*operator))?;
             }
             ExprKind::Object(entries) => {
                 for entry in entries {
@@ -335,7 +502,7 @@ impl ModuleLoader {
                 }
                 **alternative = self.expand((**alternative).clone())?;
             }
-            ExprKind::Bind { value, body, .. } => {
+            ExprKind::Bind { value, body, .. } | ExprKind::BindAlternatives { value, body, .. } => {
                 **value = self.expand((**value).clone())?;
                 **body = self.expand((**body).clone())?;
             }
@@ -359,7 +526,9 @@ impl ModuleLoader {
                 **generator = self.expand((**generator).clone())?;
                 **initial = self.expand((**initial).clone())?;
                 **update = self.expand((**update).clone())?;
-                **extract = self.expand((**extract).clone())?;
+                if let Some(extract) = extract {
+                    **extract = self.expand((**extract).clone())?;
+                }
             }
             ExprKind::Define { definition, body } => {
                 definition.body = self.expand(definition.body.clone())?;
@@ -392,8 +561,84 @@ impl ModuleLoader {
         Ok(())
     }
 
-    fn load(&mut self, requested: &str, span: Span) -> Result<CachedModule, Box<Diagnostic>> {
-        let canonical = self.resolve_path(requested, span)?;
+    fn expand_child(&mut self, child: &mut Box<Expr>) -> Result<(), Box<Diagnostic>> {
+        let span = child.span;
+        let owned = std::mem::replace(child, Box::new(Expr::new(ExprKind::Empty, span)));
+        **child = self.expand(*owned)?;
+        Ok(())
+    }
+
+    fn expand_pair_spine(
+        &mut self,
+        left: &mut Box<Expr>,
+        right: &mut Box<Expr>,
+        pair_kind: ExpandPairKind,
+    ) -> Result<(), Box<Diagnostic>> {
+        // The parser left-associates these paired forms. Peel only a
+        // contiguous same-kind left spine so precedence and parenthesized
+        // mixed operators retain their original tree shape and order.
+        let left_span = left.span;
+        let mut cursor = std::mem::replace(left, Box::new(Expr::new(ExprKind::Empty, left_span)));
+        let mut pending_rights = Vec::new();
+        loop {
+            let span = cursor.span;
+            match cursor.kind {
+                ExprKind::Comma(next_left, next_right)
+                    if matches!(pair_kind, ExpandPairKind::Comma) =>
+                {
+                    pending_rights.push((next_right, span));
+                    cursor = next_left;
+                }
+                ExprKind::Pipe(next_left, next_right)
+                    if matches!(pair_kind, ExpandPairKind::Pipe) =>
+                {
+                    pending_rights.push((next_right, span));
+                    cursor = next_left;
+                }
+                ExprKind::Binary {
+                    operator,
+                    left: next_left,
+                    right: next_right,
+                } if pair_kind == ExpandPairKind::Binary(operator) => {
+                    pending_rights.push((next_right, span));
+                    cursor = next_left;
+                }
+                ExprKind::Assignment {
+                    operator,
+                    path: next_left,
+                    value: next_right,
+                } if pair_kind == ExpandPairKind::Assignment(operator) => {
+                    pending_rights.push((next_right, span));
+                    cursor = next_left;
+                }
+                kind => {
+                    cursor = Box::new(self.expand(Expr::new(kind, span))?);
+                    break;
+                }
+            }
+        }
+
+        let mut rebuilt = cursor;
+        for (pending, span) in pending_rights.into_iter().rev() {
+            let pending = Box::new(self.expand(*pending)?);
+            rebuilt = Box::new(Expr::new(pair_kind.build(rebuilt, pending), span));
+        }
+        let right_span = right.span;
+        let right_child =
+            std::mem::replace(right, Box::new(Expr::new(ExprKind::Empty, right_span)));
+        let expanded_right = Box::new(self.expand(*right_child)?);
+        *left = rebuilt;
+        *right = expanded_right;
+        Ok(())
+    }
+
+    fn load(
+        &mut self,
+        requested: &str,
+        metadata: Option<&Expr>,
+        span: Span,
+    ) -> Result<CachedModule, Box<Diagnostic>> {
+        let canonical = self.resolve_path(requested, metadata, span)?;
         if let Some(position) = self.stack.iter().position(|path| path == &canonical) {
             let mut cycle = self.stack[position..]
                 .iter()
@@ -409,14 +654,20 @@ impl ModuleLoader {
         if let Some(module) = self.cache.get(&canonical) {
             return Ok(module.clone());
         }
-        if self.cache.len().saturating_add(self.stack.len()) >= self.module_limit {
+        if self
+            .cache
+            .len()
+            .saturating_add(self.data_cache.len())
+            .saturating_add(self.stack.len())
+            >= self.module_limit
+        {
             return Err(module_error(
                 "TQ-RESOURCE-MODULES-001",
                 "module count limit exceeded".to_owned(),
                 span,
             ));
         }
-        let bytes = fs::read(&canonical).map_err(|error| {
+        let bytes = read_module_bytes(&canonical, self.module_bytes).map_err(|error| {
             module_error(
                 "TQ-MODULE-READ-001",
                 format!("failed to read module '{}': {error}", canonical.display()),
@@ -439,11 +690,16 @@ impl ModuleLoader {
         })?;
         let source_id = SourceId::new(self.next_source);
         self.next_source = self.next_source.saturating_add(1);
-        let parsed = parse_module_ast(&canonical.display().to_string(), text, source_id)?;
+        let canonical_name = canonical.display().to_string();
+        let mut parsed = parse_module_ast(&canonical_name, text, source_id)?;
+        replace_location_variables(&mut parsed, &canonical_name, text);
         let (metadata, parsed) = module_metadata(parsed)?;
         let metadata = enrich_module_metadata(metadata, &parsed);
         self.stack.push(canonical.clone());
+        self.search_stack
+            .push(module_search_roots(&metadata, canonical.parent(), span)?);
         let expanded = self.expand(parsed);
+        self.search_stack.pop();
         self.stack.pop();
         let ast = expanded?;
         let info = ModuleInfo {
@@ -453,19 +709,125 @@ impl ModuleLoader {
             metadata,
         };
         let module = CachedModule { ast, info };
+        self.order.push(canonical.clone());
         self.cache.insert(canonical, module.clone());
         Ok(module)
     }
 
-    fn resolve_path(&self, requested: &str, span: Span) -> Result<PathBuf, Box<Diagnostic>> {
+    pub(crate) fn load_metadata(
+        &mut self,
+        requested: &str,
+        span: Span,
+    ) -> Result<ModuleInfo, Box<Diagnostic>> {
+        Ok(self.load(requested, None, span)?.info)
+    }
+
+    fn load_data(
+        &mut self,
+        requested: &str,
+        metadata: Option<&Expr>,
+        span: Span,
+    ) -> Result<CachedData, Box<Diagnostic>> {
+        let canonical = self.resolve_data_path(requested, metadata, span)?;
+        if let Some(data) = self.data_cache.get(&canonical) {
+            return Ok(data.clone());
+        }
+        if self
+            .cache
+            .len()
+            .saturating_add(self.data_cache.len())
+            .saturating_add(self.stack.len())
+            >= self.module_limit
+        {
+            return Err(module_error(
+                "TQ-RESOURCE-MODULES-001",
+                "module count limit exceeded".to_owned(),
+                span,
+            ));
+        }
+        let bytes = read_module_bytes(&canonical, self.module_bytes).map_err(|error| {
+            module_error(
+                "TQ-MODULE-READ-001",
+                format!("failed to read module '{}': {error}", canonical.display()),
+                span,
+            )
+        })?;
+        if bytes.len() > self.module_bytes {
+            return Err(module_error(
+                "TQ-RESOURCE-MODULE-BYTES-001",
+                format!("module '{}' exceeds the byte limit", canonical.display()),
+                span,
+            ));
+        }
+        let mut values = Vec::new();
+        let mut input = JsonInput::new(Cursor::new(&bytes), JsonInputOptions::default());
+        let mut checkpoint = || Ok::<(), std::io::Error>(());
+        while let Some(value) = input.next_value(&mut checkpoint).map_err(|error| {
+            let detail = match error {
+                JsonInputError::Consumer(error) | JsonInputError::Io(error) => error.to_string(),
+                other => other.to_string(),
+            };
+            module_error(
+                "TQ-MODULE-DATA-001",
+                format!(
+                    "data module '{}' is not valid JSON: {detail}",
+                    canonical.display()
+                ),
+                span,
+            )
+        })? {
+            values.push(value);
+        }
+        let value = Value::array(values);
+        let info = ModuleInfo {
+            name: requested.to_owned(),
+            canonical_path: canonical.display().to_string(),
+            sha256: hex_digest(&bytes),
+            metadata: Value::object(crate::Object::from_iter([
+                (Arc::from("deps"), Value::array(Vec::new())),
+                (Arc::from("defs"), Value::array(Vec::new())),
+            ])),
+        };
+        let data = CachedData { value, info };
+        self.order.push(canonical.clone());
+        self.data_cache.insert(canonical, data.clone());
+        Ok(data)
+    }
+
+    fn resolve_path(
+        &self,
+        requested: &str,
+        metadata: Option<&Expr>,
+        span: Span,
+    ) -> Result<PathBuf, Box<Diagnostic>> {
+        self.resolve_path_with_extensions(requested, metadata, span, &["jq"])
+    }
+
+    fn resolve_data_path(
+        &self,
+        requested: &str,
+        metadata: Option<&Expr>,
+        span: Span,
+    ) -> Result<PathBuf, Box<Diagnostic>> {
+        self.resolve_path_with_extensions(requested, metadata, span, &["json"])
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "module path validation and ordered search are intentionally kept together"
+    )]
+    fn resolve_path_with_extensions(
+        &self,
+        requested: &str,
+        metadata: Option<&Expr>,
+        span: Span,
+        extensions: &[&str],
+    ) -> Result<PathBuf, Box<Diagnostic>> {
         let requested_path = Path::new(requested);
         if requested_path.is_absolute()
-            || requested_path.components().any(|component| {
-                matches!(
-                    component,
-                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
-                )
-            })
+            || requested_path
+                .components()
+                .any(|component| matches!(component, Component::RootDir | Component::Prefix(_)))
         {
             return Err(module_error(
                 "TQ-MODULE-CONFINEMENT-001",
@@ -473,7 +835,64 @@ impl ModuleLoader {
                 span,
             ));
         }
-        if self.roots.is_empty() {
+        let mut nesting = 0usize;
+        for component in requested_path.components() {
+            match component {
+                Component::Normal(_) => nesting = nesting.saturating_add(1),
+                Component::ParentDir if nesting == 0 => {
+                    return Err(module_error(
+                        "TQ-MODULE-CONFINEMENT-001",
+                        format!("module path {requested:?} escapes configured roots"),
+                        span,
+                    ));
+                }
+                Component::ParentDir => nesting = nesting.saturating_sub(1),
+                Component::CurDir => {}
+                Component::RootDir | Component::Prefix(_) => unreachable!(),
+            }
+        }
+        let components = requested_path.components().collect::<Vec<_>>();
+        if components.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(module_error(
+                "TQ-MODULE-PATH-001",
+                format!("module path {requested:?} repeats a component"),
+                span,
+            ));
+        }
+        let mut roots = Vec::new();
+        let mut terminated = false;
+        if let Some(metadata) = metadata {
+            let metadata_roots = search_roots_from_metadata(
+                metadata,
+                self.stack.last().and_then(|path| path.parent()),
+                span,
+            )?;
+            for root in metadata_roots {
+                if root.is_none() {
+                    terminated = true;
+                    break;
+                }
+                roots.push(root.expect("non-empty search root"));
+            }
+        }
+        if !terminated {
+            for search in self.search_stack.iter().rev() {
+                for root in search {
+                    let Some(root) = root else {
+                        terminated = true;
+                        break;
+                    };
+                    roots.push(root.clone());
+                }
+                if terminated {
+                    break;
+                }
+            }
+        }
+        if !terminated {
+            roots.extend(self.roots.iter().cloned());
+        }
+        if roots.is_empty() {
             return Err(module_error(
                 "TQ-MODULE-ROOT-001",
                 format!("module {requested:?} requires an explicit module root"),
@@ -484,14 +903,21 @@ impl ModuleLoader {
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or(requested);
-        for root in &self.roots {
-            let direct = root.join(format!("{requested}.jq"));
-            let nested = root.join(requested).join(format!("{leaf}.jq"));
+        for root in &roots {
+            let direct = append_module_extension(&root.join(requested), extensions[0]);
+            let nested = root
+                .join(requested)
+                .join(format!("{leaf}.{}", extensions[0]));
             for candidate in [direct, nested] {
                 let Ok(canonical) = fs::canonicalize(&candidate) else {
                     continue;
                 };
-                if !canonical.starts_with(root) {
+                if !canonical.starts_with(root)
+                    || !self
+                        .allowed_roots
+                        .iter()
+                        .any(|allowed| canonical.starts_with(allowed))
+                {
                     return Err(module_error(
                         "TQ-MODULE-CONFINEMENT-001",
                         format!(
@@ -529,6 +955,161 @@ fn module_metadata(expr: Expr) -> Result<(Value, Expr), Box<Diagnostic>> {
     }
 }
 
+fn append_module_extension(path: &Path, extension: &str) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    path.with_file_name(format!("{name}.{extension}"))
+}
+
+fn search_roots_from_metadata(
+    metadata: &Expr,
+    origin: Option<&Path>,
+    span: Span,
+) -> Result<Vec<Option<PathBuf>>, Box<Diagnostic>> {
+    let Some(value) = constant_value(metadata) else {
+        return Err(module_error(
+            "TQ-MODULE-METADATA-001",
+            "module search metadata must be a constant expression".to_owned(),
+            span,
+        ));
+    };
+    let Value::Object(values) = value else {
+        return Ok(Vec::new());
+    };
+    values.get("search").map_or(Ok(Vec::new()), |search| {
+        search_roots_from_value(search, origin, span)
+    })
+}
+
+fn module_search_roots(
+    metadata: &Value,
+    origin: Option<&Path>,
+    span: Span,
+) -> Result<Vec<Option<PathBuf>>, Box<Diagnostic>> {
+    let Value::Object(values) = metadata else {
+        return Ok(Vec::new());
+    };
+    let Some(search) = values.get("search") else {
+        return Ok(Vec::new());
+    };
+    search_roots_from_value(search, origin, span)
+}
+
+fn read_module_bytes(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
+    let limit = u64::try_from(limit).unwrap_or(u64::MAX);
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn search_roots_from_value(
+    value: &Value,
+    origin: Option<&Path>,
+    span: Span,
+) -> Result<Vec<Option<PathBuf>>, Box<Diagnostic>> {
+    let values = match value {
+        Value::String(_) | Value::Null => vec![value],
+        Value::Array(values) => values.iter().collect::<Vec<_>>(),
+        _ => {
+            return Err(module_error(
+                "TQ-MODULE-METADATA-001",
+                "module search metadata must be a string or array of strings".to_owned(),
+                span,
+            ));
+        }
+    };
+    let mut roots = Vec::with_capacity(values.len());
+    for value in values {
+        let Value::String(value) = value else {
+            if matches!(value, Value::Null) {
+                roots.push(None);
+                break;
+            }
+            return Err(module_error(
+                "TQ-MODULE-METADATA-001",
+                "module search metadata must be a string, null, or array of strings and nulls"
+                    .to_owned(),
+                span,
+            ));
+        };
+        if value.is_empty() {
+            roots.push(None);
+            break;
+        }
+        let substituted = substitute_metadata_root(value, origin);
+        let path = substituted.as_path();
+        let relative_to_origin = matches!(path.components().next(), Some(Component::CurDir))
+            || matches!(path.components().next(), Some(Component::ParentDir));
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else if relative_to_origin {
+            origin.map_or_else(|| path.to_path_buf(), |origin| origin.join(path))
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        };
+        let Ok(canonical) = fs::canonicalize(&path) else {
+            continue;
+        };
+        roots.push(Some(canonical));
+    }
+    Ok(roots)
+}
+
+fn substitute_metadata_root(value: &str, origin: Option<&Path>) -> PathBuf {
+    if let Some(rest) = value.strip_prefix("$ORIGIN/") {
+        return origin.map_or_else(|| PathBuf::from(value), |origin| origin.join(rest));
+    }
+    if let Some(rest) = value.strip_prefix("~/") {
+        return std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map_or_else(|| PathBuf::from(value), |home| home.join(rest));
+    }
+    PathBuf::from(value)
+}
+
+fn replace_data_binding(expr: &mut Expr, qualified: &str, value: &Value) {
+    if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == qualified) {
+        expr.kind = ExprKind::Literal(value.clone());
+        return;
+    }
+    walk_expr_mut(expr, |child| replace_data_binding(child, qualified, value));
+}
+
+pub(crate) fn replace_location_variables(expr: &mut Expr, source_name: &str, source_text: &str) {
+    if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == "__loc__") {
+        let offset = usize::try_from(expr.span.start)
+            .unwrap_or(source_text.len())
+            .min(source_text.len());
+        let line = source_text[..offset]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+            + 1;
+        let file = if matches!(source_name, "<command-line>" | "<query>" | "query") {
+            "<top-level>"
+        } else {
+            source_name
+        };
+        expr.kind = ExprKind::Literal(Value::object(crate::Object::from_iter([
+            (Arc::from("file"), Value::string(file)),
+            (
+                Arc::from("line"),
+                Value::Number(Number::parse(&line.to_string()).expect("line number is valid")),
+            ),
+        ])));
+        return;
+    }
+    walk_expr_mut(expr, |child| {
+        replace_location_variables(child, source_name, source_text);
+    });
+}
+
 fn enrich_module_metadata(metadata: Value, expr: &Expr) -> Value {
     let mut metadata = match metadata {
         Value::Object(values) => values.as_ref().clone(),
@@ -554,20 +1135,43 @@ fn enrich_module_metadata(metadata: Value, expr: &Expr) -> Value {
 fn collect_module_dependencies(expr: &Expr, dependencies: &mut Vec<Value>) {
     match &expr.kind {
         ExprKind::Import {
-            path, alias, body, ..
+            path,
+            alias,
+            metadata,
+            body,
         } => {
-            dependencies.push(Value::object(crate::Object::from_iter([
-                (Arc::from("as"), Value::string(alias.as_ref())),
-                (Arc::from("is_data"), Value::Bool(false)),
-                (Arc::from("relpath"), Value::string(path.as_ref())),
-            ])));
+            let mut dependency = crate::Object::new();
+            if let Some(metadata) = metadata
+                && let Some(Value::Object(values)) = constant_value(metadata)
+                && let Some(search) = values.get("search")
+            {
+                dependency.insert(Arc::from("search"), search.clone());
+            }
+            if alias.starts_with('$') {
+                dependency.insert(Arc::from("is_data"), Value::Bool(true));
+            } else {
+                dependency.insert(Arc::from("as"), Value::string(alias.as_ref()));
+                dependency.insert(Arc::from("is_data"), Value::Bool(false));
+            }
+            dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
+            dependencies.push(Value::object(dependency));
             collect_module_dependencies(body, dependencies);
         }
-        ExprKind::Include { path, body, .. } => {
-            dependencies.push(Value::object(crate::Object::from_iter([
-                (Arc::from("is_data"), Value::Bool(false)),
-                (Arc::from("relpath"), Value::string(path.as_ref())),
-            ])));
+        ExprKind::Include {
+            path,
+            metadata,
+            body,
+        } => {
+            let mut dependency = crate::Object::new();
+            if let Some(metadata) = metadata
+                && let Some(Value::Object(values)) = constant_value(metadata)
+                && let Some(search) = values.get("search")
+            {
+                dependency.insert(Arc::from("search"), search.clone());
+            }
+            dependency.insert(Arc::from("is_data"), Value::Bool(false));
+            dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
+            dependencies.push(Value::object(dependency));
             collect_module_dependencies(body, dependencies);
         }
         ExprKind::Define { body, .. } | ExprKind::Module { body, .. } => {
@@ -751,7 +1355,7 @@ fn walk_expr_mut(expr: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
             }
             visit(alternative);
         }
-        ExprKind::Bind { value, body, .. } => {
+        ExprKind::Bind { value, body, .. } | ExprKind::BindAlternatives { value, body, .. } => {
             visit(value);
             visit(body);
         }
@@ -775,7 +1379,9 @@ fn walk_expr_mut(expr: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
             visit(generator);
             visit(initial);
             visit(update);
-            visit(extract);
+            if let Some(extract) = extract {
+                visit(extract);
+            }
         }
         ExprKind::Define { definition, body } => {
             visit(&mut definition.body);
@@ -847,8 +1453,13 @@ pub fn resolve(
     mut query: Query<Parsed>,
     options: &ResolveOptions,
 ) -> Result<Query<Resolved>, Box<Diagnostic>> {
-    let mut loader = ModuleLoader::new(options)?;
+    query.set_resolve_options(options.clone());
+    let mut loader = ModuleLoader::new(options);
     let expanded = loader.expand(query.ast().clone())?;
+    let source_name = query.source().name().to_owned();
+    let source_text = query.source().text().to_owned();
+    let mut expanded = expanded;
+    replace_location_variables(&mut expanded, &source_name, &source_text);
     *query.ast_mut() = expanded;
     query.set_modules(loader.module_info());
 
@@ -1128,51 +1739,66 @@ impl Resolver {
                 }
                 self.resolve_expr(alternative)?;
             }
-            ExprKind::Bind { value, name, body } => {
+            ExprKind::Bind {
+                value,
+                pattern,
+                body,
+            } => {
                 self.resolve_expr(value)?;
-                let source_name = Arc::clone(name);
-                let runtime = self.runtime_variable(&source_name);
-                *name = Arc::clone(&runtime);
-                self.variables
-                    .push(BTreeMap::from([(source_name, runtime)]));
+                let mut bindings = BTreeMap::new();
+                self.resolve_pattern(pattern, &mut bindings);
+                self.variables.push(bindings);
+                let result = self.resolve_expr(body);
+                self.variables.pop();
+                result?;
+            }
+            ExprKind::BindAlternatives {
+                value,
+                patterns,
+                body,
+            } => {
+                self.resolve_expr(value)?;
+                let mut bindings = BTreeMap::new();
+                for pattern in patterns {
+                    self.resolve_pattern(pattern, &mut bindings);
+                }
+                self.variables.push(bindings);
                 let result = self.resolve_expr(body);
                 self.variables.pop();
                 result?;
             }
             ExprKind::Reduce {
                 generator,
-                name,
+                pattern,
                 initial,
                 update,
             } => {
                 self.resolve_expr(generator)?;
                 self.resolve_expr(initial)?;
-                let source_name = Arc::clone(name);
-                let runtime = self.runtime_variable(&source_name);
-                *name = Arc::clone(&runtime);
-                self.variables
-                    .push(BTreeMap::from([(source_name, runtime)]));
+                let mut bindings = BTreeMap::new();
+                self.resolve_pattern(pattern, &mut bindings);
+                self.variables.push(bindings);
                 let result = self.resolve_expr(update);
                 self.variables.pop();
                 result?;
             }
             ExprKind::Foreach {
                 generator,
-                name,
+                pattern,
                 initial,
                 update,
                 extract,
             } => {
                 self.resolve_expr(generator)?;
                 self.resolve_expr(initial)?;
-                let source_name = Arc::clone(name);
-                let runtime = self.runtime_variable(&source_name);
-                *name = Arc::clone(&runtime);
-                self.variables
-                    .push(BTreeMap::from([(source_name, runtime)]));
-                let result = self
-                    .resolve_expr(update)
-                    .and_then(|()| self.resolve_expr(extract));
+                let mut bindings = BTreeMap::new();
+                self.resolve_pattern(pattern, &mut bindings);
+                self.variables.push(bindings);
+                let result = self.resolve_expr(update).and_then(|()| {
+                    extract
+                        .as_deref_mut()
+                        .map_or(Ok(()), |extract| self.resolve_expr(extract))
+                });
                 self.variables.pop();
                 result?;
             }
@@ -1256,6 +1882,34 @@ impl Resolver {
         Ok(())
     }
 
+    fn resolve_pattern(
+        &mut self,
+        pattern: &mut BindingPattern,
+        bindings: &mut BTreeMap<Arc<str>, Arc<str>>,
+    ) {
+        match pattern {
+            BindingPattern::Variable(name) => {
+                let source_name = Arc::clone(name);
+                let runtime = bindings
+                    .get(&source_name)
+                    .cloned()
+                    .unwrap_or_else(|| self.runtime_variable(&source_name));
+                *name = Arc::clone(&runtime);
+                bindings.insert(source_name, runtime);
+            }
+            BindingPattern::Array(patterns) => {
+                for pattern in patterns {
+                    self.resolve_pattern(pattern, bindings);
+                }
+            }
+            BindingPattern::Object(entries) => {
+                for entry in entries {
+                    self.resolve_pattern(&mut entry.pattern, bindings);
+                }
+            }
+        }
+    }
+
     fn resolve_definition(
         &mut self,
         definition: &mut Definition,
@@ -1321,11 +1975,8 @@ impl Resolver {
     }
 }
 
-fn deferred_builtin(name: &str) -> Option<&'static str> {
-    match name {
-        "nan" => Some("nonfinite-result"),
-        _ => None,
-    }
+fn deferred_builtin(_name: &str) -> Option<&'static str> {
+    None
 }
 
 #[allow(
@@ -1413,7 +2064,7 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             }
             analyze_expr(alternative, analysis);
         }
-        ExprKind::Bind { value, body, .. } => {
+        ExprKind::Bind { value, body, .. } | ExprKind::BindAlternatives { value, body, .. } => {
             analyze_expr(value, analysis);
             analyze_expr(body, analysis);
             add_effect(analysis, Effect::Generator, expr.span);
@@ -1441,7 +2092,9 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
             analyze_expr(generator, analysis);
             analyze_expr(initial, analysis);
             analyze_expr(update, analysis);
-            analyze_expr(extract, analysis);
+            if let Some(extract) = extract {
+                analyze_expr(extract, analysis);
+            }
             add_effect(analysis, Effect::FoldState, expr.span);
             add_effect(analysis, Effect::Subtree, expr.span);
             add_effect(analysis, Effect::Generator, expr.span);
@@ -1481,11 +2134,28 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
                     | "strings"
                     | "nulls"
                     | "recurse"
+                    | "while"
+                    | "until"
+                    | "repeat"
             ) {
                 add_effect(analysis, Effect::Generator, expr.span);
             }
-            if &**name == "inputs" {
+            if matches!(&**name, "input" | "inputs") {
                 add_effect(analysis, Effect::WholeInput, expr.span);
+            }
+            if matches!(
+                &**name,
+                "env"
+                    | "input_filename"
+                    | "input_line_number"
+                    | "localtime"
+                    | "now"
+                    | "strflocaltime"
+            ) {
+                // These builtins read process or source ambient state.  Keep
+                // them on the document plan so the host can enforce the
+                // capability policy and provide the current source context.
+                add_effect(analysis, Effect::Document, expr.span);
             }
             if &**name == "recurse" {
                 add_effect(analysis, Effect::Subtree, expr.span);
@@ -1499,8 +2169,11 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
                     &**name,
                     "all"
                         | "any"
+                        | "abs"
                         | "ascii_downcase"
+                        | "ascii_upcase"
                         | "ceil"
+                        | "endswith"
                         | "explode"
                         | "fabs"
                         | "floor"
@@ -1508,15 +2181,26 @@ fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
                         | "getpath"
                         | "group_by"
                         | "implode"
+                        | "input"
                         | "limit"
                         | "ltrimstr"
+                        | "ltrim"
+                        | "rtrim"
+                        | "trimstr"
+                        | "rtrimstr"
+                        | "startswith"
+                        | "join"
+                        | "trim"
+                        | "toboolean"
                         | "max_by"
                         | "min_by"
                         | "path"
                         | "setpath"
                         | "to_entries"
                         | "tojson"
+                        | "fromstream"
                         | "tostream"
+                        | "truncate_stream"
                         | "with_entries"
                         | "error"
                         | "tonumber"
@@ -1619,6 +2303,12 @@ mod tests {
     }
 
     #[test]
+    fn module_expansion_preserves_nested_assignment_shape() {
+        let resolved = resolve(parse("(.a = 1) = 2").unwrap(), &ResolveOptions::default()).unwrap();
+        assert_eq!(resolved.hir(), "set(set(access(., field:a), 1), 2)");
+    }
+
+    #[test]
     fn resolves_labels_in_a_distinct_lexical_namespace() {
         resolve(
             parse("1 as $x | label $x | (label $x | break $x), break $x").unwrap(),
@@ -1637,7 +2327,7 @@ mod tests {
 
     #[test]
     fn registry_is_versioned_and_checks_arity_and_new_builtin_names() {
-        assert_eq!(BuiltinRegistry::VERSION, 3);
+        assert_eq!(BuiltinRegistry::VERSION, 4);
         assert!(BuiltinRegistry.get("sort_by").unwrap().blocking);
         assert_eq!(
             resolve(parse("range()").unwrap(), &ResolveOptions::default())
@@ -1703,11 +2393,102 @@ mod tests {
     }
 
     #[test]
-    fn every_deferred_grammar_family_has_a_stable_capability_code() {
-        let resolve_cases = [("nan", "TQ-CAP-NONFINITE-RESULT")];
-        for (query, code) in resolve_cases {
-            let error = resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap_err();
-            assert_eq!(error.code, code, "{query}");
+    fn math_registry_covers_the_safe_manual_inventory() {
+        for query in [
+            "acos",
+            "acosh",
+            "asin",
+            "asinh",
+            "atan",
+            "atanh",
+            "cbrt",
+            "ceil",
+            "cos",
+            "cosh",
+            "erf",
+            "erfc",
+            "exp",
+            "exp10",
+            "exp2",
+            "expm1",
+            "fabs",
+            "floor",
+            "frexp",
+            "gamma",
+            "j0",
+            "j1",
+            "lgamma",
+            "log",
+            "log10",
+            "log1p",
+            "log2",
+            "logb",
+            "modf",
+            "nearbyint",
+            "rint",
+            "round",
+            "significand",
+            "sin",
+            "sinh",
+            "sqrt",
+            "tan",
+            "tanh",
+            "tgamma",
+            "trunc",
+            "y0",
+            "y1",
+        ] {
+            resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap();
+        }
+        for query in [
+            "atan2(0; 1)",
+            "copysign(2; -1)",
+            "drem(5; 2)",
+            "fdim(5; 2)",
+            "fmax(2; 3)",
+            "fmin(2; 3)",
+            "fmod(5; 2)",
+            "hypot(3; 4)",
+            "jn(0; 0)",
+            "ldexp(1; 3)",
+            "nextafter(1; 2)",
+            "nexttoward(1; 2)",
+            "pow(2; 3)",
+            "remainder(5; 2)",
+            "scalb(2; 3)",
+            "scalbln(2; 3)",
+            "yn(0; 1)",
+        ] {
+            resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap();
+        }
+        resolve(parse("fma(2; 3; 4)").unwrap(), &ResolveOptions::default()).unwrap();
+
+        for (name, arity) in [
+            ("atan2", 2),
+            ("fma", 3),
+            ("frexp", 0),
+            ("modf", 0),
+            ("scalbln", 2),
+        ] {
+            let builtin = BuiltinRegistry
+                .get(name)
+                .expect("math builtin is registered");
+            assert_eq!(builtin.minimum_arity, arity, "{name} minimum arity");
+            assert_eq!(builtin.maximum_arity, arity, "{name} maximum arity");
+        }
+    }
+
+    #[test]
+    fn nonfinite_math_builtins_resolve_at_runtime_arities() {
+        for query in [
+            "nan",
+            "infinite",
+            "isnan",
+            "isinfinite",
+            "isfinite",
+            "isnormal",
+        ] {
+            resolve(parse(query).unwrap(), &ResolveOptions::default()).unwrap();
         }
     }
 

@@ -23,6 +23,8 @@ use crate::{
 pub enum TranscodeCommitment {
     /// Completed RS-prefixed records publish independently.
     DirectSequence,
+    /// LF-terminated values without RS framing.
+    DirectValues,
     /// Output targets an atomic publication buffer.
     AtomicUnframed,
 }
@@ -673,28 +675,26 @@ impl<W: Write> TranscodeConsumer<W> {
             } => (parent_key.clone(), *depth, *wrote_member, *header_published),
             _ => return Err(TranscodeError::Structure("member outside direct object")),
         };
-        if !header_published {
-            if let Some(ref key) = parent_key {
-                let parent = index
-                    .checked_sub(1)
-                    .ok_or(TranscodeError::Structure("nested object without parent"))?;
-                self.prepare_direct_member_line(parent)?;
-                self.output.write_all(render_key(key).as_bytes())?;
-                self.output.write_all(b":")?;
-                let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
-                    return Err(TranscodeError::Structure(
-                        "nested object parent is not direct",
-                    ));
-                };
-                *wrote_member = true;
-                let Frame::DirectObject {
-                    header_published, ..
-                } = &mut self.frames[index]
-                else {
-                    unreachable!()
-                };
-                *header_published = true;
-            }
+        if !header_published && let Some(ref key) = parent_key {
+            let parent = index
+                .checked_sub(1)
+                .ok_or(TranscodeError::Structure("nested object without parent"))?;
+            self.prepare_direct_member_line(parent)?;
+            self.output.write_all(render_key(key).as_bytes())?;
+            self.output.write_all(b":")?;
+            let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
+                return Err(TranscodeError::Structure(
+                    "nested object parent is not direct",
+                ));
+            };
+            *wrote_member = true;
+            let Frame::DirectObject {
+                header_published, ..
+            } = &mut self.frames[index]
+            else {
+                unreachable!()
+            };
+            *header_published = true;
         }
         let nested_header = parent_key.is_some();
         if wrote_member || nested_header {
@@ -756,17 +756,19 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
                 self.document_active = true;
                 self.root_complete = false;
                 self.current_truthy = None;
-                if self.commitment == TranscodeCommitment::DirectSequence {
+                if self.commitment != TranscodeCommitment::AtomicUnframed {
                     self.output
                         .begin(self.preparation.clone(), self.arena.clone())?;
-                    self.output.write_all(b"\x1e")?;
+                    if self.commitment == TranscodeCommitment::DirectSequence {
+                        self.output.write_all(b"\x1e")?;
+                    }
                 }
             }
             Event::DocumentEnd { .. } => {
                 if !self.document_active || !self.root_complete || !self.frames.is_empty() {
                     return Err(TranscodeError::Structure("incomplete document"));
                 }
-                if self.commitment == TranscodeCommitment::DirectSequence {
+                if self.commitment != TranscodeCommitment::AtomicUnframed {
                     self.output.write_all(b"\n")?;
                     self.output.commit()?;
                 }
@@ -838,8 +840,8 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
         self.check_cancellation()
             .map_err(|error| error.to_string())?;
         if self.accepts_lightweight_scalar() {
-            let canonical =
-                Number::canonicalize_literal(&literal).map_err(|error| error.to_string())?;
+            let number = Number::parse(&literal).map_err(|error| error.to_string())?;
+            let canonical = number.canonical_numeric();
             self.complete_scalar(ScalarToken::Number(&canonical))
                 .map_err(|error| error.to_string())
         } else {

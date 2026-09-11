@@ -1,22 +1,24 @@
 //! Incremental jq path/value stream projection for JSON and TOON.
 
 use std::{
-    cell::Cell,
-    fmt,
-    io::{BufRead, Read},
+    cell::{Cell, RefCell},
+    fmt::Display,
+    io::{self, BufRead, Read},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
 
-use serde::de::{self, DeserializeSeed, Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
-use tq_core::{Number, Object, PathComponent, SourceId, Value};
+const STREAM_ERROR_CONTEXT_BYTES: usize = 64 * 1024;
+
+use tq_core::{JsonInputError, JsonLimit, Number, Object, PathComponent, SourceId, Value};
 use tq_toon::{DecodeIntoError, Decoder, Event, EventConsumer, Scalar};
 
+use crate::structural::{
+    decode_json_event_stream_typed, decode_json_events_selected_with_options_control,
+};
 use crate::{FormatError, InputFormat, JsonEventOptions, decode_json_events_with_options};
-
-const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
 
 /// Limits and error behavior for explicit jq path/value streaming.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,6 +35,9 @@ pub struct StreamOptions {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SelectedStreamObservations {
     /// Largest number of simultaneously active source containers.
+    ///
+    /// This includes containers validated by the selection-aware parser even
+    /// when their values are discarded before materialization.
     pub depth_high_water: usize,
 }
 
@@ -60,7 +65,117 @@ pub struct StreamRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StreamSelection {
     prefix: Vec<PathComponent>,
-    projection: Option<Vec<PathComponent>>,
+    mode: SelectionMode,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SelectionMode {
+    Complete,
+    Projection(Vec<PathComponent>),
+    ItemCapture(Vec<Vec<PathComponent>>),
+}
+
+/// A selected root value that cannot be represented by selected child records
+/// alone.  Non-empty containers continue to arrive as records; these variants
+/// therefore never require retaining a complete input document.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SelectionFallback {
+    /// The selected path was absent from the root.
+    Missing {
+        /// Path of the absent selected prefix.
+        path: Vec<PathComponent>,
+    },
+    /// The selected path contained a scalar, including JSON null.
+    PresentScalar {
+        /// Path of the selected scalar.
+        path: Vec<PathComponent>,
+        /// Scalar value at the selected path.
+        value: Value,
+    },
+    /// The selected path contained an empty array.
+    PresentEmptyArray {
+        /// Path of the empty array.
+        path: Vec<PathComponent>,
+    },
+    /// The selected path contained an empty object.
+    PresentEmptyObject {
+        /// Path of the empty object.
+        path: Vec<PathComponent>,
+    },
+}
+
+/// A replacement observed before the replacement value's selected children.
+/// Array and object variants mean that a container has started; its eventual
+/// emptiness is reported by the normal selected records.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SelectionReplacement {
+    /// The replacement has no value at this path.
+    Missing,
+    /// The replacement is a scalar, including JSON null.
+    Scalar(Value),
+    /// An array replacement has started.
+    ArrayStart,
+    /// An object replacement has started.
+    ObjectStart,
+}
+
+/// Receives selected records grouped by validated JSON root boundaries.
+pub trait SelectedRootSink {
+    /// Sink-specific error mapped through its display representation.
+    type Error: Display;
+
+    /// Begins one root before its selected records are delivered.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sink error when the root cannot be opened.
+    fn begin_root(&mut self, index: u64) -> Result<(), Self::Error>;
+
+    /// Reports an absent or scalar/empty selected prefix.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sink error when the fallback cannot be recorded.
+    fn fallback(&mut self, fallback: SelectionFallback) -> Result<(), Self::Error>;
+
+    /// Reports replacement of the selected prefix or one of its ancestors.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sink error when the replacement cannot be recorded.
+    fn replace_selected_prefix(
+        &mut self,
+        path: &[PathComponent],
+        replacement: SelectionReplacement,
+    ) -> Result<(), Self::Error>;
+
+    /// Reports replacement inside an already selected input item.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sink error when the replacement cannot be recorded.
+    fn replace_item_path(
+        &mut self,
+        path: &[PathComponent],
+        replacement: SelectionReplacement,
+    ) -> Result<(), Self::Error>;
+
+    /// Delivers one selected structural record.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sink error when the record cannot be retained.
+    fn record(&mut self, record: StreamRecord) -> Result<(), Self::Error>;
+
+    /// Commits the current root.  This is the only commit point.
+    ///
+    /// # Errors
+    ///
+    /// Returns a sink error when the root cannot be committed.
+    fn finish_root(&mut self) -> Result<(), Self::Error>;
+
+    /// Discards all state accumulated for the current malformed root.
+    fn abort_root(&mut self);
 }
 
 impl StreamSelection {
@@ -68,7 +183,30 @@ impl StreamSelection {
     /// path projected from each child.
     #[must_use]
     pub fn new(prefix: Vec<PathComponent>, projection: Option<Vec<PathComponent>>) -> Self {
-        Self { prefix, projection }
+        let mode = match projection {
+            Some(projection) => SelectionMode::Projection(projection),
+            None => SelectionMode::Complete,
+        };
+        Self { prefix, mode }
+    }
+
+    /// Creates a JSON selection that retains only the statically proven paths
+    /// inside each selected item.  This mode is deliberately separate from
+    /// projection: callers cannot accidentally combine two independent
+    /// retention descriptions and lose a required value.  An empty path list
+    /// conservatively selects complete items.
+    #[must_use]
+    pub fn with_item_capture_paths(
+        prefix: Vec<PathComponent>,
+        capture_paths: Vec<Vec<PathComponent>>,
+    ) -> Self {
+        if capture_paths.is_empty() {
+            return Self::new(prefix, None);
+        }
+        Self {
+            prefix,
+            mode: SelectionMode::ItemCapture(capture_paths),
+        }
     }
 
     /// Returns the statically selected array path.
@@ -80,7 +218,30 @@ impl StreamSelection {
     /// Returns the static element-local projection, when present.
     #[must_use]
     pub fn projection(&self) -> Option<&[PathComponent]> {
-        self.projection.as_deref()
+        match &self.mode {
+            SelectionMode::Projection(projection) => Some(projection),
+            SelectionMode::Complete | SelectionMode::ItemCapture(_) => None,
+        }
+    }
+
+    fn item_capture_paths(&self) -> Option<&[Vec<PathComponent>]> {
+        match &self.mode {
+            SelectionMode::ItemCapture(paths) => Some(paths),
+            SelectionMode::Complete | SelectionMode::Projection(_) => None,
+        }
+    }
+
+    fn capture_shell_required(&self, path: &[PathComponent]) -> bool {
+        let Some(capture_paths) = self.item_capture_paths() else {
+            return false;
+        };
+        if path.len() <= self.prefix.len() || !path.starts_with(&self.prefix) {
+            return false;
+        }
+        let item_relative = &path[self.prefix.len() + 1..];
+        capture_paths
+            .iter()
+            .any(|capture_path| capture_path.starts_with(item_relative))
     }
 
     fn keeps(&self, path: &[PathComponent]) -> bool {
@@ -91,13 +252,20 @@ impl StreamSelection {
         if relative.len() == 1 {
             return true;
         }
-        let Some(projection) = self.projection.as_deref() else {
-            return true;
-        };
         let item_relative = &relative[1..];
-        projection.starts_with(item_relative)
-            || item_relative.starts_with(projection)
-            || path_kind_mismatch(item_relative, projection)
+        match &self.mode {
+            SelectionMode::Complete => true,
+            SelectionMode::Projection(projection) => {
+                projection.starts_with(item_relative)
+                    || item_relative.starts_with(projection)
+                    || path_kind_mismatch(item_relative, projection)
+            }
+            SelectionMode::ItemCapture(capture_paths) => capture_paths.iter().any(|capture_path| {
+                capture_path.starts_with(item_relative)
+                    || item_relative.starts_with(capture_path)
+                    || path_kind_mismatch(item_relative, capture_path)
+            }),
+        }
     }
 
     fn tracks(&self, path: &[PathComponent]) -> bool {
@@ -180,29 +348,143 @@ where
     F: FnMut(Value) -> Result<(), String>,
 {
     let mut emit_record = |record: StreamRecord| emit(record.into_value());
-    let mut projector = Projector::new(
-        options.maximum_depth,
-        options.maximum_token_bytes,
-        &mut emit_record,
-    );
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
-    let decoded = StreamSeed {
-        projector: &mut projector,
+    let mut consumer = EventProjector {
+        projector: Projector::new(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            &mut emit_record,
+        ),
+    };
+    if options.errors_as_values {
+        consumer.projector.defer_error_record();
     }
-    .deserialize(&mut deserializer)
-    .and_then(|()| deserializer.end());
+    let source_bytes = Arc::new(Mutex::new(StreamContext::default()));
+    let decoded = decode_json_event_stream_typed(
+        TrackingReader::new(reader, Arc::clone(&source_bytes)),
+        SourceId::new(0),
+        &mut consumer,
+        JsonEventOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+    );
+    let source_context = source_bytes
+        .lock()
+        .map_err(|_| FormatError::Parse {
+            format: InputFormat::Json,
+            message: "JSON stream error context unavailable".to_owned(),
+        })?
+        .clone();
     match decoded {
-        Ok(()) => Ok(()),
-        Err(error) if options.errors_as_values && !is_resource_error(&error) => projector
-            .error_value(jq_stream_error(&error))
+        Ok(_) => consumer
+            .projector
+            .flush_deferred()
             .map_err(|message| FormatError::Parse {
                 format: InputFormat::Json,
                 message,
             }),
+        Err(JsonInputError::Syntax { position, message }) if options.errors_as_values => consumer
+            .projector
+            .error_value(
+                jq_stream_error_from_input(position, &message, &source_context),
+                false,
+                stream_error_path_is_null(&message),
+                stream_error_path_prefers_last_value(&message),
+            )
+            .and_then(|()| consumer.projector.flush_deferred())
+            .map_err(|message| FormatError::Parse {
+                format: InputFormat::Json,
+                message,
+            }),
+        Err(JsonInputError::Consumer(error) | JsonInputError::Io(error)) => {
+            Err(FormatError::Parse {
+                format: InputFormat::Json,
+                message: error.to_string(),
+            })
+        }
         Err(error) => Err(FormatError::Parse {
             format: InputFormat::Json,
             message: error.to_string(),
         }),
+    }
+}
+
+#[derive(Clone, Debug)]
+struct StreamContext {
+    bytes: Vec<u8>,
+    first_line: usize,
+    first_column: usize,
+}
+
+impl Default for StreamContext {
+    fn default() -> Self {
+        Self {
+            bytes: Vec::new(),
+            first_line: 1,
+            first_column: 1,
+        }
+    }
+}
+
+impl StreamContext {
+    fn append(&mut self, input: &[u8]) {
+        let drop = self
+            .bytes
+            .len()
+            .saturating_add(input.len())
+            .saturating_sub(STREAM_ERROR_CONTEXT_BYTES);
+        let existing_drop = drop.min(self.bytes.len());
+        let incoming_drop = drop.saturating_sub(existing_drop);
+        advance_context_position(
+            &mut self.first_line,
+            &mut self.first_column,
+            &self.bytes[..existing_drop],
+        );
+        advance_context_position(
+            &mut self.first_line,
+            &mut self.first_column,
+            &input[..incoming_drop],
+        );
+        if existing_drop != 0 {
+            self.bytes.drain(..existing_drop);
+        }
+        self.bytes.extend_from_slice(&input[incoming_drop..]);
+    }
+}
+
+fn advance_context_position(line: &mut usize, column: &mut usize, bytes: &[u8]) {
+    for byte in bytes {
+        if *byte == b'\n' {
+            *line = (*line).saturating_add(1);
+            *column = 1;
+        } else {
+            *column = (*column).saturating_add(1);
+        }
+    }
+}
+
+struct TrackingReader<R> {
+    reader: R,
+    bytes: Arc<Mutex<StreamContext>>,
+}
+
+impl<R> TrackingReader<R> {
+    fn new(reader: R, bytes: Arc<Mutex<StreamContext>>) -> Self {
+        Self { reader, bytes }
+    }
+}
+
+impl<R: Read> Read for TrackingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.reader.read(buffer)?;
+        if count != 0 {
+            let mut bytes = self
+                .bytes
+                .lock()
+                .map_err(|_| io::Error::other("JSON stream context unavailable"))?;
+            bytes.append(&buffer[..count]);
+        }
+        Ok(count)
     }
 }
 
@@ -244,8 +526,10 @@ where
 }
 
 /// Streams only records needed by a proven static automatic projection.
-/// Discarded values are still fully decoded so syntax and resource failures
-/// remain observable.
+/// Discarded values are validated by the shared JSON grammar so syntax and
+/// resource failures remain observable without retaining discarded subtrees
+/// or strings. Numeric envelope validation may still construct a temporary
+/// number for a discarded numeric token.
 ///
 /// # Errors
 ///
@@ -273,8 +557,8 @@ where
 
 /// Streams selected JSON records with cooperative cancellation and observations.
 ///
-/// Cancellation is checked once per 16 KiB read window, including while serde
-/// validates a discarded subtree.
+/// Cancellation is checked throughout lexical scanning, including while the
+/// shared parser validates a discarded subtree.
 ///
 /// # Errors
 ///
@@ -301,6 +585,121 @@ where
     )
 }
 
+/// Streams selected JSON records one validated root at a time.
+///
+/// Records are delivered to the sink while the current root is being parsed,
+/// but the sink's `finish_root` callback is the only commit point.  A syntax,
+/// resource, cancellation, or sink error calls `abort_root` for the current
+/// root before the error is returned.  Existing selected-record APIs retain
+/// their one-document behavior and are intentionally unchanged.
+///
+/// # Errors
+///
+/// Returns JSON syntax, numeric-envelope, resource-limit, cancellation, or
+/// sink failures.
+pub fn stream_json_selected_roots_with_control<R, S>(
+    reader: R,
+    options: StreamOptions,
+    selection: StreamSelection,
+    cancellation: Option<Arc<AtomicBool>>,
+    observations: &mut SelectedStreamObservations,
+    sink: &mut S,
+) -> Result<u64, FormatError>
+where
+    R: Read,
+    S: SelectedRootSink,
+{
+    let selected_prefix = selection.prefix().to_vec();
+    let parser_selection = selection.clone();
+    let sink = RefCell::new(sink);
+    let mut emit = |record: StreamRecord| {
+        sink.borrow_mut()
+            .record(record)
+            .map_err(|error| error.to_string())
+    };
+    let mut fallback = |fallback: SelectionFallback| {
+        sink.borrow_mut()
+            .fallback(fallback)
+            .map_err(|error| error.to_string())
+    };
+    let mut replacement = |path: &[PathComponent], replacement: SelectionReplacement| {
+        if path == selected_prefix.as_slice() || selected_prefix.starts_with(path) {
+            sink.borrow_mut().replace_selected_prefix(path, replacement)
+        } else {
+            sink.borrow_mut().replace_item_path(path, replacement)
+        }
+        .map_err(|error| error.to_string())
+    };
+    let mut projector = Projector::selected_with_lifecycle(
+        options.maximum_depth,
+        options.maximum_token_bytes,
+        selection,
+        &mut emit,
+        &mut fallback,
+        &mut replacement,
+    );
+    projector.cancellation.clone_from(&cancellation);
+    let mut consumer = EventProjector { projector };
+    let mut begin_root = |index| {
+        sink.borrow_mut()
+            .begin_root(index)
+            .map_err(|error| error.to_string())
+    };
+    let mut finish_root = || {
+        sink.borrow_mut()
+            .finish_root()
+            .map_err(|error| error.to_string())
+    };
+    let mut abort_root = || sink.borrow_mut().abort_root();
+    let mut retain = move |path: &[PathComponent]| parser_selection.tracks(path);
+    let mut checkpoint = || Ok(());
+    let result = crate::structural::decode_json_events_selected_roots_with_options_control(
+        reader,
+        SourceId::new(0),
+        &mut consumer,
+        JsonEventOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+        cancellation,
+        &mut begin_root,
+        &mut finish_root,
+        &mut abort_root,
+        &mut checkpoint,
+        &mut retain,
+        Some(&mut observations.depth_high_water),
+    );
+    result.map_err(map_json_input_error)
+}
+
+fn map_json_input_error(error: JsonInputError) -> FormatError {
+    match error {
+        JsonInputError::Io(error)
+            if error.to_string().contains("selected decoding interrupted") =>
+        {
+            FormatError::Resource("interrupted")
+        }
+        JsonInputError::Io(error) => FormatError::Io(error),
+        JsonInputError::Limit { limit, .. } => FormatError::Resource(match limit {
+            JsonLimit::TokenBytes => "token-bytes",
+            JsonLimit::Depth => "depth",
+        }),
+        JsonInputError::Consumer(error)
+            if error.to_string().contains("selected decoding interrupted") =>
+        {
+            FormatError::Resource("interrupted")
+        }
+        JsonInputError::Consumer(error) => FormatError::Parse {
+            format: InputFormat::Json,
+            message: error.to_string(),
+        },
+        error @ JsonInputError::Syntax { .. } => FormatError::Parse {
+            format: InputFormat::Json,
+            message: error.to_string(),
+        },
+    }
+}
+
 fn decode_selected_json<R, F>(
     reader: R,
     options: StreamOptions,
@@ -313,41 +712,250 @@ where
     R: Read,
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
-    let mut projector = Projector::selected(
-        options.maximum_depth,
-        options.maximum_token_bytes,
-        selection,
-        emit,
+    let checkpoint_cancellation = cancellation.clone();
+    let parser_selection = selection.clone();
+    let mut consumer = EventProjector {
+        projector: Projector::selected(
+            options.maximum_depth,
+            options.maximum_token_bytes,
+            selection,
+            emit,
+        ),
+    };
+    consumer.projector.cancellation = cancellation;
+    let mut checkpoint = || {
+        if checkpoint_cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            Err(io::Error::other("selected decoding interrupted"))
+        } else {
+            Ok(())
+        }
+    };
+    let mut retain = |path: &[PathComponent]| parser_selection.tracks(path);
+    let result = decode_json_events_selected_with_options_control(
+        reader,
+        SourceId::new(0),
+        &mut consumer,
+        JsonEventOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+        &mut checkpoint,
+        &mut retain,
+        true,
+        Some(&mut observations.depth_high_water),
     );
-    projector.cancellation = cancellation;
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
-    let result = StreamSeed {
-        projector: &mut projector,
-    }
-    .deserialize(&mut deserializer)
-    .and_then(|()| deserializer.end());
     observations.depth_high_water = observations
         .depth_high_water
-        .max(projector.depth_high_water.get());
+        .max(consumer.projector.depth_high_water.get());
     result.map_err(|error| FormatError::Parse {
         format: InputFormat::Json,
-        message: error.to_string(),
+        message: error,
     })
 }
 
-fn jq_stream_error(error: &serde_json::Error) -> String {
-    let message = error.to_string();
-    if message.starts_with("expected value at line ") {
-        // jq consumes the invalid bare token before reporting its endpoint.
-        // serde_json stops at the first byte; the MVP stream-error grammar's
-        // only bare-token class is a three-byte JSON literal prefix.
+fn jq_stream_error_from_input(
+    position: tq_core::JsonPosition,
+    detail: &str,
+    source: &StreamContext,
+) -> String {
+    let line = position.line;
+    let column = position.column;
+    let Some((line_bytes, line_start_column)) = source_line(source, line) else {
+        return jq_stream_error_without_context(position, detail);
+    };
+    let Some(raw_index) = column.checked_sub(line_start_column) else {
+        return jq_stream_error_without_context(position, detail);
+    };
+    if raw_index > line_bytes.len() {
+        return jq_stream_error_without_context(position, detail);
+    }
+    let index = raw_index;
+    let at_eof = index >= line_bytes.len();
+    if at_eof {
+        if detail.starts_with("unterminated string") {
+            return format!(
+                "Unfinished string at EOF at line {line}, column {}",
+                column.saturating_sub(1)
+            );
+        }
+        if detail.starts_with("expected ',' or ']'") || detail.starts_with("expected ',' or '}'") {
+            return format_separator_error(line_bytes, index, line, line_start_column, true);
+        }
+        if detail.starts_with("expected object key")
+            || detail.starts_with("expected ':' after object key")
+            || detail.starts_with("expected JSON value")
+        {
+            return format!(
+                "Unfinished JSON term at EOF at line {line}, column {}",
+                column.saturating_sub(1)
+            );
+        }
+    }
+    if detail.starts_with("unpaired high surrogate") || detail.starts_with("invalid surrogate pair")
+    {
         return format!(
-            "Invalid numeric literal at line {}, column {}",
-            error.line(),
-            error.column().saturating_add(3)
+            "Invalid \\uXXXX\\uXXXX surrogate pair escape at line {line}, column {column}"
         );
     }
-    message
+    if detail.starts_with("expected object key after ','") && line_bytes.get(index) == Some(&b'}') {
+        return format!("Expected another key:value pair at line {line}, column {column}");
+    }
+    if detail.starts_with("expected ':' after object key") {
+        return format_separator_error(line_bytes, index, line, line_start_column, false);
+    }
+    if detail.starts_with("expected ',' or ']'") || detail.starts_with("expected ',' or '}'") {
+        return format_separator_error(line_bytes, index, line, line_start_column, at_eof);
+    }
+    if detail.starts_with("expected JSON value") {
+        if line_bytes.get(index) == Some(&b'}') && line_bytes[..index].contains(&b':') {
+            return format!("Missing value in key:value pair at line {line}, column {column}");
+        }
+        if line_bytes.get(index) == Some(&b']') {
+            return format!("Expected another array element at line {line}, column {column}");
+        }
+        if let Some((start, end)) = invalid_token_bounds(line_bytes, index) {
+            return format!(
+                "{} at line {line}, column {}",
+                invalid_token_kind(&line_bytes[start..end]),
+                line_start_column.saturating_add(end)
+            );
+        }
+    }
+    if detail.starts_with("expected ',' or ']'") {
+        return format!("Expected another array element at line {line}, column {column}");
+    }
+    if detail.starts_with("invalid numeric literal") {
+        if let Some((start, end)) = invalid_token_bounds(line_bytes, index) {
+            return format!(
+                "{} at line {line}, column {}",
+                invalid_token_kind(&line_bytes[start..end]),
+                line_start_column.saturating_add(end)
+            );
+        }
+        return format!("Invalid numeric literal at line {line}, column {column}");
+    }
+    if detail.starts_with("invalid literal") {
+        return format!("Invalid literal at line {line}, column {column}");
+    }
+    jq_stream_error_without_context(position, detail)
+}
+
+fn format_separator_error(
+    line_bytes: &[u8],
+    index: usize,
+    line: usize,
+    line_start_column: usize,
+    at_eof: bool,
+) -> String {
+    if at_eof {
+        return format!(
+            "Expected separator between values at EOF at line {line}, column {}",
+            line_start_column
+                .saturating_add(line_bytes.len())
+                .saturating_sub(1)
+        );
+    }
+    let column = if line_bytes.get(index) == Some(&b'"') {
+        quoted_token_end(line_bytes, index).map_or(line_start_column.saturating_add(index), |end| {
+            line_start_column.saturating_add(end)
+        })
+    } else {
+        invalid_token_bounds(line_bytes, index)
+            .map_or(line_start_column.saturating_add(index), |(_, end)| {
+                line_start_column.saturating_add(end)
+            })
+    };
+    format!("Expected separator between values at line {line}, column {column}")
+}
+
+fn quoted_token_end(line: &[u8], start: usize) -> Option<usize> {
+    let mut escaped = false;
+    for (index, byte) in line.iter().enumerate().skip(start.saturating_add(1)) {
+        if escaped {
+            escaped = false;
+        } else if *byte == b'\\' {
+            escaped = true;
+        } else if *byte == b'"' {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn stream_error_path_is_null(detail: &str) -> bool {
+    detail.starts_with("expected object key after ','")
+        || detail.starts_with("expected ':' after object key")
+        || detail.starts_with("expected object key or '}'")
+}
+
+fn stream_error_path_prefers_last_value(detail: &str) -> bool {
+    detail.starts_with("expected ',' or ']'") || detail.starts_with("expected ',' or '}'")
+}
+
+fn jq_stream_error_without_context(position: tq_core::JsonPosition, detail: &str) -> String {
+    let line = position.line;
+    let column = position.column;
+    if detail.starts_with("expected ',' or ']'") {
+        return format!("Expected another array element at line {line}, column {column}");
+    }
+    if detail.starts_with("invalid numeric literal") {
+        return format!("Invalid numeric literal at line {line}, column {column}");
+    }
+    if detail.starts_with("invalid literal") {
+        return format!("Invalid literal at line {line}, column {column}");
+    }
+    format!("{detail} at line {line}, column {column}")
+}
+
+fn source_line(source: &StreamContext, line: usize) -> Option<(&[u8], usize)> {
+    if line < source.first_line {
+        return None;
+    }
+    let mut current = source.first_line;
+    let mut start = 0_usize;
+    if current == line {
+        for (index, byte) in source.bytes.iter().enumerate() {
+            if *byte == b'\n' {
+                return Some((&source.bytes[..=index], source.first_column));
+            }
+        }
+        return Some((&source.bytes, source.first_column));
+    }
+    for (index, byte) in source.bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            if current == line {
+                return Some((&source.bytes[start..=index], 1));
+            }
+            current = current.saturating_add(1);
+            start = index.saturating_add(1);
+        }
+    }
+    (current == line).then_some((&source.bytes[start..], 1))
+}
+
+fn invalid_token_bounds(line: &[u8], error_index: usize) -> Option<(usize, usize)> {
+    let mut start = error_index.min(line.len());
+    while start > 0 && !matches!(line[start - 1], b'[' | b'{' | b',' | b':' | b' ' | b'\t') {
+        start -= 1;
+    }
+    let mut end = error_index.min(line.len());
+    while end < line.len() && !matches!(line[end], b']' | b'}' | b',' | b' ' | b'\t' | b'\n') {
+        end += 1;
+    }
+    (start < end).then_some((start, end))
+}
+
+fn invalid_token_kind(token: &[u8]) -> &'static str {
+    if token == b"n" {
+        "Invalid numeric literal"
+    } else if matches!(token.first(), Some(b't' | b'f' | b'n')) {
+        "Invalid literal"
+    } else {
+        "Invalid numeric literal"
+    }
 }
 
 /// Streams one TOON document through its query-independent event decoder and
@@ -504,12 +1112,18 @@ struct Frame {
     kind: ContainerKind,
     path: Option<Vec<PathComponent>>,
     children: usize,
+    retained_child: bool,
     pending_key: Option<Arc<str>>,
 }
+
+type ReplacementCallback<'a> =
+    &'a mut dyn FnMut(&[PathComponent], SelectionReplacement) -> Result<(), String>;
 
 struct Projector<'a, F> {
     frames: Vec<Frame>,
     last_path: Vec<PathComponent>,
+    deferred_error_record: bool,
+    pending_record: Option<StreamRecord>,
     maximum_depth: usize,
     maximum_token_bytes: usize,
     selection: Option<StreamSelection>,
@@ -517,6 +1131,11 @@ struct Projector<'a, F> {
     cancellation: Option<Arc<AtomicBool>>,
     values_until_cancellation_check: Cell<usize>,
     emit: &'a mut F,
+    fallback: Option<&'a mut dyn FnMut(SelectionFallback) -> Result<(), String>>,
+    replacement: Option<ReplacementCallback<'a>>,
+    lifecycle: bool,
+    selection_observed: bool,
+    pending_replacement: Option<Vec<PathComponent>>,
 }
 
 impl<'a, F> Projector<'a, F>
@@ -527,6 +1146,8 @@ where
         Self {
             frames: Vec::new(),
             last_path: Vec::new(),
+            deferred_error_record: false,
+            pending_record: None,
             maximum_depth,
             maximum_token_bytes,
             selection: None,
@@ -534,6 +1155,11 @@ where
             cancellation: None,
             values_until_cancellation_check: Cell::new(0),
             emit,
+            fallback: None,
+            replacement: None,
+            lifecycle: false,
+            selection_observed: false,
+            pending_replacement: None,
         }
     }
 
@@ -546,6 +1172,8 @@ where
         Self {
             frames: Vec::new(),
             last_path: Vec::new(),
+            deferred_error_record: false,
+            pending_record: None,
             maximum_depth,
             maximum_token_bytes,
             selection: Some(selection),
@@ -553,7 +1181,71 @@ where
             cancellation: None,
             values_until_cancellation_check: Cell::new(0),
             emit,
+            fallback: None,
+            replacement: None,
+            lifecycle: false,
+            selection_observed: false,
+            pending_replacement: None,
         }
+    }
+
+    fn selected_with_lifecycle(
+        maximum_depth: usize,
+        maximum_token_bytes: usize,
+        selection: StreamSelection,
+        emit: &'a mut F,
+        fallback: &'a mut dyn FnMut(SelectionFallback) -> Result<(), String>,
+        replacement: ReplacementCallback<'a>,
+    ) -> Self {
+        Self {
+            frames: Vec::new(),
+            last_path: Vec::new(),
+            deferred_error_record: false,
+            pending_record: None,
+            maximum_depth,
+            maximum_token_bytes,
+            selection: Some(selection),
+            depth_high_water: Cell::new(0),
+            cancellation: None,
+            values_until_cancellation_check: Cell::new(0),
+            emit,
+            fallback: Some(fallback),
+            replacement: Some(replacement),
+            lifecycle: true,
+            selection_observed: false,
+            pending_replacement: None,
+        }
+    }
+
+    fn reset_root(&mut self) {
+        debug_assert!(self.lifecycle);
+        self.frames.clear();
+        self.last_path.clear();
+        self.deferred_error_record = false;
+        self.pending_record = None;
+        self.selection_observed = false;
+        self.pending_replacement = None;
+    }
+
+    fn defer_error_record(&mut self) {
+        self.deferred_error_record = true;
+    }
+
+    fn emit_record(&mut self, record: StreamRecord) -> Result<(), String> {
+        if !self.deferred_error_record {
+            return (self.emit)(record);
+        }
+        if let Some(previous) = self.pending_record.replace(record) {
+            (self.emit)(previous)?;
+        }
+        Ok(())
+    }
+
+    fn flush_deferred(&mut self) -> Result<(), String> {
+        if let Some(record) = self.pending_record.take() {
+            (self.emit)(record)?;
+        }
+        Ok(())
     }
 
     fn begin(&mut self, kind: ContainerKind) -> Result<(), String> {
@@ -561,10 +1253,34 @@ where
             return Err("stream depth limit exceeded".to_owned());
         }
         let path = self.take_value_path()?;
+        let replacement_path = self.pending_replacement.take();
+        if let Some(path) = path.as_ref() {
+            let replacement = match kind {
+                ContainerKind::Array => SelectionReplacement::ArrayStart,
+                ContainerKind::Object => SelectionReplacement::ObjectStart,
+            };
+            let selected_ancestor = self.lifecycle
+                && self
+                    .selection
+                    .as_ref()
+                    .is_some_and(|selection| selection.prefix.starts_with(path));
+            if replacement_path.as_deref() == Some(path) || selected_ancestor {
+                self.notify_replacement(path, replacement)?;
+            }
+            if self.lifecycle
+                && self
+                    .selection
+                    .as_ref()
+                    .is_some_and(|selection| path.as_slice() == selection.prefix.as_slice())
+            {
+                self.selection_observed = true;
+            }
+        }
         self.frames.push(Frame {
             kind,
             path,
             children: 0,
+            retained_child: false,
             pending_key: None,
         });
         self.depth_high_water
@@ -592,43 +1308,53 @@ where
 
     fn key(&mut self, key: String) -> Result<(), String> {
         self.check_token(key.len())?;
-        let frame = self
-            .frames
-            .last_mut()
-            .ok_or_else(|| "object key outside a container".to_owned())?;
-        if frame.kind != ContainerKind::Object || frame.pending_key.is_some() {
-            return Err("object key arrived in an invalid stream state".to_owned());
+        let key: Arc<str> = key.into();
+        let parent = {
+            let frame = self
+                .frames
+                .last_mut()
+                .ok_or_else(|| "object key outside a container".to_owned())?;
+            if frame.kind != ContainerKind::Object || frame.pending_key.is_some() {
+                return Err("object key arrived in an invalid stream state".to_owned());
+            }
+            frame.pending_key = Some(Arc::clone(&key));
+            frame.path.clone()
+        };
+        if self.lifecycle {
+            let mut path = parent.unwrap_or_default();
+            path.push(PathComponent::Key(key));
+            if self
+                .selection
+                .as_ref()
+                .is_some_and(|selection| selection.tracks(&path))
+            {
+                self.pending_replacement = Some(path);
+            }
         }
-        frame.pending_key = Some(key.into());
         Ok(())
-    }
-
-    fn scalar(&mut self, value: Value) -> Result<(), String> {
-        let token_bytes = match &value {
-            Value::Number(number) => number.to_string().len(),
-            Value::String(value) => value.len(),
-            Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => 0,
-        };
-        self.check_token(token_bytes)?;
-        let Some(path) = self.take_value_path()? else {
-            return Ok(());
-        };
-        self.emit_pair(path, value)
     }
 
     fn structural_scalar(&mut self, value: Scalar) -> Result<(), String> {
         let Some(path) = self.take_value_path()? else {
+            self.pending_replacement = None;
             return Ok(());
         };
-        self.emit_pair(
-            path,
-            match value {
-                Scalar::Null => Value::Null,
-                Scalar::Bool(value) => Value::Bool(value),
-                Scalar::Number(value) => Value::Number(value),
-                Scalar::String(value) => Value::string(value),
-            },
-        )
+        let value = match value {
+            Scalar::Null => Value::Null,
+            Scalar::Bool(value) => Value::Bool(value),
+            Scalar::Number(value) => Value::Number(value),
+            Scalar::String(value) => Value::string(value),
+        };
+        let replacement_path = self.pending_replacement.take();
+        let selected_ancestor = self.lifecycle
+            && self
+                .selection
+                .as_ref()
+                .is_some_and(|selection| selection.prefix.starts_with(&path));
+        if replacement_path.as_deref() == Some(path.as_slice()) || selected_ancestor {
+            self.notify_replacement(&path, SelectionReplacement::Scalar(value.clone()))?;
+        }
+        self.emit_pair(path, value)
     }
 
     fn check_token(&self, bytes: usize) -> Result<(), String> {
@@ -657,22 +1383,71 @@ where
             self.emit_pair(path, empty)
         } else if let Some(selection) = &self.selection {
             if selection.keeps(&path) {
-                (self.emit)(StreamRecord::path(path.clone(), None))?;
+                if frame.retained_child || !selection.capture_shell_required(&path) {
+                    self.emit_selected_record(StreamRecord::path(path.clone(), None))?;
+                } else {
+                    let empty = match kind {
+                        ContainerKind::Array => Value::array(Vec::new()),
+                        ContainerKind::Object => Value::object(Object::new()),
+                    };
+                    self.emit_selected_record(StreamRecord::path(path.clone(), Some(empty)))?;
+                }
             }
             self.last_path = path;
             Ok(())
         } else {
             let end_path = self.last_path.clone();
-            (self.emit)(StreamRecord::path(end_path, None))?;
+            self.emit_record(StreamRecord::path(end_path, None))?;
             self.last_path = path;
             Ok(())
         }
     }
 
-    fn error_value(&mut self, message: String) -> Result<(), String> {
-        let path = self.expected_path();
-        let value = Value::array(vec![Value::string(message), path_value(&path)]);
+    fn error_value(
+        &mut self,
+        message: String,
+        discard_partial_value: bool,
+        null_path: bool,
+        prefer_last_value_path: bool,
+    ) -> Result<(), String> {
+        let mut path = if prefer_last_value_path && !self.last_path.is_empty() {
+            self.last_path.clone()
+        } else {
+            self.expected_path()
+        };
+        if self.deferred_error_record
+            && let Some(pending) = self.pending_record.take()
+        {
+            if discard_partial_value {
+                path.clone_from(&pending.path);
+            } else {
+                (self.emit)(pending)?;
+            }
+        }
+        let error_path = if null_path {
+            // jq uses a null path component for syntax errors whose location
+            // cannot be associated with a completed object/array member.
+            // Retain the containing path before appending that marker.
+            self.null_slot_path()
+        } else {
+            path_value(&path)
+        };
+        let value = Value::array(vec![Value::string(message), error_path]);
         (self.emit)(StreamRecord::raw(value))
+    }
+
+    fn null_slot_path(&self) -> Value {
+        let path = self
+            .frames
+            .last()
+            .and_then(|frame| frame.path.clone())
+            .unwrap_or_default();
+        let mut values = match path_value(&path) {
+            Value::Array(values) => values.to_vec(),
+            _ => Vec::new(),
+        };
+        values.push(Value::Null);
+        Value::array(values)
     }
 
     fn take_value_path(&mut self) -> Result<Option<Vec<PathComponent>>, String> {
@@ -694,10 +1469,17 @@ where
         };
         let mut path = parent.clone();
         path.push(component);
-        if self
-            .selection
-            .as_ref()
-            .is_some_and(|selection| !selection.tracks(&path))
+        let selected_ancestor = self.lifecycle
+            && self
+                .selection
+                .as_ref()
+                .is_some_and(|selection| selection.prefix.starts_with(&path));
+        if self.lifecycle
+            && self
+                .selection
+                .as_ref()
+                .is_some_and(|selection| !selection.tracks(&path))
+            && !selected_ancestor
         {
             return Ok(None);
         }
@@ -722,21 +1504,82 @@ where
         path
     }
 
-    fn rejects_next_value(&self) -> bool {
-        self.selection
-            .as_ref()
-            .is_some_and(|selection| !selection.tracks(&self.expected_path()))
-    }
-
     fn emit_pair(&mut self, path: Vec<PathComponent>, value: Value) -> Result<(), String> {
+        if self.lifecycle
+            && self
+                .selection
+                .as_ref()
+                .is_some_and(|selection| path == selection.prefix)
+        {
+            self.selection_observed = true;
+            let fallback = match value {
+                Value::Array(values) if values.is_empty() => {
+                    SelectionFallback::PresentEmptyArray { path }
+                }
+                Value::Object(values) if values.is_empty() => {
+                    SelectionFallback::PresentEmptyObject { path }
+                }
+                value => SelectionFallback::PresentScalar { path, value },
+            };
+            if let Some(fallback_callback) = self.fallback.as_mut() {
+                fallback_callback(fallback)?;
+            }
+            return Ok(());
+        }
         if self
             .selection
             .as_ref()
             .is_none_or(|selection| selection.keeps(&path))
         {
-            (self.emit)(StreamRecord::path(path.clone(), Some(value)))?;
+            if self.lifecycle {
+                self.selection_observed = true;
+            }
+            self.emit_selected_record(StreamRecord::path(path.clone(), Some(value)))?;
         }
         self.last_path = path;
+        Ok(())
+    }
+
+    fn emit_selected_record(&mut self, record: StreamRecord) -> Result<(), String> {
+        if let Some(frame) = self.frames.last_mut() {
+            frame.retained_child = true;
+        }
+        self.emit_record(record)
+    }
+
+    fn notify_replacement(
+        &mut self,
+        path: &[PathComponent],
+        replacement: SelectionReplacement,
+    ) -> Result<(), String> {
+        if self.lifecycle
+            && self.selection.as_ref().is_some_and(|selection| {
+                path == selection.prefix || selection.prefix.starts_with(path)
+            })
+        {
+            self.selection_observed = false;
+        }
+        if let Some(callback) = self.replacement.as_mut() {
+            callback(path, replacement)?;
+        }
+        Ok(())
+    }
+
+    fn finish_selection(&mut self) -> Result<(), String> {
+        if self.selection.is_some()
+            && !self.selection_observed
+            && let Some(fallback_callback) = self.fallback.as_mut()
+        {
+            fallback_callback(SelectionFallback::Missing {
+                path: self
+                    .selection
+                    .as_ref()
+                    .expect("selection checked")
+                    .prefix
+                    .clone(),
+            })?;
+            self.selection_observed = true;
+        }
         Ok(())
     }
 }
@@ -765,364 +1608,6 @@ fn path_value(path: &[PathComponent]) -> Value {
     )
 }
 
-#[derive(Clone, Copy)]
-struct DiscardSeed<'a> {
-    depth: usize,
-    maximum_depth: usize,
-    maximum_token_bytes: usize,
-    depth_high_water: &'a Cell<usize>,
-    cancellation: Option<&'a AtomicBool>,
-    values_until_cancellation_check: &'a Cell<usize>,
-}
-
-impl<'de> DeserializeSeed<'de> for DiscardSeed<'_> {
-    type Value = ();
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let remaining = self.values_until_cancellation_check.get();
-        if remaining == 0 {
-            if self
-                .cancellation
-                .is_some_and(|flag| flag.load(Ordering::Relaxed))
-            {
-                return Err(D::Error::custom("selected decoding interrupted"));
-            }
-            self.values_until_cancellation_check.set(4096);
-        } else {
-            self.values_until_cancellation_check
-                .set(remaining.saturating_sub(1));
-        }
-        deserializer.deserialize_any(DiscardVisitor(self))
-    }
-}
-
-struct DiscardVisitor<'a>(DiscardSeed<'a>);
-
-impl DiscardVisitor<'_> {
-    fn check_token<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
-        if bytes > self.0.maximum_token_bytes {
-            return Err(E::custom("input resource limit exceeded: token-bytes"));
-        }
-        Ok(())
-    }
-
-    fn child_seed<E: de::Error>(&self) -> Result<DiscardSeed<'_>, E> {
-        if self.0.depth >= self.0.maximum_depth {
-            return Err(E::custom("stream depth limit exceeded"));
-        }
-        Ok(DiscardSeed {
-            depth: self.0.depth.saturating_add(1),
-            ..self.0
-        })
-    }
-
-    fn observe_container(&self) {
-        self.0.depth_high_water.set(
-            self.0
-                .depth_high_water
-                .get()
-                .max(self.0.depth.saturating_add(1)),
-        );
-    }
-
-    fn validate_number<E: de::Error>(&self, literal: &str) -> Result<(), E> {
-        self.check_token(literal.len())?;
-        Number::validate_literal(literal).map_err(E::custom)
-    }
-}
-
-impl<'de> Visitor<'de> for DiscardVisitor<'_> {
-    type Value = ();
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a discarded JSON value")
-    }
-
-    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        self.0.deserialize(deserializer)
-    }
-
-    fn visit_bool<E: de::Error>(self, _value: bool) -> Result<Self::Value, E> {
-        Ok(())
-    }
-
-    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
-        self.check_token(decimal_i128_bytes(i128::from(value)))
-    }
-
-    fn visit_i128<E: de::Error>(self, value: i128) -> Result<Self::Value, E> {
-        self.check_token(decimal_i128_bytes(value))
-    }
-
-    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
-        self.check_token(decimal_u128_bytes(u128::from(value)))
-    }
-
-    fn visit_u128<E: de::Error>(self, value: u128) -> Result<Self::Value, E> {
-        self.check_token(decimal_u128_bytes(value))
-    }
-
-    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
-        self.validate_number(&value.to_string())
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-        self.check_token(value.len())
-    }
-
-    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
-        self.check_token(value.len())
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        self.observe_container();
-        let child = self.child_seed::<A::Error>()?;
-        while sequence.next_element_seed(child)?.is_some() {}
-        Ok(())
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        self.observe_container();
-        let child = self.child_seed::<A::Error>()?;
-        let Some(first) = map.next_key::<String>()? else {
-            return Ok(());
-        };
-        if first == SERDE_JSON_NUMBER_TOKEN {
-            let literal = map.next_value::<String>()?;
-            self.validate_number::<A::Error>(&literal)?;
-            if map.next_key::<IgnoredAny>()?.is_some() {
-                return Err(A::Error::custom("invalid arbitrary-precision number"));
-            }
-            return Ok(());
-        }
-        self.check_token::<A::Error>(first.len())?;
-        map.next_value_seed(child)?;
-        while let Some(key) = map.next_key::<String>()? {
-            self.check_token::<A::Error>(key.len())?;
-            map.next_value_seed(child)?;
-        }
-        Ok(())
-    }
-}
-
-fn decimal_i128_bytes(value: i128) -> usize {
-    decimal_u128_bytes(value.unsigned_abs()).saturating_add(usize::from(value < 0))
-}
-
-fn decimal_u128_bytes(value: u128) -> usize {
-    if value == 0 {
-        1
-    } else {
-        usize::try_from(value.ilog10()).unwrap_or(usize::MAX) + 1
-    }
-}
-
-struct StreamSeed<'a, 'b, F> {
-    projector: &'a mut Projector<'b, F>,
-}
-
-impl<'de, F> DeserializeSeed<'de> for StreamSeed<'_, '_, F>
-where
-    F: FnMut(StreamRecord) -> Result<(), String>,
-{
-    type Value = ();
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        self.projector
-            .check_cancellation()
-            .map_err(D::Error::custom)?;
-        if self.projector.rejects_next_value() {
-            self.projector.take_value_path().map_err(D::Error::custom)?;
-            DiscardSeed {
-                depth: self.projector.frames.len(),
-                maximum_depth: self.projector.maximum_depth,
-                maximum_token_bytes: self.projector.maximum_token_bytes,
-                depth_high_water: &self.projector.depth_high_water,
-                cancellation: self.projector.cancellation.as_deref(),
-                values_until_cancellation_check: &self.projector.values_until_cancellation_check,
-            }
-            .deserialize(deserializer)
-        } else {
-            deserializer.deserialize_any(StreamVisitor {
-                projector: self.projector,
-            })
-        }
-    }
-}
-
-struct StreamVisitor<'a, 'b, F> {
-    projector: &'a mut Projector<'b, F>,
-}
-
-impl<'de, F> Visitor<'de> for StreamVisitor<'_, '_, F>
-where
-    F: FnMut(StreamRecord) -> Result<(), String>,
-{
-    type Value = ();
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON value")
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.projector.scalar(Value::Null).map_err(E::custom)
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_unit()
-    }
-
-    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.projector.scalar(Value::Bool(value)).map_err(E::custom)
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.number(&value.to_string())
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.number(&value.to_string())
-    }
-
-    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Number::from_f64(value)
-            .map(Value::Number)
-            .map_err(E::custom)
-            .and_then(|value| self.projector.scalar(value).map_err(E::custom))
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.projector
-            .scalar(Value::string(value))
-            .map_err(E::custom)
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.projector
-            .scalar(Value::string(value))
-            .map_err(E::custom)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        self.projector
-            .begin(ContainerKind::Array)
-            .map_err(A::Error::custom)?;
-        while sequence
-            .next_element_seed(StreamSeed {
-                projector: self.projector,
-            })?
-            .is_some()
-        {}
-        self.projector
-            .end(ContainerKind::Array)
-            .map_err(A::Error::custom)
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let first = map.next_key::<String>()?;
-        if first.as_deref() == Some(SERDE_JSON_NUMBER_TOKEN) {
-            let literal = map.next_value::<String>()?;
-            if map.next_key::<IgnoredAny>()?.is_some() {
-                return Err(A::Error::custom("invalid arbitrary-precision number"));
-            }
-            return self.number(&literal);
-        }
-        self.projector
-            .begin(ContainerKind::Object)
-            .map_err(A::Error::custom)?;
-        if let Some(key) = first {
-            self.projector.key(key).map_err(A::Error::custom)?;
-            map.next_value_seed(StreamSeed {
-                projector: self.projector,
-            })?;
-        }
-        while let Some(key) = map.next_key::<String>()? {
-            self.projector.key(key).map_err(A::Error::custom)?;
-            map.next_value_seed(StreamSeed {
-                projector: self.projector,
-            })?;
-        }
-        self.projector
-            .end(ContainerKind::Object)
-            .map_err(A::Error::custom)
-    }
-}
-
-impl<F> StreamVisitor<'_, '_, F>
-where
-    F: FnMut(StreamRecord) -> Result<(), String>,
-{
-    fn number<E>(self, literal: &str) -> Result<(), E>
-    where
-        E: de::Error,
-    {
-        self.projector
-            .check_token(literal.len())
-            .map_err(E::custom)?;
-        Number::parse(literal)
-            .map(Value::Number)
-            .map_err(E::custom)
-            .and_then(|value| self.projector.scalar(value).map_err(E::custom))
-    }
-}
-
-fn is_resource_error(error: &serde_json::Error) -> bool {
-    error.to_string().contains("input resource limit exceeded")
-}
-
 struct EventProjector<'a, F> {
     projector: Projector<'a, F>,
 }
@@ -1136,7 +1621,13 @@ where
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
         self.projector.check_cancellation()?;
         match event {
-            Event::DocumentStart { .. } | Event::DocumentEnd { .. } => Ok(()),
+            Event::DocumentStart { .. } => {
+                if self.projector.lifecycle {
+                    self.projector.reset_root();
+                }
+                Ok(())
+            }
+            Event::DocumentEnd { .. } => self.projector.finish_selection(),
             Event::ObjectStart { .. } => self.projector.begin(ContainerKind::Object),
             Event::ObjectEnd { .. } => self.projector.end(ContainerKind::Object),
             Event::ArrayStart { .. } => self.projector.begin(ContainerKind::Array),
@@ -1157,18 +1648,774 @@ mod tests {
         },
     };
 
-    use tq_core::{PathComponent, SourceId};
+    use tq_core::{Number, Object, PathComponent, SourceId, Value};
 
     use crate::{JsonEventOptions, decode_json_events_with_options};
 
     use super::{
-        EventProjector, Projector, SelectedStreamObservations, StreamOptions, StreamRecord,
-        StreamSelection, stream_json, stream_json_records, stream_json_selected_records,
-        stream_json_selected_records_with_control, stream_toon,
+        EventProjector, Projector, SelectedRootSink, SelectedStreamObservations, SelectionFallback,
+        SelectionReplacement, StreamOptions, StreamRecord, StreamSelection, stream_json,
+        stream_json_records, stream_json_selected_records,
+        stream_json_selected_records_with_control, stream_json_selected_roots_with_control,
+        stream_toon,
     };
 
     fn json_lines(values: &[tq_core::Value]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()
+    }
+
+    #[derive(Default)]
+    struct RootSink {
+        begun: Vec<u64>,
+        current: Vec<StreamRecord>,
+        committed: Vec<Vec<StreamRecord>>,
+        observed_records: Vec<StreamRecord>,
+        fallbacks: Vec<SelectionFallback>,
+        replacements: Vec<(Vec<PathComponent>, SelectionReplacement)>,
+        aborted: usize,
+        cancel_on_first_begin: Option<Arc<AtomicBool>>,
+    }
+
+    impl SelectedRootSink for RootSink {
+        type Error = String;
+
+        fn begin_root(&mut self, index: u64) -> Result<(), Self::Error> {
+            self.begun.push(index);
+            self.current.clear();
+            if index == 0
+                && let Some(cancelled) = &self.cancel_on_first_begin
+            {
+                cancelled.store(true, Ordering::Relaxed);
+            }
+            Ok(())
+        }
+
+        fn fallback(&mut self, fallback: SelectionFallback) -> Result<(), Self::Error> {
+            self.fallbacks.push(fallback);
+            Ok(())
+        }
+
+        fn replace_selected_prefix(
+            &mut self,
+            path: &[PathComponent],
+            replacement: SelectionReplacement,
+        ) -> Result<(), Self::Error> {
+            self.current.clear();
+            self.replacements.push((path.to_vec(), replacement));
+            Ok(())
+        }
+
+        fn replace_item_path(
+            &mut self,
+            path: &[PathComponent],
+            replacement: SelectionReplacement,
+        ) -> Result<(), Self::Error> {
+            self.current.clear();
+            self.replacements.push((path.to_vec(), replacement));
+            Ok(())
+        }
+
+        fn record(&mut self, record: StreamRecord) -> Result<(), Self::Error> {
+            self.observed_records.push(record.clone());
+            self.current.push(record);
+            Ok(())
+        }
+
+        fn finish_root(&mut self) -> Result<(), Self::Error> {
+            self.committed.push(std::mem::take(&mut self.current));
+            Ok(())
+        }
+
+        fn abort_root(&mut self) {
+            self.current.clear();
+            self.aborted = self.aborted.saturating_add(1);
+        }
+    }
+
+    fn feature_selection() -> StreamSelection {
+        StreamSelection::new(
+            vec![PathComponent::Key(Arc::from("features"))],
+            Some(vec![PathComponent::Key(Arc::from("id"))]),
+        )
+    }
+
+    #[test]
+    fn capture_selection_skips_unneeded_fields_and_keeps_empty_ancestors() {
+        let selection = StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            vec![
+                vec![PathComponent::Key(Arc::from("id"))],
+                vec![
+                    PathComponent::Key(Arc::from("properties")),
+                    PathComponent::Key(Arc::from("mag")),
+                ],
+            ],
+        );
+        let (records, result) = selected_outcome(
+            br#"{"features":[{"id":1,"properties":{"mag":2,"label":"discard","unused":{"x":1}}},{"id":2,"properties":{"label":"discard"}}]}"#,
+            root_options(),
+            selection,
+        );
+        assert_eq!(result, Ok(()));
+
+        let records = records
+            .into_iter()
+            .map(StreamRecord::into_parts)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records,
+            vec![
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(0),
+                        PathComponent::Key(Arc::from("id")),
+                    ],
+                    Some(Value::Number(Number::parse("1").expect("one"))),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(0),
+                        PathComponent::Key(Arc::from("properties")),
+                        PathComponent::Key(Arc::from("mag")),
+                    ],
+                    Some(Value::Number(Number::parse("2").expect("two"))),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(0),
+                        PathComponent::Key(Arc::from("properties")),
+                    ],
+                    None,
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(0),
+                    ],
+                    None,
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(1),
+                        PathComponent::Key(Arc::from("id")),
+                    ],
+                    Some(Value::Number(Number::parse("2").expect("two"))),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(1),
+                        PathComponent::Key(Arc::from("properties")),
+                    ],
+                    Some(Value::object(Object::new())),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Index(1),
+                    ],
+                    None,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_capture_paths_fall_back_to_complete_item_retention() {
+        let selection = StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            Vec::new(),
+        );
+        let (records, result) = selected_outcome(
+            br#"{"features":[{"id":1,"unused":{"value":2}}]}"#,
+            root_options(),
+            selection,
+        );
+        assert_eq!(result, Ok(()));
+        assert!(records.iter().any(|record| {
+            record
+                .path
+                .ends_with(&[PathComponent::Key(Arc::from("unused"))])
+        }));
+    }
+
+    #[test]
+    fn capture_selection_keeps_terminal_subtrees_and_wrong_kind_values() {
+        let terminal = StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            vec![vec![PathComponent::Key(Arc::from("meta"))]],
+        );
+        let (records, result) = selected_outcome(
+            br#"{"features":[{"meta":{"x":1,"nested":{"y":2}},"discard":true}]}"#,
+            root_options(),
+            terminal,
+        );
+        assert_eq!(result, Ok(()));
+        let terminal_paths = records
+            .iter()
+            .map(|record| record.path.clone())
+            .collect::<Vec<_>>();
+        assert!(terminal_paths.iter().any(|path| {
+            path == &[
+                PathComponent::Key(Arc::from("features")),
+                PathComponent::Index(0),
+                PathComponent::Key(Arc::from("meta")),
+                PathComponent::Key(Arc::from("nested")),
+                PathComponent::Key(Arc::from("y")),
+            ]
+        }));
+        assert!(
+            !terminal_paths
+                .iter()
+                .any(|path| { path.ends_with(&[PathComponent::Key(Arc::from("discard"))]) })
+        );
+
+        let wrong_kind = StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            vec![vec![
+                PathComponent::Key(Arc::from("values")),
+                PathComponent::Index(0),
+            ]],
+        );
+        let (records, result) = selected_outcome(
+            br#"{"features":[{"values":{"x":1,"y":2}}]}"#,
+            root_options(),
+            wrong_kind,
+        );
+        assert_eq!(result, Ok(()));
+        let wrong_kind_paths = records
+            .iter()
+            .map(|record| record.path.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            wrong_kind_paths
+                .iter()
+                .any(|path| { path.ends_with(&[PathComponent::Key(Arc::from("x"))]) })
+        );
+        assert!(
+            wrong_kind_paths
+                .iter()
+                .any(|path| { path.ends_with(&[PathComponent::Key(Arc::from("y"))]) })
+        );
+
+        let wrong_kind_array = StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            vec![vec![
+                PathComponent::Key(Arc::from("values")),
+                PathComponent::Key(Arc::from("first")),
+            ]],
+        );
+        let (records, result) = selected_outcome(
+            br#"{"features":[{"values":[1,2]}]}"#,
+            root_options(),
+            wrong_kind_array,
+        );
+        assert_eq!(result, Ok(()));
+        assert!(
+            records
+                .iter()
+                .any(|record| record.path.ends_with(&[PathComponent::Index(1)]))
+        );
+    }
+
+    #[test]
+    fn capture_selection_duplicate_ancestor_emits_replacement_and_empty_shell() {
+        let selection = StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            vec![vec![
+                PathComponent::Key(Arc::from("outer")),
+                PathComponent::Key(Arc::from("needed")),
+            ]],
+        );
+        let mut sink = RootSink::default();
+        stream_json_selected_roots_with_control(
+            br#"{"features":[{"outer":{"needed":1}},{"outer":{"needed":4},"outer":{"discard":2},"other":3}]}"#
+                .as_slice(),
+            root_options(),
+            selection,
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        let outer_path = [
+            PathComponent::Key(Arc::from("features")),
+            PathComponent::Index(1),
+            PathComponent::Key(Arc::from("outer")),
+        ];
+        assert!(sink.replacements.iter().any(|(path, replacement)| {
+            path == &outer_path && *replacement == SelectionReplacement::ObjectStart
+        }));
+        assert!(sink.observed_records.iter().any(|record| {
+            record
+                .path
+                .ends_with(&[PathComponent::Key(Arc::from("needed"))])
+                && record.value == Some(Value::Number(Number::parse("1").expect("one")))
+        }));
+        let committed = sink
+            .committed
+            .into_iter()
+            .flatten()
+            .map(StreamRecord::into_parts)
+            .collect::<Vec<_>>();
+        assert!(committed.iter().any(|(path, value)| {
+            path.ends_with(&[PathComponent::Key(Arc::from("outer"))])
+                && matches!(value, Some(Value::Object(object)) if object.is_empty())
+        }));
+    }
+
+    fn root_options() -> StreamOptions {
+        StreamOptions {
+            maximum_depth: 16,
+            maximum_token_bytes: 1024,
+            errors_as_values: false,
+        }
+    }
+
+    #[test]
+    fn selected_roots_commit_only_after_each_root_finishes() {
+        let mut sink = RootSink::default();
+        let roots = stream_json_selected_roots_with_control(
+            br#"{"features":[{"id":1}]} {"features":[{"id":2}]}"#.as_slice(),
+            root_options(),
+            feature_selection(),
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert_eq!(roots, 2);
+        assert_eq!(sink.begun, [0, 1]);
+        assert_eq!(sink.committed.len(), 2);
+        assert!(sink.committed.iter().all(|records| !records.is_empty()));
+        assert_eq!(sink.aborted, 0);
+    }
+
+    #[test]
+    fn malformed_root_aborts_without_committing_partial_records() {
+        let mut sink = RootSink::default();
+        let result = stream_json_selected_roots_with_control(
+            br#"{"features":[{"id":1}]} {"features":[{"id":2}],"discarded":[1,]}"#.as_slice(),
+            root_options(),
+            feature_selection(),
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(sink.committed.len(), 1);
+        assert_eq!(sink.committed[0].len(), 2);
+        assert_eq!(sink.aborted, 1);
+    }
+
+    #[test]
+    fn duplicate_selected_prefix_replaces_prior_records_before_commit() {
+        let mut sink = RootSink::default();
+        let roots = stream_json_selected_roots_with_control(
+            br#"{"features":[{"id":1}],"features":[]}"#.as_slice(),
+            root_options(),
+            feature_selection(),
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert_eq!(roots, 1);
+        assert_eq!(sink.committed, [Vec::new()]);
+        assert_eq!(
+            sink.replacements
+                .iter()
+                .filter(|(path, _)| path == &[PathComponent::Key(Arc::from("features"))])
+                .count(),
+            2
+        );
+        assert_eq!(
+            sink.replacements.last().expect("replacement").0,
+            [PathComponent::Key(Arc::from("features"))]
+        );
+        assert_eq!(
+            sink.replacements.last().expect("replacement").1,
+            SelectionReplacement::ArrayStart
+        );
+        assert_eq!(
+            sink.fallbacks,
+            [SelectionFallback::PresentEmptyArray {
+                path: vec![PathComponent::Key(Arc::from("features"))]
+            }]
+        );
+    }
+
+    #[test]
+    fn duplicate_ancestor_reports_missing_selected_descendant() {
+        let mut sink = RootSink::default();
+        let selection = StreamSelection::new(
+            vec![
+                PathComponent::Key(Arc::from("outer")),
+                PathComponent::Key(Arc::from("features")),
+            ],
+            Some(vec![PathComponent::Key(Arc::from("id"))]),
+        );
+        let roots = stream_json_selected_roots_with_control(
+            br#"{"outer":{"features":[{"id":1}]},"outer":{}}"#.as_slice(),
+            root_options(),
+            selection,
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert_eq!(roots, 1);
+        assert_eq!(sink.committed, [Vec::new()]);
+        assert_eq!(
+            sink.fallbacks,
+            [SelectionFallback::Missing {
+                path: vec![
+                    PathComponent::Key(Arc::from("outer")),
+                    PathComponent::Key(Arc::from("features")),
+                ]
+            }]
+        );
+        assert!(sink.replacements.iter().any(|(path, replacement)| {
+            path == &[PathComponent::Key(Arc::from("outer"))]
+                && *replacement == SelectionReplacement::ObjectStart
+        }));
+    }
+
+    #[test]
+    fn duplicate_nested_selected_item_reports_container_replacement() {
+        let mut sink = RootSink::default();
+        let selection = StreamSelection::new(
+            vec![PathComponent::Key(Arc::from("features"))],
+            Some(vec![
+                PathComponent::Key(Arc::from("item")),
+                PathComponent::Key(Arc::from("id")),
+            ]),
+        );
+        stream_json_selected_roots_with_control(
+            br#"{"features":[{"item":{"id":1},"item":{}}]}"#.as_slice(),
+            root_options(),
+            selection,
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        let item_path = [
+            PathComponent::Key(Arc::from("features")),
+            PathComponent::Index(0),
+            PathComponent::Key(Arc::from("item")),
+        ];
+        assert_eq!(
+            sink.replacements
+                .iter()
+                .filter(|(path, replacement)| {
+                    path == &item_path && *replacement == SelectionReplacement::ObjectStart
+                })
+                .count(),
+            2
+        );
+        assert!(sink.committed.iter().flatten().any(|record| {
+            let (path, value) = record.clone().into_parts();
+            path == item_path
+                && matches!(value, Some(Value::Object(ref object)) if object.is_empty())
+        }));
+    }
+
+    #[test]
+    fn duplicate_ancestor_scalar_reports_wrong_type_without_dom_fallback() {
+        let mut sink = RootSink::default();
+        let selection = StreamSelection::new(
+            vec![
+                PathComponent::Key(Arc::from("outer")),
+                PathComponent::Key(Arc::from("features")),
+            ],
+            None,
+        );
+        stream_json_selected_roots_with_control(
+            br#"{"outer":{"features":[1]},"outer":0}"#.as_slice(),
+            root_options(),
+            selection,
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        let expected_replacement = (
+            vec![PathComponent::Key(Arc::from("outer"))],
+            SelectionReplacement::Scalar(Value::Number(Number::parse("0").expect("literal zero"))),
+        );
+        assert_eq!(sink.replacements.last(), Some(&expected_replacement));
+        assert_eq!(
+            sink.fallbacks.last(),
+            Some(&SelectionFallback::Missing {
+                path: vec![
+                    PathComponent::Key(Arc::from("outer")),
+                    PathComponent::Key(Arc::from("features")),
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn lifecycle_preserves_root_and_array_ancestor_shapes() {
+        let root_cases = [
+            (
+                b"0".as_slice(),
+                SelectionReplacement::Scalar(Value::Number(
+                    Number::parse("0").expect("literal zero"),
+                )),
+            ),
+            (b"[]".as_slice(), SelectionReplacement::ArrayStart),
+            (b"[1]".as_slice(), SelectionReplacement::ArrayStart),
+        ];
+        for (input, expected_replacement) in root_cases {
+            let mut sink = RootSink::default();
+            stream_json_selected_roots_with_control(
+                input,
+                root_options(),
+                feature_selection(),
+                None,
+                &mut SelectedStreamObservations::default(),
+                &mut sink,
+            )
+            .unwrap();
+
+            assert_eq!(sink.replacements, [(Vec::new(), expected_replacement)]);
+            assert_eq!(
+                sink.fallbacks,
+                [SelectionFallback::Missing {
+                    path: vec![PathComponent::Key(Arc::from("features"))]
+                }]
+            );
+        }
+
+        let mut sink = RootSink::default();
+        let selection = StreamSelection::new(
+            vec![
+                PathComponent::Key(Arc::from("items")),
+                PathComponent::Index(1),
+                PathComponent::Key(Arc::from("features")),
+            ],
+            None,
+        );
+        stream_json_selected_roots_with_control(
+            br#"{"items":[0,7]}"#.as_slice(),
+            root_options(),
+            selection,
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        assert_eq!(
+            sink.replacements,
+            [
+                (Vec::new(), SelectionReplacement::ObjectStart),
+                (
+                    vec![PathComponent::Key(Arc::from("items"))],
+                    SelectionReplacement::ArrayStart,
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("items")),
+                        PathComponent::Index(1),
+                    ],
+                    SelectionReplacement::Scalar(Value::Number(
+                        Number::parse("7").expect("literal seven"),
+                    )),
+                ),
+            ]
+        );
+        assert_eq!(
+            sink.fallbacks,
+            [SelectionFallback::Missing {
+                path: vec![
+                    PathComponent::Key(Arc::from("items")),
+                    PathComponent::Index(1),
+                    PathComponent::Key(Arc::from("features")),
+                ]
+            }]
+        );
+    }
+
+    #[test]
+    fn reports_object_item_replacements_in_source_order() {
+        let mut sink = RootSink::default();
+        let selection = StreamSelection::new(
+            vec![PathComponent::Key(Arc::from("features"))],
+            Some(vec![PathComponent::Key(Arc::from("id"))]),
+        );
+        stream_json_selected_roots_with_control(
+            br#"{"features":{"a":{"id":1},"b":{"id":2},"a":{"id":3}}}"#.as_slice(),
+            root_options(),
+            selection,
+            None,
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        )
+        .unwrap();
+
+        let expected = ["a", "b", "a"];
+        let paths = sink
+            .replacements
+            .iter()
+            .filter_map(|(path, replacement)| {
+                if *replacement != SelectionReplacement::ObjectStart {
+                    return None;
+                }
+                match path.last() {
+                    Some(PathComponent::Key(key)) if path.len() == 2 => Some(key.as_ref()),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(paths, expected);
+        let records = sink
+            .observed_records
+            .into_iter()
+            .map(StreamRecord::into_parts)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records,
+            vec![
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Key(Arc::from("a")),
+                        PathComponent::Key(Arc::from("id")),
+                    ],
+                    Some(Value::Number(Number::parse("1").expect("one"))),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Key(Arc::from("a")),
+                    ],
+                    None,
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Key(Arc::from("b")),
+                        PathComponent::Key(Arc::from("id")),
+                    ],
+                    Some(Value::Number(Number::parse("2").expect("two"))),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Key(Arc::from("b")),
+                    ],
+                    None,
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Key(Arc::from("a")),
+                        PathComponent::Key(Arc::from("id")),
+                    ],
+                    Some(Value::Number(Number::parse("3").expect("three"))),
+                ),
+                (
+                    vec![
+                        PathComponent::Key(Arc::from("features")),
+                        PathComponent::Key(Arc::from("a")),
+                    ],
+                    None,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn cancellation_after_first_root_begins_aborts_current_root() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut sink = RootSink {
+            cancel_on_first_begin: Some(Arc::clone(&cancelled)),
+            ..RootSink::default()
+        };
+        let result = stream_json_selected_roots_with_control(
+            br#"{"features":[{"id":1}]} {"features":[{"id":2}]}"#.as_slice(),
+            root_options(),
+            feature_selection(),
+            Some(cancelled),
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::FormatError::Resource("interrupted"))
+        ));
+        assert_eq!(sink.committed.len(), 0);
+        assert_eq!(sink.aborted, 1);
+    }
+
+    #[test]
+    fn missing_and_scalar_selected_prefixes_are_reported_without_a_dom_fallback() {
+        let cases = [
+            (
+                b"{}".as_slice(),
+                SelectionFallback::Missing {
+                    path: vec![PathComponent::Key(Arc::from("features"))],
+                },
+            ),
+            (
+                br#"{"features":null}"#.as_slice(),
+                SelectionFallback::PresentScalar {
+                    path: vec![PathComponent::Key(Arc::from("features"))],
+                    value: tq_core::Value::Null,
+                },
+            ),
+        ];
+        for (input, expected) in cases {
+            let mut sink = RootSink::default();
+            let roots = stream_json_selected_roots_with_control(
+                input,
+                root_options(),
+                feature_selection(),
+                None,
+                &mut SelectedStreamObservations::default(),
+                &mut sink,
+            )
+            .unwrap();
+            assert_eq!(roots, 1);
+            assert_eq!(sink.fallbacks, [expected]);
+            assert_eq!(sink.committed, [Vec::new()]);
+        }
+    }
+
+    #[test]
+    fn cancellation_aborts_before_opening_a_root() {
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let mut sink = RootSink::default();
+        let result = stream_json_selected_roots_with_control(
+            br#"{"features":[1]}"#.as_slice(),
+            root_options(),
+            feature_selection(),
+            Some(cancelled),
+            &mut SelectedStreamObservations::default(),
+            &mut sink,
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::FormatError::Resource("interrupted"))
+        ));
+        assert!(sink.begun.is_empty());
+        assert_eq!(sink.aborted, 0);
     }
 
     fn selected_outcome(
@@ -1227,6 +2474,16 @@ mod tests {
         )
     }
 
+    fn capture_release_selection() -> StreamSelection {
+        StreamSelection::with_item_capture_paths(
+            vec![PathComponent::Key(Arc::from("features"))],
+            vec![vec![
+                PathComponent::Key(Arc::from("properties")),
+                PathComponent::Key(Arc::from("release")),
+            ]],
+        )
+    }
+
     #[test]
     fn json_and_toon_form_identical_jq_stream_records() {
         let expected = [
@@ -1282,6 +2539,116 @@ mod tests {
     }
 
     #[test]
+    fn stream_errors_normalize_bare_identifier_as_jq_numeric_literal() {
+        let mut values = Vec::new();
+        stream_json(
+            br#"["a",n]"#.as_slice(),
+            StreamOptions {
+                errors_as_values: true,
+                ..StreamOptions::default()
+            },
+            |value| {
+                values.push(value);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            values[1].to_string(),
+            r#"["Invalid numeric literal at line 1, column 7",[1]]"#
+        );
+    }
+
+    #[test]
+    fn stream_errors_discard_partial_tokens_and_match_jq_boundaries() {
+        let cases = [
+            (
+                br"[foo]".as_slice(),
+                r#"["Invalid literal at line 1, column 5",[0]]"#,
+            ),
+            (
+                br"[invalid]".as_slice(),
+                r#"["Invalid numeric literal at line 1, column 9",[0]]"#,
+            ),
+            (
+                br"[tru]".as_slice(),
+                r#"["Invalid literal at line 1, column 5",[0]]"#,
+            ),
+            (
+                br"[truee]".as_slice(),
+                r#"["Invalid literal at line 1, column 7",[0]]"#,
+            ),
+            (
+                br"[1,]".as_slice(),
+                r#"["Expected another array element at line 1, column 4",[1]]"#,
+            ),
+            (
+                br#"{"a":}"#.as_slice(),
+                r#"["Missing value in key:value pair at line 1, column 6",["a"]]"#,
+            ),
+            (
+                br#"{"a":1,}"#.as_slice(),
+                r#"["Expected another key:value pair at line 1, column 8",[null]]"#,
+            ),
+            (
+                br#"{"a" 1}"#.as_slice(),
+                r#"["Expected separator between values at line 1, column 7",[null]]"#,
+            ),
+            (
+                br"[1 2]".as_slice(),
+                r#"["Expected separator between values at line 1, column 5",[0]]"#,
+            ),
+            (
+                br"{".as_slice(),
+                r#"["Unfinished JSON term at EOF at line 1, column 1",[null]]"#,
+            ),
+            (
+                br"[".as_slice(),
+                r#"["Unfinished JSON term at EOF at line 1, column 1",[0]]"#,
+            ),
+            (
+                br#""abc"#.as_slice(),
+                r#"["Unfinished string at EOF at line 1, column 4",[]]"#,
+            ),
+            (
+                br#"{"o":{"#.as_slice(),
+                r#"["Unfinished JSON term at EOF at line 1, column 6",["o",null]]"#,
+            ),
+            (
+                br#"{"o":{"a":1,}}"#.as_slice(),
+                r#"["Expected another key:value pair at line 1, column 13",["o",null]]"#,
+            ),
+            (
+                br"[{".as_slice(),
+                r#"["Unfinished JSON term at EOF at line 1, column 2",[0,null]]"#,
+            ),
+            (
+                br#"[{"a" 1}]"#.as_slice(),
+                r#"["Expected separator between values at line 1, column 8",[0,null]]"#,
+            ),
+        ];
+        for (input, expected_error) in cases {
+            let mut values = Vec::new();
+            stream_json(
+                input,
+                StreamOptions {
+                    errors_as_values: true,
+                    ..StreamOptions::default()
+                },
+                |value| {
+                    values.push(value);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                values.last().expect("stream error value").to_string(),
+                expected_error
+            );
+        }
+    }
+
+    #[test]
     fn stream_enforces_token_limits_before_emitting() {
         let mut values = Vec::new();
         let error = stream_json(
@@ -1299,7 +2666,76 @@ mod tests {
         .to_string();
         assert_eq!(values, [] as [tq_core::Value; 0]);
         assert!(error.contains("token-bytes"));
-        assert!(error.contains("resource limit"));
+        assert!(error.contains("JSON input limit exceeded"));
+    }
+
+    #[test]
+    fn errors_as_values_does_not_convert_callback_failures_or_call_back_again() {
+        let mut calls = 0_usize;
+        let error = stream_json(
+            b"[1,2]".as_slice(),
+            StreamOptions {
+                errors_as_values: true,
+                ..StreamOptions::default()
+            },
+            |_value| {
+                calls = calls.saturating_add(1);
+                Err("stop after first output".to_owned())
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(calls, 1);
+        assert!(error.contains("stop after first output"));
+    }
+
+    #[test]
+    fn stream_error_mapping_keeps_line_after_a_truncated_long_prefix() {
+        let input = format!("\"{}\"\n[1,bad]", "a".repeat(70_000));
+        let mut values = Vec::new();
+        stream_json(
+            input.as_bytes(),
+            StreamOptions {
+                errors_as_values: true,
+                ..StreamOptions::default()
+            },
+            |value| {
+                values.push(value);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(
+            values
+                .last()
+                .is_some_and(|value| { value.to_string().contains("line 2") })
+        );
+    }
+
+    #[test]
+    fn stream_error_mapping_keeps_column_after_a_truncated_single_line() {
+        let prefix = "a".repeat(70_000);
+        let input = format!("[\"{prefix}\",1,]");
+        let mut values = Vec::new();
+        stream_json(
+            input.as_bytes(),
+            StreamOptions {
+                errors_as_values: true,
+                ..StreamOptions::default()
+            },
+            |value| {
+                values.push(value);
+                Ok(())
+            },
+        )
+        .unwrap();
+        let expected_column = prefix.len().saturating_add(7);
+        assert_eq!(
+            values.last().expect("stream error value").to_string(),
+            format!(
+                r#"["Expected another array element at line 1, column {expected_column}",[2]]"#
+            )
+        );
     }
 
     #[test]
@@ -1368,6 +2804,62 @@ mod tests {
     }
 
     #[test]
+    fn selected_fast_discard_preserves_nested_array_indexes() {
+        let input = br#"{"features":[{"values":[10,20,30]}]}"#;
+        let selection = StreamSelection::new(
+            vec![PathComponent::Key(Arc::from("features"))],
+            Some(vec![
+                PathComponent::Key(Arc::from("values")),
+                PathComponent::Index(1),
+            ]),
+        );
+        let fast = selected_outcome(input, StreamOptions::default(), selection.clone());
+        let structural = structural_selected_outcome(input, StreamOptions::default(), selection);
+        assert_eq!(fast, structural);
+        assert!(fast.0.iter().any(|record| {
+            record.path
+                == [
+                    PathComponent::Key(Arc::from("features")),
+                    PathComponent::Index(0),
+                    PathComponent::Key(Arc::from("values")),
+                    PathComponent::Index(1),
+                ]
+                && record
+                    .value
+                    .as_ref()
+                    .is_some_and(|value| value.to_string() == "20")
+        }));
+    }
+
+    #[test]
+    fn selected_fast_discard_preserves_indexed_prefix_slots() {
+        let input = br#"[{"features":[{"id":1}]},{"features":[{"id":2}]}]"#;
+        let selection = StreamSelection::new(
+            vec![
+                PathComponent::Index(1),
+                PathComponent::Key(Arc::from("features")),
+            ],
+            Some(vec![PathComponent::Key(Arc::from("id"))]),
+        );
+        let fast = selected_outcome(input, StreamOptions::default(), selection.clone());
+        let structural = structural_selected_outcome(input, StreamOptions::default(), selection);
+        assert_eq!(fast, structural);
+        assert!(fast.0.iter().any(|record| {
+            record.path
+                == [
+                    PathComponent::Index(1),
+                    PathComponent::Key(Arc::from("features")),
+                    PathComponent::Index(0),
+                    PathComponent::Key(Arc::from("id")),
+                ]
+                && record
+                    .value
+                    .as_ref()
+                    .is_some_and(|value| value.to_string() == "2")
+        }));
+    }
+
+    #[test]
     fn selected_fast_discard_preserves_discarded_subtree_failures() {
         let default = StreamOptions::default();
         let depth_limited = StreamOptions {
@@ -1401,8 +2893,17 @@ mod tests {
             ),
             (
                 br#"{"features":[{"properties":{"release":1},"geometry":[1e1000001]}]}"#.to_vec(),
+                StreamOptions {
+                    maximum_token_bytes: 8,
+                    ..default
+                },
+                "exponent-token",
+            ),
+            (
+                br#"{"features":[{"properties":{"release":1},"geometry":[1e2000000001]}]}"#
+                    .to_vec(),
                 default,
-                "exponent",
+                "exponent-envelope",
             ),
             (oversized_coefficient.into_bytes(), default, "coefficient"),
         ];
@@ -1413,6 +2914,9 @@ mod tests {
             assert_eq!(fast.0, structural.0, "records for {label}");
             assert!(fast.1.is_err(), "fast path accepted {label}");
             assert!(structural.1.is_err(), "structural path accepted {label}");
+
+            let captured = selected_outcome(&input, options, capture_release_selection());
+            assert!(captured.1.is_err(), "capture path accepted {label}");
         }
     }
 
@@ -1436,7 +2940,7 @@ mod tests {
 
         let cancellation = Arc::new(AtomicBool::new(false));
         let input = format!(
-            "{{\"discarded\":[{}],\"features\":[{{\"properties\":{{\"release\":1}}}}]}}",
+            "{{\"features\":[{{\"discarded\":[{}],\"properties\":{{\"release\":1}}}}]}}",
             std::iter::repeat_n("0", 8192).collect::<Vec<_>>().join(",")
         )
         .into_bytes();
@@ -1458,6 +2962,55 @@ mod tests {
 
         assert!(error.to_string().contains("selected decoding interrupted"));
         assert!(cancellation.load(Ordering::Relaxed));
-        assert_eq!(observations.depth_high_water, 2);
+        assert_eq!(observations.depth_high_water, 4);
+
+        let capture_cancellation = Arc::new(AtomicBool::new(false));
+        let capture_input = format!(
+            "{{\"features\":[{{\"discarded\":[{}],\"properties\":{{\"release\":1}}}}]}}",
+            std::iter::repeat_n("0", 8192).collect::<Vec<_>>().join(",")
+        )
+        .into_bytes();
+        let capture_reader = CancelAfter {
+            input: Cursor::new(capture_input),
+            cancellation: Arc::clone(&capture_cancellation),
+            trigger: 1024,
+        };
+        let capture_error = stream_json_selected_records_with_control(
+            BufReader::new(capture_reader),
+            StreamOptions::default(),
+            capture_release_selection(),
+            Some(Arc::clone(&capture_cancellation)),
+            &mut SelectedStreamObservations::default(),
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(
+            capture_error
+                .to_string()
+                .contains("selected decoding interrupted")
+        );
+        assert!(capture_cancellation.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn selected_fast_discard_observes_source_depth_beyond_retained_depth() {
+        let input = br#"{"discarded":{"deep":[[0]]},"features":[1]}"#;
+        let mut records = Vec::new();
+        let mut observations = SelectedStreamObservations::default();
+        stream_json_selected_records_with_control(
+            Cursor::new(input),
+            StreamOptions::default(),
+            StreamSelection::new(vec![PathComponent::Key(Arc::from("features"))], None),
+            None,
+            &mut observations,
+            |record| {
+                records.push(record);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(observations.depth_high_water, 4);
     }
 }

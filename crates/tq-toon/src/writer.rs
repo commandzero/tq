@@ -332,7 +332,7 @@ impl<W: Write> Encoder<W> {
         match value {
             Value::Null => "null".to_owned(),
             Value::Bool(value) => value.to_string(),
-            Value::Number(value) => value.to_string(),
+            Value::Number(value) => value.canonical_numeric(),
             Value::String(value) => {
                 if safe_string(value, self.config.delimiter, context) {
                     value.to_string()

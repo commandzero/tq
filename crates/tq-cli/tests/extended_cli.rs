@@ -27,6 +27,15 @@ fn tq_with_environment(arguments: &[&str], stdin: &[u8], key: &str, value: &str)
     run_tq(command, stdin)
 }
 
+fn tq_with_default_palette(arguments: &[&str], stdin: &[u8]) -> Outcome {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tq"));
+    command
+        .args(arguments)
+        .env_remove("NO_COLOR")
+        .env_remove("JQ_COLORS");
+    run_tq(command, stdin)
+}
+
 fn run_tq(mut command: Command, stdin: &[u8]) -> Outcome {
     let mut child = command
         .stdin(Stdio::piped())
@@ -109,60 +118,34 @@ fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
 }
 
 #[test]
-fn denied_ambient_access_redacts_diagnostics_and_report_observations() {
-    use tq_test_support::compatibility::{
-        ErrorClass, FixtureFormat, ObservationState, ProcessStatus, ToolKind, ToolObservation,
-        encode_hex,
-    };
-
-    const SENTINEL: &str = "tq-redaction-sentinel-never-report-this";
+fn process_cli_admits_environment_while_library_policy_stays_explicit() {
+    const SENTINEL: &str = "tq-process-environment-sentinel";
     let output = tq_with_environment(
-        &["--output-format", "json", "-c", "env"],
+        &[
+            "-n",
+            "--output-format",
+            "json",
+            "-c",
+            "$ENV.TQ_REDACTION_SENTINEL",
+        ],
         b"null\n",
         "TQ_REDACTION_SENTINEL",
         SENTINEL,
     );
-    assert_eq!(output.code, 5);
-    assert_eq!(output.stdout, [] as [u8; 0]);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("capability policy"));
-    assert!(
-        !output
-            .stderr
-            .windows(SENTINEL.len())
-            .any(|bytes| bytes == SENTINEL.as_bytes())
-    );
-
-    let observation = ToolObservation {
-        tool: ToolKind::Tq,
-        input_format: Some(FixtureFormat::Json),
-        state: ObservationState::Executed,
-        results: Vec::new(),
-        stdout_hex: Some(encode_hex(&output.stdout)),
-        raw_stdout_hex: None,
-        stderr_hex: Some(encode_hex(&output.stderr)),
-        process_status: Some(ProcessStatus::Exited),
-        exit_code: Some(output.code),
-        error_class: Some(ErrorClass::RuntimePolicy),
-        wall_time_micros: Some(0),
-        note: None,
-    };
-    let report_bytes = serde_json::to_vec(&observation).expect("compatibility observation JSON");
-    assert!(
-        !report_bytes
-            .windows(SENTINEL.len())
-            .any(|bytes| bytes == SENTINEL.as_bytes())
-    );
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, format!("\"{SENTINEL}\"\n").as_bytes());
+    assert!(output.stderr.is_empty());
 }
 
 #[test]
 fn regex_and_date_failures_keep_distinct_cli_experiences() {
-    let unsupported = tq(
+    let supported = tq(
         &["--output-format", "json", "-c", r#"test("(?=a)")"#],
         b"\"a\"\n",
     );
-    assert_eq!(unsupported.code, 2);
-    assert_eq!(unsupported.stdout, [] as [u8; 0]);
-    assert!(String::from_utf8_lossy(&unsupported.stderr).contains("not supported"));
+    assert_eq!(supported.code, 0);
+    assert_eq!(supported.stdout, b"true\n");
+    assert_eq!(supported.stderr, [] as [u8; 0]);
 
     let range = tq(
         &["--output-format", "json", "-c", "todateiso8601"],
@@ -618,7 +601,7 @@ fn malformed_json_does_not_publish_a_partial_toon_record() {
         b"{\"ok\":1}\n{\"a\":\"\"\"line1\nline2\"\"\"}\n",
     );
     assert_eq!(later_error.code, 5);
-    assert_eq!(later_error.stdout, b"\x1eok: 1\n");
+    assert_eq!(later_error.stdout, b"ok: 1\n");
 }
 
 #[test]
@@ -873,24 +856,214 @@ fn generated_help_and_build_configuration_are_stdout_only() {
     }
     let help = tq(&["--help"], b"");
     let help = String::from_utf8(help.stdout).unwrap();
-    for option in ["--raw-output0", "--sort-keys", "--slurpfile", "--jsonargs"] {
+    for option in [
+        "--raw-output0",
+        "--sort-keys",
+        "--slurpfile",
+        "--jsonargs",
+        "--run-tests",
+    ] {
         assert!(help.contains(option), "missing {option}");
     }
+}
+
+#[test]
+fn run_tests_executes_stdin_test_files_and_reports_failures() {
+    let passing = tq(&["--run-tests"], b"# smoke\n.\nnull\nnull\n\n");
+    assert_eq!(
+        passing.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&passing.stderr)
+    );
+    assert!(String::from_utf8_lossy(&passing.stdout).contains("1 of 1 tests passed"));
+    assert!(passing.stderr.is_empty());
+
+    let failing = tq(&["--run-tests"], b".\nnull\n1\n\n");
+    assert_eq!(failing.code, 1);
+    assert!(String::from_utf8_lossy(&failing.stdout).contains("Expected 1"));
+
+    let compile_failure = tq(
+        &["--run-tests"],
+        b"%%FAIL\nfoo\nquery compilation failed: TQ-RESOLVE-BUILTIN-001: unknown filter foo/0\n\n",
+    );
+    assert_eq!(compile_failure.code, 0);
+    let compile_failure_stdout = String::from_utf8_lossy(&compile_failure.stdout);
+    assert!(compile_failure_stdout.contains("1 of 1 tests passed"));
+    assert!(compile_failure_stdout.contains("Test jq_state: .[]"));
+    assert!(
+        compile_failure_stdout
+            .contains("Test jq_state: .[] | if .%2 == 0 then halt_error else . end")
+    );
+
+    let jq_compile_failure = tq(
+        &["--run-tests"],
+        b"%%FAIL\nfoo\njq: error: foo/0 is not defined at <top-level>, line 1, column 1:\n    foo\n    ^^^\n\n",
+    );
+    assert_eq!(jq_compile_failure.code, 0);
+    assert!(String::from_utf8_lossy(&jq_compile_failure.stdout).contains("1 of 1 tests passed"));
+
+    let jq_compile_categories = tq(
+        &["--run-tests"],
+        b"%%FAIL\n$missing\njq: error: $missing is not defined at <top-level>, line 1, column 1:\n    $missing\n    ^^^^^^^^\n\n%%FAIL\n1 | foo(1)\njq: error: foo/1 is not defined at <top-level>, line 1, column 5:\n    1 | foo(1)\n        ^^^\n\n%%FAIL\n1 +\njq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    1 +\n      ^\n\n",
+    );
+    assert_eq!(jq_compile_categories.code, 0);
+    assert!(
+        String::from_utf8_lossy(&jq_compile_categories.stdout)
+            .contains("3 of 3 tests passed (0 malformed, 0 skipped)")
+    );
+
+    let empty_result = tq(&["--run-tests"], b"empty\nnull\n\n");
+    assert_eq!(empty_result.code, 0);
+    assert!(String::from_utf8_lossy(&empty_result.stdout).contains("1 of 1 tests passed"));
+
+    let semantic_json = tq(&["--run-tests"], b"{\"a\":1}\nnull\n{\"a\": 1}\n\n");
+    assert_eq!(semantic_json.code, 0);
+
+    let stale_compile_expectation = tq(&["--run-tests"], b"%%FAIL\nfoo\nnot this diagnostic\n\n");
+    assert_eq!(stale_compile_expectation.code, 1);
+    let stale_compile_stdout = String::from_utf8_lossy(&stale_compile_expectation.stdout);
+    assert!(stale_compile_stdout.contains("Erroneous program failed with"));
+    assert!(
+        stale_compile_stdout
+            .contains("jq: error: foo/0 is not defined at <top-level>, line 1, column 1:")
+    );
+    assert!(stale_compile_stdout.contains("at line number 3: foo"));
+    assert!(stale_compile_stdout.contains("1 malformed"));
+    assert!(!stale_compile_stdout.contains("Test jq_state:"));
+
+    let extra_compile_expectation = tq(
+        &["--run-tests"],
+        b"%%FAIL\nfoo\nquery compilation failed: TQ-RESOLVE-BUILTIN-001: unknown filter foo/0\nextra\n\n",
+    );
+    assert_eq!(extra_compile_expectation.code, 1);
+    let extra_compile_stdout = String::from_utf8_lossy(&extra_compile_expectation.stdout);
+    assert!(extra_compile_stdout.contains("Erroneous program failed with"));
+    assert!(extra_compile_stdout.contains("at line number 3: foo"));
+    assert!(extra_compile_stdout.contains("1 malformed"));
+
+    let environment = tq_with_environment(
+        &["--run-tests"],
+        b"$ENV.TQ_RUN_TEST_SENTINEL\nnull\n\"present\"\n\n",
+        "TQ_RUN_TEST_SENTINEL",
+        "present",
+    );
+    assert_eq!(
+        environment.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&environment.stderr)
+    );
+    assert!(String::from_utf8_lossy(&environment.stdout).contains("1 of 1 tests passed"));
+}
+
+#[test]
+fn run_tests_renders_jq_parser_context_for_unexpected_tokens() {
+    let output = tq(
+        &["--run-tests"],
+        b"%%FAIL\n]\njq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    ]\n    ^\n\n%%FAIL\n1 + ]\njq: error: syntax error, unexpected INVALID_CHARACTER at <top-level>, line 1, column 5:\n    1 + ]\n        ^\n\n%%FAIL\n1 + ;\njq: error: syntax error, unexpected ';' at <top-level>, line 1, column 5:\n    1 + ;\n        ^\n\n",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("3 of 3 tests passed (0 malformed, 0 skipped)")
+    );
+}
+
+#[test]
+fn run_tests_renders_missing_delimiter_context() {
+    let output = tq(
+        &["--run-tests"],
+        b"%%FAIL\n[1\njq: error: syntax error, unexpected end of file, expecting '|' or ',' or ']' at <top-level>, line 1, column 2:\n    [1\n     ^\n\n%%FAIL\n{x:1\njq: error: syntax error, unexpected end of file, expecting '}' at <top-level>, line 1, column 4:\n    {x:1\n       ^\n\n",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("2 of 2 tests passed (0 malformed, 0 skipped)")
+    );
+}
+
+#[test]
+fn run_tests_renders_unterminated_if_and_unicode_string_context() {
+    let fixture = "%%FAIL\nif true then 1\njq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if true then 1\n    ^^^^^^^^^^^^^^\n\n%%FAIL\n\"é\njq: error: syntax error, unexpected end of file, expecting QQSTRING_TEXT or QQSTRING_INTERP_START or QQSTRING_END at <top-level>, line 1, column 2:\n    \"é\n     ^^\n\n";
+    let output = tq(&["--run-tests"], fixture.as_bytes());
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("2 of 2 tests passed (0 malformed, 0 skipped)")
+    );
+}
+
+#[test]
+fn run_tests_compares_lossless_json_semantics() {
+    let equivalent = tq(
+        &["--run-tests"],
+        b".\n1\n1.0\n\n.\n1e3\n1000\n\n.\n{\"z\":1,\"nested\":[9007199254740993]}\n{\"nested\":[9007199254740993],\"z\":1}\n\n",
+    );
+    assert_eq!(equivalent.code, 0);
+    assert!(String::from_utf8_lossy(&equivalent.stdout).contains("3 of 3 tests passed"));
+
+    let distinct = tq(
+        &["--run-tests"],
+        b".\n9007199254740993\n9007199254740992\n\n",
+    );
+    assert_eq!(distinct.code, 1);
+    assert!(
+        String::from_utf8_lossy(&distinct.stdout)
+            .contains("Expected 9007199254740992, but got 9007199254740993")
+    );
+}
+
+#[test]
+fn run_tests_uses_jq_json_input_for_nonfinite_predicates() {
+    let output = tq(
+        &["--run-tests"],
+        b"[type, isnan, isinfinite]\nNaN\n[\"number\",true,false]\n\n",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 of 1 tests passed"));
+}
+
+#[test]
+fn run_tests_does_not_equate_runtime_nan_with_serialized_null() {
+    let output = tq(&["--run-tests"], b".\nNaN\nnull\n\n");
+    assert_eq!(output.code, 1);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("0 of 1 tests passed"));
 }
 
 #[test]
 fn argument_free_invocation_uses_identity_filter_over_stdin() {
     let output = tq(&[], b"name: Ada\nactive: true\n");
     assert_eq!(output.code, 0);
-    assert_eq!(output.stdout, b"\x1ename: Ada\nactive: true\n");
+    assert_eq!(output.stdout, b"name: Ada\nactive: true\n");
     assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
 fn color_binary_encoding_and_argument_file_limits_are_classified() {
-    let output = tq(&["--output-format", "json", "-nC", "1"], b"");
+    let output = tq_with_default_palette(&["--output-format", "json", "-nC", "1"], b"");
     assert_eq!(output.code, 0);
-    assert_eq!(output.stdout, b"\x1b[36m1\x1b[0m\n");
+    assert_eq!(output.stdout, b"\x1b[0;39m1\x1b[0m\n");
 
     let output = tq(&["--output-format", "json", "-nbc", "1"], b"");
     assert_eq!(output.code, 0);
@@ -902,9 +1075,9 @@ fn color_binary_encoding_and_argument_file_limits_are_classified() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("UTF-8"));
 
     let output = tq(&["-n", "--argjson", "value", "1 2", "$value"], b"");
-    assert_eq!(output.code, 5);
+    assert_eq!(output.code, 2);
     assert_eq!(output.stdout, [] as [u8; 0]);
-    assert!(String::from_utf8_lossy(&output.stderr).contains("exactly one"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("one valid JSON value"));
 
     let directory = tempdir().unwrap();
     let secret = directory.path().join("secret.txt");

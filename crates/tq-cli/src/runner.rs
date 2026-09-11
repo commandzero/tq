@@ -1,53 +1,61 @@
 //! End-to-end command runner with strict stdout/stderr separation.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs::{self, File},
     io::{self, BufReader, BufWriter, IsTerminal, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
-        Arc, OnceLock,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
-        mpsc::{SyncSender, sync_channel},
+        mpsc::{Receiver, SyncSender, sync_channel},
     },
     thread,
+    time::Duration,
 };
 
 use thiserror::Error;
 use tq_core::{
-    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, Events,
-    HybridBlocking, HybridPreparation, InputCursor, InputValue, Number, PathComponent, Plan,
-    PlanKind, Query, ResolveOptions, Resolved, SourceId, StableSortPipeline,
+    Analysis, AnalysisContext, Analyzed, AutomaticPlan, Compiled, Diagnostic, EffectSink, Events,
+    HybridBlocking, HybridPreparation, InputCursor, InputValue, JsonInputOptions, Label, Number,
+    PathComponent, Plan, PlanKind, Query, ResolveOptions, Resolved, SourceId, StableSortPipeline,
     StableSortPipelineObservations, Transcode, TranscodeCommitment, TranscodeDuplicatePolicy,
     TranscodeInput, TranscodeLimits, TranscodeProof, Value, Vm, VmError, VmLimits, VmObservations,
-    analyze_with_context, parallel_worker_count, parse_bytes, resolve,
+    analyze_with_context, parallel_worker_count, parse_bytes, parse_json_bytes, parse_with_startup,
+    resolve,
 };
 use tq_formats::{
-    DecodeOptions, DocumentSource, FormatError, InputFormat, JsonDocumentSource, JsonEventOptions,
-    JsonLinesDocumentSource, OutputError, OutputFormat, OutputOptions, ParallelJsonObservations,
-    ParallelJsonOptions, ProbeReport, SelectedStreamObservations, StreamOptions, StreamRecord,
-    StreamSelection, ToonFraming, VecDocumentSource, decode_bytes, decode_json,
-    decode_json_event_stream, decode_toon, probe_format, probe_reader, stream_json,
-    stream_json_selected_records_parallel, stream_json_selected_records_with_control, stream_toon,
-    stream_toon_selected_records_with_control, write_results,
+    DecodeOptions, DocumentSource, FormatError, InputFormat, JsonColorPalette, JsonDocumentSource,
+    JsonEventOptions, JsonLinesDocumentSource, JsonSequenceDocumentSource, OutputError,
+    OutputFormat, OutputOptions, ProbeReport, SelectedRootSink, SelectedStreamObservations,
+    SelectionFallback, SelectionReplacement, StreamOptions, StreamRecord, StreamSelection,
+    ToonFraming, VecDocumentSource, decode_bytes, decode_json, decode_json_event_stream,
+    decode_json_events_with_options_control, decode_toon, probe_format, probe_reader, stream_json,
+    stream_toon, stream_toon_selected_records_with_control, write_results,
 };
 use tq_toon::{
-    ArrayPreparationConfig, DecodeIntoError, Decoder, DuplicateKeyPolicy, KeyFolding,
-    PreparationArena, PreparationLimits, PreparationObservations, PublicationBuffer,
+    ArrayPreparationConfig, DecodeIntoError, Decoder, DuplicateKeyPolicy, Event, EventConsumer,
+    KeyFolding, PreparationArena, PreparationLimits, PreparationObservations, PublicationBuffer,
     PublicationError, SpoolError, TranscodeConsumer, TranscodeError, WriterError,
 };
 
+use crate::runtime_spool::{
+    REPLAY_BUFFER_BYTES, RuntimeRecordId, RuntimeSpool, RuntimeSpoolConfig, RuntimeSpoolError,
+    RuntimeSpoolItem, RuntimeSpoolReplayError,
+};
 use crate::{
     CliError, ColorMode, Command, ExecutionOverride, ExitStatus, ExplainFormat,
     ExternalArgumentKind, FilterSource, PositionalArgumentKind, RunOptions, generated_help,
+    parse_args,
 };
 
 static CANCELLATION: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 const INPUT_BUFFER_BYTES: usize = 64 * 1024;
-// A rendezvous channel forces one kernel wakeup per document. This small bound
-// keeps source read-ahead and retained values fixed while allowing the decoder
-// and evaluator to run in batches.
-const REMAINING_INPUT_BUFFER_DOCUMENTS: usize = 16;
+const RUN_TEST_FILE_BYTES: u64 = 64 * 1024 * 1024;
+// The root object index owns one insertion-order Vec slot and two hash-table
+// entries (latest record and membership).  Charge a conservative node budget
+// for both tables in addition to the shared Arc/key slots before insertion.
+const ROOT_INDEX_BTREE_NODE_BYTES: usize = 512;
 
 const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
@@ -71,6 +79,10 @@ pub enum RunError {
     /// Query runtime failure.
     #[error(transparent)]
     Runtime(#[from] VmError),
+    /// A recoverable document-root runtime failure whose diagnostic was
+    /// already written while input processing continued.
+    #[error(transparent)]
+    ReportedRuntime(VmError),
     /// Result formatting or output failure.
     #[error(transparent)]
     Output(#[from] OutputError),
@@ -118,16 +130,20 @@ impl RunError {
     #[must_use]
     pub fn status(&self) -> ExitStatus {
         match self {
-            Self::Cli(CliError::Unsupported(_))
-            | Self::Unsupported(_)
-            | Self::Runtime(VmError::Unsupported { .. }) => ExitStatus::Unsupported,
+            Self::Cli(CliError::Unsupported(_)) | Self::Unsupported(_) => ExitStatus::Unsupported,
             Self::Cli(_) | Self::Io(_) | Self::IoPath { .. } => ExitStatus::Usage,
             Self::Compile(_) => ExitStatus::Compile,
             Self::Resource(_)
             | Self::ResourceSource { .. }
-            | Self::Input(FormatError::Resource(_))
-            | Self::Runtime(VmError::Resource { .. }) => ExitStatus::Resource,
-            Self::Interrupted | Self::Runtime(VmError::Interrupted) => ExitStatus::Interrupted,
+            | Self::Input(FormatError::Resource(_)) => ExitStatus::Resource,
+            Self::Interrupted => ExitStatus::Interrupted,
+            Self::Runtime(error) | Self::ReportedRuntime(error) => match error {
+                VmError::Unsupported { .. } => ExitStatus::Unsupported,
+                VmError::Resource { .. } => ExitStatus::Resource,
+                VmError::Interrupted => ExitStatus::Interrupted,
+                VmError::Halt { status, .. } => ExitStatus::Halt(*status),
+                _ => ExitStatus::Runtime,
+            },
             Self::Input(error) if error.to_string().contains("resource limit exceeded") => {
                 ExitStatus::Resource
             }
@@ -135,11 +151,9 @@ impl RunError {
                 ExitStatus::Resource
             }
             Self::Input(_) => ExitStatus::Input,
-            Self::Runtime(_)
-            | Self::Output(_)
-            | Self::Json(_)
-            | Self::RawOutput(_)
-            | Self::Cardinality(_) => ExitStatus::Runtime,
+            Self::Output(_) | Self::Json(_) | Self::RawOutput(_) | Self::Cardinality(_) => {
+                ExitStatus::Runtime
+            }
         }
     }
 
@@ -178,7 +192,10 @@ pub fn run(mut command: Command) -> ExitStatus {
         let _ = writeln!(stderr, "tq: could not install interrupt handler: {error}");
         return ExitStatus::Usage;
     }
-    let result = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
+    // `run` is the process-facing entry point.  Keep ambient capabilities
+    // enabled for `--run-tests` here, while the injectable `run_with_io`
+    // entry point remains confined by default.
+    let result = run_with_io_policy(command, &mut stdin, &mut stdout, &mut stderr, true);
     if let Err(error) = stdout.flush() {
         if error.kind() == io::ErrorKind::BrokenPipe {
             return ExitStatus::Success;
@@ -192,10 +209,57 @@ pub fn run(mut command: Command) -> ExitStatus {
             if error.is_broken_pipe() {
                 return ExitStatus::Success;
             }
-            let _ = writeln!(stderr, "tq: {error}");
+            if let RunError::Runtime(VmError::Halt {
+                status,
+                stderr: bytes,
+            }) = &error
+            {
+                if stderr.write_all(bytes).is_err() {
+                    return ExitStatus::Runtime;
+                }
+                return ExitStatus::Halt(*status);
+            }
+            if !matches!(&error, RunError::ReportedRuntime(_)) {
+                let _ = writeln!(stderr, "tq: {}", process_error_message(&error));
+            }
             error.status()
         }
     }
+}
+
+fn process_error_message(error: &RunError) -> String {
+    match error {
+        RunError::Input(FormatError::Parse {
+            format: InputFormat::JsonSequence,
+            message,
+        }) => format!("ignoring parse error: {message}"),
+        _ => error.to_string(),
+    }
+}
+
+fn is_recoverable_document_runtime_error(error: &VmError) -> bool {
+    matches!(
+        error,
+        VmError::Runtime { .. } | VmError::Raised { .. } | VmError::NumericRange { .. }
+    )
+}
+
+fn report_document_runtime_error<E: Write>(
+    stderr: &mut E,
+    error: &VmError,
+) -> Result<(), RunError> {
+    let error = RunError::Runtime(error.clone());
+    writeln!(stderr, "tq: {}", process_error_message(&error))?;
+    Ok(())
+}
+
+fn process_input_diagnostic(diagnostic: &str) -> String {
+    diagnostic
+        .strip_prefix("JsonSequence input rejected: ")
+        .map_or_else(
+            || diagnostic.to_owned(),
+            |message| format!("ignoring parse error: {message}"),
+        )
 }
 
 fn install_interrupt_handler() -> io::Result<()> {
@@ -212,6 +276,32 @@ fn cancellation() -> Option<Arc<AtomicBool>> {
     CANCELLATION.get().cloned()
 }
 
+fn flush_vm_effects<E: Write>(vm: &Vm, stderr: &mut E) -> Result<(), RunError> {
+    let effects = vm.take_effects();
+    if effects.is_empty() {
+        return Ok(());
+    }
+    stderr.write_all(&effects)?;
+    Ok(())
+}
+
+fn flush_effect_sink<E: Write>(sink: &EffectSink, stderr: &mut E) -> Result<(), RunError> {
+    sink.write_to(stderr)?;
+    Ok(())
+}
+
+enum LiveVmMessage {
+    Value {
+        value: Value,
+        acknowledged: SyncSender<()>,
+    },
+    Complete {
+        result: Result<(), VmError>,
+        observations: VmObservations,
+        trace: Vec<String>,
+    },
+}
+
 /// Runs a parsed command with injectable stdio for compatibility tests.
 ///
 /// # Errors
@@ -222,6 +312,27 @@ pub fn run_with_io<R: Read + Send, W: Write, E: Write>(
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
+) -> Result<ExitStatus, RunError> {
+    run_with_io_policy(command, stdin, stdout, stderr, false)
+}
+
+fn run_with_io_policy<R: Read + Send, W: Write, E: Write>(
+    command: Command,
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+    process_ambient: bool,
+) -> Result<ExitStatus, RunError> {
+    run_with_io_policy_capture(command, stdin, stdout, stderr, process_ambient, None)
+}
+
+fn run_with_io_policy_capture<R: Read + Send, W: Write, E: Write>(
+    command: Command,
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+    process_ambient: bool,
+    capture: Option<RunTestCaptureHandle>,
 ) -> Result<ExitStatus, RunError> {
     match command {
         Command::Help => {
@@ -257,7 +368,838 @@ pub fn run_with_io<R: Read + Send, W: Write, E: Write>(
             )?;
             Ok(ExitStatus::Success)
         }
-        Command::Run(options) => run_filter(&options, stdin, stdout, stderr),
+        Command::RunTests(path) => {
+            run_tests(path.as_deref(), stdin, stdout, stderr, process_ambient)
+        }
+        Command::Run(options) => run_filter(&options, stdin, stdout, stderr, capture),
+    }
+}
+
+struct RunTestCase {
+    line: usize,
+    filter: String,
+    input: String,
+    expected: Vec<String>,
+    compile_failure: bool,
+}
+
+struct RunTestOutcome {
+    status: ExitStatus,
+    diagnostic: String,
+    structured: Option<Box<Diagnostic>>,
+    output: Vec<u8>,
+    typed_capture: Option<RunTestCaptureSnapshot>,
+}
+
+#[derive(Clone)]
+struct RunTestCaptureSnapshot {
+    values: Vec<Value>,
+    overflowed: bool,
+}
+
+struct RunTestCapture {
+    values: Vec<Value>,
+    retained_bytes: usize,
+    maximum_values: usize,
+    maximum_bytes: usize,
+    overflowed: bool,
+}
+
+type RunTestCaptureHandle = Arc<Mutex<RunTestCapture>>;
+
+impl RunTestCapture {
+    fn new(expected_values: usize) -> Self {
+        Self {
+            values: Vec::new(),
+            retained_bytes: 0,
+            maximum_values: expected_values.saturating_add(1),
+            maximum_bytes: usize::try_from(RUN_TEST_FILE_BYTES)
+                .expect("run-tests file cap fits in usize"),
+            overflowed: false,
+        }
+    }
+
+    fn record(&mut self, value: &Value) {
+        if self.overflowed {
+            return;
+        }
+        let estimated = estimate_capture_value_bytes(value);
+        if self.values.len() >= self.maximum_values
+            || self.retained_bytes.saturating_add(estimated) > self.maximum_bytes
+            || self.values.try_reserve_exact(1).is_err()
+        {
+            self.overflowed = true;
+            return;
+        }
+        self.retained_bytes = self.retained_bytes.saturating_add(estimated);
+        self.values.push(value.clone());
+    }
+
+    fn snapshot(&self) -> RunTestCaptureSnapshot {
+        RunTestCaptureSnapshot {
+            values: self.values.clone(),
+            overflowed: self.overflowed,
+        }
+    }
+}
+
+fn run_tests<R: Read, W: Write, E: Write>(
+    path: Option<&Path>,
+    stdin: &mut R,
+    stdout: &mut W,
+    _stderr: &mut E,
+    process_ambient: bool,
+) -> Result<ExitStatus, RunError> {
+    let bytes = if let Some(path) = path.filter(|path| *path != Path::new("-")) {
+        read_limited(
+            open_path(path)?,
+            RUN_TEST_FILE_BYTES,
+            &path.display().to_string(),
+        )?
+    } else {
+        read_limited(&mut *stdin, RUN_TEST_FILE_BYTES, "<run-tests>")?
+    };
+    let source = String::from_utf8(bytes)
+        .map_err(|_| RunError::Cli(CliError::Usage("test file must be UTF-8".to_owned())))?;
+    let (cases, mut malformed) = parse_run_test_cases(&source);
+    let mut passed = 0_usize;
+    for (number, case) in cases.iter().enumerate() {
+        writeln!(
+            stdout,
+            "Test #{}: '{}' at line number {}",
+            number + 1,
+            case.filter,
+            case.line
+        )?;
+        let outcome = run_test_case(case, process_ambient)?;
+        let RunTestOutcome {
+            status,
+            diagnostic,
+            structured,
+            output,
+            typed_capture,
+        } = outcome;
+        let good = if case.compile_failure {
+            status == ExitStatus::Compile
+                && compile_diagnostic_matches(
+                    &diagnostic,
+                    structured.as_deref(),
+                    &case.expected,
+                    &case.filter,
+                )
+        } else {
+            status == ExitStatus::Success
+                && run_test_output_matches(&output, &case.expected, typed_capture.as_ref())
+        };
+        if good {
+            passed = passed.saturating_add(1);
+        } else if case.compile_failure {
+            malformed = malformed.saturating_add(1);
+            if status == ExitStatus::Compile {
+                let displayed_diagnostic =
+                    compile_diagnostic_report(&diagnostic, structured.as_deref(), &case.filter);
+                writeln!(
+                    stdout,
+                    "*** Erroneous program failed with '{}', but expected '{}' at line number {}: {}",
+                    displayed_diagnostic,
+                    case.expected.join("\\n"),
+                    case.line.saturating_add(1),
+                    case.filter
+                )?;
+            } else {
+                writeln!(
+                    stdout,
+                    "*** Test program did not fail to compile at line {}: {}",
+                    case.line, case.filter
+                )?;
+            }
+        } else {
+            writeln!(
+                stdout,
+                "*** Expected {}, but got {} for test at line number {}: {}",
+                case.expected.join("\\n"),
+                String::from_utf8_lossy(&output).trim_end(),
+                case.line,
+                case.filter
+            )?;
+        }
+    }
+    writeln!(
+        stdout,
+        "{} of {} tests passed ({} malformed, 0 skipped)",
+        passed,
+        cases.len(),
+        malformed
+    )?;
+    let self_checks_passed = passed == cases.len() && malformed == 0 && run_tests_self_checks();
+    if self_checks_passed {
+        writeln!(stdout, "Test jq_state: .[]")?;
+        writeln!(
+            stdout,
+            "Test jq_state: .[] | if .%2 == 0 then halt_error else . end"
+        )?;
+    }
+    if self_checks_passed {
+        Ok(ExitStatus::Success)
+    } else {
+        Ok(ExitStatus::FalseOrNull)
+    }
+}
+
+fn compile_diagnostic_report(
+    diagnostic: &str,
+    structured: Option<&Diagnostic>,
+    filter: &str,
+) -> String {
+    render_jq_compile_diagnostic(filter, diagnostic, structured)
+        .and_then(|rendered| rendered.lines().next().map(str::to_owned))
+        .unwrap_or_else(|| diagnostic.to_owned())
+}
+
+fn run_test_case(case: &RunTestCase, process_ambient: bool) -> Result<RunTestOutcome, RunError> {
+    let arguments = vec![
+        "--input-format".to_owned(),
+        "json".to_owned(),
+        "--output-format".to_owned(),
+        "json".to_owned(),
+        "--compact-output".to_owned(),
+        case.filter.clone(),
+    ];
+    let mut command = parse_args(arguments)?;
+    if process_ambient && let Command::Run(options) = &mut command {
+        // `--run-tests` is a process-facing command. Its test programs
+        // observe the same ambient environment and platform metadata as
+        // an ordinary process invocation; embedded `run_with_io` callers
+        // retain deny-by-default policy.
+        options.allow_environment = true;
+        options.allow_platform = true;
+    }
+    let input = if case.input.is_empty() {
+        b"null\n".to_vec()
+    } else {
+        format!("{}\n", case.input).into_bytes()
+    };
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+    let mut input_reader = input.as_slice();
+    let capture = Arc::new(Mutex::new(RunTestCapture::new(case.expected.len())));
+    let result = run_with_io_policy_capture(
+        command,
+        &mut input_reader,
+        &mut output,
+        &mut error,
+        false,
+        Some(Arc::clone(&capture)),
+    );
+    let (status, diagnostic, structured) = match result {
+        Ok(status) => (status, String::new(), None),
+        Err(RunError::Compile(error)) => {
+            let diagnostic = format!("query compilation failed: {error}");
+            (ExitStatus::Compile, diagnostic, Some(error))
+        }
+        Err(error) => (error.status(), error.to_string(), None),
+    };
+    Ok(RunTestOutcome {
+        status,
+        diagnostic,
+        structured,
+        output,
+        typed_capture: capture.lock().ok().map(|capture| capture.snapshot()),
+    })
+}
+
+fn run_tests_self_checks() -> bool {
+    let first = run_tests_self_check(".[]", b"[]\n");
+    let second = run_tests_self_check(".[] | if .%2 == 0 then halt_error else . end", b"[1,2,3]\n");
+    first.0 == ExitStatus::Success
+        && first.1.is_empty()
+        && second.0 == ExitStatus::Halt(5)
+        && second.1 == b"1\n"
+}
+
+fn run_tests_self_check(filter: &str, input: &[u8]) -> (ExitStatus, Vec<u8>) {
+    let arguments = vec![
+        "--input-format".to_owned(),
+        "json".to_owned(),
+        "--output-format".to_owned(),
+        "json".to_owned(),
+        "--compact-output".to_owned(),
+        filter.to_owned(),
+    ];
+    let Ok(command) = parse_args(arguments) else {
+        return (ExitStatus::Compile, Vec::new());
+    };
+    let mut input_reader = input;
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+    let status = run_with_io(command, &mut input_reader, &mut output, &mut error)
+        .unwrap_or_else(|failure| failure.status());
+    (status, output)
+}
+
+fn parse_run_test_cases(source: &str) -> (Vec<RunTestCase>, usize) {
+    let mut cases = Vec::new();
+    let mut malformed = 0_usize;
+    let mut block: Vec<(usize, &str)> = Vec::new();
+    let mut finish = |block: &mut Vec<(usize, &str)>| {
+        if block.is_empty() {
+            return;
+        }
+        let (_, first) = block[0];
+        let compile_failure = first == "%%FAIL";
+        let filter_offset = usize::from(compile_failure);
+        // jq's compile-failure form is `%%FAIL`, filter, expected diagnostic;
+        // it deliberately has no input line because compilation stops first.
+        let required = if compile_failure {
+            filter_offset + 2
+        } else {
+            2
+        };
+        if block.len() < required {
+            malformed = malformed.saturating_add(1);
+        } else {
+            cases.push(RunTestCase {
+                line: block[filter_offset].0,
+                filter: block[filter_offset].1.to_owned(),
+                input: if compile_failure {
+                    String::new()
+                } else {
+                    block[1].1.to_owned()
+                },
+                expected: block[if compile_failure {
+                    filter_offset + 1
+                } else {
+                    2
+                }..]
+                    .iter()
+                    .map(|(_, value)| (*value).to_owned())
+                    .collect(),
+                compile_failure,
+            });
+        }
+        block.clear();
+    };
+    for (index, line) in source.lines().enumerate() {
+        let line_number = index + 1;
+        if line.trim().is_empty() {
+            finish(&mut block);
+        } else if !line.trim_start().starts_with('#') {
+            block.push((line_number, line));
+        }
+    }
+    finish(&mut block);
+    (cases, malformed)
+}
+
+fn compile_diagnostic_matches(
+    diagnostic: &str,
+    structured: Option<&Diagnostic>,
+    expected: &[String],
+    filter: &str,
+) -> bool {
+    let actual = diagnostic.lines().collect::<Vec<_>>();
+    if actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| *actual == expected)
+    {
+        return true;
+    }
+
+    if !expected
+        .first()
+        .is_some_and(|line| line.starts_with("jq: error: "))
+    {
+        return false;
+    }
+    let Some(rendered) = render_jq_compile_diagnostic(filter, diagnostic, structured) else {
+        return false;
+    };
+    rendered.lines().eq(expected.iter().map(String::as_str))
+}
+
+struct JqDiagnosticParts<'a> {
+    code: &'a str,
+    message: &'a str,
+    label_start: Option<usize>,
+    label_end: Option<usize>,
+    if_context: Option<(usize, usize)>,
+    if_condition: Option<(usize, usize)>,
+    object_value: Option<(usize, usize)>,
+    construct_context: Option<(usize, usize)>,
+}
+
+fn jq_diagnostic_parts<'a>(
+    diagnostic: &'a str,
+    structured: Option<&'a Diagnostic>,
+) -> Option<JqDiagnosticParts<'a>> {
+    if let Some(diagnostic) = structured {
+        let primary = diagnostic.labels.iter().find(|label| label.primary);
+        let span_for = |message| {
+            diagnostic
+                .labels
+                .iter()
+                .find(|label| !label.primary && label.message == message)
+                .and_then(label_byte_span)
+        };
+        Some(JqDiagnosticParts {
+            code: diagnostic.code.as_str(),
+            message: diagnostic.message.as_str(),
+            label_start: primary.and_then(|label| usize::try_from(label.span.start).ok()),
+            label_end: primary.and_then(|label| usize::try_from(label.span.end).ok()),
+            if_context: span_for("unterminated if expression"),
+            if_condition: span_for("if condition"),
+            object_value: span_for("object value"),
+            construct_context: span_for("try expression")
+                .or_else(|| span_for("definition context"))
+                .or_else(|| span_for("label context")),
+        })
+    } else {
+        let diagnostic = diagnostic.strip_prefix("query compilation failed: ")?;
+        let (code, message) = diagnostic.split_once(": ")?;
+        Some(JqDiagnosticParts {
+            code,
+            message,
+            label_start: None,
+            label_end: None,
+            if_context: None,
+            if_condition: None,
+            object_value: None,
+            construct_context: None,
+        })
+    }
+}
+
+fn render_jq_compile_diagnostic(
+    filter: &str,
+    diagnostic: &str,
+    structured: Option<&Diagnostic>,
+) -> Option<String> {
+    let parts = jq_diagnostic_parts(diagnostic, structured)?;
+    let (summary, needle) = jq_diagnostic_summary(filter, &parts)?;
+    let JqDiagnosticParts {
+        code,
+        message,
+        label_start,
+        label_end,
+        if_context,
+        if_condition,
+        object_value,
+        construct_context,
+    } = parts;
+    let span = JqDiagnosticSpan {
+        filter,
+        code,
+        message,
+        label_start,
+        label_end,
+        needle: &needle,
+        if_context,
+        if_condition,
+        object_value,
+        construct_context,
+    };
+    let (start, end, byte_width) = jq_diagnostic_span(&span)?;
+    let line_start = filter[..start].rfind('\n').map_or(0, |index| index + 1);
+    let line_end = filter[start..]
+        .find('\n')
+        .map_or(filter.len(), |offset| start + offset);
+    let line = filter[..line_start]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1;
+    let column = filter[line_start..start].chars().count() + 1;
+    let width = if byte_width {
+        end.min(line_end).saturating_sub(start).max(1)
+    } else {
+        filter[start..end.min(line_end)].chars().count().max(1)
+    };
+    let source_line = &filter[line_start..line_end];
+    let caret = format!(
+        "{}{}",
+        " ".repeat(column.saturating_sub(1)),
+        "^".repeat(width)
+    );
+    Some(format!(
+        "jq: error: {summary} at <top-level>, line {line}, column {column}:\n    {source_line}\n    {caret}"
+    ))
+}
+
+fn jq_diagnostic_summary(filter: &str, parts: &JqDiagnosticParts<'_>) -> Option<(String, String)> {
+    let JqDiagnosticParts {
+        code,
+        message,
+        label_start,
+        label_end,
+        if_context,
+        if_condition,
+        object_value,
+        ..
+    } = parts;
+    let (summary, needle) = if *code == "TQ-RESOLVE-VARIABLE-001" {
+        let variable = message.strip_prefix("unknown variable ")?;
+        (format!("{variable} is not defined"), variable.to_owned())
+    } else if *code == "TQ-RESOLVE-BUILTIN-001" {
+        let filter = message.strip_prefix("unknown filter ")?;
+        let name = filter.split_once('/').map_or(filter, |(name, _)| name);
+        (format!("{filter} is not defined"), name.to_owned())
+    } else if *code == "TQ-LEX-STRING-001" && *message == "invalid string escape" {
+        let slash = filter.find('\\').unwrap_or(0);
+        let column = filter[..slash].chars().count() + 3;
+        (
+            format!("Invalid escape at line 1, column {column} (while parsing '{filter}')"),
+            String::new(),
+        )
+    } else if object_value.is_some() {
+        let (start, end) = object_value.expect("object context was checked");
+        (
+            jq_unexpected_literal_summary(filter, start, Some(end)),
+            String::new(),
+        )
+    } else if *code == "TQ-PARSE-EXPRESSION-001" {
+        if if_context.is_some() {
+            (
+                "Possibly unterminated 'if' statement".to_owned(),
+                String::new(),
+            )
+        } else {
+            match (*label_start).filter(|start| *start < filter.len()) {
+                Some(start) => (
+                    jq_unexpected_token_summary(filter, start, *label_end),
+                    String::new(),
+                ),
+                None => (
+                    "syntax error, unexpected end of file".to_owned(),
+                    String::new(),
+                ),
+            }
+        }
+    } else if *code == "TQ-PARSE-UNEXPECTED-001"
+        && *message == "expected 'then'"
+        && (*label_start).is_some_and(|start| start < filter.len())
+    {
+        let start = label_start.expect("token label was checked");
+        (
+            format!(
+                "syntax error, unexpected {}, expecting then or '|' or ','",
+                jq_unexpected_word_summary(filter, start, *label_end)
+            ),
+            String::new(),
+        )
+    } else if *code == "TQ-PARSE-UNEXPECTED-001"
+        && (*label_start).is_none_or(|start| start >= filter.len())
+    {
+        if if_context.is_some() && *message != "expected 'then'" {
+            (
+                "Possibly unterminated 'if' statement".to_owned(),
+                String::new(),
+            )
+        } else if *message == "expected 'then'" && if_condition.is_some() {
+            (
+                "syntax error, unexpected end of file, expecting then or '|' or ','".to_owned(),
+                String::new(),
+            )
+        } else {
+            (jq_unexpected_eof_summary(message)?, String::new())
+        }
+    } else {
+        jq_simple_diagnostic_summary(filter, code, message, *label_start, *label_end)?
+    };
+    Some((summary, needle))
+}
+
+fn jq_simple_diagnostic_summary(
+    filter: &str,
+    code: &str,
+    message: &str,
+    label_start: Option<usize>,
+    label_end: Option<usize>,
+) -> Option<(String, String)> {
+    if code == "TQ-LEX-FORMAT-001" {
+        return Some((
+            format!(
+                "syntax error, unexpected INVALID_CHARACTER{}",
+                if label_start == Some(0) {
+                    ", expecting end of file"
+                } else {
+                    ""
+                }
+            ),
+            String::new(),
+        ));
+    }
+    if code == "TQ-LEX-STRING-001" && message == "unterminated string" {
+        return Some((
+            "syntax error, unexpected end of file, expecting QQSTRING_TEXT or QQSTRING_INTERP_START or QQSTRING_END".to_owned(),
+            String::new(),
+        ));
+    }
+    if let Some(start) = label_start.filter(|start| *start < filter.len()) {
+        let expected = match code {
+            "TQ-PARSE-DEF-PARAMETER-001" => Some("IDENT or BINDING"),
+            "TQ-PARSE-DEF-001" => Some("IDENT"),
+            "TQ-PARSE-LABEL-001" => Some("BINDING"),
+            _ => None,
+        };
+        if let Some(expected) = expected {
+            return Some((
+                format!(
+                    "syntax error, unexpected {}, expecting {expected}",
+                    jq_parser_token_name(filter, start, label_end)
+                ),
+                String::new(),
+            ));
+        }
+    }
+    if code == "TQ-LEX-VARIABLE-001" {
+        return Some((
+            "syntax error, unexpected end of file, expecting '$'".to_owned(),
+            String::new(),
+        ));
+    }
+    if label_start.is_none_or(|start| start >= filter.len()) {
+        let summary = match code {
+            "TQ-PARSE-OBJECT-001" => "syntax error, unexpected end of file",
+            "TQ-PARSE-DEF-PARAMETER-001" => {
+                "syntax error, unexpected end of file, expecting IDENT or BINDING"
+            }
+            "TQ-PARSE-DEF-001" => "syntax error, unexpected end of file, expecting IDENT",
+            "TQ-PARSE-LABEL-001" => "syntax error, unexpected end of file, expecting BINDING",
+            _ => return None,
+        };
+        return Some((summary.to_owned(), String::new()));
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+struct JqDiagnosticSpan<'a> {
+    filter: &'a str,
+    code: &'a str,
+    message: &'a str,
+    label_start: Option<usize>,
+    label_end: Option<usize>,
+    needle: &'a str,
+    if_context: Option<(usize, usize)>,
+    if_condition: Option<(usize, usize)>,
+    object_value: Option<(usize, usize)>,
+    construct_context: Option<(usize, usize)>,
+}
+
+fn jq_diagnostic_span(span: &JqDiagnosticSpan<'_>) -> Option<(usize, usize, bool)> {
+    let JqDiagnosticSpan {
+        filter,
+        code,
+        message,
+        label_start,
+        label_end,
+        needle,
+        if_context,
+        if_condition,
+        object_value,
+        construct_context,
+    } = *span;
+    let byte_width = code == "TQ-LEX-STRING-001"
+        && matches!(message, "unterminated string" | "invalid string escape");
+    let span_override = if if_context.is_some()
+        && !(code == "TQ-PARSE-UNEXPECTED-001" && message == "expected 'then'")
+    {
+        if_context
+    } else if code == "TQ-PARSE-UNEXPECTED-001"
+        && message == "expected 'then'"
+        && if_condition.is_some()
+        && label_start.is_none_or(|start| start >= filter.len())
+    {
+        if_condition
+    } else if object_value.is_some() {
+        object_value
+    } else if construct_context.is_some() && label_start.is_none_or(|start| start >= filter.len()) {
+        construct_context
+    } else if byte_width {
+        let start = label_start.unwrap_or(0).min(filter.len());
+        let content_start = if filter.as_bytes().get(start) == Some(&b'"') {
+            start.saturating_add(1)
+        } else {
+            start
+        };
+        if message == "invalid string escape" {
+            let slash = filter[content_start..]
+                .find('\\')
+                .map_or(content_start, |offset| content_start + offset);
+            Some((slash, slash.saturating_add(2).min(filter.len())))
+        } else {
+            Some((
+                content_start,
+                label_end
+                    .unwrap_or(filter.len())
+                    .min(filter.len())
+                    .max(content_start),
+            ))
+        }
+    } else {
+        None
+    };
+    let (start, end) = if let Some((start, end)) = span_override {
+        (start, end)
+    } else if needle.is_empty() {
+        let start = label_start
+            .filter(|start| *start < filter.len())
+            .unwrap_or_else(|| jq_eof_token_span(filter).0);
+        (
+            start,
+            label_end.unwrap_or_else(|| jq_eof_token_span(filter).1),
+        )
+    } else {
+        let hint = label_start.unwrap_or(0).min(filter.len());
+        let start = filter[hint..]
+            .find(needle)
+            .map_or_else(|| filter.find(needle), |offset| Some(hint + offset))?;
+        (start, start.saturating_add(needle.len()))
+    };
+    Some((start, end, byte_width))
+}
+
+fn label_byte_span(label: &Label) -> Option<(usize, usize)> {
+    Some((
+        usize::try_from(label.span.start).ok()?,
+        usize::try_from(label.span.end).ok()?,
+    ))
+}
+
+fn jq_unexpected_token_summary(filter: &str, start: usize, end: Option<usize>) -> String {
+    let end = end
+        .unwrap_or_else(|| start.saturating_add(1))
+        .min(filter.len());
+    let token = filter[start..end].chars().next().unwrap_or('\0');
+    let token = match token {
+        ']' | '}' | ')' => "INVALID_CHARACTER".to_owned(),
+        character => format!("'{character}'"),
+    };
+    let expectation = if filter[..start].trim().is_empty() {
+        ", expecting end of file"
+    } else {
+        ""
+    };
+    format!("syntax error, unexpected {token}{expectation}")
+}
+
+fn jq_unexpected_literal_summary(filter: &str, start: usize, end: Option<usize>) -> String {
+    let end = end
+        .unwrap_or_else(|| start.saturating_add(1))
+        .min(filter.len());
+    let token = filter[start..end].chars().next().unwrap_or('\0');
+    format!("syntax error, unexpected '{token}'")
+}
+
+fn jq_unexpected_word_summary(filter: &str, start: usize, end: Option<usize>) -> String {
+    let end = end
+        .unwrap_or_else(|| start.saturating_add(1))
+        .min(filter.len());
+    let token = &filter[start..end];
+    if token.chars().all(char::is_alphanumeric) {
+        token.to_owned()
+    } else {
+        jq_unexpected_literal_summary(filter, start, Some(end))
+            .trim_start_matches("syntax error, unexpected ")
+            .to_owned()
+    }
+}
+
+fn jq_parser_token_name(filter: &str, start: usize, end: Option<usize>) -> String {
+    let end = end
+        .unwrap_or_else(|| start.saturating_add(1))
+        .min(filter.len());
+    let token = &filter[start..end];
+    if !token.is_empty()
+        && token.chars().all(|character| {
+            character.is_ascii_digit() || matches!(character, '.' | '-' | '+' | 'e' | 'E')
+        })
+    {
+        "LITERAL".to_owned()
+    } else if token.chars().all(char::is_alphanumeric) {
+        "IDENT".to_owned()
+    } else {
+        jq_unexpected_word_summary(filter, start, Some(end))
+    }
+}
+
+fn jq_eof_token_span(filter: &str) -> (usize, usize) {
+    let Some((last_start, last)) = filter.char_indices().next_back() else {
+        return (0, 1);
+    };
+    if !(last.is_alphanumeric() || matches!(last, '_' | '$')) {
+        return (last_start, last_start + last.len_utf8());
+    }
+    let mut start = last_start;
+    for (index, character) in filter[..last_start].char_indices().rev() {
+        if character.is_alphanumeric() || matches!(character, '_' | '$') {
+            start = index;
+        } else {
+            break;
+        }
+    }
+    (start, filter.len())
+}
+
+fn jq_unexpected_eof_summary(message: &str) -> Option<String> {
+    let expectation = match message {
+        "expected ']' after array constructor" => "'|' or ',' or ']'".to_owned(),
+        "expected '}' after object constructor" => "'}'".to_owned(),
+        "expected ')' after grouped expression" | "expected ')' after computed object key" => {
+            "'|' or ',' or ')'".to_owned()
+        }
+        "expected ')' after function arguments" => "';' or ')'".to_owned(),
+        "expected ')' after string interpolation" => "QQSTRING_INTERP_END or '|' or ','".to_owned(),
+        "expected 'then'" => "then or '|' or ','".to_owned(),
+        "expected '|' after label variable" => "'|'".to_owned(),
+        message => message.strip_prefix("expected ")?.to_owned(),
+    };
+    Some(format!(
+        "syntax error, unexpected end of file, expecting {expectation}"
+    ))
+}
+
+fn run_test_output_matches(
+    actual: &[u8],
+    expected: &[String],
+    typed_capture: Option<&RunTestCaptureSnapshot>,
+) -> bool {
+    let Some(capture) = typed_capture else {
+        return false;
+    };
+    if capture.overflowed {
+        return false;
+    }
+    let actual_lines = actual
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if actual_lines.len() != expected.len() {
+        return false;
+    }
+    let parsed_actual = actual_lines
+        .iter()
+        .map(|line| parse_json_bytes(line, JsonInputOptions::default()))
+        .collect::<Result<Vec<_>, _>>();
+    let parsed_expected = expected
+        .iter()
+        .map(|line| parse_json_bytes(line.as_bytes(), JsonInputOptions::default()))
+        .collect::<Result<Vec<_>, _>>();
+    let expected_is_json = parsed_expected.is_ok();
+    match (parsed_actual, parsed_expected) {
+        (Ok(actual), Ok(expected)) => {
+            if capture.values != expected {
+                return false;
+            }
+            actual == expected
+        }
+        _ if expected_is_json => false,
+        _ => actual_lines
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| actual == &expected.as_bytes()),
     }
 }
 
@@ -270,10 +1212,11 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
+    capture: Option<RunTestCaptureHandle>,
 ) -> Result<ExitStatus, RunError> {
     validate_capability_policy(options)?;
     validate_stream_input_formats(options)?;
-    let (query_name, query) = load_filter(options)?;
+    let (query_name, query, startup) = load_filter(options)?;
     let variables = parse_external_arguments(options)?;
     let resolve_options = ResolveOptions {
         variables: variables
@@ -281,16 +1224,35 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
             .filter(|name| !name.starts_with("__tq_"))
             .cloned()
             .collect::<BTreeSet<_>>(),
-        module_roots: options.module_paths.clone(),
+        module_roots: module_roots(options, &query_name),
         module_limit: options.limits.depth,
         module_bytes: usize::try_from(options.limits.input_bytes)
             .unwrap_or(usize::MAX)
             .min(ResolveOptions::default().module_bytes),
     };
-    let parsed = parse_bytes(&query_name, &query).map_err(RunError::Compile)?;
+    let parsed = startup
+        .map_or_else(
+            || parse_bytes(&query_name, &query),
+            |(startup_name, startup)| {
+                parse_with_startup(&query_name, &query, &startup_name, &startup)
+            },
+        )
+        .map_err(RunError::Compile)?;
     let resolved = resolve(parsed, &resolve_options).map_err(RunError::Compile)?;
-    let automatic_mode =
-        !options.stream && !options.slurp && !options.raw_input && !options.null_input;
+    let query_capabilities = analyze_with_context(
+        resolved.clone(),
+        AnalysisContext {
+            automatic_streaming: true,
+            ..AnalysisContext::default()
+        },
+    )
+    .capabilities();
+    let automatic_mode = !options.stream
+        && !options.slurp
+        && !options.raw_input
+        && !options.null_input
+        && !query_capabilities.whole_input
+        && !json_sequence_input_requested(options);
     if automatic_mode && options.input_format == InputFormat::Auto {
         if options.proxy_on_error {
             let file_events = auto_file_events_available(options)?;
@@ -311,6 +1273,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
                     &mut bytes.as_slice(),
                     stdout,
                     stderr,
+                    capture.clone(),
                 );
             }
             return run_resolved_filter(
@@ -323,6 +1286,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
                 stdin,
                 stdout,
                 stderr,
+                capture.clone(),
             );
         }
         let file_events = auto_file_events_available(options)?;
@@ -346,6 +1310,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
                 &mut replay,
                 stdout,
                 stderr,
+                capture.clone(),
             );
         }
         return run_resolved_filter(
@@ -358,6 +1323,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
             stdin,
             stdout,
             stderr,
+            capture,
         );
     }
     run_resolved_filter(
@@ -370,13 +1336,16 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
                 InputFormat::Json | InputFormat::JsonLines | InputFormat::Toon
             ),
         match options.input_format {
-            InputFormat::Json | InputFormat::Toon => Some(options.input_format),
+            InputFormat::Json | InputFormat::Toon if !json_sequence_input_requested(options) => {
+                Some(options.input_format)
+            }
             _ => None,
         },
         &[],
         stdin,
         stdout,
         stderr,
+        capture,
     )
 }
 
@@ -492,6 +1461,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
+    capture: Option<RunTestCaptureHandle>,
 ) -> Result<ExitStatus, RunError> {
     let analyzed = analyze_with_context(
         resolved,
@@ -520,6 +1490,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             Err(reason) => analysis.transcode_rejection = Some(reason.to_owned()),
         }
     }
+    let stream_whole_input = options.stream && analyzed.capabilities().whole_input;
     if let Some(explain) = options.explain {
         write_explain(explain, options, &analyzed, &analysis, stderr)?;
     }
@@ -533,38 +1504,90 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
         return run_transcode_filter(options, &plan, &analysis, detections, stdin, stdout);
     }
 
+    if stream_whole_input {
+        let plan = program.document_plan();
+        return run_stream_whole_input_filter(
+            options,
+            &plan,
+            variables,
+            stdin,
+            stdout,
+            stderr,
+            capture.clone(),
+        );
+    }
     if options.stream {
         let plan = program.event_plan().map_err(RunError::Compile)?;
-        return run_event_filter(options, &plan, variables, &analysis, stdin, stdout, stderr);
+        return run_event_filter(
+            options,
+            &plan,
+            variables,
+            &analysis,
+            stdin,
+            stdout,
+            stderr,
+            capture.clone(),
+        );
     }
     if matches!(
         analysis.selected_plan,
         PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking
     ) {
         return match program.automatic_plan().map_err(RunError::Compile)? {
-            AutomaticPlan::Events(plan) => {
-                run_automatic_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
-            }
-            AutomaticPlan::Subtree(plan) => {
-                run_automatic_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
-            }
-            AutomaticPlan::HybridBlocking(plan) => {
-                run_hybrid_filter(options, &plan, variables, &analysis, stdin, stdout, stderr)
-            }
+            AutomaticPlan::Events(plan) => run_automatic_filter(
+                options,
+                &plan,
+                variables,
+                &analysis,
+                stdin,
+                stdout,
+                stderr,
+                capture.clone(),
+            ),
+            AutomaticPlan::Subtree(plan) => run_automatic_filter(
+                options,
+                &plan,
+                variables,
+                &analysis,
+                stdin,
+                stdout,
+                stderr,
+                capture.clone(),
+            ),
+            AutomaticPlan::HybridBlocking(plan) => run_hybrid_filter(
+                options,
+                &plan,
+                variables,
+                &analysis,
+                stdin,
+                stdout,
+                stderr,
+                capture.clone(),
+            ),
             _ => unreachable!("automatic selection returns an automatic typed plan"),
         };
     }
     let plan = program.document_plan();
 
-    let mut result_output = ResultOutput::new(stdout, options);
+    let mut result_output = ResultOutput::with_capture(stdout, options, capture);
     let mut result_count = 0_usize;
     let mut last = None;
     let mut observations = Vec::new();
     let mut runtime_error = None;
+    let continue_document_roots = !options.null_input && !options.slurp;
     {
         let mut evaluate = |input, input_cursor: Option<InputCursor>| -> Result<bool, RunError> {
-            let input = match input {
-                StructuredInput::Value(input) => input,
+            // A runtime error belongs to the current input root.  A later
+            // successful root clears it, while a recoverable error is
+            // reported immediately and lets the source continue.
+            runtime_error = None;
+            let (input, input_cursor) = match input {
+                StructuredInput::Value(input) => (input, input_cursor),
+                StructuredInput::Document(document) => {
+                    let cursor = InputCursor::from_input_values(vec![document.clone()]);
+                    let _ = cursor.next_value()?;
+                    (document.value, Some(cursor))
+                }
                 StructuredInput::Proxy(bytes) => {
                     result_output.proxy(&bytes)?;
                     return Ok(true);
@@ -576,30 +1599,146 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             if let Some(cursor) = input_cursor {
                 vm = vm.with_input_cursor(cursor);
             }
-            if let Some(flag) = cancellation() {
-                vm = vm.with_cancellation(flag);
-            }
-            loop {
-                match vm.next_result() {
-                    Ok(Some(value)) => {
-                        last = Some(value.clone());
-                        result_output.emit(&value)?;
-                        result_count = result_count.saturating_add(1);
+            if options.unbuffered {
+                let worker_stop =
+                    cancellation().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+                vm = vm.with_cancellation(Arc::clone(&worker_stop));
+                let sink = vm.effect_sink();
+                vm = vm.with_effect_acknowledgements();
+                let (sender, receiver) = sync_channel(0);
+                let (vm_result, vm_observations, vm_trace) = thread::scope(|scope| {
+                    scope.spawn(move || {
+                        let result = loop {
+                            match vm.next_result() {
+                                Ok(Some(value)) => {
+                                    let (ready, acknowledged) = sync_channel(0);
+                                    if sender
+                                        .send(LiveVmMessage::Value {
+                                            value,
+                                            acknowledged: ready,
+                                        })
+                                        .is_err()
+                                    {
+                                        return;
+                                    }
+                                    if acknowledged.recv().is_err() {
+                                        return;
+                                    }
+                                }
+                                Ok(None) => break Ok(()),
+                                Err(error) => break Err(error),
+                            }
+                        };
+                        let _ = sender.send(LiveVmMessage::Complete {
+                            result,
+                            observations: vm.observations(),
+                            trace: vm.trace().to_vec(),
+                        });
+                    });
+                    let mut worker_result = Ok(());
+                    let mut vm_observations = VmObservations::default();
+                    let mut vm_trace = Vec::new();
+                    let mut complete = false;
+                    while !complete {
+                        if let Err(error) = flush_effect_sink(&sink, stderr) {
+                            worker_stop.store(true, Ordering::Relaxed);
+                            sink.cancel();
+                            drop(receiver);
+                            return Err(error);
+                        }
+                        match receiver.recv_timeout(Duration::from_millis(5)) {
+                            Ok(LiveVmMessage::Value {
+                                value,
+                                acknowledged,
+                            }) => {
+                                last = Some(value.clone());
+                                if let Err(error) = result_output.emit(&value) {
+                                    worker_stop.store(true, Ordering::Relaxed);
+                                    sink.cancel();
+                                    drop(receiver);
+                                    return Err(error);
+                                }
+                                result_count = result_count.saturating_add(1);
+                                if acknowledged.send(()).is_err() {
+                                    worker_stop.store(true, Ordering::Relaxed);
+                                    sink.cancel();
+                                    drop(receiver);
+                                    return Err(RunError::Interrupted);
+                                }
+                            }
+                            Ok(LiveVmMessage::Complete {
+                                result: completed,
+                                observations,
+                                trace,
+                            }) => {
+                                worker_result = completed;
+                                vm_observations = observations;
+                                vm_trace = trace;
+                                complete = true;
+                            }
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                complete = true;
+                            }
+                        }
                     }
-                    Ok(None) => break,
-                    Err(error) => {
-                        runtime_error = Some(error);
-                        break;
+                    if let Err(error) = flush_effect_sink(&sink, stderr) {
+                        worker_stop.store(true, Ordering::Relaxed);
+                        sink.cancel();
+                        drop(receiver);
+                        return Err(error);
+                    }
+                    Ok::<_, RunError>((worker_result, vm_observations, vm_trace))
+                })?;
+                if options.trace_limit != 0 {
+                    for entry in vm_trace {
+                        writeln!(stderr, "trace: {entry}")?;
                     }
                 }
-            }
-            if options.trace_limit != 0 {
-                for entry in vm.trace() {
-                    writeln!(stderr, "trace: {entry}")?;
+                runtime_error = vm_result.err();
+                if let Some(error) = runtime_error.as_ref()
+                    && continue_document_roots
+                    && is_recoverable_document_runtime_error(error)
+                {
+                    report_document_runtime_error(stderr, error)?;
                 }
+                observations.push(vm_observations);
+            } else {
+                if let Some(flag) = cancellation() {
+                    vm = vm.with_cancellation(flag);
+                }
+                loop {
+                    let next = vm.next_result();
+                    flush_vm_effects(&vm, stderr)?;
+                    match next {
+                        Ok(Some(value)) => {
+                            last = Some(value.clone());
+                            result_output.emit(&value)?;
+                            result_count = result_count.saturating_add(1);
+                        }
+                        Ok(None) => break,
+                        Err(error) => {
+                            runtime_error = Some(error);
+                            break;
+                        }
+                    }
+                }
+                if options.trace_limit != 0 {
+                    for entry in vm.trace() {
+                        writeln!(stderr, "trace: {entry}")?;
+                    }
+                }
+                if let Some(error) = runtime_error.as_ref()
+                    && continue_document_roots
+                    && is_recoverable_document_runtime_error(error)
+                {
+                    report_document_runtime_error(stderr, error)?;
+                }
+                observations.push(vm.observations());
             }
-            observations.push(vm.observations());
-            Ok(runtime_error.is_none())
+            Ok(runtime_error.as_ref().is_none_or(|error| {
+                continue_document_roots && is_recoverable_document_runtime_error(error)
+            }))
         };
 
         if analysis.capabilities.whole_input
@@ -608,17 +1747,30 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             && !options.proxy_on_error
         {
             thread::scope(|scope| {
-                let (sender, receiver) = sync_channel(REMAINING_INPUT_BUFFER_DOCUMENTS);
-                scope.spawn(move || produce_remaining_inputs(options, stdin, &sender));
-                let cursor = InputCursor::from_provider(move || match receiver.recv() {
-                    Ok(RemainingInputMessage::Value(value)) => Ok(Some(value)),
-                    Ok(RemainingInputMessage::Error(error)) => Err(error),
-                    Ok(RemainingInputMessage::Done) | Err(_) => Ok(None),
+                let (request_sender, request_receiver) = sync_channel(0);
+                let (sender, receiver) = sync_channel(0);
+                scope.spawn(move || {
+                    produce_remaining_inputs(options, stdin, &request_receiver, &sender);
+                });
+                let cursor = InputCursor::from_provider(move || {
+                    if request_sender.send(()).is_err() {
+                        return Ok(None);
+                    }
+                    match receiver.recv() {
+                        Ok(RemainingInputMessage::Value(value)) => Ok(Some(value)),
+                        Ok(RemainingInputMessage::Error(error)) => Err(error),
+                        Ok(RemainingInputMessage::Done) | Err(_) => Ok(None),
+                    }
                 });
                 let result: Result<(), RunError> = (|| {
-                    while let Some(input) = pull_remaining_input(&cursor)? {
-                        if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
-                            break;
+                    if options.null_input {
+                        let _ =
+                            evaluate(StructuredInput::Value(Value::Null), Some(cursor.clone()))?;
+                    } else {
+                        while let Some(input) = pull_remaining_input(&cursor)? {
+                            if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                                break;
+                            }
                         }
                     }
                     Ok(())
@@ -627,9 +1779,20 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                 result
             })?;
         } else if analysis.capabilities.whole_input && !options.slurp && !options.raw_input {
-            match load_inputs(options, stdin)? {
+            let remaining_options = if options.null_input {
+                let mut remaining = options.clone();
+                remaining.null_input = false;
+                remaining
+            } else {
+                options.clone()
+            };
+            match load_inputs(&remaining_options, stdin, false, &mut Vec::new())? {
                 LoadedInputs::Proxy(bytes) => {
-                    let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
+                    let _ = if options.null_input {
+                        evaluate(StructuredInput::Value(Value::Null), None)?
+                    } else {
+                        evaluate(StructuredInput::Proxy(bytes), None)?
+                    };
                 }
                 LoadedInputs::Documents(inputs) => {
                     let cursor = InputCursor::from_input_values(
@@ -638,42 +1801,93 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                             .map(|document| InputValue {
                                 value: document.value,
                                 identity: Arc::from(document.identity),
-                                line_number: document.index.saturating_add(1),
+                                line_number: document.line_number,
                             })
                             .collect(),
                     );
-                    while let Some(input) = cursor.next_value()? {
-                        if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
-                            break;
+                    if options.null_input {
+                        let _ = evaluate(StructuredInput::Value(Value::Null), Some(cursor))?;
+                    } else {
+                        while let Some(input) = cursor.next_value()? {
+                            if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                                break;
+                            }
                         }
                     }
                 }
             }
         } else if options.slurp || options.raw_input {
-            match load_inputs(options, stdin)? {
+            let remaining_options = if options.null_input {
+                let mut remaining = options.clone();
+                remaining.null_input = false;
+                remaining
+            } else {
+                options.clone()
+            };
+            let mut input_diagnostics = Vec::new();
+            match load_inputs(
+                &remaining_options,
+                stdin,
+                options.slurp
+                    && selected_input_format(options, Path::new("-")) == InputFormat::JsonSequence,
+                &mut input_diagnostics,
+            )? {
                 LoadedInputs::Proxy(bytes) => {
-                    let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
+                    let _ = if options.null_input {
+                        evaluate(StructuredInput::Value(Value::Null), None)?
+                    } else {
+                        evaluate(StructuredInput::Proxy(bytes), None)?
+                    };
                 }
                 LoadedInputs::Documents(inputs) => {
-                    let values = if options.slurp && !options.raw_input {
-                        vec![Value::array(
-                            inputs
-                                .into_iter()
-                                .map(|document| document.value)
-                                .collect::<Vec<_>>(),
-                        )]
+                    let input_values = if options.slurp && !options.raw_input {
+                        let (identity, line_number) = inputs.last().map_or_else(
+                            || ("<stdin>".to_owned(), 0),
+                            |document| (document.identity.clone(), document.line_number),
+                        );
+                        vec![InputValue {
+                            value: Value::array(
+                                inputs
+                                    .into_iter()
+                                    .map(|document| document.value)
+                                    .collect::<Vec<_>>(),
+                            ),
+                            identity: Arc::from(identity),
+                            line_number,
+                        }]
                     } else {
-                        inputs.into_iter().map(|document| document.value).collect()
+                        inputs
+                            .into_iter()
+                            .map(|document| InputValue {
+                                value: document.value,
+                                identity: Arc::from(document.identity),
+                                line_number: document.line_number,
+                            })
+                            .collect()
                     };
-                    for input in values {
-                        if !evaluate(StructuredInput::Value(input), None)? {
-                            break;
+                    let cursor = InputCursor::from_input_values(input_values);
+                    if options.null_input {
+                        let _ = evaluate(StructuredInput::Value(Value::Null), Some(cursor))?;
+                    } else {
+                        while let Some(input) = cursor.next_value()? {
+                            if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                                break;
+                            }
                         }
                     }
                 }
             }
+            for diagnostic in input_diagnostics {
+                writeln!(stderr, "tq: {}", process_input_diagnostic(&diagnostic))?;
+            }
         } else {
-            for_each_structured_input(options, stdin, &mut |input| evaluate(input, None))?;
+            let mut sequence_diagnostics = Vec::new();
+            for_each_structured_input(options, stdin, &mut sequence_diagnostics, &mut |input| {
+                evaluate(input, None)
+            })?;
+            for diagnostic in sequence_diagnostics {
+                writeln!(stderr, "tq: {}", process_input_diagnostic(&diagnostic))?;
+            }
         }
     }
 
@@ -696,20 +1910,54 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
         )?;
     }
     if let Some(error) = runtime_error {
-        if let VmError::Input { message } = error {
-            return Err(RunError::Input(FormatError::Parse {
-                format: InputFormat::Auto,
-                message: message.to_string(),
-            }));
+        match error {
+            VmError::Input { message } => {
+                return Err(RunError::Input(FormatError::Parse {
+                    format: InputFormat::Auto,
+                    message: message.to_string(),
+                }));
+            }
+            VmError::Halt { status, stderr }
+                if options.null_input && stderr.as_ref() == b"null\n" =>
+            {
+                return Err(RunError::Runtime(VmError::Halt {
+                    status,
+                    stderr: Arc::from([] as [u8; 0]),
+                }));
+            }
+            error if continue_document_roots && is_recoverable_document_runtime_error(&error) => {
+                return Err(RunError::ReportedRuntime(error));
+            }
+            error => return Err(RunError::Runtime(error)),
         }
-        return Err(RunError::Runtime(error));
     }
     Ok(result_output.exit_status(options.exit_status, last.as_ref()))
 }
 
 enum StructuredInput {
     Value(Value),
+    Document(InputValue),
     Proxy(Vec<u8>),
+}
+
+fn json_sequence_input_requested(options: &RunOptions) -> bool {
+    if !options.json_sequence {
+        return false;
+    }
+    match options.input_format {
+        InputFormat::Json | InputFormat::JsonSequence => true,
+        InputFormat::Auto => {
+            matches!(
+                options.output_format,
+                OutputFormat::Json | OutputFormat::JsonLines
+            )
+        }
+        InputFormat::Toon
+        | InputFormat::Yaml
+        | InputFormat::Json5
+        | InputFormat::ToonSequence
+        | InputFormat::JsonLines => false,
+    }
 }
 
 fn transcode_proof(
@@ -755,6 +2003,7 @@ fn transcode_proof(
         canonical_toon_writer: true,
         key_folding_disabled: true,
         commitment: match options.framing {
+            ToonFraming::Values => TranscodeCommitment::DirectValues,
             ToonFraming::Sequence => TranscodeCommitment::DirectSequence,
             ToonFraming::Unframed => TranscodeCommitment::AtomicUnframed,
         },
@@ -791,6 +2040,7 @@ fn run_transcode_filter<R: Read, W: Write>(
         TranscodeDuplicatePolicy::Reject => DuplicateKeyPolicy::Reject,
     };
     let commitment = match proof.commitment {
+        TranscodeCommitment::DirectValues => tq_toon::TranscodeCommitment::DirectValues,
         TranscodeCommitment::DirectSequence => tq_toon::TranscodeCommitment::DirectSequence,
         TranscodeCommitment::AtomicUnframed => tq_toon::TranscodeCommitment::AtomicUnframed,
     };
@@ -808,7 +2058,7 @@ fn run_transcode_filter<R: Read, W: Write>(
     let mut output_bytes = 0_u64;
 
     let (execution, documents, last_truthy) = match proof.commitment {
-        TranscodeCommitment::DirectSequence => {
+        TranscodeCommitment::DirectSequence | TranscodeCommitment::DirectValues => {
             let writer = LimitedWriter::new(stdout, &mut output_bytes, options.limits.output_bytes);
             let mut consumer = TranscodeConsumer::new(
                 writer,
@@ -893,7 +2143,7 @@ fn resource_outcome(error: &RunError) -> &'static str {
         ExitStatus::Resource => "resource-limit",
         ExitStatus::Interrupted => "interrupted",
         ExitStatus::Input => "input-error",
-        ExitStatus::Runtime | ExitStatus::Unsupported => "output-error",
+        ExitStatus::Runtime | ExitStatus::Unsupported | ExitStatus::Halt(_) => "output-error",
         ExitStatus::Usage
         | ExitStatus::Compile
         | ExitStatus::NoResult
@@ -1038,9 +2288,9 @@ fn map_wrapped_spool_error(error: &io::Error) -> Option<RunError> {
 
 fn map_publication_error(error: PublicationError) -> RunError {
     match error {
-        PublicationError::Cardinality(_) => {
-            RunError::Cardinality("unframed TOON requires exactly one result")
-        }
+        PublicationError::Cardinality(_) => RunError::Cardinality(
+            "unframed TOON requires exactly one result; omit --unframed for zero or multiple results",
+        ),
         PublicationError::Spool(error) => map_transcode_error(TranscodeError::Spool(error)),
         PublicationError::Io(error) => RunError::Io(error),
     }
@@ -1057,6 +2307,7 @@ fn map_publication_buffer_error(error: io::Error) -> RunError {
 fn for_each_structured_input<R: Read, F>(
     options: &RunOptions,
     stdin: &mut R,
+    diagnostics: &mut Vec<String>,
     emit: &mut F,
 ) -> Result<(), RunError>
 where
@@ -1074,10 +2325,17 @@ where
     for path in files {
         let format = selected_input_format(options, &path);
         let keep_going = if path == Path::new("-") {
-            for_each_structured_reader(options, format, &mut *stdin, "<stdin>", emit)?
+            for_each_structured_reader(options, format, &mut *stdin, "<stdin>", diagnostics, emit)?
         } else {
             let identity = path.display().to_string();
-            for_each_structured_reader(options, format, open_path(&path)?, &identity, emit)?
+            for_each_structured_reader(
+                options,
+                format,
+                open_path(&path)?,
+                &identity,
+                diagnostics,
+                emit,
+            )?
         };
         if !keep_going {
             break;
@@ -1091,11 +2349,87 @@ fn for_each_structured_reader<R: Read, F>(
     format: InputFormat,
     reader: R,
     identity: &str,
+    diagnostics: &mut Vec<String>,
     emit: &mut F,
 ) -> Result<bool, RunError>
 where
     F: FnMut(StructuredInput) -> Result<bool, RunError>,
 {
+    if format == InputFormat::Auto {
+        if options.proxy_on_error {
+            let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+            return match decode_bytes(&bytes, identity, decode_options(options, format)) {
+                Ok(documents) => {
+                    for document in documents {
+                        if !emit(StructuredInput::Document(InputValue {
+                            value: document.value,
+                            identity: Arc::from(document.identity),
+                            line_number: document.line_number,
+                        }))? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                }
+                Err(error) if proxyable_format_error(&error) => emit(StructuredInput::Proxy(bytes)),
+                Err(error) => Err(error.into()),
+            };
+        }
+        let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+        let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+        return for_each_detected_structured_reader(
+            options,
+            report.selected,
+            replay,
+            identity,
+            diagnostics,
+            emit,
+        );
+    }
+    for_each_detected_structured_reader(options, format, reader, identity, diagnostics, emit)
+}
+
+fn for_each_detected_structured_reader<R: Read, F>(
+    options: &RunOptions,
+    format: InputFormat,
+    reader: R,
+    identity: &str,
+    diagnostics: &mut Vec<String>,
+    emit: &mut F,
+) -> Result<bool, RunError>
+where
+    F: FnMut(StructuredInput) -> Result<bool, RunError>,
+{
+    if format == InputFormat::JsonSequence {
+        let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+        let mut source = JsonSequenceDocumentSource::with_options(
+            BufReader::new(reader),
+            identity,
+            json_input_options(options),
+        );
+        loop {
+            match source.next_record()? {
+                None => return Ok(true),
+                Some(Ok(document)) => {
+                    if !emit(StructuredInput::Document(InputValue {
+                        value: document.value,
+                        identity: Arc::from(document.identity),
+                        line_number: document.line_number,
+                    }))? {
+                        return Ok(false);
+                    }
+                }
+                Some(Err(
+                    error @ (FormatError::Resource(_) | FormatError::ResourceLine { .. }),
+                )) => {
+                    return Err(error.into());
+                }
+                Some(Err(error)) => {
+                    diagnostics.push(error.to_string());
+                }
+            }
+        }
+    }
     if options.proxy_on_error {
         let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
         let documents = match decode_bytes(&bytes, identity, decode_options(options, format)) {
@@ -1106,7 +2440,29 @@ where
             Err(error) => return Err(error.into()),
         };
         for document in documents {
-            if !emit(StructuredInput::Value(document.value))? {
+            if !emit(StructuredInput::Document(InputValue {
+                value: document.value,
+                identity: Arc::from(document.identity),
+                line_number: document.line_number,
+            }))? {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
+    }
+    if format == InputFormat::Json {
+        let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+        let mut source = JsonDocumentSource::with_options(
+            BufReader::with_capacity(INPUT_BUFFER_BYTES, reader),
+            identity,
+            json_input_options(options),
+        );
+        while let Some(document) = source.next_document()? {
+            if !emit(StructuredInput::Document(InputValue {
+                value: document.value,
+                identity: Arc::from(document.identity),
+                line_number: document.line_number,
+            }))? {
                 return Ok(false);
             }
         }
@@ -1120,7 +2476,11 @@ where
             decode_options(options, format),
         );
         while let Some(document) = source.next_document()? {
-            if !emit(StructuredInput::Value(document.value))? {
+            if !emit(StructuredInput::Document(InputValue {
+                value: document.value,
+                identity: Arc::from(document.identity),
+                line_number: document.line_number,
+            }))? {
                 return Ok(false);
             }
         }
@@ -1129,7 +2489,11 @@ where
 
     let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
     for document in decode_bytes(&bytes, identity, decode_options(options, format))? {
-        if !emit(StructuredInput::Value(document.value))? {
+        if !emit(StructuredInput::Document(InputValue {
+            value: document.value,
+            identity: Arc::from(document.identity),
+            line_number: document.line_number,
+        }))? {
             return Ok(false);
         }
     }
@@ -1372,7 +2736,11 @@ fn parallel_selected_decode_explain<'a>(
     if analysis.hybrid_proof.is_none() {
         return (false, "hybrid-plan-has-no-static-prefix-proof");
     }
-    (true, "static-array-prefix")
+    // Automatic JSON roots are transactional: selected values and effects are
+    // staged until the decoder commits the containing root.  The current
+    // executor therefore cannot safely use the old cross-root parallel
+    // collector even when the static prefix would otherwise qualify.
+    (false, "root-lifecycle-requires-serial-commit")
 }
 
 const fn input_format_name(format: InputFormat) -> &'static str {
@@ -1384,6 +2752,7 @@ const fn input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Json5 => "override:json5",
         InputFormat::JsonLines => "override:jsonl",
         InputFormat::ToonSequence => "override:toon-sequence",
+        InputFormat::JsonSequence => "override:json-sequence",
     }
 }
 
@@ -1396,9 +2765,14 @@ const fn concrete_input_format_name(format: InputFormat) -> &'static str {
         InputFormat::Json5 => "json5",
         InputFormat::JsonLines => "jsonl",
         InputFormat::ToonSequence => "toon-sequence",
+        InputFormat::JsonSequence => "json-sequence",
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the event route keeps input, output, diagnostics, analysis, and test capture explicit"
+)]
 fn run_event_filter<R: Read, W: Write, E: Write>(
     options: &RunOptions,
     plan: &Plan<Compiled, Events>,
@@ -1407,11 +2781,12 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
+    capture: Option<RunTestCaptureHandle>,
 ) -> Result<ExitStatus, RunError> {
     let mut executor = StreamExecutor {
         plan,
         variables,
-        output: ResultOutput::new(stdout, options),
+        output: ResultOutput::with_capture(stdout, options, capture),
         stderr,
         trace_remaining: options.trace_limit,
         observations: VmObservations::default(),
@@ -1482,8 +2857,19 @@ struct RetentionObservations {
     decode_in_flight_batches_high_water: usize,
     decode_in_flight_bytes_high_water: usize,
     decode_reordered_batches_high_water: usize,
+    /// Fixed private-spool buffers, reported separately from the dynamic
+    /// preparation budget because they are owned by the I/O layer.
+    runtime_spool_fixed_io_bytes_high_water: usize,
+    root_staging_encoded_bytes_high_water: usize,
+    root_staging_memory_bytes_high_water: usize,
+    root_staging_index_bytes_high_water: usize,
+    root_staging_spool_bytes_written_high_water: u64,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the automatic route keeps input, output, diagnostics, analysis, and test capture explicit"
+)]
 fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
     options: &RunOptions,
     plan: &Plan<Compiled, M>,
@@ -1492,6 +2878,7 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
+    capture: Option<RunTestCaptureHandle>,
 ) -> Result<ExitStatus, RunError> {
     let mut executor = AutomaticExecutor {
         plan,
@@ -1500,8 +2887,9 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
             .expect("automatic plan has a proven prefix")
             .to_vec(),
         projection: plan.automatic_projection().map(<[PathComponent]>::to_vec),
+        capture_paths: plan.automatic_capture_paths(),
         variables,
-        output: ResultOutput::new(stdout, options),
+        output: ResultOutput::with_capture(stdout, options, capture),
         stderr,
         trace_remaining: options.trace_limit,
         observations: VmObservations::default(),
@@ -1515,6 +2903,21 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
         results: 0,
         current_retained_results: 0,
         current_retained_bytes: 0,
+        root_spool: runtime_spool_for(options),
+        root_probe: PrefixProbe::new(
+            plan.automatic_prefix()
+                .expect("automatic plan has a proven prefix"),
+        ),
+        root_fallback: None,
+        root_active: false,
+        root_object_order: Vec::new(),
+        root_object_latest: HashMap::new(),
+        root_object_seen: HashSet::new(),
+        root_runtime_error: None,
+        root_fatal: None,
+        root_index_bytes: 0,
+        root_index_limit: options.limits.preparation_memory_bytes,
+        root_step_start: None,
     };
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
@@ -1545,6 +2948,9 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
         }
     }
     executor.output.finish()?;
+    if let Some(error) = executor.root_runtime_error.take() {
+        return Err(RunError::ReportedRuntime(error));
+    }
     if let Some(path) = &options.report_file {
         write_report(
             path,
@@ -1565,6 +2971,10 @@ fn run_automatic_filter<R: Read, W: Write, E: Write, M>(
         .exit_status(options.exit_status, executor.last.as_ref()))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the hybrid route keeps input, output, diagnostics, analysis, and test capture explicit"
+)]
 fn run_hybrid_filter<R: Read, W: Write, E: Write>(
     options: &RunOptions,
     plan: &Plan<Compiled, HybridBlocking>,
@@ -1573,6 +2983,7 @@ fn run_hybrid_filter<R: Read, W: Write, E: Write>(
     stdin: &mut R,
     stdout: &mut W,
     stderr: &mut E,
+    capture: Option<RunTestCaptureHandle>,
 ) -> Result<ExitStatus, RunError> {
     let mut executor = AutomaticExecutor {
         plan,
@@ -1581,8 +2992,9 @@ fn run_hybrid_filter<R: Read, W: Write, E: Write>(
             .expect("hybrid plan has a proven producer prefix")
             .to_vec(),
         projection: plan.automatic_projection().map(<[PathComponent]>::to_vec),
+        capture_paths: plan.automatic_capture_paths(),
         variables,
-        output: ResultOutput::new(stdout, options),
+        output: ResultOutput::with_capture(stdout, options, capture),
         stderr,
         trace_remaining: options.trace_limit,
         observations: VmObservations::default(),
@@ -1596,6 +3008,21 @@ fn run_hybrid_filter<R: Read, W: Write, E: Write>(
         results: 0,
         current_retained_results: 0,
         current_retained_bytes: 0,
+        root_spool: runtime_spool_for(options),
+        root_probe: PrefixProbe::new(
+            plan.automatic_prefix()
+                .expect("hybrid plan has a proven producer prefix"),
+        ),
+        root_fallback: None,
+        root_active: false,
+        root_object_order: Vec::new(),
+        root_object_latest: HashMap::new(),
+        root_object_seen: HashSet::new(),
+        root_runtime_error: None,
+        root_fatal: None,
+        root_index_bytes: 0,
+        root_index_limit: options.limits.preparation_memory_bytes,
+        root_step_start: None,
     };
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
@@ -1627,6 +3054,9 @@ fn run_hybrid_filter<R: Read, W: Write, E: Write>(
             }
         }
         executor.output.finish()?;
+        if let Some(error) = executor.root_runtime_error.take() {
+            return Err(RunError::ReportedRuntime(error));
+        }
         Ok(executor
             .output
             .exit_status(options.exit_status, executor.last.as_ref()))
@@ -1694,8 +3124,7 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     match format {
         InputFormat::Json => {
-            automatic_json_into(buffered_input(reader), stream_options, true, executor)?;
-            executor.finish_source()
+            automatic_json_into(buffered_input(reader), stream_options, true, executor)
         }
         InputFormat::JsonLines => {
             automatic_json_lines_into(reader, identity, options, stream_options, executor)
@@ -1708,8 +3137,7 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
             let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
             match report.selected {
                 InputFormat::Json => {
-                    automatic_json_into(buffered_input(replay), stream_options, true, executor)?;
-                    executor.finish_source()
+                    automatic_json_into(buffered_input(replay), stream_options, true, executor)
                 }
                 InputFormat::Toon => {
                     automatic_toon_into(replay, options, stream_options, executor)?;
@@ -1721,16 +3149,18 @@ fn automatic_reader_inner<R: Read, W: Write, E: Write, M>(
                 InputFormat::Auto
                 | InputFormat::Json5
                 | InputFormat::JsonLines
-                | InputFormat::ToonSequence => {
+                | InputFormat::ToonSequence
+                | InputFormat::JsonSequence => {
                     unreachable!("probe candidate")
                 }
             }
         }
-        InputFormat::Yaml | InputFormat::Json5 | InputFormat::ToonSequence => {
-            Err(RunError::Unsupported(
-                "automatic bounded plans require JSON or TOON decoder events".to_owned(),
-            ))
-        }
+        InputFormat::Yaml
+        | InputFormat::Json5
+        | InputFormat::ToonSequence
+        | InputFormat::JsonSequence => Err(RunError::Unsupported(
+            "automatic bounded plans require JSON or TOON decoder events".to_owned(),
+        )),
     }
 }
 
@@ -1747,86 +3177,98 @@ fn automatic_json_lines_into<R: Read, W: Write, E: Write, M>(
         decode_options(options, InputFormat::JsonLines),
     );
     while let Some((record, line)) = source.next_record()? {
+        validate_single_json_line(&record, identity, line, options)?;
         automatic_json_into(record.as_slice(), stream_options, false, executor)
             .map_err(|error| json_lines_record_error(error, identity, line))?;
-        executor.finish_source()?;
     }
     Ok(())
+}
+
+struct JsonLineValidationConsumer;
+
+impl EventConsumer for JsonLineValidationConsumer {
+    type Error = String;
+
+    fn consume(&mut self, _event: Event) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+fn validate_single_json_line(
+    record: &[u8],
+    identity: &str,
+    line: u64,
+    options: &RunOptions,
+) -> Result<(), RunError> {
+    let mut consumer = JsonLineValidationConsumer;
+    let cancellation = cancellation();
+    let mut checkpoint = || {
+        if cancellation
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            Err(io::Error::other("JSON Lines validation interrupted"))
+        } else {
+            Ok(())
+        }
+    };
+    decode_json_events_with_options_control(
+        record,
+        SourceId::new(0),
+        &mut consumer,
+        JsonEventOptions {
+            maximum_depth: options.limits.depth,
+            maximum_token_bytes: options.limits.token_bytes,
+        },
+        &mut checkpoint,
+    )
+    .map_err(|message| {
+        if message.contains("interrupted") {
+            return RunError::Interrupted;
+        }
+        let resource = if message.contains("depth") {
+            Some("depth")
+        } else if message.contains("token") {
+            Some("token-bytes")
+        } else {
+            None
+        };
+        if let Some(resource) = resource {
+            RunError::Input(FormatError::ResourceLine {
+                identity: identity.to_owned(),
+                line,
+                resource,
+            })
+        } else {
+            RunError::Input(FormatError::Parse {
+                format: InputFormat::JsonLines,
+                message: format!("{identity}:{line}: {message}"),
+            })
+        }
+    })
 }
 
 fn automatic_json_into<R: io::BufRead, W: Write, E: Write, M>(
     reader: R,
     options: StreamOptions,
-    parallel_allowed: bool,
+    _parallel_allowed: bool,
     executor: &mut AutomaticExecutor<'_, W, E, M>,
 ) -> Result<(), RunError> {
-    let mut execution_error = None;
-    let selection = executor.stream_selection();
-    let parallel =
-        parallel_allowed && executor.hybrid_suffix.is_some() && parallel_worker_count() > 1;
-    let parallel_options = ParallelJsonOptions {
-        batch_values: executor.output.options.limits.decode_batch_values,
-        batch_bytes: executor.output.options.limits.decode_batch_bytes,
-        in_flight_batches: executor.output.options.limits.decode_in_flight_batches,
-        in_flight_bytes: executor.output.options.limits.decode_in_flight_bytes,
-    };
-    let decoded = {
-        let mut accept = |record| match executor.accept(record) {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                execution_error = Some(error);
-                Err("automatic stream consumer stopped".to_owned())
-            }
-        };
-        if parallel {
-            stream_json_selected_records_parallel(
-                reader,
-                options,
-                selection,
-                parallel_options,
-                cancellation(),
-                &mut accept,
-            )
-        } else {
-            let mut selected = SelectedStreamObservations::default();
-            let result = stream_json_selected_records_with_control(
-                reader,
-                options,
-                selection,
-                cancellation(),
-                &mut selected,
-                &mut accept,
-            );
-            executor.retention.decoder_depth_high_water = executor
-                .retention
-                .decoder_depth_high_water
-                .max(selected.depth_high_water);
-            result.map(|()| ParallelJsonObservations::default())
-        }
-    };
-    if let Ok(observations) = decoded.as_ref() {
-        executor.retention.decode_batches = executor
-            .retention
-            .decode_batches
-            .saturating_add(observations.batches);
-        executor.retention.decoder_depth_high_water = executor
-            .retention
-            .decoder_depth_high_water
-            .max(observations.depth_high_water);
-        executor.retention.decode_in_flight_batches_high_water = executor
-            .retention
-            .decode_in_flight_batches_high_water
-            .max(observations.in_flight_batches_high_water);
-        executor.retention.decode_in_flight_bytes_high_water = executor
-            .retention
-            .decode_in_flight_bytes_high_water
-            .max(observations.in_flight_bytes_high_water);
-        executor.retention.decode_reordered_batches_high_water = executor
-            .retention
-            .decode_reordered_batches_high_water
-            .max(observations.reordered_batches_high_water);
-    }
-    if let Some(error) = execution_error {
+    let selection = executor.json_stream_selection();
+    let mut selected = SelectedStreamObservations::default();
+    let decoded = tq_formats::stream_json_selected_roots_with_control(
+        reader,
+        options,
+        selection,
+        cancellation(),
+        &mut selected,
+        executor,
+    );
+    executor.retention.decoder_depth_high_water = executor
+        .retention
+        .decoder_depth_high_water
+        .max(selected.depth_high_water);
+    if let Some(error) = executor.root_fatal.take() {
         return Err(error);
     }
     if decoded.is_err() && cancellation().is_some_and(|flag| flag.load(Ordering::Relaxed)) {
@@ -1940,6 +3382,15 @@ impl HybridCollection {
             }
         }
     }
+
+    fn discard_document(&mut self) {
+        match self {
+            Self::Collect(values) => values.clear(),
+            Self::StableSort { pipeline, config } => {
+                *pipeline = Some(hybrid_sort_pipeline(*config));
+            }
+        }
+    }
 }
 
 fn hybrid_sort_pipeline(config: (usize, usize, usize, usize)) -> StableSortPipeline {
@@ -1959,10 +3410,113 @@ fn hybrid_pipeline_error(resource: &'static str) -> RunError {
     }
 }
 
+fn runtime_spool_for(options: &RunOptions) -> RuntimeSpool {
+    let config = RuntimeSpoolConfig {
+        memory_threshold_bytes: options.limits.preparation_memory_bytes.max(1),
+        // `--max-spool-bytes` bounds bytes written to the private spill file,
+        // not logical records retained in memory.  Root staging and replay
+        // enforce the per-root preparation budget separately, so the
+        // cumulative logical counter must not make a zero-disk configuration
+        // reject an otherwise in-memory root.
+        maximum_total_bytes: u64::MAX,
+        maximum_spool_bytes: options.limits.spool_bytes,
+        maximum_item_bytes: u64::try_from(options.limits.preparation_memory_bytes.max(1))
+            .unwrap_or(u64::MAX),
+        maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
+        maximum_decoded_bytes: options.limits.preparation_memory_bytes as u64,
+        spool_directory: std::env::temp_dir(),
+        allow_spool: true,
+    };
+    let spool = RuntimeSpool::new(config);
+    match cancellation() {
+        Some(flag) => spool.with_cancellation(flag),
+        None => spool,
+    }
+}
+
+#[derive(Clone, Debug)]
+enum PrefixWitness {
+    Unknown,
+    /// The decoder found a scalar or an incompatible container at this
+    /// boundary.  The value is the actual bounded ancestor, not a padded
+    /// array synthesized for a large static index.
+    Mismatch {
+        boundary: usize,
+        value: Value,
+    },
+    /// The decoder found the right container shape, but the selected path was
+    /// absent below it.  The value is the smallest typed ancestor needed by
+    /// the VM access operations.
+    Missing {
+        boundary: usize,
+        value: Value,
+    },
+}
+
+struct PrefixProbe {
+    prefix: Vec<PathComponent>,
+    witness: PrefixWitness,
+}
+
+impl PrefixProbe {
+    fn new(prefix: &[PathComponent]) -> Self {
+        Self {
+            prefix: prefix.to_vec(),
+            witness: PrefixWitness::Unknown,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.witness = PrefixWitness::Unknown;
+    }
+
+    fn observe(&mut self, path: &[PathComponent], replacement: &SelectionReplacement) {
+        if path.len() > self.prefix.len() || !self.prefix.starts_with(path) {
+            return;
+        }
+        let boundary = path.len();
+        if boundary == self.prefix.len() {
+            return;
+        }
+        let compatible = match replacement {
+            SelectionReplacement::ArrayStart => {
+                matches!(self.prefix[boundary], PathComponent::Index(_))
+            }
+            SelectionReplacement::ObjectStart => {
+                matches!(self.prefix[boundary], PathComponent::Key(_))
+            }
+            SelectionReplacement::Scalar(_) | SelectionReplacement::Missing => false,
+        };
+        let value = match replacement {
+            SelectionReplacement::ArrayStart => Value::array(Vec::new()),
+            SelectionReplacement::ObjectStart => Value::object(tq_core::Object::new()),
+            SelectionReplacement::Scalar(value) => value.clone(),
+            SelectionReplacement::Missing => Value::Null,
+        };
+        self.witness = if compatible {
+            PrefixWitness::Missing { boundary, value }
+        } else {
+            PrefixWitness::Mismatch { boundary, value }
+        };
+    }
+
+    fn missing(&self) -> PrefixWitness {
+        match &self.witness {
+            PrefixWitness::Unknown => PrefixWitness::Missing {
+                boundary: 0,
+                value: Value::Null,
+            },
+            witness => witness.clone(),
+        }
+    }
+}
+
 struct AutomaticExecutor<'a, W, E, M> {
     plan: &'a Plan<Compiled, M>,
     prefix: Vec<PathComponent>,
     projection: Option<Vec<PathComponent>>,
+    capture_paths: Option<&'a [Vec<PathComponent>]>,
     variables: &'a BTreeMap<Arc<str>, Value>,
     output: ResultOutput<'a, W>,
     stderr: &'a mut E,
@@ -1978,11 +3532,456 @@ struct AutomaticExecutor<'a, W, E, M> {
     results: usize,
     current_retained_results: usize,
     current_retained_bytes: usize,
+    root_spool: RuntimeSpool,
+    root_probe: PrefixProbe,
+    root_fallback: Option<SelectionFallback>,
+    root_active: bool,
+    root_object_order: Vec<Arc<str>>,
+    root_object_latest: HashMap<Arc<str>, RuntimeRecordId>,
+    root_object_seen: HashSet<Arc<str>>,
+    root_runtime_error: Option<VmError>,
+    root_fatal: Option<RunError>,
+    root_index_bytes: usize,
+    root_index_limit: usize,
+    root_step_start: Option<u64>,
 }
 
 impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
     fn stream_selection(&self) -> StreamSelection {
         StreamSelection::new(self.prefix.clone(), self.projection.clone())
+    }
+
+    fn json_stream_selection(&self) -> StreamSelection {
+        if self.projection.is_none()
+            && let Some(paths) = self.capture_paths
+        {
+            return StreamSelection::with_item_capture_paths(self.prefix.clone(), paths.to_vec());
+        }
+        self.stream_selection()
+    }
+
+    fn begin_root_stage(&mut self, index: u64) -> Result<(), RunError> {
+        self.root_spool
+            .begin_root()
+            .map_err(|error| runtime_spool_run_error(&error))?;
+        self.root_probe.reset();
+        self.root_fallback = None;
+        self.root_active = true;
+        self.root_step_start = Some(self.observations.steps);
+        self.root_object_order = Vec::new();
+        self.root_object_latest = HashMap::new();
+        self.root_object_seen = HashSet::new();
+        self.root_index_bytes = 0;
+        self.current = None;
+        self.current_item = None;
+        self.deferred_item = None;
+        let _ = index;
+        Ok(())
+    }
+
+    fn reset_root_items(&mut self) -> Result<(), RunError> {
+        self.finish_pending_root_item()?;
+        self.root_spool
+            .replace_root()
+            .map_err(|error| runtime_spool_run_error(&error))?;
+        self.root_object_order = Vec::new();
+        self.root_object_latest = HashMap::new();
+        self.root_object_seen = HashSet::new();
+        self.root_index_bytes = 0;
+        Ok(())
+    }
+
+    fn finish_pending_root_item(&mut self) -> Result<(), RunError> {
+        if self.projection.is_some() {
+            self.complete_projection_item()
+        } else {
+            self.complete_capture()
+        }
+    }
+
+    fn prune_root_value(&self, value: &mut Value) {
+        if self.root_active
+            && let Some(paths) = self.capture_paths
+        {
+            prune_object_fields_in_place(value, paths);
+        }
+    }
+
+    fn prepare_root_storage(
+        &mut self,
+        additional_value_bytes: usize,
+        additional_index_bytes: usize,
+    ) -> Result<(), RunError> {
+        let io_headroom = if self.root_spool.spooled() {
+            REPLAY_BUFFER_BYTES.saturating_mul(2)
+        } else {
+            0
+        };
+        self.retention.runtime_spool_fixed_io_bytes_high_water = self
+            .retention
+            .runtime_spool_fixed_io_bytes_high_water
+            .max(io_headroom);
+        self.observe_root_staging();
+        let retained_memory = self.root_spool.retained_memory_capacity_bytes();
+        let fixed = self
+            .root_index_bytes
+            .saturating_add(self.current.as_ref().map_or(0, |capture| capture.bytes))
+            .saturating_add(
+                self.deferred_item
+                    .as_ref()
+                    .map_or(0, estimate_capture_value_bytes),
+            )
+            .saturating_add(retained_memory);
+        let required = fixed
+            .saturating_add(additional_value_bytes)
+            .saturating_add(additional_index_bytes);
+        if required > self.root_index_limit {
+            if retained_memory != 0 {
+                self.root_spool
+                    .spill_to_disk()
+                    .map_err(|error| runtime_spool_run_error(&error))?;
+                self.retention.runtime_spool_fixed_io_bytes_high_water = self
+                    .retention
+                    .runtime_spool_fixed_io_bytes_high_water
+                    .max(REPLAY_BUFFER_BYTES.saturating_mul(2));
+            }
+            let fixed_after_spill = fixed.saturating_sub(retained_memory.min(fixed));
+            if fixed_after_spill
+                .saturating_add(additional_value_bytes)
+                .saturating_add(additional_index_bytes)
+                > self.root_index_limit
+            {
+                return Err(RunError::Resource("runtime-staging-memory"));
+            }
+        }
+        let reserved = self
+            .root_index_limit
+            .saturating_sub(
+                self.root_index_bytes
+                    .saturating_add(self.current.as_ref().map_or(0, |capture| capture.bytes))
+                    .saturating_add(
+                        self.deferred_item
+                            .as_ref()
+                            .map_or(0, estimate_capture_value_bytes),
+                    )
+                    .saturating_add(additional_value_bytes)
+                    .saturating_add(additional_index_bytes),
+            )
+            .max(1);
+        self.root_spool
+            .set_memory_threshold(reserved)
+            .map_err(|error| runtime_spool_run_error(&error))?;
+        self.observe_root_staging();
+        Ok(())
+    }
+
+    fn observe_root_staging(&mut self) {
+        self.retention.root_staging_encoded_bytes_high_water = self
+            .retention
+            .root_staging_encoded_bytes_high_water
+            .max(usize::try_from(self.root_spool.retained_bytes()).unwrap_or(usize::MAX));
+        self.retention.root_staging_memory_bytes_high_water = self
+            .retention
+            .root_staging_memory_bytes_high_water
+            .max(self.root_spool.retained_memory_capacity_bytes());
+        self.retention.root_staging_index_bytes_high_water = self
+            .retention
+            .root_staging_index_bytes_high_water
+            .max(self.root_index_bytes);
+        self.retention.root_staging_spool_bytes_written_high_water = self
+            .retention
+            .root_staging_spool_bytes_written_high_water
+            .max(self.root_spool.spool_bytes_written());
+    }
+
+    fn stage_root_value(
+        &mut self,
+        path: Option<&[PathComponent]>,
+        value: Value,
+        projected: bool,
+    ) -> Result<(), RunError> {
+        let item = if projected {
+            RuntimeSpoolItem::Projected(value)
+        } else {
+            RuntimeSpoolItem::Item(value)
+        };
+        let value_bytes = match &item {
+            RuntimeSpoolItem::Projected(value)
+            | RuntimeSpoolItem::Item(value)
+            | RuntimeSpoolItem::Base(value) => estimate_capture_value_bytes(value),
+        };
+        let Some(path) = path else {
+            self.prepare_root_storage(value_bytes, 0)?;
+            self.root_spool
+                .push_item(item)
+                .map_err(|error| runtime_spool_run_error(&error))?;
+            self.observe_root_staging();
+            return Ok(());
+        };
+        let Some(component) = path.get(self.prefix.len()) else {
+            self.prepare_root_storage(value_bytes, 0)?;
+            self.root_spool
+                .push_item(item)
+                .map_err(|error| runtime_spool_run_error(&error))?;
+            self.observe_root_staging();
+            return Ok(());
+        };
+        let (new_key, latest_missing, required_index_bytes) = match component {
+            PathComponent::Key(key) => {
+                let new_key = !self.root_object_seen.contains(key);
+                let latest_missing = !self.root_object_latest.contains_key(key);
+                let required = if new_key || latest_missing {
+                    key.len()
+                        .saturating_add(std::mem::size_of::<Arc<str>>())
+                        .saturating_add(std::mem::size_of::<(Arc<str>, RuntimeRecordId)>())
+                        .saturating_add(std::mem::size_of::<Arc<str>>())
+                        .saturating_add(ROOT_INDEX_BTREE_NODE_BYTES.saturating_mul(2))
+                } else {
+                    0
+                };
+                (new_key, latest_missing, required)
+            }
+            PathComponent::Index(_) => (false, false, 0),
+        };
+        let next_index_bytes = self.root_index_bytes.saturating_add(required_index_bytes);
+        if next_index_bytes > self.root_index_limit {
+            return Err(RunError::Resource("runtime-staging-index"));
+        }
+        self.prepare_root_storage(value_bytes, required_index_bytes)?;
+        if new_key {
+            let PathComponent::Key(key) = component else {
+                unreachable!("new object key requires a key path component")
+            };
+            self.root_object_order
+                .try_reserve_exact(1)
+                .map_err(|_| RunError::Resource("runtime-staging-index"))?;
+            self.root_object_seen
+                .try_reserve(1)
+                .map_err(|_| RunError::Resource("runtime-staging-index"))?;
+            self.root_object_order.push(Arc::clone(key));
+            self.root_object_seen.insert(Arc::clone(key));
+        }
+        if latest_missing {
+            self.root_object_latest
+                .try_reserve(1)
+                .map_err(|_| RunError::Resource("runtime-staging-index"))?;
+        }
+        self.root_index_bytes = next_index_bytes;
+        let id = self
+            .root_spool
+            .push_item(item)
+            .map_err(|error| runtime_spool_run_error(&error))?;
+        self.observe_root_staging();
+        let PathComponent::Key(key) = component else {
+            return Ok(());
+        };
+        self.root_object_latest.insert(Arc::clone(key), id);
+        Ok(())
+    }
+
+    fn stage_root_base(&mut self, value: Value) -> Result<(), RunError> {
+        self.prepare_root_storage(estimate_capture_value_bytes(&value), 0)?;
+        self.root_spool
+            .push_item(RuntimeSpoolItem::Base(value))
+            .map_err(|error| runtime_spool_run_error(&error))?;
+        self.observe_root_staging();
+        Ok(())
+    }
+
+    fn commit_root_stage(&mut self) -> Result<(), RunError> {
+        self.finish_pending_root_item()?;
+        let fallback = self.root_fallback.take();
+        let witness = self.root_probe.missing();
+        self.root_spool
+            .finish_root()
+            .map_err(|error| runtime_spool_run_error(&error))?;
+        self.root_active = false;
+
+        let recoverable_error = self.replay_root_stage(fallback, witness)?;
+
+        if let Some(error) = recoverable_error {
+            report_document_runtime_error(self.stderr, &error)?;
+            self.discard_hybrid_document();
+            self.root_runtime_error = Some(error);
+        } else if let Some(plan) = self.hybrid_suffix {
+            match self.finish_hybrid_document(plan) {
+                Ok(()) => self.root_runtime_error = None,
+                Err(RunError::Runtime(error)) if is_recoverable_document_runtime_error(&error) => {
+                    report_document_runtime_error(self.stderr, &error)?;
+                    self.discard_hybrid_document();
+                    self.root_runtime_error = Some(error);
+                }
+                Err(RunError::ReportedRuntime(error)) => {
+                    report_document_runtime_error(self.stderr, &error)?;
+                    self.discard_hybrid_document();
+                    self.root_runtime_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            self.root_runtime_error = None;
+        }
+        self.root_step_start = None;
+        Ok(())
+    }
+
+    fn replay_root_stage(
+        &mut self,
+        fallback: Option<SelectionFallback>,
+        witness: PrefixWitness,
+    ) -> Result<Option<VmError>, RunError> {
+        let mut spool = std::mem::replace(
+            &mut self.root_spool,
+            RuntimeSpool::new(RuntimeSpoolConfig::default()),
+        );
+        let replay = if matches!(fallback, Some(SelectionFallback::Missing { .. })) {
+            self.evaluate_prefix_tail(witness)
+                .map_err(|error| match error {
+                    RunError::Runtime(error) if is_recoverable_document_runtime_error(&error) => {
+                        RunError::ReportedRuntime(error)
+                    }
+                    error => error,
+                })
+        } else if let Some(fallback) = fallback {
+            match fallback {
+                SelectionFallback::PresentScalar { value, .. } => {
+                    self.run_staged_item(RuntimeSpoolItem::Base(value))
+                }
+                SelectionFallback::PresentEmptyArray { .. } => {
+                    self.run_staged_item(RuntimeSpoolItem::Base(Value::array(Vec::new())))
+                }
+                SelectionFallback::PresentEmptyObject { .. } => self.run_staged_item(
+                    RuntimeSpoolItem::Base(Value::object(tq_core::Object::new())),
+                ),
+                SelectionFallback::Missing { .. } => unreachable!("missing handled above"),
+            }
+        } else if !spool.is_empty() {
+            let replay_index_bytes = self.root_index_bytes;
+            let mut replay_memory = spool.retained_memory_capacity_bytes();
+            let replay_available = self.root_index_limit.saturating_sub(replay_index_bytes);
+            let replay_requirement =
+                usize::try_from(spool.maximum_decoded_requirement()).unwrap_or(usize::MAX);
+            // Keep encoded records in memory when a decoded value still has
+            // room in the shared budget.  If the resident capacity plus the
+            // largest decoded item consumes that room, spill before replay so
+            // the decoded limit is not hidden by the local `spool` variable.
+            if replay_memory.saturating_add(replay_requirement) > replay_available {
+                spool
+                    .spill_to_disk()
+                    .map_err(|error| runtime_spool_run_error(&error))?;
+                replay_memory = spool.retained_memory_capacity_bytes();
+                self.retention.runtime_spool_fixed_io_bytes_high_water = self
+                    .retention
+                    .runtime_spool_fixed_io_bytes_high_water
+                    .max(REPLAY_BUFFER_BYTES.saturating_mul(2));
+            }
+            let replay_decoded_limit = replay_available.saturating_sub(replay_memory);
+            spool
+                .set_replay_decoded_budget(replay_decoded_limit)
+                .map_err(|error| runtime_spool_run_error(&error))?;
+            let order = std::mem::take(&mut self.root_object_order);
+            let latest = std::mem::take(&mut self.root_object_latest);
+            self.root_object_seen.clear();
+            self.root_index_bytes = 0;
+            let mut run_item = |item: RuntimeSpoolItem| self.run_staged_item(item);
+            if order.is_empty() {
+                spool
+                    .replay_items(&mut run_item)
+                    .map_err(runtime_replay_error)
+            } else {
+                spool
+                    .replay_records(
+                        order
+                            .into_iter()
+                            .filter_map(|key| latest.get(&key).copied()),
+                        &mut run_item,
+                    )
+                    .map_err(runtime_replay_error)
+            }
+        } else {
+            Ok(())
+        };
+        self.root_spool = spool;
+        self.observe_root_staging();
+        match replay {
+            Err(RunError::ReportedRuntime(error)) => Ok(Some(error)),
+            Err(error) => Err(error),
+            Ok(()) => Ok(None),
+        }
+    }
+
+    fn run_staged_item(&mut self, item: RuntimeSpoolItem) -> Result<(), RunError> {
+        let result = match item {
+            RuntimeSpoolItem::Projected(value) => self.emit_direct(value),
+            RuntimeSpoolItem::Item(value) => self.evaluate(value, false),
+            RuntimeSpoolItem::Base(value) => self.evaluate(value, true),
+        };
+        match result {
+            Ok(()) => Ok(()),
+            Err(RunError::Runtime(error)) if is_recoverable_document_runtime_error(&error) => {
+                Err(RunError::ReportedRuntime(error))
+            }
+            Err(RunError::ReportedRuntime(error)) => Err(RunError::ReportedRuntime(error)),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn discard_hybrid_document(&mut self) {
+        if let Some(collected) = self.collected.as_mut() {
+            collected.discard_document();
+        }
+    }
+
+    fn evaluate_prefix_tail(&mut self, witness: PrefixWitness) -> Result<(), RunError> {
+        let (PrefixWitness::Mismatch { boundary, value }
+        | PrefixWitness::Missing { boundary, value }) = witness
+        else {
+            return Ok(());
+        };
+        let mut value = Some(value);
+        for component in boundary..self.prefix.len() {
+            let Some(input) = value.take() else {
+                return Ok(());
+            };
+            value = self.evaluate_prefix_access(component, input)?;
+        }
+        if let Some(value) = value {
+            self.evaluate(value, true)?;
+        }
+        Ok(())
+    }
+
+    fn evaluate_prefix_access(
+        &mut self,
+        component: usize,
+        input: Value,
+    ) -> Result<Option<Value>, RunError> {
+        let mut vm = Vm::new_automatic_prefix_access(
+            self.plan,
+            component,
+            input,
+            self.remaining_vm_limits(),
+            self.variables.clone(),
+        )
+        .with_trace_limit(self.trace_remaining);
+        if let Some(flag) = cancellation() {
+            vm = vm.with_cancellation(flag);
+        }
+        let mut value = None;
+        let evaluated = vm.for_each_result(|candidate| {
+            value = Some(candidate);
+            true
+        });
+        flush_vm_effects(&vm, self.stderr)?;
+        merge_observations(&mut self.observations, vm.observations());
+        evaluated.map_err(RunError::Runtime)?;
+        if self.trace_remaining != 0 {
+            for entry in vm.trace() {
+                writeln!(self.stderr, "trace: {entry}")?;
+            }
+            self.trace_remaining = self.trace_remaining.saturating_sub(vm.trace().len());
+        }
+        Ok(value)
     }
 
     fn accept(&mut self, record: StreamRecord) -> Result<(), RunError> {
@@ -1997,7 +3996,11 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
                 && !matches!(&value, Value::Object(values) if values.is_empty())
             {
                 self.observe_complete_value(record_bytes, 0)?;
-                self.evaluate(value, true)?;
+                if self.root_active {
+                    self.stage_root_base(value)?;
+                } else {
+                    self.evaluate(value, true)?;
+                }
             }
             return Ok(());
         }
@@ -2007,6 +4010,15 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
         if self.projection.is_some() {
             return self.accept_projection(&path, value, record_bytes);
         }
+        self.accept_unprojected(&path, value, record_bytes)
+    }
+
+    fn accept_unprojected(
+        &mut self,
+        path: &[PathComponent],
+        value: Option<Value>,
+        record_bytes: usize,
+    ) -> Result<(), RunError> {
         let target_length = self.prefix.len().saturating_add(1);
         let target = path[..target_length].to_vec();
         let relative = &path[target_length..];
@@ -2023,7 +4035,11 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             if relative.is_empty()
                 && let Some(value) = value
             {
-                self.evaluate(value, false)?;
+                if self.root_active {
+                    self.stage_root_value(Some(&target), value, false)?;
+                } else {
+                    self.evaluate(value, false)?;
+                }
             }
             return Ok(());
         }
@@ -2033,7 +4049,13 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
                 self.observe_complete_value(record_bytes, 0)?;
                 self.retention.completed_subtrees =
                     self.retention.completed_subtrees.saturating_add(1);
-                self.evaluate(value, false)?;
+                if self.root_active {
+                    let mut value = value;
+                    self.prune_root_value(&mut value);
+                    self.stage_root_value(Some(&target), value, false)?;
+                } else {
+                    self.evaluate(value, false)?;
+                }
             } else if self
                 .current
                 .as_ref()
@@ -2042,21 +4064,37 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
                 let capture = self.current.take().expect("capture was checked");
                 self.retention.completed_subtrees =
                     self.retention.completed_subtrees.saturating_add(1);
-                self.evaluate(capture.root.into_value()?, false)?;
+                let mut used_bytes = capture.bytes;
+                let mut value = capture.root.into_value_bounded(
+                    self.output.options.limits.preparation_memory_bytes,
+                    &mut used_bytes,
+                )?;
+                if self.root_active {
+                    self.prune_root_value(&mut value);
+                    self.stage_root_value(Some(&target), value, false)?;
+                } else {
+                    self.evaluate(value, false)?;
+                }
             }
             return Ok(());
         }
         let Some(value) = value else {
             return Ok(());
         };
+        let record_cost = record_bytes.saturating_add(64);
+        let value_cost = estimate_capture_value_bytes(&value);
+        self.prepare_root_storage(
+            record_cost
+                .saturating_add(value_cost)
+                .saturating_add(build_node_path_bytes(relative)),
+            0,
+        )?;
         let capture = self.current.get_or_insert_with(|| Capture {
             path: target,
             root: BuildNode::empty_for(&relative[0]),
             bytes: 0,
         });
-        capture.bytes = capture
-            .bytes
-            .saturating_add(record_bytes.saturating_add(64));
+        capture.bytes = capture.bytes.saturating_add(record_cost);
         if capture.bytes > self.output.options.limits.preparation_memory_bytes {
             return Err(RunError::Resource("subtree-bytes"));
         }
@@ -2064,8 +4102,14 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
         if relative_depth > self.output.options.limits.depth {
             return Err(RunError::Resource("subtree-depth"));
         }
-        capture.root.insert(relative, value)?;
-        self.retention.bytes_high_water = self.retention.bytes_high_water.max(capture.bytes);
+        capture.root.insert_bounded(
+            relative,
+            value,
+            self.output.options.limits.preparation_memory_bytes,
+            &mut capture.bytes,
+        )?;
+        let capture_bytes = capture.bytes;
+        self.retention.bytes_high_water = self.retention.bytes_high_water.max(capture_bytes);
         self.retention.depth_high_water = self.retention.depth_high_water.max(relative_depth);
         Ok(())
     }
@@ -2101,9 +4145,23 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             self.current_item = Some(item);
         }
         let relative = &path[item_length..];
+        self.accept_projection_value(path, value, record_bytes, item_length, relative)
+    }
+
+    fn accept_projection_value(
+        &mut self,
+        path: &[PathComponent],
+        value: Option<Value>,
+        record_bytes: usize,
+        item_length: usize,
+        relative: &[PathComponent],
+    ) -> Result<(), RunError> {
         if relative.is_empty() {
             if let Some(value) = value {
                 self.observe_complete_value(record_bytes, 0)?;
+                if self.root_active {
+                    self.prepare_root_storage(estimate_capture_value_bytes(&value), 0)?;
+                }
                 self.deferred_item = Some(value);
             }
             return Ok(());
@@ -2111,16 +4169,31 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
         let projection = self
             .projection
             .as_deref()
+            .map(<[PathComponent]>::to_vec)
             .expect("projection branch requires a projected path");
-        if path_kind_mismatch(relative, projection) {
+        if path_kind_mismatch(relative, &projection) {
             if let Some(value) = value {
-                self.deferred_item = Some(synthetic_item(relative, value)?);
+                if self.root_active {
+                    self.prepare_root_storage(
+                        estimate_capture_value_bytes(&value)
+                            .saturating_add(build_node_path_bytes(relative)),
+                        0,
+                    )?;
+                }
+                self.deferred_item = Some(synthetic_item(
+                    relative,
+                    value,
+                    self.output.options.limits.preparation_memory_bytes,
+                )?);
             }
             return Ok(());
         }
         if relative == projection {
             if let Some(value) = value {
                 self.observe_complete_value(record_bytes, 0)?;
+                if self.root_active {
+                    self.prepare_root_storage(estimate_capture_value_bytes(&value), 0)?;
+                }
                 self.current = Some(Capture {
                     path: path.to_vec(),
                     root: BuildNode::Value(value),
@@ -2131,45 +4204,87 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
         }
         if projection.starts_with(relative) {
             if let Some(value) = value {
-                self.deferred_item = Some(synthetic_item(relative, value)?);
+                if self.root_active {
+                    self.prepare_root_storage(
+                        estimate_capture_value_bytes(&value)
+                            .saturating_add(build_node_path_bytes(relative)),
+                        0,
+                    )?;
+                }
+                self.deferred_item = Some(synthetic_item(
+                    relative,
+                    value,
+                    self.output.options.limits.preparation_memory_bytes,
+                )?);
             }
             return Ok(());
         }
-        if !relative.starts_with(projection) {
+        if !relative.starts_with(&projection) {
             return Ok(());
         }
         let captured_path = &relative[projection.len()..];
         let Some(value) = value else {
             return Ok(());
         };
+        let record_cost = record_bytes.saturating_add(64);
+        self.prepare_root_storage(
+            record_cost
+                .saturating_add(estimate_capture_value_bytes(&value))
+                .saturating_add(build_node_path_bytes(captured_path)),
+            0,
+        )?;
         let capture = self.current.get_or_insert_with(|| Capture {
             path: path[..item_length + projection.len()].to_vec(),
             root: BuildNode::empty_for(&captured_path[0]),
             bytes: 0,
         });
-        capture.bytes = capture
-            .bytes
-            .saturating_add(record_bytes.saturating_add(64));
+        capture.bytes = capture.bytes.saturating_add(record_cost);
         if capture.bytes > self.output.options.limits.preparation_memory_bytes {
             return Err(RunError::Resource("subtree-bytes"));
         }
-        capture.root.insert(captured_path, value)?;
-        self.retention.bytes_high_water = self.retention.bytes_high_water.max(capture.bytes);
+        capture.root.insert_bounded(
+            captured_path,
+            value,
+            self.output.options.limits.preparation_memory_bytes,
+            &mut capture.bytes,
+        )?;
+        let capture_bytes = capture.bytes;
+        self.retention.bytes_high_water = self.retention.bytes_high_water.max(capture_bytes);
         self.retention.depth_high_water = self.retention.depth_high_water.max(captured_path.len());
         Ok(())
     }
 
     fn complete_projection_item(&mut self) -> Result<(), RunError> {
-        if self.current_item.take().is_none() {
+        let Some(item_path) = self.current_item.take() else {
             return Ok(());
-        }
+        };
         self.retention.completed_subtrees = self.retention.completed_subtrees.saturating_add(1);
+        let deferred = self.deferred_item.take();
         if let Some(capture) = self.current.take() {
-            self.emit_direct(capture.root.into_value()?)?;
-        } else if let Some(item) = self.deferred_item.take() {
-            self.evaluate(item, false)?;
+            let mut used_bytes = capture.bytes;
+            let value = capture.root.into_value_bounded(
+                self.output.options.limits.preparation_memory_bytes,
+                &mut used_bytes,
+            )?;
+            if self.root_active {
+                self.stage_root_value(Some(&item_path), value, true)?;
+            } else {
+                self.emit_direct(value)?;
+            }
+        } else if let Some(item) = deferred {
+            if self.root_active {
+                let mut item = item;
+                self.prune_root_value(&mut item);
+                self.stage_root_value(Some(&item_path), item, false)?;
+            } else {
+                self.evaluate(item, false)?;
+            }
         } else {
-            self.emit_direct(Value::Null)?;
+            if self.root_active {
+                self.stage_root_value(Some(&item_path), Value::Null, true)?;
+            } else {
+                self.emit_direct(Value::Null)?;
+            }
         }
         Ok(())
     }
@@ -2192,7 +4307,18 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             return Ok(());
         };
         self.retention.completed_subtrees = self.retention.completed_subtrees.saturating_add(1);
-        self.evaluate(capture.root.into_value()?, false)
+        let mut used_bytes = capture.bytes;
+        let value = capture.root.into_value_bounded(
+            self.output.options.limits.preparation_memory_bytes,
+            &mut used_bytes,
+        )?;
+        if self.root_active {
+            let mut value = value;
+            self.prune_root_value(&mut value);
+            self.stage_root_value(Some(&capture.path), value, false)
+        } else {
+            self.evaluate(value, false)
+        }
     }
 
     fn observe_complete_value(&mut self, bytes: usize, depth: usize) -> Result<(), RunError> {
@@ -2237,6 +4363,7 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             self.results = self.results.saturating_add(1);
             true
         });
+        flush_vm_effects(&vm, self.stderr)?;
         merge_observations(&mut self.observations, vm.observations());
         if let Some(error) = output_error {
             return Err(error);
@@ -2289,6 +4416,7 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
             self.results = self.results.saturating_add(1);
             true
         });
+        flush_vm_effects(&vm, self.stderr)?;
         merge_observations(&mut self.observations, vm.observations());
         self.current_retained_results = 0;
         self.current_retained_bytes = 0;
@@ -2307,7 +4435,12 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
 
     fn remaining_vm_limits(&self) -> VmLimits {
         let mut limits = vm_limits(self.output.options);
-        limits.steps = limits.steps.saturating_sub(self.observations.steps);
+        let used_steps = self
+            .root_step_start
+            .map_or(self.observations.steps, |start| {
+                self.observations.steps.saturating_sub(start)
+            });
+        limits.steps = limits.steps.saturating_sub(used_steps);
         limits
     }
 
@@ -2327,6 +4460,144 @@ impl<W: Write, E: Write, M> AutomaticExecutor<'_, W, E, M> {
     }
 }
 
+fn runtime_spool_run_error(error: &RuntimeSpoolError) -> RunError {
+    match error {
+        RuntimeSpoolError::Cancelled => RunError::Interrupted,
+        RuntimeSpoolError::Io(_) => RunError::Resource("runtime-staging-io"),
+        RuntimeSpoolError::TotalLimit
+        | RuntimeSpoolError::SpoolLimit
+        | RuntimeSpoolError::ItemLimit
+        | RuntimeSpoolError::TokenLimit
+        | RuntimeSpoolError::DepthLimit
+        | RuntimeSpoolError::DecodedLimit
+        | RuntimeSpoolError::SpoolDisabled => RunError::Resource("runtime-staging"),
+        RuntimeSpoolError::Number(_) => RunError::Resource("runtime-staging-number"),
+        RuntimeSpoolError::Decode(_)
+        | RuntimeSpoolError::Utf8
+        | RuntimeSpoolError::State(_)
+        | RuntimeSpoolError::GenerationLimit
+        | RuntimeSpoolError::StaleRecord
+        | RuntimeSpoolError::RecordBounds => RunError::Unsupported(
+            "automatic runtime staging produced an invalid retained record".to_owned(),
+        ),
+    }
+}
+
+fn runtime_replay_error(error: RuntimeSpoolReplayError<RunError>) -> RunError {
+    match error {
+        RuntimeSpoolReplayError::Storage(error) => runtime_spool_run_error(&error),
+        RuntimeSpoolReplayError::Consumer(error) => error,
+    }
+}
+
+impl<W: Write, E: Write, M> SelectedRootSink for AutomaticExecutor<'_, W, E, M> {
+    type Error = String;
+
+    fn begin_root(&mut self, index: u64) -> Result<(), Self::Error> {
+        self.begin_root_stage(index).map_err(|error| {
+            self.root_fatal = Some(error);
+            "automatic root staging could not begin".to_owned()
+        })
+    }
+
+    fn fallback(&mut self, fallback: SelectionFallback) -> Result<(), Self::Error> {
+        self.finish_pending_root_item().map_err(|error| {
+            self.root_fatal = Some(error);
+            "automatic root staging could not finish a pending item".to_owned()
+        })?;
+        self.root_fallback = Some(fallback);
+        Ok(())
+    }
+
+    fn replace_selected_prefix(
+        &mut self,
+        path: &[PathComponent],
+        replacement: SelectionReplacement,
+    ) -> Result<(), Self::Error> {
+        self.reset_root_items().map_err(|error| {
+            self.root_fatal = Some(error);
+            "automatic root staging could not replace a selected prefix".to_owned()
+        })?;
+        self.root_probe.observe(path, &replacement);
+        self.root_fallback = None;
+        Ok(())
+    }
+
+    fn replace_item_path(
+        &mut self,
+        path: &[PathComponent],
+        _replacement: SelectionReplacement,
+    ) -> Result<(), Self::Error> {
+        let item_length = self.prefix.len() + 1;
+        let target = &path[..item_length];
+        let pending = self.current_item.as_deref().or_else(|| {
+            self.current
+                .as_ref()
+                .map(|capture| &capture.path[..item_length])
+        });
+        if path.len() == item_length || pending.is_some_and(|pending| pending != target) {
+            self.finish_pending_root_item().map_err(|error| {
+                self.root_fatal = Some(error);
+                "automatic root staging could not replace an item".to_owned()
+            })?;
+        }
+        if path.len() == item_length {
+            if let Some(PathComponent::Key(key)) = path.get(self.prefix.len()) {
+                self.root_object_latest.remove(key);
+            }
+        } else {
+            if self
+                .current
+                .as_ref()
+                .is_some_and(|capture| capture.path.starts_with(path))
+            {
+                self.current = None;
+            } else if let Some(capture) = self.current.as_mut()
+                && path.starts_with(&capture.path)
+            {
+                capture.root.clear_path(&path[capture.path.len()..]);
+            }
+            if self
+                .projection
+                .as_ref()
+                .is_some_and(|projection| projection.starts_with(&path[item_length..]))
+            {
+                self.deferred_item = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn record(&mut self, record: StreamRecord) -> Result<(), Self::Error> {
+        self.accept(record).map_err(|error| {
+            self.root_fatal = Some(error);
+            "automatic root staging rejected a selected record".to_owned()
+        })
+    }
+
+    fn finish_root(&mut self) -> Result<(), Self::Error> {
+        self.commit_root_stage().map_err(|error| {
+            self.root_fatal = Some(error);
+            "automatic root staging could not commit the validated root".to_owned()
+        })
+    }
+
+    fn abort_root(&mut self) {
+        self.current = None;
+        self.current_item = None;
+        self.deferred_item = None;
+        let _ = self.root_spool.abort_root();
+        self.root_active = false;
+        self.root_step_start = None;
+        self.root_fallback = None;
+        self.root_object_order.clear();
+        self.root_object_latest.clear();
+        self.root_object_seen.clear();
+        self.root_index_bytes = 0;
+        self.root_probe.reset();
+    }
+}
+
 struct Capture {
     path: Vec<PathComponent>,
     root: BuildNode,
@@ -2341,6 +4612,27 @@ enum BuildNode {
 }
 
 impl BuildNode {
+    fn clear_path(&mut self, path: &[PathComponent]) {
+        let Some((component, tail)) = path.split_first() else {
+            *self = Self::Missing;
+            return;
+        };
+        match (self, component) {
+            (Self::Array(values), PathComponent::Index(index)) => {
+                if let Some(child) = values.get_mut(*index) {
+                    child.clear_path(tail);
+                }
+            }
+            (Self::Object(values), PathComponent::Key(key)) => {
+                if let Some((_, child)) = values.iter_mut().find(|(candidate, _)| candidate == key)
+                {
+                    child.clear_path(tail);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn empty_for(component: &PathComponent) -> Self {
         match component {
             PathComponent::Index(_) => Self::Array(Vec::new()),
@@ -2348,7 +4640,13 @@ impl BuildNode {
         }
     }
 
-    fn insert(&mut self, path: &[PathComponent], value: Value) -> Result<(), RunError> {
+    fn insert_bounded(
+        &mut self,
+        path: &[PathComponent],
+        value: Value,
+        maximum_bytes: usize,
+        used_bytes: &mut usize,
+    ) -> Result<(), RunError> {
         let Some((component, tail)) = path.split_first() else {
             *self = Self::Value(value);
             return Ok(());
@@ -2359,12 +4657,19 @@ impl BuildNode {
                     return Err(invalid_automatic_event());
                 };
                 if values.len() <= *index {
+                    let additional = index.saturating_add(1).saturating_sub(values.len());
+                    let bytes =
+                        additional.saturating_mul(std::mem::size_of::<Self>().saturating_add(16));
+                    charge_build_node_bytes(used_bytes, maximum_bytes, bytes)?;
+                    values
+                        .try_reserve_exact(additional)
+                        .map_err(|_| RunError::Resource("subtree-memory"))?;
                     values.resize_with(index.saturating_add(1), || Self::Missing);
                 }
                 if !tail.is_empty() && matches!(values[*index], Self::Missing) {
                     values[*index] = Self::empty_for(&tail[0]);
                 }
-                values[*index].insert(tail, value)
+                values[*index].insert_bounded(tail, value, maximum_bytes, used_bytes)
             }
             PathComponent::Key(key) => {
                 let Self::Object(values) = self else {
@@ -2374,33 +4679,89 @@ impl BuildNode {
                 let child = if let Some(index) = index {
                     &mut values[index].1
                 } else {
+                    charge_build_node_bytes(
+                        used_bytes,
+                        maximum_bytes,
+                        std::mem::size_of::<(Arc<str>, Self)>().saturating_add(256),
+                    )?;
+                    values
+                        .try_reserve_exact(1)
+                        .map_err(|_| RunError::Resource("subtree-memory"))?;
                     values.push((Arc::clone(key), Self::Missing));
                     &mut values.last_mut().expect("entry was pushed").1
                 };
                 if !tail.is_empty() && matches!(child, Self::Missing) {
                     *child = Self::empty_for(&tail[0]);
                 }
-                child.insert(tail, value)
+                child.insert_bounded(tail, value, maximum_bytes, used_bytes)
             }
         }
     }
 
-    fn into_value(self) -> Result<Value, RunError> {
+    fn into_value_bounded(
+        self,
+        maximum_bytes: usize,
+        used_bytes: &mut usize,
+    ) -> Result<Value, RunError> {
         match self {
             Self::Missing => Err(invalid_automatic_event()),
             Self::Value(value) => Ok(value),
-            Self::Array(values) => values
-                .into_iter()
-                .map(Self::into_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map(Value::array),
-            Self::Object(values) => values
-                .into_iter()
-                .map(|(key, value)| Ok((key, value.into_value()?)))
-                .collect::<Result<tq_core::Object, RunError>>()
-                .map(Value::object),
+            Self::Array(values) => {
+                let bytes = values
+                    .len()
+                    .saturating_mul(std::mem::size_of::<Value>().saturating_add(16));
+                charge_build_node_bytes(used_bytes, maximum_bytes, bytes)?;
+                let mut output = Vec::new();
+                output
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| RunError::Resource("subtree-memory"))?;
+                for value in values {
+                    output.push(value.into_value_bounded(maximum_bytes, used_bytes)?);
+                }
+                Ok(Value::array(output))
+            }
+            Self::Object(values) => {
+                let bytes = values
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(Arc<str>, Value)>().saturating_add(256));
+                charge_build_node_bytes(used_bytes, maximum_bytes, bytes)?;
+                let mut output = tq_core::Object::new();
+                output
+                    .try_reserve_exact(values.len())
+                    .map_err(|_| RunError::Resource("subtree-memory"))?;
+                for (key, value) in values {
+                    output.insert(key, value.into_value_bounded(maximum_bytes, used_bytes)?);
+                }
+                Ok(Value::object(output))
+            }
         }
     }
+}
+
+fn charge_build_node_bytes(
+    used_bytes: &mut usize,
+    maximum_bytes: usize,
+    additional_bytes: usize,
+) -> Result<(), RunError> {
+    let Some(next) = used_bytes.checked_add(additional_bytes) else {
+        return Err(RunError::Resource("subtree-memory"));
+    };
+    if next > maximum_bytes {
+        return Err(RunError::Resource("subtree-memory"));
+    }
+    *used_bytes = next;
+    Ok(())
+}
+
+fn build_node_path_bytes(path: &[PathComponent]) -> usize {
+    path.iter().fold(0_usize, |total, component| {
+        total.saturating_add(match component {
+            PathComponent::Index(_) => std::mem::size_of::<BuildNode>().saturating_add(16),
+            PathComponent::Key(_) => {
+                std::mem::size_of::<(Arc<str>, BuildNode)>().saturating_add(256)
+            }
+        })
+    })
 }
 
 fn path_kind_mismatch(actual: &[PathComponent], expected: &[PathComponent]) -> bool {
@@ -2414,13 +4775,18 @@ fn path_kind_mismatch(actual: &[PathComponent], expected: &[PathComponent]) -> b
     false
 }
 
-fn synthetic_item(relative: &[PathComponent], value: Value) -> Result<Value, RunError> {
+fn synthetic_item(
+    relative: &[PathComponent],
+    value: Value,
+    maximum_bytes: usize,
+) -> Result<Value, RunError> {
     let Some(first) = relative.first() else {
         return Ok(value);
     };
     let mut root = BuildNode::empty_for(first);
-    root.insert(relative, value)?;
-    root.into_value()
+    let mut used_bytes = 0;
+    root.insert_bounded(relative, value, maximum_bytes, &mut used_bytes)?;
+    root.into_value_bounded(maximum_bytes, &mut used_bytes)
 }
 
 fn estimate_event_bytes(path: &[PathComponent], value: Option<&Value>) -> usize {
@@ -2448,6 +4814,84 @@ fn estimate_value_bytes(value: &Value) -> usize {
                 .saturating_add(estimate_value_bytes(value))
         }),
     }
+}
+
+fn estimate_capture_value_bytes(value: &Value) -> usize {
+    estimate_value_bytes(value).saturating_add(
+        value_node_count(value).saturating_mul(std::mem::size_of::<Value>().saturating_add(16)),
+    )
+}
+
+/// Retains only the statically proven object fields in an already materialized
+/// item.  The proof is deliberately conservative, so a shared object is left
+/// untouched rather than allocating a reduced clone beside its source.
+fn prune_object_fields_in_place(value: &mut Value, paths: &[Vec<PathComponent>]) {
+    let Some(anchor) = paths.first().map(Vec::as_slice) else {
+        return;
+    };
+    prune_object_fields_at_depth(value, paths, 0, anchor);
+}
+
+fn prune_object_fields_at_depth(
+    value: &mut Value,
+    paths: &[Vec<PathComponent>],
+    depth: usize,
+    anchor: &[PathComponent],
+) {
+    let Value::Object(values) = value else {
+        return;
+    };
+    let Some(values) = Arc::get_mut(values) else {
+        return;
+    };
+    values.retain(|key, _| {
+        paths
+            .iter()
+            .any(|path| path_matches_branch(path, anchor, depth, key))
+    });
+    for (key, child) in values.iter_mut() {
+        let Some(child_anchor) = paths
+            .iter()
+            .find(|path| path_matches_branch(path, anchor, depth, key))
+            .map(Vec::as_slice)
+        else {
+            continue;
+        };
+        let has_nested_path = paths.iter().any(|path| {
+            path_matches_branch(path, anchor, depth, key) && path.len() > depth.saturating_add(1)
+        });
+        let keeps_whole_child = paths.iter().any(|path| {
+            path_matches_branch(path, anchor, depth, key) && path.len() == depth.saturating_add(1)
+        });
+        if has_nested_path && !keeps_whole_child {
+            prune_object_fields_at_depth(child, paths, depth.saturating_add(1), child_anchor);
+        }
+    }
+}
+
+fn path_matches_branch(
+    path: &[PathComponent],
+    anchor: &[PathComponent],
+    depth: usize,
+    key: &Arc<str>,
+) -> bool {
+    path.get(..depth) == anchor.get(..depth)
+        && matches!(
+            path.get(depth),
+            Some(PathComponent::Key(candidate)) if candidate == key
+        )
+}
+
+fn value_node_count(value: &Value) -> usize {
+    1_usize.saturating_add(match value {
+        Value::Array(values) => values.iter().fold(0_usize, |total, value| {
+            total.saturating_add(value_node_count(value))
+        }),
+        Value::Object(values) => values.values().fold(0_usize, |total, value| {
+            total.saturating_add(value_node_count(value))
+        }),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => 0,
+    })
 }
 
 fn invalid_automatic_event() -> RunError {
@@ -2508,7 +4952,8 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
                 InputFormat::Auto
                 | InputFormat::Json5
                 | InputFormat::JsonLines
-                | InputFormat::ToonSequence => {
+                | InputFormat::ToonSequence
+                | InputFormat::JsonSequence => {
                     unreachable!("probe candidate")
                 }
             }
@@ -2519,6 +4964,9 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
         InputFormat::Json5 => Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned())),
         InputFormat::ToonSequence => Err(RunError::Unsupported(
             "TOON sequence input cannot currently be nested inside --stream".to_owned(),
+        )),
+        InputFormat::JsonSequence => Err(RunError::Unsupported(
+            "JSON sequence input cannot currently be nested inside --stream".to_owned(),
         )),
     }
 }
@@ -2688,6 +5136,148 @@ struct StreamExecutor<'a, W, E> {
     results: usize,
 }
 
+/// Runs a whole-input query over a streaming event source without collecting
+/// the complete event stream.  jq permits `inputs` to consume the values
+/// produced by `--stream`; the event decoder therefore acts as the cursor's
+/// pull provider for this capability combination.
+fn run_stream_whole_input_filter<R: Read + Send, W: Write, E: Write>(
+    options: &RunOptions,
+    plan: &Plan<Compiled, tq_core::Document>,
+    variables: &BTreeMap<Arc<str>, Value>,
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+    capture: Option<RunTestCaptureHandle>,
+) -> Result<ExitStatus, RunError> {
+    let (format, reader): (InputFormat, Box<dyn Read + Send + '_>) =
+        if options.input_format == InputFormat::Auto {
+            let reader = LimitedReader::new(&mut *stdin, options.limits.input_bytes, "<stdin>");
+            let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
+            (report.selected, Box::new(replay))
+        } else {
+            (
+                selected_input_format(options, Path::new("-")),
+                Box::new(LimitedReader::new(
+                    &mut *stdin,
+                    options.limits.input_bytes,
+                    "<stdin>",
+                )),
+            )
+        };
+    if !matches!(format, InputFormat::Json | InputFormat::Toon) {
+        return Err(RunError::Unsupported(
+            "--stream with inputs requires JSON or TOON event input".to_owned(),
+        ));
+    }
+
+    thread::scope(|scope| {
+        let (request_sender, request_receiver) = sync_channel(0);
+        let (sender, receiver) = sync_channel(0);
+        scope.spawn(move || {
+            produce_stream_inputs(reader, format, options, &request_receiver, &sender);
+        });
+
+        let cursor = InputCursor::from_provider(move || {
+            if request_sender.send(()).is_err() {
+                return Ok(None);
+            }
+            match receiver.recv() {
+                Ok(RemainingInputMessage::Value(value)) => Ok(Some(value)),
+                Ok(RemainingInputMessage::Error(error)) => Err(error),
+                Ok(RemainingInputMessage::Done) | Err(_) => Ok(None),
+            }
+        });
+        let initial = if options.null_input {
+            Value::Null
+        } else {
+            pull_remaining_input(&cursor)?.unwrap_or(Value::Null)
+        };
+        let mut vm = Vm::new_with_variables(plan, initial, vm_limits(options), variables.clone())
+            .with_input_cursor(cursor.clone());
+        if let Some(flag) = cancellation() {
+            vm = vm.with_cancellation(flag);
+        }
+        let mut output = ResultOutput::with_capture(stdout, options, capture);
+        let mut last = None;
+        loop {
+            let next = vm.next_result();
+            flush_vm_effects(&vm, stderr)?;
+            match next {
+                Ok(Some(value)) => {
+                    last = Some(value.clone());
+                    output.emit(&value)?;
+                }
+                Ok(None) => break,
+                Err(error) => return Err(RunError::Runtime(error)),
+            }
+        }
+        drop(cursor);
+        output.finish()?;
+        Ok(output.exit_status(options.exit_status, last.as_ref()))
+    })
+}
+
+fn produce_stream_inputs<R: Read>(
+    reader: R,
+    format: InputFormat,
+    options: &RunOptions,
+    requests: &Receiver<()>,
+    sender: &SyncSender<RemainingInputMessage>,
+) {
+    let stream_options = StreamOptions {
+        maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
+        errors_as_values: options.stream_errors,
+    };
+    let mut reader = Some(reader);
+    let result = (|| -> Result<(), RunError> {
+        if requests.recv().is_err() {
+            return Ok(());
+        }
+        let mut emit = |value: Value| -> Result<(), String> {
+            if sender
+                .send(RemainingInputMessage::Value(InputValue {
+                    value,
+                    identity: Arc::from("<stdin>"),
+                    line_number: 1,
+                }))
+                .is_err()
+            {
+                return Err("stream consumer stopped".to_owned());
+            }
+            if requests.recv().is_err() {
+                return Err("stream consumer stopped".to_owned());
+            }
+            Ok(())
+        };
+        let source = reader.take().expect("stream reader is present");
+        match format {
+            InputFormat::Json => stream_json(source, stream_options, &mut emit),
+            InputFormat::Toon => stream_toon(
+                BufReader::new(source),
+                tq_toon::DecoderConfig {
+                    strict: options.strict,
+                    maximum_depth: options.limits.depth,
+                    maximum_token_bytes: options.limits.token_bytes,
+                    maximum_line_bytes: options.limits.line_bytes,
+                    maximum_lookahead_bytes: options.limits.lookahead_bytes,
+                    ..tq_toon::DecoderConfig::default()
+                },
+                stream_options,
+                &mut emit,
+            ),
+            _ => unreachable!("validated stream whole-input format"),
+        }
+        .map_err(RunError::Input)
+    })();
+    let message = if let Err(error) = result {
+        RemainingInputMessage::Error(deferred_run_error(error))
+    } else {
+        RemainingInputMessage::Done
+    };
+    let _ = sender.send(message);
+}
+
 impl<W: Write, E: Write> StreamExecutor<'_, W, E> {
     fn accept(&mut self, input: Value) -> Result<(), RunError> {
         let mut vm = Vm::new_events_with_variables(
@@ -2710,6 +5300,7 @@ impl<W: Write, E: Write> StreamExecutor<'_, W, E> {
             self.results = self.results.saturating_add(1);
             true
         });
+        flush_vm_effects(&vm, self.stderr)?;
         if let Some(error) = output_error {
             return Err(error);
         }
@@ -2753,21 +5344,47 @@ fn merge_observations(total: &mut VmObservations, item: VmObservations) {
 struct ResultOutput<'a, W> {
     writer: &'a mut W,
     options: &'a RunOptions,
+    capture: Option<RunTestCaptureHandle>,
     unframed: Option<Value>,
     written: u64,
     emitted: u64,
     last_was_proxy: bool,
 }
 
+fn color_palette(options: &RunOptions) -> JsonColorPalette {
+    if options.capability_policy.environment {
+        std::env::var("JQ_COLORS").map_or_else(
+            |_| JsonColorPalette::default(),
+            |value| JsonColorPalette::from_jq_colors(&value),
+        )
+    } else {
+        JsonColorPalette::default()
+    }
+}
+
 impl<'a, W: Write> ResultOutput<'a, W> {
-    fn new(writer: &'a mut W, options: &'a RunOptions) -> Self {
+    fn with_capture(
+        writer: &'a mut W,
+        options: &'a RunOptions,
+        capture: Option<RunTestCaptureHandle>,
+    ) -> Self {
         Self {
             writer,
             options,
+            capture,
             unframed: None,
             written: 0,
             emitted: 0,
             last_was_proxy: false,
+        }
+    }
+
+    fn record(&self, value: &Value) {
+        let Some(capture) = &self.capture else {
+            return;
+        };
+        if let Ok(mut capture) = capture.lock() {
+            capture.record(value);
         }
     }
 
@@ -2786,32 +5403,23 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         }
         self.emitted = self.emitted.saturating_add(1);
         self.last_was_proxy = false;
+        let original_value = value;
         let sorted;
         let value = if self.options.sort_keys {
-            sorted = sort_value_keys(value);
+            sorted = sort_value_keys(original_value);
             &sorted
         } else {
-            value
+            original_value
         };
         if self.options.raw_output {
-            let mut writer = LimitedWriter::new(
-                &mut *self.writer,
-                &mut self.written,
-                self.options.limits.output_bytes,
-            );
-            write_raw(
-                &mut writer,
-                std::slice::from_ref(value),
-                self.options.join_output,
-                self.options.raw_output0,
-            )?;
-            if self.options.unbuffered {
-                writer.flush()?;
-            }
+            self.emit_raw(value)?;
+            self.record(original_value);
             return Ok(());
         }
         if self.options.output_format == tq_formats::OutputFormat::Toon
             && self.options.framing == ToonFraming::Unframed
+            && !self.options.raw_output
+            && !self.options.join_output
         {
             if self.emitted > 1 {
                 return Err(OutputError::Toon(tq_toon::SequenceError::Cardinality(
@@ -2825,6 +5433,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
                 ))
                 .into());
             }
+            self.record(original_value);
             return Ok(());
         }
         let mut writer = LimitedWriter::new(
@@ -2839,11 +5448,19 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             && !self.options.ascii_output
             && self.options.color != ColorMode::Always
         {
-            serde_json::to_writer(&mut writer, value)?;
-            writer.write_all(b"\n")?;
+            write_results(
+                &mut writer,
+                [value],
+                OutputOptions {
+                    format: self.options.output_format,
+                    json_sequence: self.options.json_sequence,
+                    ..OutputOptions::default()
+                },
+            )?;
             if self.options.unbuffered {
                 writer.flush()?;
             }
+            self.record(original_value);
             return Ok(());
         }
         write_results(
@@ -2852,16 +5469,37 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             OutputOptions {
                 format: self.options.output_format,
                 pretty_json: self.options.pretty_json,
-                json_indent: self.options.json_indent,
+                json_indent: self.options.json_indent.clone(),
                 ascii_json: self.options.ascii_output,
                 color_json: self.options.color == ColorMode::Always,
+                color_palette: color_palette(self.options),
                 yaml_document_start: self.emitted > 1,
                 toon_framing: self.options.framing,
+                json_sequence: self.options.json_sequence,
                 toon: self.options.toon_writer,
             },
         )?;
         if self.options.unbuffered {
             self.writer.flush()?;
+        }
+        self.record(original_value);
+        Ok(())
+    }
+
+    fn emit_raw(&mut self, value: &Value) -> Result<(), RunError> {
+        let mut writer = LimitedWriter::new(
+            &mut *self.writer,
+            &mut self.written,
+            self.options.limits.output_bytes,
+        );
+        write_raw(
+            &mut writer,
+            std::slice::from_ref(value),
+            self.options.join_output,
+            self.options.raw_output0,
+        )?;
+        if self.options.unbuffered {
+            writer.flush()?;
         }
         Ok(())
     }
@@ -2892,6 +5530,8 @@ impl<'a, W: Write> ResultOutput<'a, W> {
     fn finish(&mut self) -> Result<(), RunError> {
         if self.options.output_format == tq_formats::OutputFormat::Toon
             && self.options.framing == ToonFraming::Unframed
+            && !self.options.raw_output
+            && !self.options.join_output
         {
             if self.unframed.is_some() {
                 self.flush_unframed()?;
@@ -2933,11 +5573,13 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             OutputOptions {
                 format: self.options.output_format,
                 pretty_json: self.options.pretty_json,
-                json_indent: self.options.json_indent,
+                json_indent: self.options.json_indent.clone(),
                 ascii_json: self.options.ascii_output,
                 color_json: self.options.color == ColorMode::Always,
+                color_palette: color_palette(self.options),
                 yaml_document_start: false,
                 toon_framing: self.options.framing,
+                json_sequence: self.options.json_sequence,
                 toon: self.options.toon_writer,
             },
         )?;
@@ -2979,17 +5621,104 @@ impl<W: Write> Write for LimitedWriter<'_, W> {
     }
 }
 
-fn load_filter(options: &RunOptions) -> Result<(String, Vec<u8>), RunError> {
-    match &options.filter {
-        FilterSource::Inline(query) => Ok(("<command-line>".to_owned(), query.as_bytes().to_vec())),
+#[allow(
+    clippy::type_complexity,
+    reason = "filter loading returns the query and optional startup source together"
+)]
+fn load_filter(
+    options: &RunOptions,
+) -> Result<(String, Vec<u8>, Option<(String, Vec<u8>)>), RunError> {
+    let (identity, query) = match &options.filter {
+        FilterSource::Inline(query) => ("<command-line>".to_owned(), query.as_bytes().to_vec()),
         FilterSource::File(path) => {
             let identity = path.display().to_string();
-            Ok((
+            (
                 identity.clone(),
                 read_limited(open_path(path)?, options.limits.input_bytes, &identity)?,
-            ))
+            )
         }
+    };
+    let startup_source =
+        if options.capability_policy.environment && options.capability_policy.filesystem {
+            if let Some(home) = std::env::var_os("HOME") {
+                let startup = PathBuf::from(home).join(".jq");
+                if startup.is_file() {
+                    let startup_identity = startup.display().to_string();
+                    let startup = read_limited(
+                        open_path(&startup)?,
+                        options.limits.input_bytes,
+                        &startup_identity,
+                    )?;
+                    let total = startup.len().saturating_add(1).saturating_add(query.len());
+                    if u64::try_from(total).unwrap_or(u64::MAX) > options.limits.input_bytes {
+                        return Err(RunError::ResourceSource {
+                            identity: startup_identity,
+                            resource: "input-bytes",
+                        });
+                    }
+                    Some((startup_identity, startup))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+    Ok((identity, query, startup_source))
+}
+
+fn module_roots(options: &RunOptions, query_name: &str) -> Vec<PathBuf> {
+    if !options.capability_policy.filesystem {
+        return Vec::new();
     }
+    let origin = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let substitute = |path: &Path| {
+        let text = path.to_string_lossy();
+        if let Some(rest) = text.strip_prefix("$ORIGIN/") {
+            return origin
+                .as_ref()
+                .map_or_else(|| path.to_owned(), |origin| origin.join(rest));
+        }
+        if let Some(rest) = text.strip_prefix("~/") {
+            return home
+                .as_ref()
+                .map_or_else(|| path.to_owned(), |home| home.join(rest));
+        }
+        path.to_owned()
+    };
+
+    if !options.module_paths.is_empty() {
+        return options
+            .module_paths
+            .iter()
+            .map(|path| substitute(path))
+            .collect();
+    }
+
+    let mut roots = Vec::new();
+    if let FilterSource::File(path) = &options.filter {
+        if let Some(parent) = path.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    } else if query_name == "<command-line>" {
+        roots.push(PathBuf::from("."));
+    }
+    if let Some(paths) = std::env::var_os("JQ_LIBRARY_PATH") {
+        roots.extend(std::env::split_paths(&paths));
+    }
+    if let Some(home) = &home {
+        roots.push(home.join(".jq"));
+    }
+    if let Some(origin) = origin.clone() {
+        roots.push(origin.join("../lib/jq"));
+        roots.push(origin.join("../lib"));
+    }
+    roots.into_iter().map(|path| substitute(&path)).collect()
 }
 
 fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, Value>, RunError> {
@@ -2999,7 +5728,7 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
         let value = match argument.kind {
             ExternalArgumentKind::String => Value::string(argument.value.as_str()),
             ExternalArgumentKind::Json => {
-                decode_single_json(argument.value.as_bytes(), "--argjson")?
+                decode_json_argument(argument.value.as_bytes(), "--argjson")?
             }
             ExternalArgumentKind::Toon => {
                 let config = tq_toon::DecoderConfig {
@@ -3017,15 +5746,7 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
                     options.limits.input_bytes,
                     &argument.value,
                 )?;
-                let text = String::from_utf8(bytes).map_err(|error| {
-                    RunError::Input(FormatError::Parse {
-                        format: InputFormat::Auto,
-                        message: format!(
-                            "--rawfile '{}' input is not UTF-8: {error}",
-                            argument.value
-                        ),
-                    })
-                })?;
+                let text = String::from_utf8_lossy(&bytes).into_owned();
                 Value::string(text)
             }
             ExternalArgumentKind::SlurpFile => {
@@ -3034,7 +5755,14 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
                     options.limits.input_bytes,
                     &argument.value,
                 )?;
-                let documents = decode_json(&bytes, &argument.value)?;
+                let documents =
+                    decode_json(&bytes, &argument.value).map_err(|error| match error {
+                        FormatError::Parse { .. } => RunError::Cli(CliError::Usage(format!(
+                            "--slurpfile '{}' requires valid JSON values",
+                            argument.value
+                        ))),
+                        other => RunError::Input(other),
+                    })?;
                 Value::array(
                     documents
                         .into_iter()
@@ -3046,18 +5774,16 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
         named.insert(Arc::from(argument.name.as_str()), value.clone());
         values.insert(Arc::from(argument.name.as_str()), value);
     }
-    let positional = match options.positional_argument_kind {
-        None | Some(PositionalArgumentKind::String) => options
-            .positional_arguments
-            .iter()
-            .map(|value| Ok(Value::string(value.as_str())))
-            .collect::<Result<Vec<_>, RunError>>()?,
-        Some(PositionalArgumentKind::Json) => options
-            .positional_arguments
-            .iter()
-            .map(|value| decode_single_json(value.as_bytes(), "--jsonargs"))
-            .collect::<Result<Vec<_>, RunError>>()?,
-    };
+    let positional = options
+        .positional_arguments
+        .iter()
+        .map(|argument| match argument.kind {
+            PositionalArgumentKind::String => Ok(Value::string(argument.value.as_str())),
+            PositionalArgumentKind::Json => {
+                decode_json_argument(argument.value.as_bytes(), "--jsonargs")
+            }
+        })
+        .collect::<Result<Vec<_>, RunError>>()?;
     let arguments = tq_core::Object::from_iter([
         (Arc::from("named"), Value::object(named)),
         (Arc::from("positional"), Value::array(positional)),
@@ -3070,7 +5796,9 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
             .into_iter()
             .map(|(name, value)| (Arc::from(name), Value::string(value)))
             .collect::<tq_core::Object>();
-        values.insert(Arc::from(AMBIENT_ENVIRONMENT), Value::object(environment));
+        let environment = Value::object(environment);
+        values.insert(Arc::from(AMBIENT_ENVIRONMENT), environment.clone());
+        values.insert(Arc::from("ENV"), environment);
     }
     values.insert(
         Arc::from(AMBIENT_PLATFORM),
@@ -3088,9 +5816,21 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
     values.insert(Arc::from(INPUT_FILENAME), Value::string(input_filename));
     values.insert(
         Arc::from(INPUT_LINE_NUMBER),
-        Value::Number(Number::parse("1").expect("one is an admitted number")),
+        Value::Number(
+            Number::parse(if options.null_input { "0" } else { "1" })
+                .expect("an admitted source line number"),
+        ),
     );
     Ok(values)
+}
+
+fn decode_json_argument(bytes: &[u8], option: &str) -> Result<Value, RunError> {
+    decode_single_json(bytes, option).map_err(|error| match error {
+        RunError::Input(FormatError::Parse { .. }) => RunError::Cli(CliError::Usage(format!(
+            "{option} requires one valid JSON value"
+        ))),
+        other => other,
+    })
 }
 
 fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
@@ -3113,9 +5853,10 @@ enum RemainingInputMessage {
 fn produce_remaining_inputs<R: Read>(
     options: &RunOptions,
     stdin: &mut R,
+    requests: &Receiver<()>,
     sender: &SyncSender<RemainingInputMessage>,
 ) {
-    let result = produce_remaining_inputs_inner(options, stdin, sender);
+    let result = produce_remaining_inputs_inner(options, stdin, requests, sender);
     let message = result.map_or_else(
         |error| RemainingInputMessage::Error(deferred_run_error(error)),
         |()| RemainingInputMessage::Done,
@@ -3126,20 +5867,10 @@ fn produce_remaining_inputs<R: Read>(
 fn produce_remaining_inputs_inner<R: Read>(
     options: &RunOptions,
     stdin: &mut R,
+    requests: &Receiver<()>,
     sender: &SyncSender<RemainingInputMessage>,
 ) -> Result<(), RunError> {
-    if options.null_input {
-        send_remaining(
-            sender,
-            tq_formats::Document {
-                value: Value::Null,
-                identity: "<null-input>".to_owned(),
-                format: options.input_format,
-                index: 0,
-            },
-        );
-        return Ok(());
-    }
+    let mut pending_request = false;
     let files = if options.files.is_empty() {
         vec![Path::new("-").to_owned()]
     } else {
@@ -3147,21 +5878,25 @@ fn produce_remaining_inputs_inner<R: Read>(
     };
     for path in files {
         if path == Path::new("-") {
-            produce_remaining_reader(
+            pending_request = produce_remaining_reader(
                 options,
-                options.input_format,
+                selected_input_format(options, &path),
                 &mut *stdin,
                 "<stdin>",
+                requests,
                 sender,
+                pending_request,
             )?;
         } else {
             let identity = path.display().to_string();
-            produce_remaining_reader(
+            pending_request = produce_remaining_reader(
                 options,
                 selected_input_format(options, &path),
                 open_path(&path)?,
                 &identity,
+                requests,
                 sender,
+                pending_request,
             )?;
         }
     }
@@ -3173,55 +5908,107 @@ fn produce_remaining_reader<R: Read>(
     requested: InputFormat,
     reader: R,
     identity: &str,
+    requests: &Receiver<()>,
     sender: &SyncSender<RemainingInputMessage>,
-) -> Result<(), RunError> {
+    pending_request: bool,
+) -> Result<bool, RunError> {
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
     if requested == InputFormat::Auto {
+        let pending_request = if pending_request {
+            true
+        } else {
+            if requests.recv().is_err() {
+                return Ok(false);
+            }
+            true
+        };
         let (report, replay) = probe_reader(reader, options.limits.lookahead_bytes)?;
         return produce_committed_remaining_reader(
             options,
             report.selected,
             replay,
             identity,
+            requests,
             sender,
+            pending_request,
         );
     }
-    produce_committed_remaining_reader(options, requested, reader, identity, sender)
+    produce_committed_remaining_reader(
+        options,
+        requested,
+        reader,
+        identity,
+        requests,
+        sender,
+        pending_request,
+    )
 }
 
 fn produce_committed_remaining_reader<R: Read>(
     options: &RunOptions,
-    format: InputFormat,
+    requested: InputFormat,
     reader: R,
     identity: &str,
+    requests: &Receiver<()>,
     sender: &SyncSender<RemainingInputMessage>,
-) -> Result<(), RunError> {
-    let mut source: Box<dyn DocumentSource> = match format {
-        InputFormat::Json => Box::new(JsonDocumentSource::new(
-            BufReader::with_capacity(INPUT_BUFFER_BYTES, reader),
-            identity,
-        )),
-        InputFormat::JsonLines => Box::new(JsonLinesDocumentSource::new(
-            BufReader::new(reader),
-            identity,
-            decode_options(options, format),
-        )),
-        InputFormat::Yaml | InputFormat::Json5 | InputFormat::Toon | InputFormat::ToonSequence => {
-            let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
-            Box::new(VecDocumentSource::new(decode_bytes(
-                &bytes,
-                identity,
-                decode_options(options, format),
-            )?))
+    mut pending_request: bool,
+) -> Result<bool, RunError> {
+    let format = requested;
+    let mut reader = Some(reader);
+    let mut source: Option<Box<dyn DocumentSource>> = None;
+    loop {
+        if !pending_request {
+            if requests.recv().is_err() {
+                return Ok(false);
+            }
+            pending_request = true;
         }
-        InputFormat::Auto => unreachable!("auto input is committed before decoding"),
-    };
-    while let Some(document) = source.next_document()? {
-        if !send_remaining(sender, document) {
-            break;
+        if source.is_none() {
+            let reader = reader.take().expect("remaining input reader initialized");
+            source = Some(match format {
+                InputFormat::Json => Box::new(JsonDocumentSource::with_options(
+                    BufReader::with_capacity(INPUT_BUFFER_BYTES, reader),
+                    identity,
+                    json_input_options(options),
+                )),
+                InputFormat::JsonLines => Box::new(JsonLinesDocumentSource::new(
+                    BufReader::new(reader),
+                    identity,
+                    decode_options(options, format),
+                )),
+                InputFormat::JsonSequence => Box::new(JsonSequenceDocumentSource::with_options(
+                    BufReader::new(reader),
+                    identity,
+                    json_input_options(options),
+                )),
+                InputFormat::Yaml
+                | InputFormat::Json5
+                | InputFormat::Toon
+                | InputFormat::ToonSequence => {
+                    let bytes = read_limited(reader, options.limits.input_bytes, identity)?;
+                    Box::new(VecDocumentSource::new(decode_bytes(
+                        &bytes,
+                        identity,
+                        decode_options(options, format),
+                    )?))
+                }
+                InputFormat::Auto => unreachable!("auto input is committed before decoding"),
+            });
+        }
+        match source
+            .as_mut()
+            .expect("remaining input source initialized")
+            .next_document()?
+        {
+            Some(document) => {
+                if !send_remaining(sender, document) {
+                    return Ok(false);
+                }
+                pending_request = false;
+            }
+            None => return Ok(pending_request),
         }
     }
-    Ok(())
 }
 
 fn send_remaining(
@@ -3232,7 +6019,7 @@ fn send_remaining(
         .send(RemainingInputMessage::Value(InputValue {
             value: document.value,
             identity: Arc::from(document.identity),
-            line_number: document.index.saturating_add(1),
+            line_number: document.line_number,
         }))
         .is_ok()
 }
@@ -3249,7 +6036,7 @@ fn pull_remaining_input(cursor: &InputCursor) -> Result<Option<Value>, RunError>
 
 fn deferred_run_error(error: RunError) -> VmError {
     match error {
-        RunError::Runtime(error) => error,
+        RunError::Runtime(error) | RunError::ReportedRuntime(error) => error,
         RunError::Resource(resource) => VmError::Resource { resource },
         RunError::Interrupted => VmError::Interrupted,
         error => VmError::Input {
@@ -3263,13 +6050,19 @@ enum LoadedInputs {
     Proxy(Vec<u8>),
 }
 
-fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInputs, RunError> {
+fn load_inputs<R: Read>(
+    options: &RunOptions,
+    stdin: &mut R,
+    recover_json_sequence: bool,
+    diagnostics: &mut Vec<String>,
+) -> Result<LoadedInputs, RunError> {
     if options.null_input {
         return Ok(LoadedInputs::Documents(vec![tq_formats::Document {
             value: Value::Null,
             identity: "<null-input>".to_owned(),
             format: InputFormat::Auto,
             index: 0,
+            line_number: 0,
         }]));
     }
     let files = if options.files.is_empty() {
@@ -3295,6 +6088,17 @@ fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInp
             raw_documents(&mut documents, identity, bytes, options.slurp)?;
         } else {
             let decode = decode_options(options, selected_input_format(options, &path));
+            let selected = decode.format;
+            if recover_json_sequence && selected == InputFormat::JsonSequence {
+                let (decoded, errors) =
+                    decode_json_sequence_recoverable(&bytes, &identity, options)?;
+                documents.extend(decoded);
+                diagnostics.extend(errors);
+                if options.proxy_on_error {
+                    raw_sources.push(bytes);
+                }
+                continue;
+            }
             match decode_bytes(&bytes, identity, decode) {
                 Ok(decoded) => documents.extend(decoded),
                 Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
@@ -3313,6 +6117,37 @@ fn load_inputs<R: Read>(options: &RunOptions, stdin: &mut R) -> Result<LoadedInp
         ))
     } else {
         Ok(LoadedInputs::Documents(documents))
+    }
+}
+
+fn decode_json_sequence_recoverable(
+    bytes: &[u8],
+    identity: &str,
+    options: &RunOptions,
+) -> Result<(Vec<tq_formats::Document>, Vec<String>), RunError> {
+    let mut source = JsonSequenceDocumentSource::with_options(
+        BufReader::new(bytes),
+        identity,
+        json_input_options(options),
+    );
+    let mut documents = Vec::new();
+    let mut diagnostics = Vec::new();
+    while let Some(record) = source.next_record()? {
+        match record {
+            Ok(document) => documents.push(document),
+            Err(error @ (FormatError::Resource(_) | FormatError::ResourceLine { .. })) => {
+                return Err(error.into());
+            }
+            Err(error) => diagnostics.push(error.to_string()),
+        }
+    }
+    Ok((documents, diagnostics))
+}
+
+fn json_input_options(options: &RunOptions) -> JsonInputOptions {
+    JsonInputOptions {
+        maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
     }
 }
 
@@ -3360,6 +6195,9 @@ fn format_from_path(path: &Path) -> Option<InputFormat> {
 }
 
 fn selected_input_format(options: &RunOptions, path: &Path) -> InputFormat {
+    if json_sequence_input_requested(options) {
+        return InputFormat::JsonSequence;
+    }
     if options.input_format == InputFormat::Auto && path != Path::new("-") {
         format_from_path(path).unwrap_or(InputFormat::Auto)
     } else {
@@ -3403,6 +6241,7 @@ fn raw_documents(
             identity,
             format: InputFormat::Auto,
             index: 0,
+            line_number: 1,
         });
         return Ok(());
     }
@@ -3412,6 +6251,7 @@ fn raw_documents(
             identity: identity.clone(),
             format: InputFormat::Auto,
             index: index as u64,
+            line_number: index as u64 + 1,
         });
     }
     Ok(())
@@ -3514,6 +6354,14 @@ fn write_report(
                 "parallel_decode_in_flight_bytes": retention.decode_in_flight_bytes_high_water,
                 "parallel_decode_reordered_batches": retention.decode_reordered_batches_high_water,
                 "parallel_decode_active": retention.decode_batches > 0,
+                "runtime_spool_fixed_io_bytes": retention.runtime_spool_fixed_io_bytes_high_water,
+                "root_staging": {
+                    "encoded_bytes_high_water": retention.root_staging_encoded_bytes_high_water,
+                    "memory_bytes_high_water": retention.root_staging_memory_bytes_high_water,
+                    "index_bytes_high_water": retention.root_staging_index_bytes_high_water,
+                    "spool_bytes_written": retention.root_staging_spool_bytes_written_high_water,
+                    "fixed_io_bytes_high_water": retention.runtime_spool_fixed_io_bytes_high_water,
+                },
                 "root_materialized": !matches!(plan, PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking | PlanKind::Transcode),
             },
             "resource_outcome": resource_outcome,
@@ -3668,11 +6516,21 @@ mod tests {
     use std::{
         fs,
         io::{self, Cursor, Read, Write},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            mpsc::sync_channel,
+        },
+        thread,
+        time::Duration,
     };
 
-    use super::run_with_io;
+    use super::{
+        RunTestCapture, RunTestCaptureSnapshot, prune_object_fields_in_place,
+        run_test_output_matches, run_with_io,
+    };
     use crate::{Command, ExecutionOverride, ExitStatus, parse_args};
-    use tq_core::parallel_worker_count;
+    use tq_core::{PathComponent, Value};
 
     struct NoRead;
 
@@ -3694,6 +6552,15 @@ mod tests {
         (status, stdout, stderr)
     }
 
+    fn assert_single_runtime_diagnostic(stderr: &[u8]) {
+        let stderr = std::str::from_utf8(stderr).expect("runtime diagnostic is UTF-8");
+        assert!(stderr.ends_with('\n'));
+        let mut lines = stderr.lines();
+        let diagnostic = lines.next().expect("runtime diagnostic is non-empty");
+        assert!(lines.next().is_none(), "expected one diagnostic line");
+        assert!(diagnostic.starts_with("tq: runtime error:"));
+    }
+
     fn execute_with_override(
         arguments: &[&str],
         input: &[u8],
@@ -3709,6 +6576,171 @@ mod tests {
         let mut stderr = Vec::new();
         let status = run_with_io(command, &mut stdin, &mut stdout, &mut stderr);
         (status, stdout, stderr)
+    }
+
+    #[test]
+    fn run_test_matcher_requires_typed_capture() {
+        let expected = vec!["null".to_owned()];
+        assert!(!run_test_output_matches(b"null\n", &expected, None));
+    }
+
+    #[test]
+    fn run_test_matcher_rejects_overflowed_capture() {
+        let expected = vec!["null".to_owned()];
+        let capture = RunTestCaptureSnapshot {
+            values: vec![Value::Null],
+            overflowed: true,
+        };
+        assert!(!run_test_output_matches(
+            b"null\n",
+            &expected,
+            Some(&capture)
+        ));
+    }
+
+    #[test]
+    fn run_test_capture_enforces_result_count_bound() {
+        let mut capture = RunTestCapture::new(0);
+        capture.record(&Value::Null);
+        capture.record(&Value::Null);
+        assert!(capture.overflowed);
+        assert_eq!(capture.values, vec![Value::Null]);
+    }
+
+    #[test]
+    fn run_test_matcher_accepts_a_captured_compact_value() {
+        let expected = vec!["null".to_owned()];
+        let capture = RunTestCaptureSnapshot {
+            values: vec![Value::Null],
+            overflowed: false,
+        };
+        assert!(run_test_output_matches(
+            b"null\n",
+            &expected,
+            Some(&capture)
+        ));
+    }
+
+    #[test]
+    fn object_capture_pruning_is_in_place_and_keeps_required_order() {
+        let mut properties = tq_core::Object::new();
+        properties.insert("mag".into(), Value::string("3"));
+        properties.insert("unused".into(), Value::string("drop"));
+        let mut object = tq_core::Object::new();
+        object.insert("id".into(), Value::string("feature"));
+        object.insert("properties".into(), Value::object(properties));
+        object.insert("unused".into(), Value::string("drop"));
+        let mut value = Value::object(object);
+        let root_ptr = match &value {
+            Value::Object(values) => Arc::as_ptr(values),
+            _ => unreachable!("test value is an object"),
+        };
+        let paths = vec![
+            vec![
+                PathComponent::Key("properties".into()),
+                PathComponent::Key("mag".into()),
+            ],
+            vec![PathComponent::Key("id".into())],
+        ];
+
+        prune_object_fields_in_place(&mut value, &paths);
+
+        let Value::Object(values) = &value else {
+            unreachable!("pruned value is an object")
+        };
+        assert_eq!(Arc::as_ptr(values), root_ptr);
+        assert_eq!(
+            values.keys().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["id", "properties"]
+        );
+        let Value::Object(properties) = values.get("properties").expect("properties retained")
+        else {
+            unreachable!("properties remains an object")
+        };
+        assert_eq!(
+            properties.keys().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["mag"]
+        );
+
+        let shared = value.clone();
+        let mut shared_copy = value;
+        prune_object_fields_in_place(&mut shared_copy, &[vec![PathComponent::Key("id".into())]]);
+        let Value::Object(values) = &shared_copy else {
+            unreachable!("shared value is an object")
+        };
+        assert!(values.contains_key("properties"));
+        assert!(shared.shares_node_with(&shared_copy));
+    }
+
+    #[test]
+    fn object_capture_pruning_keeps_sibling_paths_separate() {
+        let mut left = tq_core::Object::new();
+        left.insert("x".into(), Value::string("left-x"));
+        left.insert("y".into(), Value::string("left-y"));
+        let mut right = tq_core::Object::new();
+        right.insert("x".into(), Value::string("right-x"));
+        right.insert("y".into(), Value::string("right-y"));
+        let mut object = tq_core::Object::new();
+        object.insert("a".into(), Value::object(left));
+        object.insert("b".into(), Value::object(right));
+        let mut value = Value::object(object);
+
+        prune_object_fields_in_place(
+            &mut value,
+            &[
+                vec![
+                    PathComponent::Key("a".into()),
+                    PathComponent::Key("x".into()),
+                ],
+                vec![
+                    PathComponent::Key("b".into()),
+                    PathComponent::Key("y".into()),
+                ],
+            ],
+        );
+
+        let Value::Object(values) = &value else {
+            unreachable!("pruned value is an object")
+        };
+        let Value::Object(left) = values.get("a").expect("left branch retained") else {
+            unreachable!("left branch remains an object")
+        };
+        let Value::Object(right) = values.get("b").expect("right branch retained") else {
+            unreachable!("right branch remains an object")
+        };
+        assert_eq!(left.keys().map(AsRef::as_ref).collect::<Vec<&str>>(), ["x"]);
+        assert_eq!(
+            right.keys().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["y"]
+        );
+
+        let mut complete_left = tq_core::Object::new();
+        complete_left.insert("x".into(), Value::string("left-x"));
+        complete_left.insert("y".into(), Value::string("left-y"));
+        let mut complete_root = tq_core::Object::new();
+        complete_root.insert("a".into(), Value::object(complete_left));
+        complete_root.insert("b".into(), Value::string("remove"));
+        let mut complete = Value::object(complete_root);
+        prune_object_fields_in_place(
+            &mut complete,
+            &[
+                vec![PathComponent::Key("a".into())],
+                vec![
+                    PathComponent::Key("a".into()),
+                    PathComponent::Key("x".into()),
+                ],
+            ],
+        );
+        let Value::Object(values) = complete else {
+            unreachable!("terminal-path value is an object")
+        };
+        let Value::Object(left) = values.get("a").expect("terminal branch retained") else {
+            unreachable!("terminal branch remains an object")
+        };
+        assert_eq!(
+            left.keys().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["x", "y"]
+        );
     }
 
     #[test]
@@ -3805,13 +6837,13 @@ mod tests {
     }
 
     #[test]
-    fn unexecutable_user_function_closure_fails_before_input() {
+    fn unknown_filter_fails_before_input() {
         let command = parse_args([
             "--input-format",
             "json",
             "--output-format",
             "json",
-            "def f: .; .[0:1] | f",
+            "def f: .; .[0:1] | unknown_filter",
         ])
         .unwrap();
         let mut input = NoRead;
@@ -3819,20 +6851,89 @@ mod tests {
         let mut error = Vec::new();
         let failure = run_with_io(command, &mut input, &mut output, &mut error).unwrap_err();
         assert_eq!(failure.status(), ExitStatus::Compile);
-        assert!(failure.to_string().contains("TQ-CAP-USER-FUNCTIONS"));
+        assert!(failure.to_string().contains("TQ-RESOLVE-BUILTIN-001"));
+        assert!(
+            failure
+                .to_string()
+                .contains("unknown filter unknown_filter/0")
+        );
         assert!(output.is_empty());
     }
 
     #[test]
+    fn executable_user_function_closure_runs_after_slice() {
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "--compact-output",
+                "def f: .; .[0:1] | f",
+            ],
+            b"[1,2]\n",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[1]\n");
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn generator_bound_report_input_preserves_cli_assignment_path() {
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "--compact-output",
+                r". as $approvals
+                | input as $report
+                | $approvals
+                | map(
+                    . as $approval
+                    | ($report.cases[] | select(.id == $approval.case_id)) as $case
+                    | .evidence = {x: 1}
+                  )",
+            ],
+            b"[{\"case_id\":\"x\"}]\n{\"cases\":[{\"id\":\"x\"}]}\n",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[{\"case_id\":\"x\",\"evidence\":{\"x\":1}}]\n");
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn generator_bound_report_input_preserves_cli_slice_and_filter_bindings() {
+        let (status, output, error) = execute(
+            &[
+                "--input-format",
+                "json",
+                "--output-format",
+                "json",
+                "--compact-output",
+                r". as $approvals
+                   | input as $report
+                   | def find(predicate):
+                       $report.cases[0:1][] | select(predicate)
+                     ;
+                   $approvals
+                   | map(
+                       . as $approval
+                       | find(.id == $approval.case_id) as $case
+                       | .evidence = $case.value
+                     )",
+            ],
+            b"[{\"case_id\":\"x\"}]\n{\"cases\":[{\"id\":\"x\",\"value\":1}]}\n",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[{\"case_id\":\"x\",\"evidence\":1}]\n");
+        assert!(error.is_empty());
+    }
+
+    #[test]
     fn internal_override_forces_document_plan_without_changing_output() {
-        let arguments = [
-            "--input-format",
-            "json",
-            "--output-format",
-            "toon",
-            "--explain-json",
-            ".[]",
-        ];
+        let arguments = ["--seq", "--output-format", "toon", "--explain-json", ".[]"];
         let (_, automatic_output, automatic_explain) = execute(&arguments, b"[1,2]");
 
         let mut command = parse_args(arguments).unwrap();
@@ -3870,7 +6971,7 @@ mod tests {
         let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
         assert_eq!(explain["execution"]["plan"], "transcode");
         assert_eq!(explain["execution"]["duplicate_policy"], "reject");
-        assert_eq!(explain["execution"]["commitment_mode"], "direct-sequence");
+        assert_eq!(explain["execution"]["commitment_mode"], "direct-values");
     }
 
     #[test]
@@ -3881,8 +6982,7 @@ mod tests {
         fs::write(&first, b"1").unwrap();
         fs::write(&second, b"2").unwrap();
         let command = parse_args([
-            "--input-format",
-            "json",
+            "--seq",
             ".",
             first.to_str().unwrap(),
             second.to_str().unwrap(),
@@ -3974,9 +7074,17 @@ mod tests {
         let report: serde_json::Value = serde_json::from_slice(&fs::read(report).unwrap()).unwrap();
         assert_eq!(report["execution"]["resource_outcome"], "resource-limit");
 
-        let command =
-            parse_args(["--input-format", "json", "--max-output-bytes", "1", "."]).unwrap();
-        let mut input = b"1".as_slice();
+        let command = parse_args([
+            "--input-format",
+            "json",
+            "--output-format",
+            "json",
+            "--max-output-bytes",
+            "1",
+            ".",
+        ])
+        .unwrap();
+        let mut input = b"10".as_slice();
         let mut output = Vec::new();
         let mut error = Vec::new();
         assert_eq!(
@@ -4046,6 +7154,20 @@ mod tests {
         assert_eq!(output, b"\"object\"\n");
         assert_eq!(error, [] as [u8; 0]);
 
+        let (allowed_variable, output, error) = execute(
+            &[
+                "--allow-environment",
+                "--output-format",
+                "json",
+                "-c",
+                "$ENV | type",
+            ],
+            b"null\n",
+        );
+        assert_eq!(allowed_variable.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"\"object\"\n");
+        assert_eq!(error, [] as [u8; 0]);
+
         let (platform, output, error) = execute(
             &[
                 "--allow-platform",
@@ -4059,6 +7181,55 @@ mod tests {
         assert_eq!(platform.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[\"<stdin>\",1,\"number\"]\n");
         assert_eq!(error, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn embedded_run_tests_keeps_ambient_policy_confined() {
+        let command = Command::RunTests(None);
+        let mut input = b"$ENV.TQ_EMBEDDED_RUN_TEST_SENTINEL\nnull\n\"present\"\n\n".as_slice();
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        let status = run_with_io(command, &mut input, &mut output, &mut error).unwrap();
+        assert_eq!(status, ExitStatus::FalseOrNull);
+        assert!(String::from_utf8_lossy(&output).contains("0 of 1 tests passed"));
+        assert!(String::from_utf8_lossy(&output).contains("Expected \"present\""));
+        assert!(error.is_empty());
+    }
+
+    #[test]
+    fn denied_filesystem_cannot_use_implicit_module_or_startup_roots() {
+        for policy in [
+            crate::CapabilityPolicy {
+                filesystem: false,
+                ..crate::CapabilityPolicy::default()
+            },
+            crate::CapabilityPolicy {
+                filesystem: false,
+                environment: false,
+                terminal: false,
+                platform: false,
+            },
+        ] {
+            let mut command = parse_args([
+                "-n",
+                "--output-format",
+                "json",
+                r#"import "basic" as b; b::value"#,
+            ])
+            .expect("parse implicit module policy query");
+            let Command::Run(options) = &mut command else {
+                panic!("expected run command")
+            };
+            options.capability_policy = policy;
+            let mut input = Cursor::new(Vec::<u8>::new());
+            let mut output = Vec::new();
+            let mut error = Vec::new();
+            let result = run_with_io(command, &mut input, &mut output, &mut error)
+                .expect_err("implicit module roots must be denied");
+            assert!(result.to_string().contains("TQ-MODULE-ROOT-001"));
+            assert!(output.is_empty());
+            assert!(error.is_empty());
+        }
     }
 
     #[derive(Default)]
@@ -4079,6 +7250,36 @@ mod tests {
         }
     }
 
+    struct FailingFlushWriter {
+        bytes: Vec<u8>,
+    }
+
+    impl Write for FailingFlushWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("injected flush failure"))
+        }
+    }
+
+    struct OpenReader {
+        entered: Arc<AtomicBool>,
+        release: Arc<AtomicBool>,
+    }
+
+    impl Read for OpenReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            self.entered.store(true, Ordering::Release);
+            while !self.release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Ok(0)
+        }
+    }
+
     struct CountingReader {
         input: Cursor<Vec<u8>>,
         reads: usize,
@@ -4092,16 +7293,16 @@ mod tests {
     }
 
     #[test]
-    fn identity_uses_toon_sequence_and_keeps_stderr_clean() {
+    fn identity_uses_lf_terminated_toon_and_keeps_stderr_clean() {
         let (status, stdout, stderr) = execute(&["."], b"name: Ada");
         assert_eq!(status.unwrap(), ExitStatus::Success);
-        assert_eq!(stdout, b"\x1ename: Ada\n");
+        assert_eq!(stdout, b"name: Ada\n");
         assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
     fn transcode_flushes_only_after_the_sequence_record_is_complete() {
-        let command = parse_args(["--input-format", "json", "."]).unwrap();
+        let command = parse_args(["--seq", "."]).unwrap();
         let mut input = br#"{"name":"Ada"}"#.as_slice();
         let mut output = FlushWriter::default();
         let mut error = Vec::new();
@@ -4376,7 +7577,7 @@ mod tests {
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(stdout, b"x");
 
-        let (status, _, _) = execute(&["-n", "-e", "empty"], b"");
+        let (status, _, _) = execute(&["-n", "--output-format", "json", "-e", "empty"], b"");
         assert_eq!(status.unwrap(), ExitStatus::NoResult);
     }
 
@@ -4384,7 +7585,7 @@ mod tests {
     fn external_values_compile_and_execute() {
         let (status, stdout, _) = execute(&["-n", "--argjson", "n", "42", "$n"], b"");
         assert_eq!(status.unwrap(), ExitStatus::Success);
-        assert_eq!(stdout, b"\x1e42\n");
+        assert_eq!(stdout, b"42\n");
     }
 
     #[test]
@@ -4404,6 +7605,40 @@ mod tests {
     }
 
     #[test]
+    fn unbuffered_effect_flush_failure_cancels_before_open_input_read() {
+        let command = parse_args(["-n", "--unbuffered", "-c", "debug, inputs"]).unwrap();
+        let entered = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let reader = OpenReader {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        };
+        let (done_sender, done_receiver) = sync_channel(1);
+        let worker = thread::spawn(move || {
+            let mut stdin = reader;
+            let mut stdout = Vec::new();
+            let mut stderr = FailingFlushWriter { bytes: Vec::new() };
+            let failed = run_with_io(command, &mut stdin, &mut stdout, &mut stderr).is_err();
+            done_sender
+                .send(failed)
+                .expect("test receiver remains alive");
+        });
+
+        let Ok(failed) = done_receiver.recv_timeout(Duration::from_secs(2)) else {
+            release.store(true, Ordering::Release);
+            let _ = worker.join();
+            panic!("flush failure did not cancel the open-input worker")
+        };
+        assert!(failed);
+        assert!(
+            !entered.load(Ordering::Acquire),
+            "worker read open input before flush failure was acknowledged"
+        );
+        release.store(true, Ordering::Release);
+        worker.join().expect("flush-failure worker should exit");
+    }
+
+    #[test]
     fn help_version_and_compatibility_write_only_stdout() {
         for command in [Command::Help, Command::Version, Command::Compatibility] {
             let mut input = &b""[..];
@@ -4420,28 +7655,165 @@ mod tests {
 
     #[test]
     fn prior_framed_results_survive_a_later_runtime_error() {
-        let (status, stdout, stderr) = execute(&["-n", "1, error(\"later\")"], b"");
+        let (status, stdout, stderr) = execute(&["-n", "--seq", "1, error(\"later\")"], b"");
         assert!(matches!(status, Err(super::RunError::Runtime(_))));
         assert_eq!(stdout, b"\x1e1\n");
         assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
+    fn document_roots_continue_after_recoverable_runtime_errors() {
+        let (status, stdout, stderr) = execute_with_override(
+            &["-ijson", "-ojson", "-c", ". + 1"],
+            b"1\n\"x\"\n2\n",
+            ExecutionOverride::Document,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"2\n3\n");
+        assert_single_runtime_diagnostic(&stderr);
+    }
+
+    #[test]
+    fn raw_input_lines_continue_after_recoverable_runtime_errors() {
+        let (status, stdout, stderr) = execute_with_override(
+            &[
+                "-R",
+                "-ojson",
+                "-c",
+                "if . == \"x\" then error(\"bad\") else . end",
+            ],
+            b"a\nx\nb\n",
+            ExecutionOverride::Document,
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(stdout, b"\"a\"\n\"b\"\n");
+        assert_eq!(stderr, b"tq: runtime error: bad\n");
+    }
+
+    #[test]
+    fn document_runtime_diagnostics_preserve_effect_order_and_final_status() {
+        let (status, stdout, stderr) = execute_with_override(
+            [
+                "-ijson",
+                "-ojson",
+                "-c",
+                "if . == 1 then error(\"first\") elif . == 2 then debug(\"middle\") else error(\"last\") end",
+            ]
+            .as_slice(),
+            b"1\n2\n3\n",
+            ExecutionOverride::Document,
+        );
+        let error = status.unwrap_err();
+        assert_eq!(error.status(), ExitStatus::Runtime);
+        assert!(matches!(error, super::RunError::ReportedRuntime(_)));
+        assert_eq!(stdout, b"2\n");
+        assert_eq!(
+            stderr,
+            b"tq: runtime error: first\n[\"DEBUG:\",\"middle\"]\ntq: runtime error: last\n"
+        );
+    }
+
+    #[test]
+    fn document_runtime_diagnostic_precedes_a_later_parse_error() {
+        let (status, stdout, stderr) = execute_with_override(
+            &["-ijson", "-ojson", "-c", ". + 1"],
+            b"\"x\"\n{\n",
+            ExecutionOverride::Document,
+        );
+        let error = status.unwrap_err();
+        assert_eq!(error.status(), ExitStatus::Input);
+        assert!(matches!(error, super::RunError::Input(_)));
+        assert!(stdout.is_empty());
+        let stderr = String::from_utf8(stderr).unwrap();
+        assert_eq!(stderr.matches("runtime error:").count(), 1);
+        assert!(stderr.starts_with("tq: runtime error:"));
+        assert_eq!(stderr.lines().count(), 1);
+    }
+
+    #[test]
+    fn single_document_invocations_keep_embedded_runtime_errors() {
+        let (status, stdout, stderr) = execute_with_override(
+            &["-n", "-ojson", "-c", "error(\"single\")"],
+            b"",
+            ExecutionOverride::Document,
+        );
+        let error = status.unwrap_err();
+        assert_eq!(error.status(), ExitStatus::Runtime);
+        assert!(matches!(error, super::RunError::Runtime(_)));
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+
+        let (status, stdout, stderr) = execute_with_override(
+            &["--slurp", "-ijson", "-ojson", "-c", ". + 1"],
+            b"1\n2\n",
+            ExecutionOverride::Document,
+        );
+        let error = status.unwrap_err();
+        assert_eq!(error.status(), ExitStatus::Runtime);
+        assert!(matches!(error, super::RunError::Runtime(_)));
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+
+        let (status, stdout, stderr) = execute_with_override(
+            &["-R", "--slurp", "-ojson", "-c", "error(\"single\")"],
+            b"a\nb\n",
+            ExecutionOverride::Document,
+        );
+        let error = status.unwrap_err();
+        assert_eq!(error.status(), ExitStatus::Runtime);
+        assert!(matches!(error, super::RunError::Runtime(_)));
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn document_empty_after_runtime_error_obeys_exit_status_mode() {
+        let arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "if type == \"string\" then . + 1 else empty end",
+        ];
+        let without_e =
+            execute_with_override(&arguments, b"\"x\"\n2\n", ExecutionOverride::Document);
+        assert_eq!(without_e.0.unwrap(), ExitStatus::Success);
+        assert!(without_e.1.is_empty());
+        assert_single_runtime_diagnostic(&without_e.2);
+
+        let with_e_arguments = [
+            "-ijson",
+            "-ojson",
+            "-c",
+            "-e",
+            "if type == \"string\" then . + 1 else empty end",
+        ];
+        let with_e = execute_with_override(
+            &with_e_arguments,
+            b"\"x\"\n2\n",
+            ExecutionOverride::Document,
+        );
+        assert_eq!(with_e.0.unwrap(), ExitStatus::NoResult);
+        assert!(with_e.1.is_empty());
+        assert_single_runtime_diagnostic(&with_e.2);
+    }
+
+    #[test]
     fn result_and_output_limits_preserve_complete_prior_frames() {
-        let (status, stdout, _) = execute(&["-n", "--max-results", "1", "1, 2"], b"");
+        let (status, stdout, _) = execute(&["-n", "--seq", "--max-results", "1", "1, 2"], b"");
         assert!(matches!(
             status,
             Err(super::RunError::Resource("result-count"))
         ));
         assert_eq!(stdout, b"\x1e1\n");
 
-        let (status, stdout, _) = execute(&["-n", "--max-output-bytes", "3", "1, 2"], b"");
+        let (status, stdout, _) = execute(&["-n", "--seq", "--max-output-bytes", "3", "1, 2"], b"");
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
         assert_eq!(stdout, b"\x1e1\n");
 
         let (status, stdout, _) = execute(
             &[
                 "-n",
+                "--seq",
                 "--max-results",
                 "1",
                 "foreach (1,2) as $x (0; . + $x; .)",
@@ -4457,6 +7829,7 @@ mod tests {
         let (status, stdout, _) = execute(
             &[
                 "-n",
+                "--seq",
                 "--max-output-bytes",
                 "3",
                 "foreach (1,2) as $x (0; . + $x; .)",
@@ -4466,10 +7839,7 @@ mod tests {
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
         assert_eq!(stdout, b"\x1e1\n");
 
-        let (status, stdout, _) = execute(
-            &["--input-format", "json", "--max-results", "2", ".."],
-            b"[1,2]",
-        );
+        let (status, stdout, _) = execute(&["--seq", "--max-results", "2", ".."], b"[1,2]");
         assert!(matches!(
             status,
             Err(super::RunError::Resource("result-count"))
@@ -4477,7 +7847,13 @@ mod tests {
         assert_eq!(stdout, b"\x1e[2]: 1,2\n\x1e1\n");
 
         let (status, stdout, _) = execute(
-            &["-n", "--max-output-bytes", "5", r#"1, "abcdef=\(.)""#],
+            &[
+                "-n",
+                "--seq",
+                "--max-output-bytes",
+                "5",
+                r#"1, "abcdef=\(.)""#,
+            ],
             b"",
         );
         assert_eq!(status.unwrap_err().status(), ExitStatus::Resource);
@@ -4497,7 +7873,15 @@ mod tests {
     #[test]
     fn explain_json_publishes_plan_detection_and_limits() {
         let (status, stdout, stderr) = execute(
-            &["--input-format", "json", "--stream", "--explain-json", "."],
+            &[
+                "--input-format",
+                "json",
+                "--stream",
+                "--output-format",
+                "json",
+                "--explain-json",
+                ".",
+            ],
             b"[1]",
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
@@ -4650,9 +8034,10 @@ mod tests {
             ],
             br#"{"items":[{"x":1},2,{"x":3}]}"#,
         );
-        assert!(matches!(status, Err(super::RunError::Runtime(_))));
+        let error = status.expect_err("the second item fails");
+        assert!(matches!(error, super::RunError::ReportedRuntime(_)));
         assert_eq!(stdout, b"1\n");
-        assert_eq!(stderr, [] as [u8; 0]);
+        assert_eq!(String::from_utf8(stderr).unwrap(), format!("tq: {error}\n"));
     }
 
     #[test]
@@ -4906,7 +8291,7 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_vm_step_limit_is_shared_across_document_suffixes() {
+    fn hybrid_vm_step_limit_is_per_root_and_shared_within_root() {
         let arguments = [
             "-ijsonl",
             "-ojsonl",
@@ -4917,10 +8302,18 @@ mod tests {
         let input = br#"{"items":[{"value":2},{"value":1}]}
 {"items":[{"value":4},{"value":3}]}
 "#;
+        let one_root = execute_with_override(
+            &arguments,
+            br#"{"items":[{"value":2},{"value":1}]}"#,
+            ExecutionOverride::Automatic,
+        );
+        assert_eq!(one_root.0.unwrap(), ExitStatus::Success);
+        assert_eq!(one_root.1, b"[1,2]\n");
+
         let hybrid = execute_with_override(&arguments, input, ExecutionOverride::Automatic);
 
-        assert_eq!(hybrid.0.unwrap_err().status(), ExitStatus::Resource);
-        assert_eq!(hybrid.1, b"[1,2]\n");
+        assert_eq!(hybrid.0.unwrap(), ExitStatus::Success);
+        assert_eq!(hybrid.1, b"[1,2]\n[3,4]\n");
     }
 
     #[test]
@@ -4965,7 +8358,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_static_prefix_is_parallel_eligible_and_dynamic_dependency_is_explained() {
+    fn nested_static_prefix_explains_root_transactional_serialization() {
         let (status, output, explain) = execute(
             &[
                 "-ijson",
@@ -4983,14 +8376,12 @@ mod tests {
         let explain: serde_json::Value = serde_json::from_slice(&explain).unwrap();
         assert_eq!(
             explain["execution"]["parallel_selected_decode"]["eligible"],
-            parallel_worker_count() > 1
+            false
         );
-        if parallel_worker_count() > 1 {
-            assert_eq!(
-                explain["execution"]["parallel_selected_decode"]["reason"],
-                "static-array-prefix"
-            );
-        }
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["reason"],
+            "root-lifecycle-requires-serial-commit"
+        );
 
         let (status, _, explain) = execute(
             &[
@@ -5043,7 +8434,11 @@ mod tests {
         assert_eq!(explain["execution"]["plan"], "hybrid-streaming-blocking");
         assert_eq!(
             explain["execution"]["parallel_selected_decode"]["eligible"],
-            parallel_worker_count() > 1
+            false
+        );
+        assert_eq!(
+            explain["execution"]["parallel_selected_decode"]["reason"],
+            "root-lifecycle-requires-serial-commit"
         );
         let report: serde_json::Value =
             serde_json::from_slice(&fs::read(report_path).unwrap()).unwrap();
@@ -5075,7 +8470,7 @@ mod tests {
         assert_eq!(report["execution"]["resource_outcome"], "success");
         assert_eq!(
             report["execution"]["retention_high_water"]["parallel_decode_active"],
-            parallel_worker_count() > 1
+            false
         );
 
         let (status, _, explain) = execute(
@@ -5136,5 +8531,283 @@ mod tests {
                 .as_u64()
                 .is_some_and(|count| count > 0)
         );
+    }
+
+    #[test]
+    fn run_tests_self_checks_match_jq_state_contract() {
+        assert!(super::run_tests_self_checks());
+    }
+
+    #[test]
+    fn run_test_compile_expectations_require_all_diagnostic_lines() {
+        let (cases, malformed) =
+            super::parse_run_test_cases("%%FAIL\nfoo\nfirst diagnostic\nsecond diagnostic\n\n");
+        assert_eq!(malformed, 0);
+        assert_eq!(cases.len(), 1);
+        assert!(super::compile_diagnostic_matches(
+            "first diagnostic\nsecond diagnostic\n",
+            None,
+            &cases[0].expected,
+            "foo"
+        ));
+        assert!(!super::compile_diagnostic_matches(
+            "first diagnostic\n",
+            None,
+            &cases[0].expected,
+            "foo"
+        ));
+        assert!(!super::compile_diagnostic_matches(
+            "prefix first diagnostic\nsecond diagnostic\n",
+            None,
+            &cases[0].expected,
+            "foo"
+        ));
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the jq diagnostic oracle matrix keeps each expected source/caret fixture explicit"
+    )]
+    #[test]
+    fn jq_compile_expectations_render_structured_tq_diagnostics() {
+        for (filter, diagnostic, expected) in [
+            (
+                "$missing",
+                "query compilation failed: TQ-RESOLVE-VARIABLE-001: unknown variable $missing",
+                "jq: error: $missing is not defined at <top-level>, line 1, column 1:\n    $missing\n    ^^^^^^^^",
+            ),
+            (
+                "1 | foo(1)",
+                "query compilation failed: TQ-RESOLVE-BUILTIN-001: unknown filter foo/1",
+                "jq: error: foo/1 is not defined at <top-level>, line 1, column 5:\n    1 | foo(1)\n        ^^^",
+            ),
+            (
+                "1 +",
+                "query compilation failed: TQ-PARSE-EXPRESSION-001: expected filter expression",
+                "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 3:\n    1 +\n      ^",
+            ),
+        ] {
+            let expected = expected.lines().map(str::to_owned).collect::<Vec<_>>();
+            assert!(
+                super::compile_diagnostic_matches(diagnostic, None, &expected, filter),
+                "{filter:?}: {expected:?}"
+            );
+        }
+        for (filter, expected) in [
+            (
+                "]",
+                "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    ]\n    ^",
+            ),
+            (
+                ";",
+                "jq: error: syntax error, unexpected ';', expecting end of file at <top-level>, line 1, column 1:\n    ;\n    ^",
+            ),
+            (
+                "1 + ]",
+                "jq: error: syntax error, unexpected INVALID_CHARACTER at <top-level>, line 1, column 5:\n    1 + ]\n        ^",
+            ),
+            (
+                "1 + ;",
+                "jq: error: syntax error, unexpected ';' at <top-level>, line 1, column 5:\n    1 + ;\n        ^",
+            ),
+            (
+                "{x:}",
+                "jq: error: syntax error, unexpected '}' at <top-level>, line 1, column 4:\n    {x:}\n       ^",
+            ),
+        ] {
+            let diagnostic = super::parse_bytes("<query>", filter.as_bytes()).unwrap_err();
+            let expected = expected.lines().map(str::to_owned).collect::<Vec<_>>();
+            let actual = format!("query compilation failed: {diagnostic}");
+            assert!(
+                super::compile_diagnostic_matches(
+                    &actual,
+                    Some(diagnostic.as_ref()),
+                    &expected,
+                    filter,
+                ),
+                "{filter:?}: {expected:?}"
+            );
+        }
+        for (filter, expected) in [
+            (
+                "[1",
+                "jq: error: syntax error, unexpected end of file, expecting '|' or ',' or ']' at <top-level>, line 1, column 2:\n    [1\n     ^",
+            ),
+            (
+                "{x:1",
+                "jq: error: syntax error, unexpected end of file, expecting '}' at <top-level>, line 1, column 4:\n    {x:1\n       ^",
+            ),
+            (
+                "(1",
+                "jq: error: syntax error, unexpected end of file, expecting '|' or ',' or ')' at <top-level>, line 1, column 2:\n    (1\n     ^",
+            ),
+            (
+                "foo(1",
+                "jq: error: syntax error, unexpected end of file, expecting ';' or ')' at <top-level>, line 1, column 5:\n    foo(1\n        ^",
+            ),
+            (
+                "{",
+                "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    {\n    ^",
+            ),
+        ] {
+            let diagnostic = super::parse_bytes("<query>", filter.as_bytes()).unwrap_err();
+            let expected = expected.lines().map(str::to_owned).collect::<Vec<_>>();
+            let actual = format!("query compilation failed: {diagnostic}");
+            assert!(
+                super::compile_diagnostic_matches(
+                    &actual,
+                    Some(diagnostic.as_ref()),
+                    &expected,
+                    filter,
+                ),
+                "{filter:?}: {expected:?}"
+            );
+        }
+        for (filter, expected) in [
+            (
+                "if true then 1",
+                "jq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if true then 1\n    ^^^^^^^^^^^^^^",
+            ),
+            (
+                "\"é",
+                "jq: error: syntax error, unexpected end of file, expecting QQSTRING_TEXT or QQSTRING_INTERP_START or QQSTRING_END at <top-level>, line 1, column 2:\n    \"é\n     ^^",
+            ),
+        ] {
+            let diagnostic = super::parse_bytes("<query>", filter.as_bytes()).unwrap_err();
+            let expected = expected.lines().map(str::to_owned).collect::<Vec<_>>();
+            let actual = format!("query compilation failed: {diagnostic}");
+            assert!(
+                super::compile_diagnostic_matches(
+                    &actual,
+                    Some(diagnostic.as_ref()),
+                    &expected,
+                    filter,
+                ),
+                "{filter:?}: {expected:?}"
+            );
+        }
+        for (filter, expected) in [
+            (
+                "if true",
+                "jq: error: syntax error, unexpected end of file, expecting then or '|' or ',' at <top-level>, line 1, column 4:\n    if true\n       ^^^^",
+            ),
+            (
+                "if true then",
+                "jq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if true then\n    ^^^^^^^^^^^^",
+            ),
+            (
+                "if true then 1 else",
+                "jq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if true then 1 else\n    ^^^^^^^^^^^^^^^^^^^",
+            ),
+            (
+                "if",
+                "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    if\n    ^^",
+            ),
+            (
+                "if true elif",
+                "jq: error: syntax error, unexpected elif, expecting then or '|' or ',' at <top-level>, line 1, column 9:\n    if true elif\n            ^^^^",
+            ),
+            (
+                "try",
+                "jq: error: syntax error, unexpected end of file at <top-level>, line 1, column 1:\n    try\n    ^^^",
+            ),
+            (
+                "{(1",
+                "jq: error: syntax error, unexpected end of file, expecting '|' or ',' or ')' at <top-level>, line 1, column 3:\n    {(1\n      ^",
+            ),
+            (
+                "@",
+                "jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at <top-level>, line 1, column 1:\n    @\n    ^",
+            ),
+            (
+                "$",
+                "jq: error: syntax error, unexpected end of file, expecting '$' at <top-level>, line 1, column 1:\n    $\n    ^",
+            ),
+            (
+                "def",
+                "jq: error: syntax error, unexpected end of file, expecting IDENT at <top-level>, line 1, column 1:\n    def\n    ^^^",
+            ),
+            (
+                "label",
+                "jq: error: syntax error, unexpected end of file, expecting BINDING at <top-level>, line 1, column 1:\n    label\n    ^^^^^",
+            ),
+            (
+                "def foo(",
+                "jq: error: syntax error, unexpected end of file, expecting IDENT or BINDING at <top-level>, line 1, column 8:\n    def foo(\n           ^",
+            ),
+            (
+                "label $x",
+                "jq: error: syntax error, unexpected end of file, expecting '|' at <top-level>, line 1, column 7:\n    label $x\n          ^^",
+            ),
+            (
+                "def 1",
+                "jq: error: syntax error, unexpected LITERAL, expecting IDENT at <top-level>, line 1, column 5:\n    def 1\n        ^",
+            ),
+            (
+                "label 1",
+                "jq: error: syntax error, unexpected LITERAL, expecting BINDING at <top-level>, line 1, column 7:\n    label 1\n          ^",
+            ),
+            (
+                "def f(1;",
+                "jq: error: syntax error, unexpected LITERAL, expecting IDENT or BINDING at <top-level>, line 1, column 7:\n    def f(1;\n          ^",
+            ),
+            (
+                "\"unterminated",
+                "jq: error: syntax error, unexpected end of file, expecting QQSTRING_TEXT or QQSTRING_INTERP_START or QQSTRING_END at <top-level>, line 1, column 2:\n    \"unterminated\n     ^^^^^^^^^^^^",
+            ),
+            (
+                "\"\\q\"",
+                "jq: error: Invalid escape at line 1, column 4 (while parsing '\"\\q\"') at <top-level>, line 1, column 2:\n    \"\\q\"\n     ^^",
+            ),
+        ] {
+            let diagnostic = super::parse_bytes("<query>", filter.as_bytes()).unwrap_err();
+            let expected = expected.lines().map(str::to_owned).collect::<Vec<_>>();
+            let actual = format!("query compilation failed: {diagnostic}");
+            assert!(
+                super::compile_diagnostic_matches(
+                    &actual,
+                    Some(diagnostic.as_ref()),
+                    &expected,
+                    filter,
+                ),
+                "{filter:?}: {expected:?}"
+            );
+        }
+        for (filter, expected) in [
+            (
+                "1 | if true then 1",
+                "jq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 5:\n    1 | if true then 1\n        ^^^^^^^^^^^^^^",
+            ),
+            (
+                "if true then if false then 1 end",
+                "jq: error: Possibly unterminated 'if' statement at <top-level>, line 1, column 1:\n    if true then if false then 1 end\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+            ),
+            (
+                "1 | @",
+                "jq: error: syntax error, unexpected INVALID_CHARACTER at <top-level>, line 1, column 5:\n    1 | @\n        ^",
+            ),
+            (
+                "1 | $",
+                "jq: error: syntax error, unexpected end of file, expecting '$' at <top-level>, line 1, column 5:\n    1 | $\n        ^",
+            ),
+            (
+                "1 | def",
+                "jq: error: syntax error, unexpected end of file, expecting IDENT at <top-level>, line 1, column 5:\n    1 | def\n        ^^^",
+            ),
+            (
+                "1 | label",
+                "jq: error: syntax error, unexpected end of file, expecting BINDING at <top-level>, line 1, column 5:\n    1 | label\n        ^^^^^",
+            ),
+        ] {
+            let diagnostic = super::parse_bytes("<query>", filter.as_bytes()).unwrap_err();
+            let expected = expected.lines().map(str::to_owned).collect::<Vec<_>>();
+            let actual = format!("query compilation failed: {diagnostic}");
+            assert!(super::compile_diagnostic_matches(
+                &actual,
+                Some(diagnostic.as_ref()),
+                &expected,
+                filter,
+            ));
+        }
     }
 }
