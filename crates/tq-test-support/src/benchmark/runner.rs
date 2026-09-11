@@ -14,7 +14,8 @@ use super::{
     BenchmarkAdapter, BenchmarkCase, BenchmarkCorpusIdentity, BenchmarkInvocation,
     BenchmarkOutcome, BenchmarkRow, BenchmarkSample, CorrectnessDecision, CorrectnessObservation,
     CorrectnessPayload, DatasetTier, MeasuredOutcome, MeasuredStatus, OutputContractKind,
-    SemanticDigest, SemanticDigester, correctness_gate, measure_process, summarize_samples,
+    SemanticDigest, SemanticDigester, correctness_gate, measure_process,
+    measure_process_uninstrumented, summarize_samples,
 };
 use crate::compatibility::{
     ErrorClass, NormalizationError, ProcessError, ProcessOutcome, ProcessStatus, ToolKind,
@@ -228,12 +229,35 @@ pub fn run_gated_row(
         }
     }
     let mut samples = Vec::with_capacity(case.sampling.measured(tier));
+    let mut instrumented_samples = Vec::new();
     for _ in 0..case.sampling.measured(tier) {
-        let measured = measure_process(invocation)?;
+        // First enforce the live limit in a separate repetition. Only then
+        // time the equivalent command without sampler interference. Native
+        // peak RSS still checks the limit at the end of the timing repetition.
+        if invocation.rss_limit.is_some() {
+            let instrumented = measure_process(invocation)?;
+            instrumented_samples.push(BenchmarkSample::from(&instrumented));
+            if let Some(outcome) = failed_outcome(case, &instrumented) {
+                let diagnostic = measured_diagnostic(&outcome, &instrumented);
+                let mut row = row_with_diagnostic(
+                    case,
+                    adapter,
+                    corpus,
+                    tier,
+                    invocation,
+                    outcome,
+                    samples,
+                    Some(diagnostic),
+                );
+                row.instrumented_samples = instrumented_samples;
+                return Ok(row);
+            }
+        }
+        let measured = measure_process_uninstrumented(invocation)?;
         if let Some(outcome) = failed_outcome(case, &measured) {
             samples.push(BenchmarkSample::from(&measured));
             let diagnostic = measured_diagnostic(&outcome, &measured);
-            return Ok(row_with_diagnostic(
+            let mut row = row_with_diagnostic(
                 case,
                 adapter,
                 corpus,
@@ -242,11 +266,13 @@ pub fn run_gated_row(
                 outcome,
                 samples,
                 Some(diagnostic),
-            ));
+            );
+            row.instrumented_samples = instrumented_samples;
+            return Ok(row);
         }
         samples.push(BenchmarkSample::from(&measured));
     }
-    Ok(row(
+    let mut row = row(
         case,
         adapter,
         corpus,
@@ -254,7 +280,9 @@ pub fn run_gated_row(
         invocation,
         BenchmarkOutcome::Timed,
         samples,
-    ))
+    );
+    row.instrumented_samples = instrumented_samples;
+    Ok(row)
 }
 
 fn correctness_limit_row(
@@ -396,6 +424,13 @@ fn row_with_diagnostic(
     samples: Vec<BenchmarkSample>,
     diagnostic: Option<String>,
 ) -> BenchmarkRow {
+    let (instrumented_samples, samples): (Vec<_>, Vec<_>) =
+        samples.into_iter().partition(|sample| {
+            sample
+                .measurement_protocol
+                .as_ref()
+                .is_some_and(|protocol| protocol.rss_poll_interval_micros.is_some())
+        });
     let summary = (outcome == BenchmarkOutcome::Timed && !samples.is_empty())
         .then(|| summarize_samples(&samples, corpus.artifact.bytes, corpus.logical_records))
         .flatten();
@@ -416,6 +451,7 @@ fn row_with_diagnostic(
         timeout_seconds: case.timeout_seconds,
         limits: case.limits.clone(),
         samples,
+        instrumented_samples,
         summary,
         reference_ratios: BTreeMap::new(),
         reference_peak_rss_ratios: BTreeMap::new(),

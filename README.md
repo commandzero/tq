@@ -13,7 +13,7 @@ supported syntax and known differences.
 
 ## Install and use
 
-Rust 1.88 or newer is required.
+Rust 1.95 or newer is required.
 
 ```console
 cargo install tq-cli
@@ -132,18 +132,53 @@ JSON, YAML, and TOON. Before timing starts, the runner generates each
 representation and checks that every format has the same ordered values.
 Reports record time, CPU, peak RSS, throughput, output size, machine and tool
 identity, and every incorrect or failed run. The runner does not resize inputs
-to manufacture target sizes.
+to manufacture target sizes. The required production contract launches each
+executable directly and, once the native backend passes lifecycle and
+audited-counter validation, collects native child exit status, CPU, and
+OS-recorded peak RSS through one resource-aware waiter. An allocation preflight
+runs before corpus preparation and aborts publication if authoritative RSS,
+units, or collector provenance are unavailable. A draft or unverified native
+backend is not accepted benchmark evidence.
 
-Benchmark commands require elevated child-process inspection permissions and
-must run outside restricted sandboxes. On macOS, every authoritative peak RSS
-sample comes from `/usr/bin/time -l`; a run with unavailable RSS must be rerun
-with the required permissions.
+Benchmark commands require elevated child-accounting permissions and must run
+outside restricted sandboxes. `/usr/bin/time -l` on macOS and GNU
+`/usr/bin/time -v` on Linux are independent validation tools only; they do not
+wrap production runs or replace native accounting. `ps` is optional and may be
+selected only for an explicitly requested process-group limit or diagnostic,
+with scope and sampling interval recorded because short peaks can be missed.
+Measurements without sampled limits need no `ps`. Catalog cases that select an
+RSS limit still use it in separate enforcement repetitions. Production runs
+need neither platform `time` nor Python allocation probes.
+
+Reports record the direct spawn-to-exit timing boundary, input-delivery method,
+RSS scope, and host-validated precision. One-decimal display values are
+presentation only; stored nanoseconds do not imply nanosecond accuracy. Repeat
+no-op and known-duration controls when validating supported precision. Native
+Windows accounting is deferred to issue #31 and cannot be claimed from
+cross-compilation or emulation.
+
+State whether the platform waiter accounts for only the waited-for child or
+also includes waited-for descendants. Limit process-only comparisons to
+verified non-forking jq, yq, and tq workloads; forked workloads require an
+explicitly comparable RSS scope.
+
+For issue #30, disclose each comparable wall-time and peak-RSS increase above
+20% independently with baseline, candidate, sample count, dispersion, and an
+explanation. Documented increases above 20% through 50% are acceptable when
+all other gates pass; anything above 50% blocks acceptance until mitigated and
+remeasured. Exactly 20% does not require disclosure and exactly 50% does not
+block acceptance. Cross-tool jq/yq ratios are comparative evidence, not tq
+self-regression evidence.
 
 ```console
 ./scripts/run-campaign.sh benchmark smoke
 ./scripts/run-campaign.sh benchmark standard
 ./scripts/run-campaign.sh benchmark large  # opt-in; uses the natural ~1 GB-class corpus
 ```
+
+The dated snapshot below is historical evidence from an earlier measurement
+method; its source labels and values are not requirements for current
+campaigns and are not comparable with native-accounting reports.
 
 ### Benchmark snapshot, 2026-08-30
 

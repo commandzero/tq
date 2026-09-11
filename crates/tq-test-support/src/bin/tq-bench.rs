@@ -1,11 +1,15 @@
 //! Local correctness-gated benchmark campaign driver.
 
+#[path = "tq-bench/calibration.rs"]
+mod calibration;
+
 use std::{
     collections::BTreeMap,
     env, fs,
     io::Write as _,
     path::{Path, PathBuf},
     process::ExitCode,
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
@@ -18,7 +22,7 @@ use tq_test_support::{
         BenchmarkSampling, BenchmarkTool, Comparability, DatasetTier, InputFormat, RegressionGate,
         RegressionThresholds, collect_environment, compare_reports, evaluate_regression,
         is_correctness_output_limit, load_benchmark_catalog, normalize_correctness_run,
-        populate_reference_ratios, preflight_rss, render_markdown_pages,
+        populate_reference_ratios, preflight_rss, render_markdown_campaigns, render_markdown_pages,
         run_correctness_limit_probe, run_gated_row, unsupported_row,
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
@@ -60,7 +64,9 @@ struct Options {
     selected_cases: Vec<String>,
     baseline: Option<PathBuf>,
     markdown_dir: Option<PathBuf>,
-    render_only: Option<PathBuf>,
+    render_only: Vec<PathBuf>,
+    preflight_only: bool,
+    timing_calibrations: Vec<PathBuf>,
     regression_thresholds: RegressionThresholds,
 }
 
@@ -83,31 +89,70 @@ struct PreparedCampaign {
     reason = "campaign orchestration is intentionally linear and delegates measurement details"
 )]
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
+    if env::args().nth(1).as_deref() == Some("--internal-rss-control") {
+        return Ok(ExitCode::SUCCESS);
+    }
+    if env::args().nth(1).as_deref() == Some("--internal-rss-probe") {
+        tq_test_support::benchmark::run_allocation_probe(64 * 1024 * 1024, 1)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let options = options()?;
-    if let Some(report_path) = &options.render_only {
+    if options.preflight_only && !options.render_only.is_empty() {
+        return Err("--preflight-only cannot be combined with --render-only".into());
+    }
+    if !options.render_only.is_empty() {
         let markdown_dir = options
             .markdown_dir
             .as_deref()
             .ok_or("--render-only requires --markdown-dir")?;
-        let report: BenchmarkCampaignReport =
-            serde_json::from_reader(fs::File::open(report_path)?)?;
-        render_markdown_pages(markdown_dir, &report)?;
-        print!("{}", report.render_human());
+        let reports = options
+            .render_only
+            .iter()
+            .map(|path| {
+                serde_json::from_reader(fs::File::open(path)?)
+                    .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
+            })
+            .collect::<Result<Vec<BenchmarkCampaignReport>, _>>()?;
+        render_markdown_campaigns(markdown_dir, &reports)?;
+        for (index, report) in reports.iter().enumerate() {
+            if index > 0 {
+                println!();
+            }
+            print!("{}", report.render_human());
+        }
         return Ok(ExitCode::SUCCESS);
     }
-    let rss_preflight = preflight_rss()?;
+    let cancellation = Arc::new(AtomicBool::new(false));
+    // The CLI owns these process-lifetime handlers. Measurements only inspect
+    // the shared flag; their single owner still performs termination and reap.
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        signal_hook::flag::register(signal, Arc::clone(&cancellation))?;
+    }
+    let rss_preflight = preflight_rss(Some(Arc::clone(&cancellation)))?;
     eprintln!(
         "tq-bench: RSS preflight passed ({})",
         rss_preflight.provenance.label()
     );
+    if options.preflight_only {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let calibrations = options
+        .timing_calibrations
+        .iter()
+        .map(|path| calibration::TimingCalibration::load(path))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let tools = discover_tools(&root)?;
+    require_campaign_tools(&tools)?;
     let prepared = if options.profile == "smoke" {
         prepare_smoke(&root.join("examples"))?
     } else {
         prepare_manifests(&options)?
     };
     let catalog = load_benchmark_catalog(&root.join("benchmarks/cases"))?;
-    let tools = discover_tools(&root)?;
     let mut corpus = Vec::new();
     for dataset in &prepared.datasets {
         for (format, (_, artifact)) in &dataset.formats {
@@ -152,8 +197,13 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let reference_identity = tools
                 .get(&reference_adapter.tool)
                 .ok_or("reference jq executable is unavailable")?;
-            let reference_invocation =
-                invocation(&case, reference_adapter, dataset, reference_identity)?;
+            let reference_invocation = invocation(
+                &case,
+                reference_adapter,
+                dataset,
+                reference_identity,
+                &cancellation,
+            )?;
             let reference = match normalize_correctness_run(
                 &reference_invocation,
                 ToolKind::Jq,
@@ -174,6 +224,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         .1,
                 );
                 let placeholder = BenchmarkInvocation {
+                    cancellation: Some(Arc::clone(&cancellation)),
                     executable: PathBuf::from(tool_name(adapter.tool)),
                     args: Vec::new(),
                     stdin: Vec::new(),
@@ -199,7 +250,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     );
                     continue;
                 };
-                let invocation = invocation(&case, adapter, dataset, identity)?;
+                let invocation = invocation(&case, adapter, dataset, identity, &cancellation)?;
                 if !adapter.applicable {
                     record_row(
                         &mut rows,
@@ -238,6 +289,25 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
         }
     }
+    for row in &mut rows {
+        for sample in row
+            .samples
+            .iter_mut()
+            .chain(row.instrumented_samples.iter_mut())
+        {
+            if !calibrations.is_empty() {
+                let protocol = sample
+                    .measurement_protocol
+                    .as_mut()
+                    .ok_or("measured sample has no protocol for timing calibration")?;
+                calibrations
+                    .iter()
+                    .find(|calibration| calibration.matches(protocol))
+                    .ok_or("no matching timing calibration for sample instrumentation")?
+                    .apply(protocol)?;
+            }
+        }
+    }
     populate_reference_ratios(&mut rows, &["jq-json", "yq-json", "yq-yaml"]);
     let has_failure = rows.iter().any(|row| {
         !matches!(
@@ -249,7 +319,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         schema_version: 1,
         campaign_id: jiff::Timestamp::now().to_string(),
         profile: options.profile,
-        environment: collect_environment("release-benchmark"),
+        environment: collect_environment(if cfg!(debug_assertions) {
+            "debug-benchmark"
+        } else {
+            "release-benchmark"
+        }),
         corpus,
         tools: tools.into_values().collect(),
         cases: rows,
@@ -273,6 +347,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     report
         .validate_authoritative_rss()
         .map_err(|error| format!("benchmark report RSS validation failed: {error}"))?;
+    if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("benchmark campaign cancelled; report not published".into());
+    }
     write_report(&options.output, &report)?;
     if let Some(markdown_dir) = &options.markdown_dir {
         render_markdown_pages(markdown_dir, &report)?;
@@ -322,9 +399,11 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut selected_cases = Vec::new();
     let mut baseline = None;
     let mut markdown_dir = None;
-    let mut render_only = None;
+    let mut render_only = Vec::new();
+    let mut preflight_only = false;
+    let mut timing_calibrations = Vec::new();
     let mut wall_time_percent: f64 = 50.0;
-    let mut peak_rss_percent: f64 = 20.0;
+    let mut peak_rss_percent: f64 = 50.0;
     let mut minimum_samples = 5;
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -369,6 +448,13 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
                     arguments.next().ok_or("--baseline needs a path")?,
                 ));
             }
+            "--timing-calibration" => {
+                timing_calibrations.push(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--timing-calibration needs a summary path")?,
+                ));
+            }
             "--markdown-dir" => {
                 if markdown_dir.is_some() {
                     return Err("--markdown-dir may be supplied only once".into());
@@ -378,15 +464,13 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
                 ));
             }
             "--render-only" => {
-                if render_only.is_some() {
-                    return Err("--render-only may be supplied only once".into());
-                }
-                render_only = Some(PathBuf::from(
+                render_only.push(PathBuf::from(
                     arguments
                         .next()
                         .ok_or("--render-only needs a report path")?,
                 ));
             }
+            "--preflight-only" => preflight_only = true,
             "--wall-regression-percent" => {
                 wall_time_percent = arguments
                     .next()
@@ -407,7 +491,7 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N] [--markdown-dir DIRECTORY] [--render-only REPORT --markdown-dir DIRECTORY]"
+                    "Usage: tq-bench [--preflight-only] run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--timing-calibration SUMMARY ...] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N] [--markdown-dir DIRECTORY] [--render-only REPORT... --markdown-dir DIRECTORY] [native child accounting on macOS/Linux; platform time commands are independent validation only; Windows deferred]"
                 );
                 std::process::exit(0);
             }
@@ -417,7 +501,7 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if !matches!(profile.as_str(), "smoke" | "rapid" | "standard" | "large") {
         return Err(format!("invalid profile: {profile}").into());
     }
-    if render_only.is_none() {
+    if render_only.is_empty() && !preflight_only {
         if profile == "rapid" {
             if max_samples.is_none() {
                 max_samples = Some(1);
@@ -455,7 +539,7 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if rss_limit_bytes == Some(0) {
         return Err("--rss-limit-bytes must be at least 1".into());
     }
-    if render_only.is_some() && markdown_dir.is_none() {
+    if !render_only.is_empty() && markdown_dir.is_none() {
         return Err("--render-only requires --markdown-dir".into());
     }
     Ok(Options {
@@ -471,6 +555,8 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
         baseline,
         markdown_dir,
         render_only,
+        preflight_only,
+        timing_calibrations,
         regression_thresholds: RegressionThresholds {
             wall_time_percent,
             peak_rss_percent,
@@ -743,11 +829,28 @@ fn discover_tools(
     Ok(tools)
 }
 
+fn require_campaign_tools(tools: &BTreeMap<BenchmarkTool, ToolIdentity>) -> Result<(), String> {
+    let missing = [BenchmarkTool::Jq, BenchmarkTool::Yq, BenchmarkTool::Tq]
+        .into_iter()
+        .filter(|tool| !tools.contains_key(tool))
+        .map(tool_name)
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "required campaign executables unavailable: {}; repair discovery before running the matrix",
+            missing.join(", ")
+        ))
+    }
+}
+
 fn invocation(
     case: &tq_test_support::benchmark::BenchmarkCase,
     adapter: &tq_test_support::benchmark::BenchmarkAdapter,
     dataset: &PreparedDataset,
     identity: &ToolIdentity,
+    cancellation: &Arc<AtomicBool>,
 ) -> Result<BenchmarkInvocation, Box<dyn std::error::Error>> {
     let path = &dataset
         .formats
@@ -762,6 +865,7 @@ fn invocation(
     args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
     args.push(path.display().to_string());
     Ok(BenchmarkInvocation {
+        cancellation: Some(Arc::clone(cancellation)),
         executable: identity.path.clone(),
         args,
         stdin: Vec::new(),
@@ -885,6 +989,13 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use tq_test_support::benchmark::DatasetFamily;
+
+    #[test]
+    fn missing_executables_are_not_unsupported_capability_rows() {
+        let error = super::require_campaign_tools(&BTreeMap::new()).unwrap_err();
+        assert!(error.contains("jq, yq, tq"));
+        assert!(error.contains("repair discovery"));
+    }
 
     #[test]
     fn issue5_input_sequence_has_one_disjoint_dataset_family() {

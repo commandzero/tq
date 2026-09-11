@@ -3,6 +3,8 @@
 ### Requirement: Resource and latency metrics
 Each valid benchmark sample SHALL capture monotonic spawn-to-exit wall duration and process exit status. Native macOS and Linux hosts MUST additionally collect the specific child's OS-recorded peak resident memory, user CPU, system CPU, and output bytes. Time to first result SHALL be reported for cases where it can be observed without changing semantics, with its observation method and precision stated. Peak RSS SHALL describe process resident memory including its threads, not heap allocation, physical footprint, or simultaneous process-tree peak. Independent process peaks MUST NOT be summed.
 
+The recorded resource scope SHALL disclose validated pre-exec launch and waited-descendant effects. Native lifetime RSS MUST NOT be described as a pure post-exec metric. Campaign-runner memory MUST NOT determine the target's reported peak; a launch floor that obscures supported small-tool workloads SHALL block acceptance. Estimated parent or worker RSS MUST NOT be subtracted from the OS maximum.
+
 Every authoritative campaign SHALL run outside restricted sandboxes with the permissions needed for native child accounting and SHALL complete an allocation preflight before corpus preparation. Preflight MUST verify positive OS peak RSS and explicit collection provenance through the same interface used by measured rows. It MUST NOT require a polling dwell or successful `ps` sampling unless a separately selected diagnostic or limit requires sampling. Collection failure, missing provenance, invalid units, overflow, or unavailable RSS SHALL invalidate the campaign and prevent publication of a valid comparison report. Diagnostics MAY retain the failure and unavailable fields; zero and sampled substitutes MUST NOT be fabricated. Provenance MUST identify the collector actually used, not be inferred from OS identity or a positive count.
 
 Native process accounting SHALL replace mandatory `time` wrappers and recurring `ps` sampling for primary timing and RSS. Platform `time` SHALL remain an independent validation tool. Explicitly requested sampled diagnostics or RSS-limit enforcement SHALL state their scope, interval, and potential to miss peaks; they MUST NOT replace the OS peak metric. Unsupported native platforms, including Windows deferred to issue #31, SHALL fail preflight clearly without implying verification.
@@ -59,7 +61,7 @@ For issue #30 acceptance, each comparable workload's wall-time and peak-RSS incr
 ## ADDED Requirements
 
 ### Requirement: Direct invocation and timing boundary
-The benchmark SHALL launch the selected executable directly with its argument vector and requested environment and working directory. It MUST NOT insert a shell or measurement wrapper unless that executable is explicitly the subject of a separate benchmark. Inputs, correctness checks, command construction, and capture destinations SHALL be prepared before timing. A monotonic interval SHALL begin immediately before spawning and end when the child's exit is observed by its resource-collecting waiter. Subsequent parsing, worker joins, cleanup, and report generation MUST NOT extend that duration. Spawn failures SHALL be infrastructure failures, not successful zero-duration executions.
+The benchmark SHALL launch the selected executable directly with its argument vector and requested environment and working directory. An isolated, low-memory Rust measurement worker MAY perform that launch and own the exact-child measurement after passing the worker-isolation validation below. It MUST NOT insert a shell or external measurement wrapper between itself and the selected executable unless that executable is explicitly the subject of a separate benchmark. Inputs, correctness checks, command construction, and capture destinations SHALL be prepared before timing. A monotonic interval in the process owning the target SHALL begin immediately before spawning and end when the child's exit is observed by its resource-collecting waiter. Worker startup, request and reply transfer, subsequent parsing, worker joins, cleanup, and report generation MUST NOT extend that duration. Spawn failures SHALL be infrastructure failures, not successful zero-duration executions.
 
 Reports SHALL distinguish stored duration resolution and display precision from validated accuracy. Millisecond accuracy SHALL be validated on supported hosts; one-decimal presentation MUST NOT imply accuracy finer than supported by control measurements. Nanosecond storage MUST NOT imply nanosecond accuracy. Instrumentation that measurably distorts timing SHALL use separately labeled timing and memory repetitions with equivalent workloads and identities.
 
@@ -74,6 +76,33 @@ Reports SHALL distinguish stored duration resolution and display precision from 
 #### Scenario: Timing calibration
 - **WHEN** no-op and known-duration controls are repeated on a native host
 - **THEN** validation reports spawn/wait overhead, dispersion, and supported reporting precision without subtracting invented overhead from samples
+
+### Requirement: Isolated measurement worker
+An internal Rust worker MAY isolate target launching from the campaign coordinator's memory. It SHALL initialize its own executable image before launching the target and SHALL return the target's exact-child resource usage, never its own lifetime usage. Bulk input and capture preparation SHALL remain outside the worker's target-launch memory footprint. Control messages SHALL be bounded and preserve the existing public invocation contract without loading corpus-sized input or reports into the worker before target launch.
+
+The worker SHALL remain the single owner of target completion and resource collection. Coordinator management of worker completion MUST NOT race target reaping. Startup, communication, cancellation, and cleanup SHALL be bounded. Worker absence, failure, malformed or truncated replies, and lost control channels SHALL fail closed with retained diagnostics. Target and process-group cleanup SHALL be verified for worker and coordinator failure. No failure MAY silently fall back to the contaminated in-process launch path.
+
+Reports and calibration SHALL identify the worker executable, launch protocol, collector sources, resource scope, and residual launch-floor evidence. Changed workers or protocols SHALL invalidate calibration and prevent incompatible comparisons. Worker adoption SHALL require native parent-memory independence, request-sequence isolation, and independent platform-time validation on both hosts. This permission does not establish that a worker is a verified solution; inability to meet these conditions SHALL require another design decision.
+
+#### Scenario: Coordinator memory changes
+- **WHEN** an identical small target is measured with page-touched coordinator allocations of zero, 32 MiB, and a larger corpus-representative size
+- **THEN** its RSS remains independent of coordinator allocation within declared page-aware tolerances and agrees with independent native time controls
+
+#### Scenario: Large prepared input and repeated requests
+- **WHEN** a target receives large prepared stdin or a low-memory request follows a high-memory request
+- **THEN** exact input delivery is preserved and worker payload copies or prior requests do not determine the target's RSS
+
+#### Scenario: Worker overhead is delayed
+- **WHEN** worker startup, request transfer, reply transfer, or teardown is deliberately delayed
+- **THEN** the measured target interval excludes those delays and still uses the target owner's monotonic clock
+
+#### Scenario: Worker control failure
+- **WHEN** the worker fails or its control channel is lost while a target is running
+- **THEN** bounded cleanup leaves no live target or descendant, diagnostics identify the infrastructure failure, and no valid measurement is published
+
+#### Scenario: Worker changes after calibration
+- **WHEN** a worker executable or launch protocol differs from the independently validated identity
+- **THEN** old calibration cannot authorize the new measurement path and fresh native controls are required
 
 ### Requirement: Single-owner child resource lifecycle
 One measurement lifecycle SHALL own child completion, resource collection, timeout, cancellation, forced termination, and cleanup. The resource collector MUST target the specific child and collect its usage during reaping; ordinary waits MUST NOT consume status first. Cumulative accounting across prior children MUST NOT be used. Normal exit, nonzero exit, signal, timeout, output limit, and configured memory-limit outcomes SHALL remain distinct. All paths SHALL close input delivery and bound process and worker cleanup without zombies or double reaping. Collection errors SHALL retain available exit diagnostics without manufacturing metrics.
@@ -96,6 +125,10 @@ One measurement lifecycle SHALL own child completion, resource collection, timeo
 
 ### Requirement: Native accounting validation
 macOS and Linux SHALL exercise the same measurement interface through safe Rust APIs. Dependency selection MUST audit lifecycle semantics, target support, resource units, maintenance, licensing, and transitive dependencies. First-party unsafe code or FFI bridges SHALL NOT be introduced; failure to find suitable safe APIs SHALL require a separate design decision before implementation proceeds.
+
+The workspace SHALL declare a minimum Rust version of 1.95 to support the selected `wait4 0.2.0` dependency. The consuming wait API and dependency-internal interrupted-call retries SHALL preserve the existing exact-child observation, cleanup, and reap ordering. Raising MSRV SHALL NOT be treated as evidence that Linux pre-exec RSS inheritance is resolved.
+
+The approved dependency MAY rely on valid, nonnegative OS counters within its audited numeric range when its internal conversions expose no overflow error. This assumption and its limits MUST be documented; the implementation MUST NOT claim it can detect every malformed upstream counter after conversion. First-party conversions SHALL use checked arithmetic and reject detectable invalid, zero-RSS, unavailable, or overflowed results. Independent native validation remains mandatory.
 
 Validation SHALL use helpers that allocate and touch pages, release memory, and exit, including bursts shorter than the previous sampling interval without an intentional polling dwell. Multiple allocation sizes, independent children, and allocations across threads SHALL validate peak behavior and platform conversion. Tolerances SHALL account for page size, runtime baseline, and allocator behavior rather than equating heap bytes to RSS. Native `time` comparisons SHALL independently validate accounting on both OSes. Cross-compilation or emulation alone MUST NOT satisfy native verification.
 

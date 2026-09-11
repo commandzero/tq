@@ -85,6 +85,9 @@ pub struct BenchmarkRow {
     pub limits: BenchmarkLimits,
     /// Actual measurements; empty for correctness failures.
     pub samples: Vec<BenchmarkSample>,
+    /// Separate sampled RSS-limit repetitions, never pooled into primary timing summaries.
+    #[serde(default)]
+    pub instrumented_samples: Vec<BenchmarkSample>,
     /// Aggregate metrics for valid samples.
     pub summary: Option<RowSummary>,
     /// Ratios to named reference rows; informational only.
@@ -143,9 +146,49 @@ pub enum BenchmarkOutcome {
     ResourceLimit,
 }
 
+/// Collection protocol used to determine whether measurements are comparable.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MeasurementProtocol {
+    /// Clock boundaries and observation method.
+    pub timing_method: String,
+    /// How input bytes reach the tool.
+    pub input_delivery: String,
+    /// Accounting scope, including any documented inherited usage.
+    pub rss_scope: String,
+    /// Requested exit-observation polling interval, not an accuracy guarantee.
+    pub exit_poll_interval_micros: u64,
+    /// Optional process-group RSS enforcement sampling interval.
+    pub rss_poll_interval_micros: Option<u64>,
+    /// Host-validated timing accuracy, unavailable until calibrated.
+    pub validated_accuracy_micros: Option<u64>,
+}
+
+impl MeasurementProtocol {
+    fn is_valid(&self) -> bool {
+        !self.timing_method.trim().is_empty()
+            && !self.input_delivery.trim().is_empty()
+            && !self.rss_scope.trim().is_empty()
+            && self.exit_poll_interval_micros > 0
+            && self.rss_poll_interval_micros != Some(0)
+            && self.validated_accuracy_micros != Some(0)
+    }
+
+    fn is_calibrated(&self) -> bool {
+        self.validated_accuracy_micros
+            .is_some_and(|accuracy| accuracy > 0)
+    }
+
+    fn is_valid_for_comparison(&self) -> bool {
+        self.is_valid() && self.is_calibrated()
+    }
+}
+
 /// One measured fresh-process invocation.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BenchmarkSample {
+    /// Explicit protocol; absent only for historical reports.
+    #[serde(default)]
+    pub measurement_protocol: Option<MeasurementProtocol>,
     /// Wall duration.
     pub wall_time_micros: u128,
     /// User CPU duration.
@@ -170,6 +213,7 @@ pub struct BenchmarkSample {
 impl From<&MeasuredOutcome> for BenchmarkSample {
     fn from(value: &MeasuredOutcome) -> Self {
         Self {
+            measurement_protocol: Some(value.measurement_protocol.clone()),
             wall_time_micros: value.wall_time_micros,
             user_cpu_micros: value.user_cpu_micros,
             system_cpu_micros: value.system_cpu_micros,
@@ -192,10 +236,16 @@ impl BenchmarkCampaignReport {
     /// # Errors
     ///
     /// Returns an error when a measured sample lacks positive authoritative RSS
-    /// or explicit provenance, or when a timed row has no samples.
+    /// or explicit provenance, when a timed row has no samples, or when a
+    /// native RSS-limited timed row lacks valid separate enforcement evidence.
     pub fn validate_authoritative_rss(&self) -> Result<(), String> {
         for row in &self.cases {
-            for (index, sample) in row.samples.iter().enumerate() {
+            for (index, sample) in row
+                .samples
+                .iter()
+                .chain(&row.instrumented_samples)
+                .enumerate()
+            {
                 if sample.peak_rss_bytes.is_none_or(|bytes| bytes == 0) {
                     return Err(format!(
                         "{} {} sample {} has no positive authoritative RSS",
@@ -208,6 +258,30 @@ impl BenchmarkCampaignReport {
                         row.case_id, row.adapter_id, index
                     ));
                 }
+                if matches!(
+                    sample.rss_provenance,
+                    Some(RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4)
+                ) && (sample
+                    .measurement_protocol
+                    .as_ref()
+                    .is_none_or(|protocol| !protocol.is_valid())
+                    || sample.user_cpu_micros.is_none()
+                    || sample.system_cpu_micros.is_none())
+                {
+                    return Err(format!(
+                        "{} {} sample {} lacks native collection evidence",
+                        row.case_id, row.adapter_id, index
+                    ));
+                }
+            }
+            if !row.samples.is_empty() && row_rss_source(row).is_none() {
+                return Err(format!(
+                    "{} {} mixes collection methods",
+                    row.case_id, row.adapter_id
+                ));
+            }
+            if let Some(reason) = validate_instrumented_samples(row) {
+                return Err(format!("{} {} {reason}", row.case_id, row.adapter_id));
             }
             if row.outcome == BenchmarkOutcome::Timed && row.samples.is_empty() {
                 return Err(format!(
@@ -296,6 +370,12 @@ pub struct RegressionGate {
     pub thresholds: Option<RegressionThresholds>,
     /// Row-specific failures.
     pub failures: Vec<String>,
+    /// Independent metric increases above the issue #30 disclosure threshold.
+    #[serde(default)]
+    pub disclosures: Vec<String>,
+    /// Rows without sufficient comparable evidence; never counted as passes.
+    #[serde(default)]
+    pub unavailable: Vec<String>,
 }
 
 /// Campaign final status.
@@ -351,6 +431,12 @@ impl BenchmarkCampaignReport {
                 .expect("write benchmark report");
             }
         }
+        for disclosure in &self.regression_gate.disclosures {
+            writeln!(output, "disclosure: {disclosure}").expect("write regression disclosure");
+        }
+        for reason in &self.regression_gate.unavailable {
+            writeln!(output, "not comparable: {reason}").expect("write unavailable comparison");
+        }
         output
     }
 }
@@ -367,6 +453,12 @@ pub fn summarize_samples(
     logical_records: u64,
 ) -> Option<RowSummary> {
     if samples.is_empty() {
+        return None;
+    }
+    if samples.iter().any(|sample| {
+        sample.rss_provenance != samples[0].rss_provenance
+            || sample.measurement_protocol != samples[0].measurement_protocol
+    }) {
         return None;
     }
     let wall = metric(samples.iter().map(|sample| sample.wall_time_micros as f64))?;
@@ -410,6 +502,14 @@ pub fn compare_reports(
     left: &BenchmarkCampaignReport,
     right: &BenchmarkCampaignReport,
 ) -> Comparability {
+    report_comparability(left, right, false)
+}
+
+fn report_comparability(
+    left: &BenchmarkCampaignReport,
+    right: &BenchmarkCampaignReport,
+    self_regression: bool,
+) -> Comparability {
     let mut reasons = Vec::new();
     if left.profile != right.profile {
         reasons.push("campaign profile differs".to_owned());
@@ -417,11 +517,51 @@ pub fn compare_reports(
     if left.environment.machine_identity != right.environment.machine_identity {
         reasons.push("machine identity differs".to_owned());
     }
-    if left.corpus != right.corpus {
+    if !corpus_identities_match(&left.corpus, &right.corpus) {
         reasons.push("corpus identity differs".to_owned());
     }
-    if serde_json::to_value(&left.tools).ok() != serde_json::to_value(&right.tools).ok() {
+    if !self_regression && left.tools != right.tools {
         reasons.push("tool identity differs".to_owned());
+    }
+    if self_regression {
+        let build = |report: &BenchmarkCampaignReport| {
+            report
+                .tools
+                .iter()
+                .find(|tool| tool.tool == crate::compatibility::ToolKind::Tq)
+                .map(|tool| (tool.build_features.clone(), tool.runtime_libraries.clone()))
+        };
+        if build(left) != build(right) {
+            reasons.push("tq build configuration differs".to_owned());
+        }
+    }
+    if left.environment.compiler_profile != right.environment.compiler_profile {
+        reasons.push("compiler profile differs".to_owned());
+    }
+    if !measurement_contracts_match(left, right) {
+        reasons.push("measurement protocol or RSS provenance differs".to_owned());
+    }
+    if [left, right]
+        .iter()
+        .any(|report| has_unvalidated_native_timing(report))
+    {
+        reasons.push("native timing precision is unvalidated".to_owned());
+    }
+    if [left, right]
+        .iter()
+        .any(|report| has_unverified_rss_provenance(report))
+    {
+        reasons.push("unverified RSS provenance is present".to_owned());
+    }
+    for report in [left, right] {
+        for row in &report.cases {
+            if let Some(reason) = validate_instrumented_samples(row) {
+                reasons.push(format!(
+                    "{} {} invalid instrumented evidence: {reason}",
+                    row.case_id, row.adapter_id
+                ));
+            }
+        }
     }
     Comparability {
         comparable: reasons.is_empty(),
@@ -429,9 +569,45 @@ pub fn compare_reports(
     }
 }
 
+fn measurement_contracts_match(
+    left: &BenchmarkCampaignReport,
+    right: &BenchmarkCampaignReport,
+) -> bool {
+    let left_contracts = left
+        .cases
+        .iter()
+        .flat_map(|row| {
+            row.samples
+                .iter()
+                .chain(row.instrumented_samples.iter())
+                .map(|sample| (sample.rss_provenance, sample.measurement_protocol.clone()))
+        })
+        .collect::<Vec<_>>();
+    let right_contracts = right
+        .cases
+        .iter()
+        .flat_map(|row| {
+            row.samples
+                .iter()
+                .chain(row.instrumented_samples.iter())
+                .map(|sample| (sample.rss_provenance, sample.measurement_protocol.clone()))
+        })
+        .collect::<Vec<_>>();
+    left_contracts
+        .iter()
+        .all(|contract| right_contracts.contains(contract))
+        && right_contracts
+            .iter()
+            .all(|contract| left_contracts.contains(contract))
+}
+
 /// Adds independent wall-time ratios to matching named reference adapters.
 ///
 /// Ratios are informational and are never combined into a winner score.
+#[allow(
+    clippy::too_many_lines,
+    reason = "keep reference contract checks beside ratio construction"
+)]
 #[allow(
     clippy::cast_precision_loss,
     reason = "peak-memory reference ratios intentionally use floating-point reporting"
@@ -444,6 +620,8 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 || !row
                     .comparison_families
                     .contains(&ComparisonFamily::SameFormat)
+                || validate_instrumented_samples(row).is_some()
+                || !row_supports_comparison(row)
             {
                 return None;
             }
@@ -459,20 +637,30 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                     summary.wall_time_micros.median,
                     summary.peak_rss_bytes,
                     row.input_format,
+                    row.execution_class,
                     row.warmups,
                     row.requested_samples,
                     row.timeout_seconds,
                     row.limits.output_bytes,
                     row.limits.rss_bytes,
+                    row_rss_source(row),
+                    row.samples
+                        .first()
+                        .and_then(|sample| sample.measurement_protocol.clone()),
                 ),
             ))
         })
         .collect::<BTreeMap<_, _>>();
     for row in rows {
+        row.reference_ratios.clear();
+        row.reference_peak_rss_ratios.clear();
+        row.soft_performance_objective = None;
         let comparable_candidate = row.outcome == BenchmarkOutcome::Timed
             && row
                 .comparison_families
-                .contains(&ComparisonFamily::SameFormat);
+                .contains(&ComparisonFamily::SameFormat)
+            && validate_instrumented_samples(row).is_none();
+        let comparable_candidate = comparable_candidate && row_supports_comparison(row);
         let Some(own) = row
             .summary
             .as_ref()
@@ -492,18 +680,29 @@ pub fn populate_reference_ratios(rows: &mut [BenchmarkRow], reference_adapters: 
                 reference_median,
                 reference_rss,
                 reference_format,
+                reference_execution_class,
                 reference_warmups,
                 reference_samples,
                 reference_timeout,
                 reference_output_limit,
                 reference_rss_limit,
+                reference_source,
+                reference_protocol,
             )) = summaries.get(&key)
                 && row.input_format == *reference_format
+                && row.execution_class == *reference_execution_class
                 && row.warmups == *reference_warmups
                 && row.requested_samples == *reference_samples
                 && row.timeout_seconds == *reference_timeout
                 && row.limits.output_bytes == *reference_output_limit
                 && row.limits.rss_bytes == *reference_rss_limit
+                && row_supports_comparison(row)
+                && row_rss_source(row) == *reference_source
+                && row
+                    .samples
+                    .first()
+                    .and_then(|sample| sample.measurement_protocol.as_ref())
+                    == reference_protocol.as_ref()
             {
                 if *reference_median > 0.0 {
                     row.reference_ratios
@@ -560,6 +759,10 @@ fn soft_status(ratio: Option<f64>, target: f64) -> SoftObjectiveStatus {
 /// Evaluates only tq rows against a comparable tq baseline.
 #[must_use]
 #[allow(
+    clippy::too_many_lines,
+    reason = "compare independent metrics only after all row compatibility checks"
+)]
+#[allow(
     clippy::cast_precision_loss,
     reason = "percentage thresholds intentionally compare floating-point ratios"
 )]
@@ -568,41 +771,104 @@ pub fn evaluate_regression(
     candidate: &BenchmarkCampaignReport,
     thresholds: RegressionThresholds,
 ) -> RegressionGate {
-    let comparability = compare_reports(baseline, candidate);
+    let comparability = report_comparability(baseline, candidate, true);
     if !comparability.comparable {
+        let (unavailable, failures): (Vec<_>, Vec<_>) =
+            comparability.reasons.into_iter().partition(|reason| {
+                reason == "measurement protocol or RSS provenance differs"
+                    || reason.contains("invalid instrumented evidence")
+                    || reason.contains("native timing precision is unvalidated")
+                    || reason.contains("unverified RSS provenance is present")
+            });
         return RegressionGate {
             evaluated: false,
             thresholds: Some(thresholds),
-            failures: comparability.reasons,
+            failures,
+            unavailable,
+            ..RegressionGate::default()
         };
     }
     let mut failures = Vec::new();
+    let mut disclosures = Vec::new();
+    let mut unavailable = Vec::new();
+    let mut evaluated_rows = 0;
     for candidate_row in candidate
         .cases
         .iter()
         .filter(|row| row.adapter_id.starts_with("tq-"))
     {
         let Some(candidate_summary) = &candidate_row.summary else {
+            unavailable.push(format!(
+                "{} candidate has no summary",
+                candidate_row.case_id
+            ));
             continue;
         };
         if candidate_row.samples.len() < thresholds.minimum_samples {
+            unavailable.push(format!(
+                "{} candidate has insufficient samples",
+                candidate_row.case_id
+            ));
             continue;
         }
         let Some(baseline_row) = baseline.cases.iter().find(|row| {
             row.case_id == candidate_row.case_id
                 && row.adapter_id == candidate_row.adapter_id
                 && row.source_id == candidate_row.source_id
+                && row.tier == candidate_row.tier
         }) else {
+            unavailable.push(format!("{} has no baseline row", candidate_row.case_id));
             continue;
         };
         let Some(baseline_summary) = &baseline_row.summary else {
+            unavailable.push(format!("{} baseline has no summary", candidate_row.case_id));
             continue;
         };
-        if percent_change(
+        let native_contracts_match = row_native_contract(baseline_row)
+            .zip(row_native_contract(candidate_row))
+            .is_some_and(|(baseline_contract, candidate_contract)| {
+                baseline_contract == candidate_contract
+            });
+        if baseline_row.samples.len() < thresholds.minimum_samples
+            || baseline_row.outcome != BenchmarkOutcome::Timed
+            || candidate_row.outcome != BenchmarkOutcome::Timed
+            || !commands_match_for_self_regression(baseline_row, candidate_row, baseline, candidate)
+            || baseline_row.input_format != candidate_row.input_format
+            || baseline_row.execution_class != candidate_row.execution_class
+            || baseline_row.comparison_families != candidate_row.comparison_families
+            || baseline_row.warmups != candidate_row.warmups
+            || baseline_row.requested_samples != candidate_row.requested_samples
+            || baseline_row.timeout_seconds != candidate_row.timeout_seconds
+            || baseline_row.limits.output_bytes != candidate_row.limits.output_bytes
+            || baseline_row.limits.rss_bytes != candidate_row.limits.rss_bytes
+            || !native_contracts_match
+            || row_rss_source(baseline_row) != row_rss_source(candidate_row)
+            || row_rss_source(baseline_row).is_none()
+            || row_rss_source(candidate_row).is_none()
+        {
+            unavailable.push(format!(
+                "{} row contract or samples differ",
+                candidate_row.case_id
+            ));
+            continue;
+        }
+        evaluated_rows += 1;
+        let wall_change = percent_change(
             baseline_summary.wall_time_micros.median,
             candidate_summary.wall_time_micros.median,
-        ) > thresholds.wall_time_percent
-        {
+        );
+        if wall_change > 20.0 {
+            disclosures.push(format_disclosure(
+                candidate_row,
+                "wall time",
+                baseline_summary.wall_time_micros.median,
+                candidate_summary.wall_time_micros.median,
+                &baseline_summary.wall_time_micros,
+                &candidate_summary.wall_time_micros,
+                wall_change,
+            ));
+        }
+        if wall_change > thresholds.wall_time_percent {
             failures.push(format!(
                 "{}/{} median wall time regressed",
                 candidate_row.case_id, candidate_row.adapter_id
@@ -611,19 +877,309 @@ pub fn evaluate_regression(
         if let (Some(old), Some(new)) = (
             baseline_summary.peak_rss_bytes,
             candidate_summary.peak_rss_bytes,
-        ) && percent_change(old as f64, new as f64) > thresholds.peak_rss_percent
-        {
-            failures.push(format!(
-                "{}/{} peak RSS regressed",
-                candidate_row.case_id, candidate_row.adapter_id
+        ) {
+            let rss_change = percent_change(old as f64, new as f64);
+            let baseline_rss = metric(
+                baseline_row
+                    .samples
+                    .iter()
+                    .filter_map(|sample| sample.peak_rss_bytes)
+                    .map(|bytes| bytes as f64),
+            );
+            let candidate_rss = metric(
+                candidate_row
+                    .samples
+                    .iter()
+                    .filter_map(|sample| sample.peak_rss_bytes)
+                    .map(|bytes| bytes as f64),
+            );
+            if rss_change > 20.0
+                && let (Some(baseline_rss), Some(candidate_rss)) =
+                    (baseline_rss.as_ref(), candidate_rss.as_ref())
+            {
+                disclosures.push(format_disclosure(
+                    candidate_row,
+                    "peak RSS",
+                    old as f64,
+                    new as f64,
+                    baseline_rss,
+                    candidate_rss,
+                    rss_change,
+                ));
+            }
+            if rss_change > thresholds.peak_rss_percent {
+                failures.push(format!(
+                    "{}/{} peak RSS regressed",
+                    candidate_row.case_id, candidate_row.adapter_id
+                ));
+            }
+        } else {
+            unavailable.push(format!(
+                "{} lacks comparable peak RSS",
+                candidate_row.case_id
             ));
         }
     }
     RegressionGate {
-        evaluated: true,
+        evaluated: evaluated_rows > 0,
         thresholds: Some(thresholds),
         failures,
+        disclosures,
+        unavailable,
     }
+}
+
+fn corpus_identities_match(
+    left: &[BenchmarkCorpusIdentity],
+    right: &[BenchmarkCorpusIdentity],
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| corpus_identity_matches(left, right))
+}
+
+/// Compare the immutable artifact identity while allowing cache relocation.
+fn corpus_identity_matches(
+    left: &BenchmarkCorpusIdentity,
+    right: &BenchmarkCorpusIdentity,
+) -> bool {
+    left.origin == right.origin
+        && left.source_id == right.source_id
+        && left.tier == right.tier
+        && left.format == right.format
+        && left.artifact.bytes == right.artifact.bytes
+        && left.artifact.sha256 == right.artifact.sha256
+        && left.logical_records == right.logical_records
+        && left.manifest_sha256 == right.manifest_sha256
+}
+
+fn commands_match_for_self_regression(
+    baseline: &BenchmarkRow,
+    candidate: &BenchmarkRow,
+    baseline_report: &BenchmarkCampaignReport,
+    candidate_report: &BenchmarkCampaignReport,
+) -> bool {
+    let Some(baseline_command) = baseline.command.get(1..) else {
+        return false;
+    };
+    let Some(candidate_command) = candidate.command.get(1..) else {
+        return false;
+    };
+    let baseline_path = row_artifact_path(baseline_report, baseline);
+    let candidate_path = row_artifact_path(candidate_report, candidate);
+    normalize_corpus_arguments(baseline_command, baseline_path)
+        == normalize_corpus_arguments(candidate_command, candidate_path)
+}
+
+fn row_artifact_path<'a>(
+    report: &'a BenchmarkCampaignReport,
+    row: &BenchmarkRow,
+) -> Option<&'a str> {
+    report
+        .corpus
+        .iter()
+        .find(|identity| {
+            identity.source_id == row.source_id
+                && identity.tier == row.tier
+                && identity.format == row.input_format
+        })
+        .map(|identity| identity.artifact.path.as_str())
+}
+
+/// Replace only an exact recorded artifact-path argument; flags and queries stay literal.
+fn normalize_corpus_arguments<'a>(
+    command: &'a [String],
+    artifact_path: Option<&str>,
+) -> Vec<Option<&'a str>> {
+    command
+        .iter()
+        .map(|argument| {
+            if artifact_path.is_some_and(|path| argument == path) {
+                None
+            } else {
+                Some(argument.as_str())
+            }
+        })
+        .collect()
+}
+
+fn row_native_contract(row: &BenchmarkRow) -> Option<&MeasurementProtocol> {
+    let source = row_rss_source(row)?;
+    if !matches!(
+        source,
+        RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
+    ) {
+        return None;
+    }
+    row.samples
+        .first()
+        .and_then(|sample| sample.measurement_protocol.as_ref())
+        .filter(|protocol| protocol.is_valid_for_comparison())
+}
+
+fn row_supports_comparison(row: &BenchmarkRow) -> bool {
+    let Some(source) = row_rss_source(row) else {
+        return false;
+    };
+    !is_native_rss_provenance(source) || row_native_contract(row).is_some()
+}
+
+fn has_unvalidated_native_timing(report: &BenchmarkCampaignReport) -> bool {
+    report
+        .cases
+        .iter()
+        .flat_map(|row| row.samples.iter().chain(&row.instrumented_samples))
+        .any(|sample| {
+            sample.rss_provenance.is_some_and(is_native_rss_provenance)
+                && sample
+                    .measurement_protocol
+                    .as_ref()
+                    .is_none_or(|protocol| !protocol.is_valid_for_comparison())
+        })
+}
+
+fn has_unverified_rss_provenance(report: &BenchmarkCampaignReport) -> bool {
+    report
+        .cases
+        .iter()
+        .flat_map(|row| row.samples.iter().chain(&row.instrumented_samples))
+        .any(|sample| sample.rss_provenance.is_none())
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "keep the separated instrumentation contract checks together"
+)]
+fn validate_instrumented_samples(row: &BenchmarkRow) -> Option<String> {
+    let primary_source = row_rss_source(row);
+    let native_primary = primary_source.is_some_and(is_native_rss_provenance);
+    if row.instrumented_samples.is_empty() {
+        if row.outcome == BenchmarkOutcome::Timed
+            && row.limits.rss_bytes.is_some()
+            && native_primary
+        {
+            return Some("lacks matching instrumented RSS-limit repetitions".to_owned());
+        }
+        return None;
+    }
+    if row.limits.rss_bytes.is_none() {
+        return Some("has instrumented samples without an RSS limit".to_owned());
+    }
+    if row.outcome == BenchmarkOutcome::Timed && row.instrumented_samples.len() != row.samples.len()
+    {
+        return Some(format!(
+            "has {} instrumented RSS-limit repetitions for {} timing samples",
+            row.instrumented_samples.len(),
+            row.samples.len()
+        ));
+    }
+    if row.samples.iter().any(|sample| {
+        sample
+            .measurement_protocol
+            .as_ref()
+            .is_some_and(|protocol| protocol.rss_poll_interval_micros.is_some())
+    }) {
+        return Some("mixes instrumented and timing samples".to_owned());
+    }
+
+    let first = &row.instrumented_samples[0];
+    let Some(source) = first.rss_provenance else {
+        return Some("has instrumented samples without RSS provenance".to_owned());
+    };
+    if !is_native_rss_provenance(source) {
+        return Some(format!(
+            "uses non-native instrumented RSS provenance {}",
+            source.label()
+        ));
+    }
+    if primary_source.is_some_and(|primary| primary != source) {
+        return Some("mixes primary and instrumented RSS provenance".to_owned());
+    }
+    let Some(protocol) = first.measurement_protocol.as_ref() else {
+        return Some("has instrumented samples without a measurement protocol".to_owned());
+    };
+    if !protocol.is_valid() || protocol.rss_poll_interval_micros.is_none() {
+        return Some("has invalid instrumented RSS sampler protocol".to_owned());
+    }
+    if row.instrumented_samples.iter().any(|sample| {
+        sample.rss_provenance != Some(source)
+            || sample.measurement_protocol.as_ref() != Some(protocol)
+            || !instrumented_sample_has_native_evidence(sample)
+    }) {
+        return Some("mixes or contains invalid instrumented RSS evidence".to_owned());
+    }
+    None
+}
+
+fn instrumented_sample_has_native_evidence(sample: &BenchmarkSample) -> bool {
+    sample.peak_rss_bytes.is_some_and(|bytes| bytes > 0)
+        && sample.user_cpu_micros.is_some()
+        && sample.system_cpu_micros.is_some()
+        && sample
+            .measurement_protocol
+            .as_ref()
+            .is_some_and(MeasurementProtocol::is_valid)
+}
+
+const fn is_native_rss_provenance(source: RssProvenance) -> bool {
+    matches!(
+        source,
+        RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
+    )
+}
+
+fn format_disclosure(
+    row: &BenchmarkRow,
+    metric_name: &str,
+    baseline: f64,
+    candidate: f64,
+    baseline_metrics: &MetricSummary,
+    candidate_metrics: &MetricSummary,
+    increase_percent: f64,
+) -> String {
+    format!(
+        "{}/{} {metric_name} increased by {increase_percent:?}% (baseline={baseline:?}, candidate={candidate:?}, baseline_samples={}, candidate_samples={}, baseline_dispersion=mad:{:?};p95:{:?};range:{:?}-{:?}, candidate_dispersion=mad:{:?};p95:{:?};range:{:?}-{:?}, explanation=issue-30 disclosure above 20%)",
+        row.case_id,
+        row.adapter_id,
+        baseline_metrics.samples,
+        candidate_metrics.samples,
+        baseline_metrics.median_absolute_deviation,
+        baseline_metrics.p95,
+        baseline_metrics.minimum,
+        baseline_metrics.maximum,
+        candidate_metrics.median_absolute_deviation,
+        candidate_metrics.p95,
+        candidate_metrics.minimum,
+        candidate_metrics.maximum,
+    )
+}
+
+fn row_rss_source(row: &BenchmarkRow) -> Option<RssProvenance> {
+    let source = row.samples.first()?.rss_provenance?;
+    if matches!(
+        source,
+        RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
+    ) && row.samples[0]
+        .measurement_protocol
+        .as_ref()
+        .is_none_or(|protocol| !protocol.is_valid())
+    {
+        return None;
+    }
+    row.samples
+        .iter()
+        .all(|sample| {
+            sample.rss_provenance == Some(source)
+                && sample.measurement_protocol == row.samples[0].measurement_protocol
+                && sample.peak_rss_bytes.is_some_and(|bytes| bytes > 0)
+                && (!matches!(
+                    source,
+                    RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
+                ) || (sample.user_cpu_micros.is_some() && sample.system_cpu_micros.is_some()))
+        })
+        .then_some(source)
 }
 
 fn metric(values: impl Iterator<Item = f64>) -> Option<MetricSummary> {

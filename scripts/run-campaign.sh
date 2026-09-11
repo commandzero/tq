@@ -54,13 +54,21 @@ case "$campaign:$profile" in
         cargo build --quiet --release -p tq-cli
         TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
         export TQ_BIN
-        exec cargo run --quiet -p tq-test-support --bin tq-bench -- run \
+        set --
+        if [ -n "${TQ_TIMING_CALIBRATION:-}" ]; then
+            set -- --timing-calibration "$TQ_TIMING_CALIBRATION"
+        fi
+        exec cargo run --quiet --release -p tq-test-support --bin tq-bench -- run \
             --profile smoke --output "$work_root/smoke.json" --max-samples 1 \
             --case benchmark.startup --case benchmark.parse-discard \
             --case benchmark.scalar-extraction --case benchmark.event-stream \
-            --case benchmark.object-deep-merge
+            --case benchmark.object-deep-merge "$@"
         ;;
     benchmark:rapid|benchmark:standard|benchmark:large)
+        if [ "$profile" = standard ] && [ -z "${TQ_TIMING_CALIBRATION:-}" ]; then
+            echo "standard publication requires TQ_TIMING_CALIBRATION pointing to a verified native validation summary" >&2
+            exit 64
+        fi
         mkdir -p "$work_root"
         cache_root="${TQ_CORPUS_CACHE:-$work_root/corpus}"
         corpus_origin="${TQ_CORPUS_ORIGIN:-frozen}"
@@ -68,6 +76,8 @@ case "$campaign:$profile" in
         cargo build --quiet --release -p tq-cli
         TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
         export TQ_BIN
+        cargo run --quiet --release --locked -p tq-test-support --bin tq-bench -- \
+            --preflight-only --profile "$profile"
         if [ -z "${TQ_BENCH_MANIFESTS:-}" ]; then
             refresh_json="$(mktemp "${TMPDIR:-/tmp}/tq-corpus.XXXXXX")"
             trap 'rm -f "$refresh_json"' EXIT HUP INT TERM
@@ -78,7 +88,7 @@ case "$campaign:$profile" in
             fi
             cargo run --quiet --release -p tq-test-support --bin tq-corpus -- \
                 "$corpus_command" tests/corpus/sources "$cache_root" "$corpus_profile" >"$refresh_json"
-            TQ_BENCH_MANIFESTS="$(jq -r '.manifests | join(":")' "$refresh_json")"
+            TQ_BENCH_MANIFESTS="$("$TQ_BIN" -r '.manifests | join(":")' "$refresh_json")"
             export TQ_BENCH_MANIFESTS
             rm -f "$refresh_json"
             trap - EXIT HUP INT TERM
@@ -86,6 +96,9 @@ case "$campaign:$profile" in
         set --
         if [ "$profile" = standard ]; then
             set -- --markdown-dir "$PWD/docs/tests/comparison"
+        fi
+        if [ -n "${TQ_TIMING_CALIBRATION:-}" ]; then
+            set -- "$@" --timing-calibration "$TQ_TIMING_CALIBRATION"
         fi
         exec cargo run --quiet --release -p tq-test-support --bin tq-bench -- run \
             --profile "$profile" --output "$work_root/$profile.json" \

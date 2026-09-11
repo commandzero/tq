@@ -9,15 +9,19 @@ use std::{
 use serde_json::{Value, json};
 
 fn write_report(path: &Path, final_status: &str) {
+    write_report_for_host(path, final_status, "test", "test");
+}
+
+fn write_report_for_host(path: &Path, final_status: &str, os: &str, architecture: &str) {
     let report = json!({
         "schema_version": 1,
         "campaign_id": "test-campaign",
         "profile": "rapid",
         "environment": {
             "collected_at": "2026-01-01T00:00:00Z",
-            "os": "test",
+            "os": os,
             "kernel": null,
-            "architecture": "test",
+            "architecture": architecture,
             "logical_cpus": 1,
             "physical_cpus": null,
             "cpu_model": null,
@@ -79,6 +83,41 @@ fn render_only_succeeds_for_historical_failed_reports() {
     }
 }
 
+#[test]
+fn render_only_accepts_multiple_host_reports_without_overwriting_host_sections() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let linux_report = directory.path().join("linux.json");
+    let macos_report = directory.path().join("macos.json");
+    let markdown = directory.path().join("markdown");
+    fs::create_dir(&markdown).expect("create markdown directory");
+    write_report_for_host(&linux_report, "passed", "linux", "x86_64");
+    write_report_for_host(&macos_report, "passed", "macos", "aarch64");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_tq-bench"))
+        .args([
+            "--render-only",
+            linux_report.to_str().expect("linux report path"),
+            "--render-only",
+            macos_report.to_str().expect("macos report path"),
+            "--markdown-dir",
+            markdown.to_str().expect("markdown path"),
+        ])
+        .output()
+        .expect("run multi-host render-only benchmark command");
+
+    assert!(
+        output.status.success(),
+        "multi-host render-only failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let index = fs::read_to_string(markdown.join("index.md")).expect("rendered index");
+    assert_eq!(index.matches("### Host: linux / x86_64 / rapid").count(), 1);
+    assert_eq!(
+        index.matches("### Host: macos / aarch64 / rapid").count(),
+        1
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn failed_run_writes_report_returns_failure_and_reports_row_progress() {
@@ -124,9 +163,8 @@ fn failed_run_writes_report_returns_failure_and_reports_row_progress() {
 
 #[cfg(unix)]
 #[test]
-fn rss_preflight_failure_aborts_before_writing_a_report() {
+fn missing_campaign_executables_abort_before_writing_a_report() {
     let directory = tempfile::tempdir().expect("temporary directory");
-    let _python = fake_tool(directory.path(), "python3", "exit 0");
     let report = directory.path().join("preflight.json");
 
     let output = Command::new(env!("CARGO_BIN_EXE_tq-bench"))
@@ -147,7 +185,10 @@ fn rss_preflight_failure_aborts_before_writing_a_report() {
         "failed RSS preflight must not write a report"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("process-group RSS inspection unavailable"));
+    assert!(
+        stderr.contains("required campaign executables unavailable: jq, yq"),
+        "unexpected executable-discovery stderr: {stderr}"
+    );
 }
 
 #[cfg(unix)]

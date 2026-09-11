@@ -133,6 +133,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let adapter = adapter(tool);
             let Some(identity) = tools.get(&tool) else {
                 let placeholder = BenchmarkInvocation {
+                    cancellation: None,
                     executable: PathBuf::from(tool_name(tool)),
                     args: Vec::new(),
                     stdin: record.input.clone(),
@@ -340,6 +341,7 @@ fn invocation(
     };
     args.push(benchmark.query.clone());
     BenchmarkInvocation {
+        cancellation: None,
         executable: identity.path.clone(),
         args,
         stdin: input.to_vec(),

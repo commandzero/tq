@@ -13,8 +13,10 @@ See the [compatibility guide](compatibility.md) for the evidence policy.
 
 ## Minimum Rust version
 
-Building from source requires Rust 1.88 or newer. The previous 1.87 declaration
-was incompatible with existing let chains and the pinned JSON5 dependency.
+Building from source now requires Rust 1.95 or newer for `wait4 0.2.0`
+native benchmark accounting. The earlier parity checkpoint required Rust 1.88:
+the previous 1.87 declaration was incompatible with existing let chains and
+the pinned JSON5 dependency.
 The parser checkpoint passed workspace checks for all targets and features
 with Rust 1.88 selected explicitly; the compatibility test campaigns used
 Rust 1.98.0. These are separate checks, not a claim that the full test campaign

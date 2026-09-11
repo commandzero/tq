@@ -22,6 +22,7 @@
         "type": "object",
         "properties": {
           "diagnostic": {"type": "string", "maxLength": 1024},
+          "instrumented_samples": {"$ref": "#/properties/cases/items/properties/samples"},
           "samples": {
             "type": "array",
             "items": {
@@ -31,18 +32,63 @@
                 "process_group_peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
                 "rss_provenance": {
                   "anyOf": [
-                    {"enum": ["gnu-time-v", "bsd-time-l"]},
+                    {"enum": ["gnu-time-v", "bsd-time-l", "darwin-wait4", "linux-wait4"]},
+                    {"type": "null"}
+                  ]
+                },
+                "measurement_protocol": {
+                  "anyOf": [
+                    {"$ref": "#/$defs/measurement_protocol"},
                     {"type": "null"}
                   ]
                 }
-              }
+              },
+              "allOf": [{
+                "if": {
+                  "required": ["rss_provenance"],
+                  "properties": {"rss_provenance": {"enum": ["darwin-wait4", "linux-wait4"]}}
+                },
+                "then": {
+                  "required": ["measurement_protocol", "peak_rss_bytes", "user_cpu_micros", "system_cpu_micros"],
+                  "properties": {
+                    "measurement_protocol": {"$ref": "#/$defs/measurement_protocol"},
+                    "peak_rss_bytes": {"type": "integer", "minimum": 1},
+                    "user_cpu_micros": {"type": "integer", "minimum": 0},
+                    "system_cpu_micros": {"type": "integer", "minimum": 0}
+                  }
+                }
+              }]
             }
           }
         }
       }
     },
     "comparability": {"type": "object"},
-    "regression_gate": {"type": "object"},
+    "regression_gate": {
+      "type": "object",
+      "properties": {
+        "evaluated": {"type": "boolean"},
+        "thresholds": {"type": ["object", "null"]},
+        "failures": {"type": "array", "items": {"type": "string"}},
+        "disclosures": {"type": "array", "items": {"type": "string"}},
+        "unavailable": {"type": "array", "items": {"type": "string"}}
+      }
+    },
     "final_status": {"enum": ["passed", "observed-failures", "regression"]}
+  },
+  "$defs": {
+    "measurement_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timing_method", "input_delivery", "rss_scope", "exit_poll_interval_micros", "rss_poll_interval_micros", "validated_accuracy_micros"],
+      "properties": {
+        "timing_method": {"type": "string", "minLength": 1},
+        "input_delivery": {"type": "string", "minLength": 1},
+        "rss_scope": {"type": "string", "minLength": 1},
+        "exit_poll_interval_micros": {"type": "integer", "minimum": 1},
+        "rss_poll_interval_micros": {"type": ["integer", "null"], "minimum": 1},
+        "validated_accuracy_micros": {"type": ["integer", "null"], "minimum": 1}
+      }
+    }
   }
 }

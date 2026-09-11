@@ -17,12 +17,38 @@ Record the input size, tool versions, commands, timing, peak RSS, comparison
 method, and important failures. Leave out the full corpus and per-sample data
 from the report itself.
 
-Run all benchmark and baseline commands outside restricted sandboxes with
-elevated permission to inspect child processes. On macOS, collect every
-authoritative peak RSS sample with `/usr/bin/time -l` and record the reported
-`maximum resident set size`. Process-group sampling may supplement this value,
-but it cannot replace it. Discard and rerun any campaign whose sandbox blocks
-process inspection or leaves macOS RSS unavailable.
+Run all authoritative benchmark and baseline commands outside restricted
+sandboxes with the elevated permissions needed for native child accounting.
+The required production contract launches each executable directly and, once
+the native backend passes lifecycle and audited-counter validation, uses one
+resource-aware waiter to collect the exact child's exit status, CPU usage, and
+OS-recorded peak RSS. Its allocation preflight runs before corpus preparation;
+missing RSS, invalid units, or missing collector provenance abort the campaign
+before corpus work and publication. A draft or unverified native backend is not
+accepted benchmark evidence.
+
+Use `/usr/bin/time -l` on macOS and GNU `/usr/bin/time -v` on Linux only for
+independent validation of native counters, with the same executable, input, and
+command contract. These commands must remain separate from the production
+measurement method. `ps` is optional and limited to explicitly requested
+process-group RSS enforcement or diagnostics; record its scope and interval
+because sampling can miss short peaks. Measurements without sampled limits
+require no `ps`; catalog cases with RSS limits use separate enforcement
+repetitions. Production measurements require neither platform `time` nor
+Python allocation probes. Native Windows accounting
+is deferred to issue #31 and cannot be verified through cross-compilation or
+emulation.
+
+Reports retain the direct spawn-to-exit boundary, input-delivery method, RSS
+scope, collector provenance, and validated timing accuracy. Display precision
+is presentation only: one decimal does not imply one-decimal accuracy, and
+nanosecond storage does not imply nanosecond accuracy. Repeat no-op and
+known-duration controls to establish the supported precision.
+
+State whether the platform waiter accounts for only the waited-for child or
+also includes waited-for descendants. Limit process-only comparisons to
+verified non-forking jq, yq, and tq workloads; forked workloads require an
+explicitly comparable RSS scope.
 
 The current reviewed reports are kept in the benchmark archive
 repository alongside their raw campaign outputs.
@@ -32,7 +58,7 @@ repository alongside their raw campaign outputs.
 The local tq-only defaults are:
 
 - Median wall time may increase by at most 50%.
-- Peak RSS may increase by at most 20%.
+- Peak RSS may increase by at most 50%.
 - A row needs at least five measured samples before it can fail the gate.
 
 Run self-regression checks against JSON reports in the archive checkout's
@@ -44,12 +70,24 @@ TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --re
   run --profile standard --origin frozen --manifest PATH \
   --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/candidate.json" \
   --baseline "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/accepted.json" \
-  --wall-regression-percent 50 --rss-regression-percent 20 \
+  --timing-calibration PATH_TO_VERIFIED_NATIVE_SUMMARY \
+  --wall-regression-percent 50 --rss-regression-percent 50 \
   --minimum-regression-samples 5
 ```
 
 The gate skips comparisons when the profile, machine, corpus artifact, or tool
-identity differs. A reference-tool change is metadata, not a regression.
+identity differs. A reference-tool change is metadata, not a regression. Old
+wrapper-based or sampled-memory reports keep their original method and are not
+comparable baselines for native-accounting claims.
+
+For issue #30 acceptance, review wall time and peak RSS independently for every
+comparable workload. Disclose each increase above 20% with baseline, candidate,
+sample count, dispersion, and an explanation. Documented increases greater than
+20% and at most 50% are acceptable when all other gates pass; an increase above
+50% blocks acceptance until mitigated and remeasured. Exactly 20% does not
+cross the disclosure threshold, and exactly 50% does not block acceptance.
+Cross-tool jq/yq ratios remain comparative evidence rather than tq
+self-regression evidence.
 
 ## jq-relative soft objective
 

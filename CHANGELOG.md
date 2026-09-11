@@ -26,13 +26,15 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
+- Changed macOS and Linux benchmark collection to direct spawn-to-exit timing and native child peak RSS, with separately labeled optional sampling and independent platform-time validation (#30).
+- Changed benchmark result tables to show one decimal and units in measurement cells, use `-` for unavailable comparisons, and keep collector provenance outside tables (#30).
 - Changed benchmark correctness checks to support default TOON result streams and retain failure diagnostics.
 - Changed benchmark campaigns to return a failing exit status after saving failed observations.
 - Changed benchmark campaigns to abort immediately when authoritative RSS collection is unavailable.
 - Changed the benchmark catalog to enable verified YAML, TOON, and yq adapters and explain remaining exclusions.
 - Changed optimized JSON execution to validate each input value before running its filter, preserving duplicate-key replacement and continuing after recoverable errors at the next input value.
 - Changed `acos` and `exp` to use safe standard-library operations, matching the pinned macOS jq rounding witnesses.
-- Raised the minimum Rust version to 1.88 to match existing language and dependency requirements.
+- Raised the minimum Rust version to 1.95 to support native child accounting with `wait4 0.2.0` (#30).
 - Corrected Linux CPU-time and process-group RSS measurements in benchmark reports.
 - Changed streamed `inputs` processing to use bounded buffering and reduce per-document scheduling overhead (#5).
 - Changed format conversion to preserve oversized JSON numbers instead of silently falling back to YAML strings (#18).

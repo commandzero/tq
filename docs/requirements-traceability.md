@@ -46,5 +46,5 @@ Release review checks the following without suppressing failures:
    digested incrementally rather than accumulated as a complete result vector.
 4. The natural-large explicit stream stays within its 128 MiB RSS envelope;
    blocking/document cases retain their observed outcome even when unfavorable.
-5. Stable and Rust 1.88 workspace tests, strict OpenSpec validation, Clippy,
+5. Stable and the currently declared minimum Rust version's workspace tests, strict OpenSpec validation, Clippy,
    rustdoc, and all six bounded fuzz targets pass.

@@ -13,6 +13,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["blocking"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
 sha2 = "0.11.0"
+signal-hook = "0.3.18"
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 tiktoken-rs = "0.9.1"
@@ -23,6 +24,13 @@ tq-toon = { path = "../tq-toon" }
 wait-timeout = "0.2.1"
 yaml_serde = "0.10.7"
 zip = { version = "6.0.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+rustix = { version = "1.1.4", features = ["process"] }
+wait4 = "=0.2.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "=0.14.11"
 
 [lints]
 workspace = true

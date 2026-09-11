@@ -5,8 +5,13 @@ mod environment;
 mod manifest;
 mod markdown;
 mod measure;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod native_process;
+mod probe;
 mod report;
 mod runner;
+
+pub use probe::{AllocationProbeError, run_allocation_probe};
 
 pub(crate) use correctness::SemanticDigester;
 pub use correctness::{
@@ -21,18 +26,20 @@ pub use manifest::{
     load_benchmark_catalog,
 };
 pub use markdown::{
-    MarkdownRenderError, RESULTS_END_MARKER, RESULTS_START_MARKER, render_markdown_pages,
-    workload_filename,
+    MarkdownRenderError, RESULTS_END_MARKER, RESULTS_START_MARKER, render_markdown_campaigns,
+    render_markdown_pages, workload_filename,
 };
 pub use measure::{
     BenchmarkInvocation, MeasureError, MeasuredOutcome, MeasuredStatus, RssPreflight,
-    RssProvenance, measure_process, preflight_rss,
+    RssProvenance, collector_source_sha256, measure_process, measure_process_uninstrumented,
+    preflight_rss,
 };
 pub use report::{
     BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
-    BenchmarkRow, BenchmarkSample, Comparability, MetricSummary, RegressionGate,
-    RegressionThresholds, RowSummary, SoftObjectiveStatus, SoftPerformanceObjective,
-    compare_reports, evaluate_regression, populate_reference_ratios, summarize_samples,
+    BenchmarkRow, BenchmarkSample, Comparability, MeasurementProtocol, MetricSummary,
+    RegressionGate, RegressionThresholds, RowSummary, SoftObjectiveStatus,
+    SoftPerformanceObjective, compare_reports, evaluate_regression, populate_reference_ratios,
+    summarize_samples,
 };
 pub use runner::{
     BenchmarkRunnerError, is_correctness_output_limit, normalize_correctness_run,

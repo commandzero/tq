@@ -1,0 +1,28 @@
+name: Repository preflight
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly-2026-08-30
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+      - name: Install pinned preflight tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
+          npm install --global --ignore-scripts --no-audit --no-fund --save-exact @fission-ai/openspec@1.11.0
+          cargo install okf --version 0.2.7 --locked
+          test "$(openspec --version)" = "1.11.0"
+          rg --version
+      - name: Run shared repository preflight
+        run: ./scripts/preflight.sh

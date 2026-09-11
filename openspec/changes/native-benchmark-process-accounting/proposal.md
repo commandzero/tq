@@ -5,7 +5,9 @@
 ## What Changes
 
 - Launch jq, yq, and tq directly with argument vectors and measure monotonic spawn-to-exit duration after preparing input and capture files.
+- Investigate an isolated, low-memory Rust measurement worker to prevent campaign-runner memory from determining Linux child RSS. The worker directly launches and reaps the selected tool; worker startup and communication stay outside the measured interval. Adoption requires parent-memory isolation and independent native validation, not merely a successful prototype.
 - Collect the specific child's exit status, CPU usage, and OS-recorded peak RSS through one owner of the wait lifecycle on macOS and Linux. Keep first-party Rust free of unsafe code and FFI bridges.
+- Raise the minimum Rust version to 1.95 and use the audited `wait4 0.2.0` dependency for consuming child ownership, interrupted-call retries, and defensive RSS conversion. Retain the approved valid-OS-counter assumption, checked first-party conversions, and independent validation.
 - Remove mandatory RSS polling and `time` wrappers from primary measurements. Keep explicitly requested diagnostic sampling or limit enforcement separately labeled and bounded.
 - **BREAKING**: Replace the benchmark policy requiring `time` and `ps` with verified native accounting. Add explicit method, scope, availability, and timing precision to reports; preserve old provenance and reject incompatible comparisons.
 - Validate short allocation bursts, units, independent children, threads, termination, and timing controls on both native platforms. Compare native counters independently with platform `time`.

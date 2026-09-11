@@ -55,6 +55,67 @@ fn correct_candidate_runs_warmup_and_requested_samples() {
 }
 
 #[test]
+fn rss_limited_rows_keep_timing_and_enforcement_repetitions_separate() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "correct-limited", "printf '1\\n'");
+    let mut invocation = invocation(executable);
+    invocation.rss_limit = Some(128 * 1024 * 1024);
+    let mut case = case();
+    case.limits.rss_bytes = invocation.rss_limit;
+    let row = run_gated_row(
+        &case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+        &reference(),
+    )
+    .expect("limited gated row");
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+    assert_eq!(row.samples.len(), 3);
+    assert!(row.samples.iter().all(|sample| {
+        sample
+            .measurement_protocol
+            .as_ref()
+            .is_some_and(|protocol| protocol.rss_poll_interval_micros.is_none())
+    }));
+    let stored = serde_json::to_value(&row).unwrap();
+    let instrumented = stored["instrumented_samples"]
+        .as_array()
+        .expect("separate enforcement samples");
+    assert_eq!(instrumented.len(), 3);
+    assert!(
+        instrumented
+            .iter()
+            .all(|sample| sample["measurement_protocol"]["rss_poll_interval_micros"] == 25_000)
+    );
+    assert_eq!(row.summary.as_ref().unwrap().wall_time_micros.samples, 3);
+}
+
+#[test]
+fn failed_sampled_enforcement_is_not_reported_as_a_timing_repetition() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = script(directory.path(), "over-limit", "printf '1\\n'");
+    let mut invocation = invocation(executable);
+    invocation.rss_limit = Some(1);
+    let mut case = case();
+    case.limits.rss_bytes = Some(1);
+    let row = run_gated_row(
+        &case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+        &reference(),
+    )
+    .unwrap();
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert!(row.samples.is_empty());
+    assert_eq!(row.instrumented_samples.len(), 1);
+    assert!(row.summary.is_none());
+}
+
+#[test]
 fn signaled_correctness_candidate_is_not_misclassified_as_incorrect() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let executable = script(directory.path(), "signaled", "kill -TERM $$");
@@ -450,6 +511,7 @@ fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {
 
 fn invocation(executable: PathBuf) -> BenchmarkInvocation {
     BenchmarkInvocation {
+        cancellation: None,
         executable,
         args: Vec::new(),
         stdin: Vec::new(),

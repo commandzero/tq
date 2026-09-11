@@ -127,6 +127,7 @@ fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {
 
 fn invocation(executable: PathBuf, args: Vec<String>) -> BenchmarkInvocation {
     BenchmarkInvocation {
+        cancellation: None,
         executable,
         args,
         stdin: Vec::new(),

@@ -8,11 +8,11 @@ use tq_test_support::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
         BenchmarkRow, BenchmarkSample, Comparability, ComparisonFamily, CorrectnessDecision,
         CorrectnessObservation, CorrectnessPayload, ExecutionClass, InputFormat,
-        OutputContractKind, RegressionGate, RegressionThresholds, RssProvenance,
-        SoftObjectiveStatus, collect_environment, compare_reports, correctness_gate,
+        MeasurementProtocol, OutputContractKind, RegressionGate, RegressionThresholds,
+        RssProvenance, SoftObjectiveStatus, collect_environment, compare_reports, correctness_gate,
         evaluate_regression, populate_reference_ratios, semantic_digest, summarize_samples,
     },
-    compatibility::ProcessStatus,
+    compatibility::{ProcessStatus, ToolIdentity, ToolKind},
     corpus::ArtifactIdentity,
 };
 
@@ -112,6 +112,26 @@ fn different_campaign_profiles_are_not_regression_comparable() {
 }
 
 #[test]
+fn changed_measurement_contracts_are_not_report_comparable() {
+    let left = campaign("machine-a", "digest-a", 100, 1024);
+    let mut right = left.clone();
+    for sample in &mut right.cases[0].samples {
+        sample.measurement_protocol = None;
+        sample.rss_provenance = Some(RssProvenance::GnuTimeV);
+    }
+    right.cases[0].summary = summarize_samples(&right.cases[0].samples, 100, 1);
+
+    let comparison = compare_reports(&left, &right);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("measurement protocol"))
+    );
+}
+
+#[test]
 fn tq_regression_gate_uses_configured_self_thresholds_only() {
     let baseline = campaign("machine-a", "digest-a", 100, 1024);
     let candidate = campaign("machine-a", "digest-a", 130, 2048);
@@ -128,14 +148,398 @@ fn tq_regression_gate_uses_configured_self_thresholds_only() {
     assert_eq!(gate.failures.len(), 2);
 }
 
+#[test]
+fn issue30_disclosure_and_blocking_boundaries_use_unrounded_metrics() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    for (value, notices, failures) in [(1200, 0, 0), (1201, 2, 0), (1500, 2, 0), (1501, 2, 2)] {
+        let candidate = campaign(
+            "machine-a",
+            "digest-a",
+            value,
+            u64::try_from(value).unwrap(),
+        );
+        let gate = evaluate_regression(
+            &baseline,
+            &candidate,
+            RegressionThresholds {
+                wall_time_percent: 50.0,
+                peak_rss_percent: 50.0,
+                minimum_samples: 3,
+            },
+        );
+        assert!(gate.evaluated);
+        assert_eq!(gate.disclosures.len(), notices, "value {value}");
+        assert_eq!(gate.failures.len(), failures, "value {value}");
+        if notices > 0 {
+            let disclosures = gate.disclosures.join("\n");
+            assert!(disclosures.contains("baseline="), "value {value}");
+            assert!(disclosures.contains("candidate="), "value {value}");
+            assert!(disclosures.contains("baseline_samples=3"), "value {value}");
+            assert!(disclosures.contains("candidate_samples=3"), "value {value}");
+            assert!(disclosures.contains("dispersion="), "value {value}");
+        }
+    }
+}
+
+#[test]
+fn missing_baseline_rows_are_not_evaluated_as_passing() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    baseline.cases.clear();
+    let candidate = campaign("machine-a", "digest-a", 1000, 1000);
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert_eq!(gate.unavailable.len(), 1);
+}
+
+#[test]
+fn missing_authoritative_sample_is_unavailable_not_a_passing_gate() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut candidate = campaign("machine-a", "digest-a", 1000, 1000);
+    candidate.cases[0].samples[1].peak_rss_bytes = None;
+    candidate.cases[0].summary = summarize_samples(&candidate.cases[0].samples, 100, 1);
+
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty());
+    assert!(!gate.unavailable.is_empty());
+}
+
+#[test]
+fn self_regression_allows_a_different_tq_binary_but_requires_command_and_protocol_match() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut candidate = baseline.clone();
+    candidate.cases[0].command[0] = "/other/build/tq".to_owned();
+    let thresholds = RegressionThresholds {
+        wall_time_percent: 50.0,
+        peak_rss_percent: 50.0,
+        minimum_samples: 3,
+    };
+    assert!(evaluate_regression(&baseline, &candidate, thresholds.clone()).evaluated);
+
+    candidate.cases[0].command[1] = "different-query".to_owned();
+    let gate = evaluate_regression(&baseline, &candidate, thresholds.clone());
+    assert!(!gate.evaluated);
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("contract"))
+    );
+
+    candidate = baseline.clone();
+    for sample in &mut candidate.cases[0].samples {
+        let mut protocol = native_protocol();
+        protocol.input_delivery = "pipe".to_owned();
+        sample.measurement_protocol = Some(protocol);
+    }
+    candidate.cases[0].summary = summarize_samples(&candidate.cases[0].samples, 100, 1);
+    let gate = evaluate_regression(&baseline, &candidate, thresholds);
+    assert!(!gate.evaluated);
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("measurement protocol"))
+    );
+}
+
+#[test]
+fn relocated_corpus_paths_are_normalized_only_for_the_recorded_row_artifact() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let baseline_path = "/baseline/cache/source.json".to_owned();
+    baseline.corpus[0].artifact.path.clone_from(&baseline_path);
+    baseline.cases[0].command.push(baseline_path);
+
+    let mut candidate = baseline.clone();
+    let candidate_path = "/candidate/cache/source.json".to_owned();
+    candidate.corpus[0]
+        .artifact
+        .path
+        .clone_from(&candidate_path);
+    candidate.cases[0].command[0] = "/candidate/build/tq".to_owned();
+    candidate.cases[0].command[2] = candidate_path;
+
+    assert!(compare_reports(&baseline, &candidate).comparable);
+    assert!(
+        evaluate_regression(
+            &baseline,
+            &candidate,
+            RegressionThresholds {
+                wall_time_percent: 50.0,
+                peak_rss_percent: 50.0,
+                minimum_samples: 3,
+            },
+        )
+        .evaluated
+    );
+}
+
+#[test]
+fn self_regression_rejects_a_command_path_that_is_not_the_row_artifact() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let baseline_path = "/baseline/cache/source.json".to_owned();
+    baseline.corpus[0].artifact.path.clone_from(&baseline_path);
+    baseline.cases[0].command.push(baseline_path);
+
+    let mut candidate = baseline.clone();
+    let candidate_path = "/candidate/cache/source.json".to_owned();
+    candidate.corpus[0]
+        .artifact
+        .path
+        .clone_from(&candidate_path);
+    candidate.cases[0].command[0] = "/candidate/build/tq".to_owned();
+    candidate.cases[0].command[2] = "/candidate/cache/not-the-row-artifact.json".to_owned();
+
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("contract"))
+    );
+}
+
+#[test]
+fn corpus_relocation_does_not_hide_an_immutable_artifact_change() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    baseline.corpus[0].artifact.path = "/baseline/source.json".to_owned();
+    let mut candidate = baseline.clone();
+    candidate.corpus[0].artifact.path = "/candidate/source.json".to_owned();
+    candidate.corpus[0].artifact.bytes += 1;
+
+    let comparison = compare_reports(&baseline, &candidate);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("corpus"))
+    );
+}
+
+#[test]
+fn reference_tool_identity_changes_are_metadata_for_tq_self_regression() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    baseline.tools = vec![reference_tool("jq-1")];
+    let mut candidate = campaign("machine-a", "digest-a", 1000, 1000);
+    candidate.tools = vec![reference_tool("jq-2")];
+
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(gate.evaluated);
+    assert!(gate.failures.is_empty());
+}
+
+#[test]
+fn historical_wrapper_samples_are_retained_but_not_self_regression_evidence() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    for sample in &mut baseline.cases[0].samples {
+        sample.measurement_protocol = None;
+        sample.rss_provenance = Some(RssProvenance::GnuTimeV);
+    }
+    baseline.cases[0].summary = summarize_samples(&baseline.cases[0].samples, 100, 1);
+    let candidate = baseline.clone();
+
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("contract"))
+    );
+}
+
+#[test]
+fn uncalibrated_native_samples_are_not_comparison_evidence() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut candidate = baseline.clone();
+    for sample in &mut candidate.cases[0].samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .expect("native protocol")
+            .validated_accuracy_micros = None;
+    }
+    candidate.cases[0].summary = summarize_samples(&candidate.cases[0].samples, 100, 1);
+
+    let comparison = compare_reports(&baseline, &candidate);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("timing precision is unvalidated")),
+        "reasons: {:?}",
+        comparison.reasons
+    );
+
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty());
+    assert!(gate.unavailable.iter().any(|reason| {
+        reason.contains("timing precision") || reason.contains("measurement protocol")
+    }));
+
+    let mut ratio_report = candidate.clone();
+    let mut reference = ratio_report.cases[0].clone();
+    reference.adapter_id = "jq-json".to_owned();
+    ratio_report.cases.push(reference);
+    populate_reference_ratios(&mut ratio_report.cases, &["jq-json"]);
+    assert!(ratio_report.cases[0].reference_ratios.is_empty());
+    assert!(ratio_report.cases[0].reference_peak_rss_ratios.is_empty());
+}
+
+#[test]
+fn equal_unknown_rss_provenance_is_not_comparable() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    for sample in &mut baseline.cases[0].samples {
+        sample.rss_provenance = None;
+    }
+    let candidate = baseline.clone();
+
+    let comparison = compare_reports(&baseline, &candidate);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| { reason.contains("unverified RSS provenance") })
+    );
+}
+
+#[test]
+fn uncalibrated_native_samples_remain_valid_diagnostic_records() {
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    for sample in &mut report.cases[0].samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .expect("native protocol")
+            .validated_accuracy_micros = None;
+    }
+    assert!(report.validate_authoritative_rss().is_ok());
+}
+
+#[test]
+fn a_faster_metric_cannot_hide_an_independent_regression() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    for (wall, rss) in [(500, 1501), (1501, 500)] {
+        let candidate = campaign("machine-a", "digest-a", wall, rss);
+        let gate = evaluate_regression(
+            &baseline,
+            &candidate,
+            RegressionThresholds {
+                wall_time_percent: 50.0,
+                peak_rss_percent: 50.0,
+                minimum_samples: 3,
+            },
+        );
+        assert!(gate.evaluated);
+        assert_eq!(gate.disclosures.len(), 1);
+        assert_eq!(gate.failures.len(), 1);
+    }
+}
+
+#[test]
+fn incompatible_collection_methods_do_not_support_regression_or_reference_ratios() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut candidate = baseline.clone();
+    for sample in &mut candidate.cases[0].samples {
+        sample.rss_provenance = Some(RssProvenance::BsdTimeL);
+    }
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert_eq!(gate.unavailable.len(), 1);
+    let mut reference = baseline.cases[0].clone();
+    reference.adapter_id = "jq-json".to_owned();
+    candidate.cases.push(reference);
+    populate_reference_ratios(&mut candidate.cases, &["jq-json"]);
+    assert!(candidate.cases[0].reference_ratios.is_empty());
+    assert!(candidate.cases[0].reference_peak_rss_ratios.is_empty());
+    let mut samples = baseline.cases[0].samples.clone();
+    samples[1].rss_provenance = Some(RssProvenance::BsdTimeL);
+    assert!(summarize_samples(&samples, 100, 1).is_none());
+}
+
+#[test]
+fn reference_ratios_do_not_pool_mixed_protocol_samples() {
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut jq = report.cases[0].clone();
+    jq.adapter_id = "jq-json".to_owned();
+    let mut changed = native_protocol();
+    changed.input_delivery = "pipe".to_owned();
+    jq.samples[1].measurement_protocol = Some(changed);
+    jq.summary = summarize_samples(&jq.samples, 100, 1);
+    assert!(jq.summary.is_none());
+    report.cases.push(jq);
+
+    populate_reference_ratios(&mut report.cases, &["jq-json"]);
+    assert!(report.cases[0].reference_ratios.is_empty());
+    assert!(report.cases[0].reference_peak_rss_ratios.is_empty());
+}
+
 fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampaignReport {
     let samples = (0..3)
         .map(|_| BenchmarkSample {
+            measurement_protocol: Some(native_protocol()),
             wall_time_micros: wall,
             user_cpu_micros: Some(1),
             system_cpu_micros: Some(1),
             peak_rss_bytes: Some(rss),
-            rss_provenance: None,
+            rss_provenance: Some(RssProvenance::LinuxWait4),
             process_group_peak_rss_bytes: None,
             first_result_micros: Some(1),
             output_bytes: 1,
@@ -181,6 +585,7 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
                 rss_bytes: None,
             },
             samples,
+            instrumented_samples: Vec::new(),
             summary,
             reference_ratios: BTreeMap::new(),
             reference_peak_rss_ratios: BTreeMap::new(),
@@ -190,6 +595,32 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
         comparability: Comparability::default(),
         regression_gate: RegressionGate::default(),
         final_status: BenchmarkFinalStatus::Passed,
+    }
+}
+
+fn native_protocol() -> MeasurementProtocol {
+    MeasurementProtocol {
+        timing_method: "direct-spawn-to-exit-observation".to_owned(),
+        input_delivery: "prepared-seekable-stdin-file".to_owned(),
+        rss_scope: "wait4-child-including-waited-descendants-and-threads".to_owned(),
+        exit_poll_interval_micros: 100,
+        rss_poll_interval_micros: None,
+        validated_accuracy_micros: Some(1_000),
+    }
+}
+
+fn reference_tool(version: &str) -> ToolIdentity {
+    ToolIdentity {
+        tool: ToolKind::Jq,
+        path: version.into(),
+        version: version.to_owned(),
+        executable: ArtifactIdentity {
+            path: version.to_owned(),
+            bytes: 1,
+            sha256: version.to_owned(),
+        },
+        build_features: Vec::new(),
+        runtime_libraries: Vec::new(),
     }
 }
 
@@ -277,6 +708,7 @@ fn soft_jq_objective_rejects_incorrect_or_policy_mismatched_rows() {
 #[test]
 fn new_reports_reject_missing_or_zero_rss_provenance() {
     let mut report = campaign("machine-a", "digest-a", 100, 1024);
+    report.cases[0].samples[0].rss_provenance = None;
     let error = report
         .validate_authoritative_rss()
         .expect_err("legacy-style samples must not validate as new measurements");
@@ -292,4 +724,118 @@ fn new_reports_reject_missing_or_zero_rss_provenance() {
         .validate_authoritative_rss()
         .expect_err("zero RSS must not validate");
     assert!(error.contains("positive authoritative RSS"));
+}
+
+#[test]
+fn rss_limited_timed_rows_require_valid_separate_instrumented_evidence() {
+    let baseline = limited_campaign(1000, 1000);
+    assert!(baseline.validate_authoritative_rss().is_ok());
+
+    let mut missing = baseline.clone();
+    missing.cases[0].instrumented_samples.clear();
+    let error = missing
+        .validate_authoritative_rss()
+        .expect_err("timed RSS-limited rows need enforcement repetitions");
+    assert!(
+        error.contains("instrumented RSS-limit repetitions"),
+        "{error}"
+    );
+    let gate = evaluate_regression(&baseline, &missing, regression_thresholds());
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty());
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("instrumented"))
+    );
+
+    let mut invalid = baseline.clone();
+    invalid.cases[0].instrumented_samples[1].measurement_protocol = Some(native_protocol());
+    let error = invalid
+        .validate_authoritative_rss()
+        .expect_err("instrumented repetitions need a sampler protocol");
+    assert!(error.contains("instrumented"), "{error}");
+    let gate = evaluate_regression(&baseline, &invalid, regression_thresholds());
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty());
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("instrumented"))
+    );
+
+    let mut mixed = baseline.clone();
+    for sample in &mut mixed.cases[0].samples {
+        sample.measurement_protocol = Some(instrumented_protocol());
+    }
+    mixed.cases[0].summary = summarize_samples(&mixed.cases[0].samples, 100, 1);
+    let error = mixed
+        .validate_authoritative_rss()
+        .expect_err("timing samples cannot carry the sampler contract");
+    assert!(
+        error.contains("mixes instrumented and timing samples"),
+        "{error}"
+    );
+}
+
+#[test]
+fn instrumented_contracts_remain_separate_and_must_match_across_reports() {
+    let baseline = limited_campaign(1000, 1000);
+    let mut candidate = baseline.clone();
+    let mut changed = instrumented_protocol();
+    changed.rss_poll_interval_micros = Some(50_000);
+    for sample in &mut candidate.cases[0].instrumented_samples {
+        sample.measurement_protocol = Some(changed.clone());
+    }
+    assert!(candidate.validate_authoritative_rss().is_ok());
+    let comparison = compare_reports(&baseline, &candidate);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("measurement protocol"))
+    );
+    let gate = evaluate_regression(&baseline, &candidate, regression_thresholds());
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty());
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("measurement"))
+    );
+}
+
+fn regression_thresholds() -> RegressionThresholds {
+    RegressionThresholds {
+        wall_time_percent: 50.0,
+        peak_rss_percent: 50.0,
+        minimum_samples: 3,
+    }
+}
+
+fn limited_campaign(wall: u128, rss: u64) -> BenchmarkCampaignReport {
+    let mut report = campaign("machine-a", "digest-a", wall, rss);
+    report.cases[0].limits.rss_bytes = Some(128 * 1024 * 1024);
+    report.cases[0].instrumented_samples = report.cases[0]
+        .samples
+        .iter()
+        .cloned()
+        .map(|mut sample| {
+            sample.measurement_protocol = Some(instrumented_protocol());
+            sample
+        })
+        .collect();
+    report
+}
+
+fn instrumented_protocol() -> MeasurementProtocol {
+    MeasurementProtocol {
+        timing_method: "direct-spawn-to-exit-observation-with-rss-sampler".to_owned(),
+        input_delivery: "prepared-seekable-stdin-file".to_owned(),
+        rss_scope: "process-group-including-descendants".to_owned(),
+        exit_poll_interval_micros: 100,
+        rss_poll_interval_micros: Some(25_000),
+        validated_accuracy_micros: Some(1_000),
+    }
 }

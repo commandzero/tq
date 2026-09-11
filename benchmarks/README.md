@@ -27,29 +27,100 @@ cargo run -p tq-test-support --bin tq-bench -- \
 Rapid and large runs do not replace the standard reference pages. Smoke fills
 the three additional workload pages included in the current review.
 
-## Required execution permissions
+## Required execution permissions and accounting
 
-Run every benchmark campaign outside restricted sandboxes with permission to
-inspect child processes. In Codex, this means approving elevated execution for
-the complete campaign command. A sandboxed run can make process-group sampling
-fail, misclassify child outcomes, and leave RSS unavailable.
+The audited `wait4 0.1.3` dependency assumes valid, nonnegative OS counters
+within its numeric range. Its internal conversions expose no overflow error;
+on supported 64-bit hosts, RSS overflow would require roughly 8 EiB and CPU
+overflow roughly 292,000 CPU-years. First-party arithmetic remains checked,
+and the harness rejects detectable invalid returned values. This does not
+guarantee detection of every malformed upstream value. Native allocation and
+independent `time` controls remain required.
 
-On macOS, `/usr/bin/time -l` is required for every authoritative peak RSS
-sample. Record its `maximum resident set size` value for each measured jq, yq,
-or tq invocation under the campaign's normal warmup and sample policy. The
-harness may also sample the child process group with `ps`, but that does not
-replace the authoritative `time` measurement. On Linux, GNU `/usr/bin/time -v`
-must provide `Maximum resident set size` for every measured invocation. Before
-starting any campaign, run the harness RSS preflight and confirm that the
-selected `time` implementation, process-group inspection, and one allocated
-measured child all produce positive numeric RSS values. The `tq-bench run`
-command performs this preflight before it prepares or replays the corpus. If
-preflight cannot collect authoritative RSS, abandon the campaign immediately
-and repair the sandbox or benchmark host environment before retrying. If any
-measured sample later lacks authoritative RSS, abort the campaign immediately;
-do not write or review a partial report.
-The harness must enforce both checks rather than treating missing RSS as an
-optional metric.
+The legacy shell experiments under `benchmarks/cases/` retain their original
+`time` wrappers for reproducing earlier runs. Their output is not
+native-accounting campaign evidence and cannot serve as an equivalent-method
+baseline for this change.
+
+Run every authoritative benchmark campaign outside restricted sandboxes with
+the elevated permissions needed for native child accounting. In Codex, this
+means approving elevated execution for the complete campaign command. The
+required production path is the Rust harness invoking each executable directly
+and, once its native backend passes lifecycle and audited-counter validation,
+using one resource-aware waiter to collect the exact child's exit status, CPU
+usage, and OS-recorded peak RSS. Its allocation preflight runs through that same
+native interface before corpus preparation. If preflight cannot collect positive
+RSS, valid units, or explicit collector provenance, abandon the campaign before
+corpus work and repair the host permissions before retrying. A later missing or
+invalid authoritative sample invalidates the campaign; do not write or review a
+partial report. A draft or unverified native backend is not accepted benchmark
+evidence.
+
+Use `/usr/bin/time -l` on macOS and GNU `/usr/bin/time -v` on Linux only as
+independent validation of the native counters. They are not production
+wrappers and their observations must remain separately labeled. `ps` is not a
+default dependency: select it only for an explicitly requested process-group
+RSS limit or diagnostic, and record its process scope and sampling interval
+because a sampler can miss short-lived peaks. Measurements without sampled
+limits work without `ps`; catalog cases selecting an RSS limit still require
+it for enforcement repetitions. Production runs need neither `/usr/bin/time`
+nor Python allocation probes.
+
+For RSS-limited rows, the sampling loop runs a separate instrumented repetition
+before each timing repetition. A failed instrumented repetition stops that
+row. The timing repetition has no recurring RSS sampler; it still checks the
+native peak against the limit at exit and enforces timeout and output limits
+while running. This is not an in-flight RSS ceiling for the timing repetition.
+Reports retain `instrumented_samples` separately and never mix them into
+primary timing or peak-RSS summaries. Primary RSS still comes from the native
+waiter for that exact timing child.
+
+Requested inspection fails if it returns no positive process-group RSS while
+the exact child is still alive. A child that exits before inspection can have
+no sampled observation; its native exit-time peak still enforces the limit.
+Reports keep that sampled field unavailable rather than fabricating zero.
+
+Reports retain the direct spawn-to-exit timing boundary, input-delivery method,
+RSS scope, collector provenance, and host-validated timing accuracy. Displayed
+one-decimal values are presentation only; stored precision and clock
+resolution do not establish equivalent accuracy, and nanosecond storage does
+not imply nanosecond accuracy. Repeat no-op and known-duration controls when
+validating supported precision. Native Windows accounting is deferred to issue
+#31; cross-compilation or emulation is not native verification.
+
+Run the retained native controls with the release build and elevated permissions:
+
+```console
+TQ_NATIVE_VALIDATION_OUT=/path/to/tq-benchmarks/.work/native-validation \
+  cargo test --release -p tq-test-support --test benchmark_native_validation -- \
+  --ignored --exact native_accounting_validation_writes_retained_evidence --nocapture
+```
+
+For publication, pass the successful control summary to the campaign with
+`--timing-calibration SUMMARY_PATH`. The driver checks the host configuration,
+compiled collector-source identity, release profile, control sample counts, and
+measurement protocol. Repeat the option when separate instrumentation needs
+separate controls. An uninstrumented control cannot validate a sampled run.
+The report retains the summary's SHA-256 and observed known-duration bound.
+That bound includes process startup and sleep scheduling, is not a universal
+accuracy guarantee, and is never subtracted from samples. Runs without linked
+controls retain unknown accuracy and are diagnostic evidence, not a completed
+native publication review.
+
+For `scripts/run-campaign.sh benchmark standard`, set
+`TQ_TIMING_CALIBRATION` to that summary path. The script requires it before
+preparing the corpus because standard runs publish comparison tables. Rapid,
+smoke, and large runs also forward this variable when supplied. Use the CLI
+directly for multiple calibration files or to record a standard campaign
+without publishing tables.
+
+For issue #30, review wall time and peak RSS independently for every comparable
+workload. Disclose each increase above 20% with baseline, candidate, sample
+count, dispersion, and an explanation. Documented increases greater than 20%
+and at most 50% are acceptable when every other gate passes; an increase above
+50% blocks acceptance until mitigated and remeasured. Exactly 20% is not a
+disclosure and exactly 50% is not a blocking increase. Cross-tool jq/yq ratios
+remain comparative evidence, never tq self-regression evidence.
 
 The catalog in `cases/workloads.jsonl` runs jq on JSON, yq on JSON and YAML, and
 tq on JSON, YAML, and TOON. It reports native-format views separately. The
@@ -164,8 +235,10 @@ is useful for validation, and `--case benchmark.event-stream` selects one
 workload. A reviewed long-running campaign may also use `--timeout-seconds N`
 and `--rss-limit-bytes N`; these overrides are copied into every report row,
 and an existing stricter per-case RSS limit still wins. The working JSON
-retains host, compiler, tool, corpus, command, limit, and environment data. It
-lives in the archive checkout's `.work/` directory. The reviewed findings are
+retains host, compiler, tool, corpus, command, limit, environment, and
+measurement-protocol data, including timing boundary, input delivery, RSS
+scope, and validated precision. It lives in the archive checkout's `.work/`
+directory. The reviewed findings are
 rendered into the committed pages under `docs/tests/comparison/`; raw archive
 files do not have a second dated Markdown summary.
 
@@ -174,26 +247,45 @@ result exceeds that limit, the campaign runs one bounded probe for each adapter
 and records `resource-limit`, timeout, or signal outcomes. It does not time
 unverified output or load a multi-gigabyte result into the runner.
 
-On macOS, RSS enforcement samples the complete child process group with
-`ps -axo pgid=,rss=`. On Linux, it uses the equivalent process-group query
-available on the host. This requires the elevated execution described above.
-`/usr/bin/time -l` on macOS and GNU `/usr/bin/time -v` on Linux supply the
-authoritative per-process peak RSS evidence. Do not accept a report that marks
-RSS unavailable: stop, repair the execution environment, and rerun the entire
-campaign.
+The production contract launches the selected executable directly and freezes
+wall time at native child exit observation, after inputs and captures are
+prepared and before cleanup or report generation. Once the native backend has
+passed lifecycle and audited-counter validation, the harness records this
+boundary. First-result latency is the first captured output when available; its
+observation method and validated precision are recorded in the report. Native
+RSS is scoped to the waited-for child (and any descendants included by the
+platform waiter), not a heap, physical-footprint, or summed process-tree
+metric. A draft or unverified backend is not accepted evidence.
 
-Harness wall time is end to end: it includes process wrapping, polling, and
-sampler shutdown, so startup and other short-run overhead can be material. It
-does not represent pure executable time. First-result latency is the first
-captured output when available; fallback on completed output is not a precise
-first-write timestamp. GNU-time per-process RSS is authoritative on Linux;
-sampled process-group RSS is a separate inspection signal. Apply these limits
-when interpreting existing Ironhide reports as well as new reviews.
+Reports must state whether the platform waiter accounts for only the waited-for
+child or also includes waited-for descendants. Limit process-only comparisons
+to verified non-forking jq, yq, and tq workloads; forked workloads require an
+explicitly comparable RSS scope.
+
+If an explicit RSS limit or diagnostic selects process-group sampling, macOS
+may use `ps -axo pgid=,rss=` and Linux the equivalent host query. Record the
+sampled scope and interval and treat it as an enforcement/diagnostic signal
+that can miss peaks; it never replaces native child accounting. For independent
+validation, use `/usr/bin/time -l` on macOS or GNU `/usr/bin/time -v` on Linux
+with the same executable, input, and command contract, and retain that evidence
+as a separate method. Do not accept a report that marks authoritative RSS
+unavailable: stop, repair the execution environment, and rerun the campaign.
+
+The harness does not use Python allocation probes. Native Windows accounting is
+deferred to issue #31 and unsupported-platform preflight failures must remain
+visible rather than being presented as verification. Existing wrapper or
+sampled reports retain their original method and are not pooled with native
+measurements.
 
 Pass `--baseline PATH` to evaluate a manifest-aware tq self-regression. The
-accepted local defaults are 50% median wall time, 20% peak RSS, and at least
-five samples; override them with `--wall-regression-percent`,
-`--rss-regression-percent`, and `--minimum-regression-samples`. See
+command's conservative local defaults are 50% median wall time, 50% peak RSS,
+and at least five samples; override them with `--wall-regression-percent`,
+`--rss-regression-percent`, and `--minimum-regression-samples`. For issue #30
+publication review, disclose every comparable wall-time and peak-RSS increase
+above 20% independently, document increases through 50% as acceptable only
+with an explanation, and block any increase above 50% until remeasured. The
+comparison must use equivalent native-method reports; wrapper or sampled
+historical reports are retained but are not comparable baselines. See
 `docs/performance-baseline.md` for the baseline review and unfavorable results.
 
 The report does not calculate an aggregate winner. Review wall time and
