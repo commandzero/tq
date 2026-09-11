@@ -36,6 +36,7 @@ use std::{
 
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
+use tempfile::NamedTempFile;
 use tq_test_support::benchmark::{
     BenchmarkInvocation, EnvironmentManifest, MeasuredOutcome, MeasuredStatus, MeasurementProtocol,
     RssProvenance, collect_environment, collector_source_sha256, measure_process,
@@ -55,6 +56,9 @@ const TIME_CPU_TOLERANCE_MICROS: u128 = 10_000;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 const SAMPLER_RSS_LIMIT_BYTES: u64 = 128 * 1024 * 1024;
+const WORKER_PARENT_ALLOCATIONS: [u64; 3] = [0, 32 * 1024 * 1024, 128 * 1024 * 1024];
+const WORKER_STDIN_BYTES: u64 = 32 * 1024 * 1024;
+const WORKER_HIGH_TARGET_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 struct Case {
@@ -239,6 +243,65 @@ struct WorkerIsolationEvidence {
 }
 
 #[derive(Debug, Serialize)]
+struct WorkerPairRecord {
+    scenario: String,
+    phase: String,
+    parent_allocation_bytes: u64,
+    stdin_bytes: u64,
+    repetition: usize,
+    target_args: Vec<String>,
+    native: MeasuredOutcome,
+    independent_time: TimeObservation,
+    independent_stdout_sha256: Option<String>,
+    rss_comparison: RssComparison,
+    cpu_comparison: CpuComparisons,
+}
+
+struct WorkerPair {
+    record: WorkerPairRecord,
+    independent_time_output: Output,
+}
+
+struct TimeRun {
+    output: Output,
+    observation: TimeObservation,
+    stdout_sha256: Option<String>,
+}
+
+struct WorkerPairRequest<'a> {
+    scenario: &'a str,
+    phase: &'a str,
+    parent_allocation_bytes: u64,
+    target_args: &'a [String],
+    stdin: &'a [u8],
+    repetition: usize,
+    page_size: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkerErrorRecord {
+    scenario: String,
+    phase: String,
+    parent_allocation_bytes: u64,
+    stdin_bytes: u64,
+    repetition: usize,
+    target_args: Vec<String>,
+    error: String,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkerValidationSummary {
+    metadata: Metadata,
+    evidence_directory: String,
+    records_file: String,
+    errors_file: String,
+    worker_measurement_protocol: Option<MeasurementProtocol>,
+    worker_isolation: Option<WorkerIsolationEvidence>,
+    validation_failures: Vec<String>,
+    protocol_notes: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
 struct SamplerDistortion {
     normal_case: String,
     sampler_case: String,
@@ -322,6 +385,16 @@ fn worker_public_measurement_returns_fresh_worker_identity() {
     assert!(!worker.launch_protocol.is_empty());
     assert_eq!(worker.collector_source_sha256, collector_source_sha256());
     assert!(outcome.peak_rss_bytes.is_some_and(|rss| rss > 0));
+}
+
+#[test]
+#[ignore = "release native worker-isolation controls; retain raw pairs and summary"]
+fn worker_isolation_validation_writes_retained_evidence() {
+    let output_directory = run_worker_isolation_validation().expect("worker validation run");
+    eprintln!(
+        "worker isolation validation evidence: {}",
+        output_directory.display()
+    );
 }
 
 #[allow(clippy::too_many_lines)]
@@ -673,6 +746,591 @@ fn run_validation() -> io::Result<PathBuf> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
+fn run_worker_isolation_validation() -> io::Result<PathBuf> {
+    let repetitions = configured_repetitions()?;
+    let page_size = native_page_size()?;
+    if page_size == 0 {
+        return Err(io::Error::other("native page size was zero"));
+    }
+    let base_directory = env::var_os("TQ_NATIVE_VALIDATION_OUT")
+        .map_or_else(|| PathBuf::from("target/native-validation"), PathBuf::from);
+    fs::create_dir_all(&base_directory)?;
+    let run_directory = base_directory.join(format!(
+        "worker-isolation-{}-{}",
+        unix_micros().unwrap_or(0),
+        std::process::id()
+    ));
+    fs::create_dir(&run_directory)?;
+
+    let probe_path = Path::new(PROBE);
+    let metadata = Metadata {
+        protocol: "native-worker-isolation-v1",
+        host_os: env::consts::OS,
+        host_arch: env::consts::ARCH,
+        page_size_bytes: page_size,
+        repetitions,
+        build_profile: build_profile(),
+        time_program: "/usr/bin/time",
+        time_mode: time_mode(),
+        rustc: command_version("rustc", &["--version"]),
+        time_version: command_version("/usr/bin/time", &["--version"]),
+        time_sha256: file_sha256(Path::new("/usr/bin/time")).ok(),
+        started_unix_micros: unix_micros(),
+        probe_path: probe_path.display().to_string(),
+        probe_sha256: file_sha256(probe_path)?,
+        runner_executable_path: env::current_exe()
+            .ok()
+            .map(|path| path.display().to_string()),
+        runner_executable_sha256: env::current_exe()
+            .ok()
+            .as_deref()
+            .and_then(|path| file_sha256(path).ok()),
+        collector_source_sha256: collector_source_sha256(),
+        environment: collect_environment("native-worker-isolation-validation"),
+    };
+    write_json(&run_directory.join("metadata.json"), &metadata)?;
+    let records_path = run_directory.join("records.jsonl");
+    let errors_path = run_directory.join("errors.jsonl");
+    let mut records_file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&records_path)?;
+    let mut errors_file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&errors_path)?;
+    let mut records = Vec::with_capacity(repetitions * 6);
+    let mut validation_failures = Vec::new();
+
+    for parent_bytes in WORKER_PARENT_ALLOCATIONS {
+        for repetition in 0..repetitions {
+            collect_worker_pair(
+                &mut records_file,
+                &mut errors_file,
+                &mut records,
+                &mut validation_failures,
+                &run_directory,
+                &WorkerPairRequest {
+                    scenario: "parent-control",
+                    phase: "noop",
+                    parent_allocation_bytes: parent_bytes,
+                    target_args: &["noop".to_owned()],
+                    stdin: &[],
+                    repetition,
+                    page_size,
+                },
+            )?;
+        }
+    }
+
+    let prepared_stdin = vec![
+        b'q';
+        usize::try_from(WORKER_STDIN_BYTES).map_err(|_| io::Error::other(
+            "worker stdin size does not fit usize"
+        ))?
+    ];
+    for repetition in 0..repetitions {
+        collect_worker_pair(
+            &mut records_file,
+            &mut errors_file,
+            &mut records,
+            &mut validation_failures,
+            &run_directory,
+            &WorkerPairRequest {
+                scenario: "prepared-stdin",
+                phase: "stdin-echo",
+                parent_allocation_bytes: 128 * 1024 * 1024,
+                target_args: &["stdin-echo".to_owned()],
+                stdin: &prepared_stdin,
+                repetition,
+                page_size,
+            },
+        )?;
+    }
+
+    for repetition in 0..repetitions {
+        collect_worker_pair(
+            &mut records_file,
+            &mut errors_file,
+            &mut records,
+            &mut validation_failures,
+            &run_directory,
+            &WorkerPairRequest {
+                scenario: "high-low",
+                phase: "high",
+                parent_allocation_bytes: 0,
+                target_args: &[
+                    "allocate-burst".to_owned(),
+                    WORKER_HIGH_TARGET_BYTES.to_string(),
+                ],
+                stdin: &[],
+                repetition,
+                page_size,
+            },
+        )?;
+        collect_worker_pair(
+            &mut records_file,
+            &mut errors_file,
+            &mut records,
+            &mut validation_failures,
+            &run_directory,
+            &WorkerPairRequest {
+                scenario: "high-low",
+                phase: "low",
+                parent_allocation_bytes: 0,
+                target_args: &["noop".to_owned()],
+                stdin: &[],
+                repetition,
+                page_size,
+            },
+        )?;
+    }
+
+    let worker_isolation = worker_isolation_summary(&records, repetitions, page_size);
+    if !worker_isolation_passes_for_runner(
+        worker_isolation.as_ref(),
+        &metadata,
+        repetitions,
+        page_size,
+    ) {
+        validation_failures.push("worker isolation controls did not pass".to_owned());
+    }
+    if let Some(evidence) = worker_isolation.as_ref() {
+        for control in &evidence.coordinator_controls {
+            let rss_failures = control
+                .repetitions
+                .saturating_sub(control.rss_comparisons_within_tolerance);
+            if rss_failures > 0 {
+                validation_failures.push(format!(
+                    "parent {} RSS comparisons failed: {rss_failures}",
+                    control.coordinator_allocation_bytes
+                ));
+            }
+            let cpu_failures = control
+                .repetitions
+                .saturating_sub(control.cpu_comparisons_within_tolerance);
+            if cpu_failures > 0 {
+                validation_failures.push(format!(
+                    "parent {} CPU comparisons failed: {cpu_failures}",
+                    control.coordinator_allocation_bytes
+                ));
+            }
+        }
+    }
+    if !worker_protocols_match(&records) {
+        validation_failures
+            .push("worker identity or launch protocol changed between records".to_owned());
+    }
+    let worker_measurement_protocol = records
+        .iter()
+        .find(|record| record.native.measurement_protocol.worker.is_some())
+        .map(|record| record.native.measurement_protocol.clone());
+    if worker_measurement_protocol.is_none() {
+        validation_failures.push("worker identity was absent from all records".to_owned());
+    }
+    let summary = WorkerValidationSummary {
+        metadata,
+        evidence_directory: run_directory.display().to_string(),
+        records_file: records_path.display().to_string(),
+        errors_file: errors_path.display().to_string(),
+        worker_measurement_protocol,
+        worker_isolation,
+        validation_failures: validation_failures.clone(),
+        protocol_notes: vec![
+            "Each native row is a fresh public measure_process_worker invocation; parent controls use the probe's coordinator-allocation mode.",
+            "Each row retains a native worker outcome paired with an independent /usr/bin/time observation of the same target mode.",
+            "RSS comparison uses max(25% of the larger median, four host pages); parent-isolation tolerance uses max(25% of the larger median, eight host pages).",
+            "The high-to-low sequence requires a high allocation burst followed by a fresh low request whose RSS remains within the zero-control isolation bound.",
+            "The summary is diagnostic evidence only and does not switch the benchmark campaign to worker launch.",
+        ],
+    };
+    write_json(&run_directory.join("summary.json"), &summary)?;
+    if validation_failures.is_empty() {
+        Ok(run_directory)
+    } else {
+        Err(io::Error::other(format!(
+            "worker isolation validation failed; summary retained at {}: {}",
+            run_directory.display(),
+            validation_failures.join("; ")
+        )))
+    }
+}
+
+fn collect_worker_pair(
+    records_file: &mut File,
+    errors_file: &mut File,
+    records: &mut Vec<WorkerPairRecord>,
+    validation_failures: &mut Vec<String>,
+    run_directory: &Path,
+    request: &WorkerPairRequest<'_>,
+) -> io::Result<()> {
+    match run_worker_pair(request) {
+        Ok(pair) => {
+            let mut record = pair.record;
+            let stem = format!(
+                "worker-{}-{}-{}-{}",
+                request.scenario,
+                request.phase,
+                request.parent_allocation_bytes,
+                request.repetition
+            );
+            let (stdout_file, stderr_file) = save_time_output(
+                run_directory,
+                &stem,
+                request.repetition,
+                &pair.independent_time_output,
+            )?;
+            record.independent_time.stdout_file = stdout_file;
+            record.independent_time.stderr_file = stderr_file;
+            serde_json::to_writer(&mut *records_file, &record).map_err(io::Error::other)?;
+            records_file.write_all(b"\n")?;
+            records_file.flush()?;
+            records.push(record);
+        }
+        Err(error) => {
+            let failure = WorkerErrorRecord {
+                scenario: request.scenario.to_owned(),
+                phase: request.phase.to_owned(),
+                parent_allocation_bytes: request.parent_allocation_bytes,
+                stdin_bytes: u64::try_from(request.stdin.len()).unwrap_or(u64::MAX),
+                repetition: request.repetition,
+                target_args: request.target_args.to_vec(),
+                error: error.clone(),
+            };
+            serde_json::to_writer(&mut *errors_file, &failure).map_err(io::Error::other)?;
+            errors_file.write_all(b"\n")?;
+            errors_file.flush()?;
+            validation_failures.push(format!(
+                "{}/{} repetition {}: {error}",
+                request.scenario, request.phase, request.repetition
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn run_worker_pair(request: &WorkerPairRequest<'_>) -> Result<WorkerPair, String> {
+    let native = if request.scenario == "parent-control" || request.scenario == "prepared-stdin" {
+        run_worker_parent_probe(request.parent_allocation_bytes, request.stdin.len())?
+    } else {
+        run_worker_direct(request.target_args, request.stdin)?
+    };
+    validate_worker_outcome(&native)?;
+    let time_run = run_independent_time_with_stdin(request.target_args, request.stdin)
+        .map_err(|error| format!("independent time failed: {error}"))?;
+    let time_output = time_run.output;
+    let independent_time = time_run.observation;
+    if !independent_time.success {
+        return Err(format!(
+            "independent time exited unsuccessfully ({:?})",
+            independent_time.exit_code
+        ));
+    }
+    let time_rss = independent_time
+        .parsed_peak_rss_bytes
+        .ok_or("independent time did not report peak RSS")?;
+    let time_user_cpu = independent_time
+        .parsed_user_cpu_micros
+        .ok_or("independent time did not report user CPU")?;
+    let time_system_cpu = independent_time
+        .parsed_system_cpu_micros
+        .ok_or("independent time did not report system CPU")?;
+    let native_rss = native
+        .peak_rss_bytes
+        .ok_or("worker outcome did not report peak RSS")?;
+    let native_user_cpu = native
+        .user_cpu_micros
+        .ok_or("worker outcome did not report user CPU")?;
+    let native_system_cpu = native
+        .system_cpu_micros
+        .ok_or("worker outcome did not report system CPU")?;
+    Ok(WorkerPair {
+        record: WorkerPairRecord {
+            scenario: request.scenario.to_owned(),
+            phase: request.phase.to_owned(),
+            parent_allocation_bytes: request.parent_allocation_bytes,
+            stdin_bytes: u64::try_from(request.stdin.len()).unwrap_or(u64::MAX),
+            repetition: request.repetition,
+            target_args: request.target_args.to_vec(),
+            native,
+            independent_time,
+            independent_stdout_sha256: time_run.stdout_sha256,
+            rss_comparison: rss_comparison(native_rss, time_rss, request.page_size),
+            cpu_comparison: CpuComparisons {
+                user: cpu_comparison(native_user_cpu, time_user_cpu),
+                system: cpu_comparison(native_system_cpu, time_system_cpu),
+            },
+        },
+        independent_time_output: time_output,
+    })
+}
+
+fn run_worker_direct(args: &[String], stdin: &[u8]) -> Result<MeasuredOutcome, String> {
+    let output_limit = u64::try_from(stdin.len())
+        .ok()
+        .and_then(|bytes| bytes.checked_add(OUTPUT_LIMIT))
+        .ok_or("worker stdin size exceeds output-limit range")?;
+    let invocation = BenchmarkInvocation {
+        cancellation: None,
+        executable: PathBuf::from(PROBE),
+        args: args.to_vec(),
+        stdin: stdin.to_vec(),
+        current_dir: None,
+        timeout: TIMEOUT,
+        output_limit,
+        rss_limit: None,
+        retain_output: false,
+    };
+    measure_process_worker(&invocation).map_err(|error| error.to_string())
+}
+
+fn run_worker_parent_probe(
+    parent_allocation_bytes: u64,
+    stdin_bytes: usize,
+) -> Result<MeasuredOutcome, String> {
+    let invocation = BenchmarkInvocation {
+        cancellation: None,
+        executable: PathBuf::from(PROBE),
+        args: vec![
+            "measure-worker-parent".to_owned(),
+            parent_allocation_bytes.to_string(),
+            stdin_bytes.to_string(),
+        ],
+        stdin: Vec::new(),
+        current_dir: None,
+        timeout: TIMEOUT,
+        output_limit: OUTPUT_LIMIT,
+        rss_limit: None,
+        retain_output: true,
+    };
+    let wrapper = measure_process_worker(&invocation).map_err(|error| error.to_string())?;
+    if wrapper.status != MeasuredStatus::Exited || wrapper.exit_code != Some(0) {
+        return Err(format!(
+            "worker parent probe failed: {:?} {:?}",
+            wrapper.status, wrapper.exit_code
+        ));
+    }
+    let stdout_path = wrapper
+        .stdout_path
+        .as_ref()
+        .ok_or("worker parent probe did not retain its outcome")?;
+    let bytes = fs::read(stdout_path).map_err(|error| format!("read worker outcome: {error}"))?;
+    remove_capture_paths(&wrapper);
+    serde_json::from_slice(&bytes).map_err(|error| format!("decode worker outcome: {error}"))
+}
+
+fn remove_capture_paths(outcome: &MeasuredOutcome) {
+    for path in [&outcome.stdout_path, &outcome.stderr_path]
+        .into_iter()
+        .flatten()
+    {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn validate_worker_outcome(outcome: &MeasuredOutcome) -> Result<(), String> {
+    if outcome.status != MeasuredStatus::Exited || outcome.exit_code != Some(0) {
+        return Err(format!(
+            "worker target failed: {:?} {:?}",
+            outcome.status, outcome.exit_code
+        ));
+    }
+    if outcome.rss_provenance != expected_provenance() {
+        return Err(format!(
+            "worker used unexpected RSS provenance {}",
+            outcome.rss_provenance.label()
+        ));
+    }
+    if outcome.peak_rss_bytes.is_none_or(|rss| rss == 0) {
+        return Err("worker outcome had no positive peak RSS".to_owned());
+    }
+    if outcome.user_cpu_micros.is_none() || outcome.system_cpu_micros.is_none() {
+        return Err("worker outcome omitted CPU accounting".to_owned());
+    }
+    Ok(())
+}
+
+fn worker_isolation_summary(
+    records: &[WorkerPairRecord],
+    repetitions: usize,
+    page_size: u64,
+) -> Option<WorkerIsolationEvidence> {
+    let zero_rss = worker_parent_rss_median(records, 0)?;
+    let controls = WORKER_PARENT_ALLOCATIONS
+        .iter()
+        .map(|parent| worker_control_summary(records, *parent, zero_rss, page_size))
+        .collect::<Option<Vec<_>>>()?;
+    let prepared = records
+        .iter()
+        .filter(|record| record.scenario == "prepared-stdin")
+        .collect::<Vec<_>>();
+    let sequence = records
+        .iter()
+        .filter(|record| record.scenario == "high-low")
+        .collect::<Vec<_>>();
+    let high = sequence.iter().filter(|record| record.phase == "high");
+    let low = sequence.iter().filter(|record| record.phase == "low");
+    let high_records = high.collect::<Vec<_>>();
+    let low_records = low.collect::<Vec<_>>();
+    let worker_source = records
+        .iter()
+        .find_map(|record| {
+            record
+                .native
+                .measurement_protocol
+                .worker
+                .as_ref()
+                .map(|worker| worker.collector_source_sha256.clone())
+        })
+        .unwrap_or_default();
+    let prepared_verified = prepared.len() >= repetitions
+        && prepared.iter().all(|record| {
+            record.stdin_bytes == WORKER_STDIN_BYTES
+                && worker_pair_matches(record)
+                && record.native.output_bytes == WORKER_STDIN_BYTES
+                && record.native.peak_rss_bytes.is_some_and(|rss| {
+                    worker_noop_tolerance(zero_rss, rss, page_size)
+                        .is_some_and(|bound| rss.abs_diff(zero_rss) <= bound)
+                })
+        });
+    let sequence_verified = high_records.len() >= repetitions
+        && low_records.len() >= repetitions
+        && high_records
+            .iter()
+            .all(|record| worker_pair_matches(record))
+        && low_records.iter().all(|record| {
+            worker_pair_matches(record)
+                && record.native.peak_rss_bytes.is_some_and(|rss| {
+                    worker_noop_tolerance(zero_rss, rss, page_size)
+                        .is_some_and(|bound| rss.abs_diff(zero_rss) <= bound)
+                })
+        })
+        && high_records.iter().all(|record| {
+            record
+                .native
+                .peak_rss_bytes
+                .is_some_and(|rss| rss.saturating_sub(zero_rss) >= MEANINGFUL_BURST_BYTES)
+        });
+    let independent_verified =
+        records.len() >= repetitions * 6 && records.iter().all(worker_pair_matches);
+    Some(WorkerIsolationEvidence {
+        collector_source_sha256: worker_source,
+        coordinator_controls: controls,
+        residual_floor_bytes: zero_rss,
+        prepared_stdin_bytes: WORKER_STDIN_BYTES,
+        prepared_stdin_repetitions: prepared.len(),
+        prepared_stdin_verified: prepared_verified,
+        high_low_request_repetitions: low_records.len().min(high_records.len()),
+        high_low_request_verified: sequence_verified,
+        independent_time_repetitions: records.len(),
+        independent_time_verified: independent_verified,
+    })
+}
+
+fn worker_parent_rss_median(records: &[WorkerPairRecord], parent_bytes: u64) -> Option<u64> {
+    let mut values = records
+        .iter()
+        .filter(|record| {
+            record.scenario == "parent-control" && record.parent_allocation_bytes == parent_bytes
+        })
+        .filter_map(|record| record.native.peak_rss_bytes)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| median(&mut values))
+}
+
+fn worker_control_summary(
+    records: &[WorkerPairRecord],
+    parent_bytes: u64,
+    zero_rss: u64,
+    page_size: u64,
+) -> Option<WorkerAllocationControl> {
+    let selected = records
+        .iter()
+        .filter(|record| {
+            record.scenario == "parent-control" && record.parent_allocation_bytes == parent_bytes
+        })
+        .collect::<Vec<_>>();
+    let mut native_rss = selected
+        .iter()
+        .filter_map(|record| record.native.peak_rss_bytes)
+        .collect::<Vec<_>>();
+    let mut independent_rss = selected
+        .iter()
+        .filter_map(|record| record.independent_time.parsed_peak_rss_bytes)
+        .collect::<Vec<_>>();
+    if native_rss.is_empty() || independent_rss.is_empty() {
+        return None;
+    }
+    let native_median = median(&mut native_rss);
+    let independent_median = median(&mut independent_rss);
+    let max_delta = selected
+        .iter()
+        .filter_map(|record| record.native.peak_rss_bytes)
+        .map(|rss| rss.abs_diff(zero_rss))
+        .max()?;
+    Some(WorkerAllocationControl {
+        coordinator_allocation_bytes: parent_bytes,
+        repetitions: selected.len(),
+        native_rss_median_bytes: native_median,
+        independent_time_rss_median_bytes: Some(independent_median),
+        rss_comparisons_within_tolerance: selected
+            .iter()
+            .filter(|record| record.rss_comparison.within_page_aware_tolerance)
+            .count(),
+        cpu_comparisons_within_tolerance: selected
+            .iter()
+            .filter(|record| {
+                record.cpu_comparison.user.within_tolerance
+                    && record.cpu_comparison.system.within_tolerance
+            })
+            .count(),
+        max_delta_from_zero_bytes: max_delta,
+        tolerance_bytes: worker_noop_tolerance(zero_rss, native_median, page_size)?,
+    })
+}
+
+fn worker_pair_matches(record: &WorkerPairRecord) -> bool {
+    record.rss_comparison.within_page_aware_tolerance
+        && record.cpu_comparison.user.within_tolerance
+        && record.cpu_comparison.system.within_tolerance
+}
+
+fn worker_protocols_match(records: &[WorkerPairRecord]) -> bool {
+    let Some(first) = records.first().map(|record| {
+        let mut protocol = record.native.measurement_protocol.clone();
+        protocol.validated_accuracy_micros = None;
+        protocol.isolation_evidence = None;
+        protocol
+    }) else {
+        return false;
+    };
+    records.iter().all(|record| {
+        let mut protocol = record.native.measurement_protocol.clone();
+        protocol.validated_accuracy_micros = None;
+        protocol.isolation_evidence = None;
+        protocol == first
+    })
+}
+
+fn worker_noop_tolerance(zero_rss: u64, control_rss: u64, page_size: u64) -> Option<u64> {
+    zero_rss
+        .max(control_rss)
+        .checked_div(4)
+        .zip(page_size.checked_mul(8))
+        .map(|(relative, pages)| relative.max(pages))
+}
+
+fn worker_isolation_passes_for_runner(
+    evidence: Option<&WorkerIsolationEvidence>,
+    metadata: &Metadata,
+    repetitions: usize,
+    page_size: u64,
+) -> bool {
+    evidence
+        .is_some_and(|evidence| worker_isolation_passes(evidence, metadata, repetitions, page_size))
+}
+
 fn configured_repetitions() -> io::Result<usize> {
     let value = env::var("TQ_NATIVE_VALIDATION_REPETITIONS")
         .unwrap_or_else(|_| DEFAULT_REPETITIONS.to_string());
@@ -922,16 +1580,55 @@ fn run_native(args: &[String], rss_limit_bytes: Option<u64>) -> io::Result<Measu
 }
 
 fn run_independent_time(args: &[String]) -> io::Result<(Output, TimeObservation)> {
+    let run = run_independent_time_with_stdin(args, &[])?;
+    Ok((run.output, run.observation))
+}
+
+fn run_independent_time_with_stdin(args: &[String], stdin_bytes: &[u8]) -> io::Result<TimeRun> {
+    let stdin_file = if stdin_bytes.is_empty() {
+        None
+    } else {
+        let mut file = NamedTempFile::new()?;
+        file.write_all(stdin_bytes)?;
+        file.flush()?;
+        Some(file)
+    };
+    let stdin = match stdin_file.as_ref() {
+        Some(file) => Stdio::from(file.reopen()?),
+        None => Stdio::null(),
+    };
+    let mut stdout_file = if stdin_bytes.is_empty() {
+        None
+    } else {
+        Some(NamedTempFile::new()?)
+    };
+    let stdout = match stdout_file.as_ref() {
+        Some(file) => Stdio::from(file.reopen()?),
+        None => Stdio::piped(),
+    };
     let started = Instant::now();
-    let output = Command::new("/usr/bin/time")
+    let mut command = Command::new("/usr/bin/time");
+    command
         .arg(time_flag())
         .arg(PROBE)
         .args(args)
         .env("LC_ALL", "C")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()?;
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(Stdio::piped());
+    let output = command.output()?;
+    let wrapper_wall_micros = started.elapsed().as_micros();
+    let stdout_sha256 = if let Some(file) = stdout_file.take() {
+        let bytes = fs::read(file.path())?;
+        if bytes != stdin_bytes {
+            return Err(io::Error::other(
+                "independent time target did not echo prepared stdin exactly",
+            ));
+        }
+        Some(hex_digest(&Sha256::digest(&bytes)))
+    } else {
+        None
+    };
     let status = output.status;
     let (parsed_user_cpu_micros, parsed_system_cpu_micros) = parse_time_cpu(&output.stderr)
         .map_or((None, None), |(user, system)| (Some(user), Some(system)));
@@ -940,7 +1637,7 @@ fn run_independent_time(args: &[String]) -> io::Result<(Output, TimeObservation)
         success: status.success(),
         exit_code: status.code(),
         signal: exit_signal(status),
-        wrapper_wall_micros: started.elapsed().as_micros(),
+        wrapper_wall_micros,
         parsed_wall_micros: parse_time_elapsed(&output.stderr),
         parsed_user_cpu_micros,
         parsed_system_cpu_micros,
@@ -948,7 +1645,11 @@ fn run_independent_time(args: &[String]) -> io::Result<(Output, TimeObservation)
         stdout_file: String::new(),
         stderr_file: String::new(),
     };
-    Ok((output, observation))
+    Ok(TimeRun {
+        output,
+        observation,
+        stdout_sha256,
+    })
 }
 
 fn save_time_output(

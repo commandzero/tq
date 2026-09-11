@@ -1,5 +1,34 @@
 # Implementation evidence
 
+## Resumed native worker testing
+
+The repeated controls are recorded in [native worker proof results](worker-proof.md).
+Across two unchanged release runs per host, all 480 RSS comparisons passed
+but 11 CPU comparisons failed. The failed evidence remains retained and
+cannot authorize worker adoption or campaign publication.
+
+The user granted standing permission to copy repositories to Ironhide for
+testing. The 2026-09-11 source refresh succeeded at the existing isolated
+scratch destination. The native Linux release build used the pinned nightly
+compiler explicitly and the locked `wait4 0.2.0` dependency.
+
+Linux passed 12 measurement tests, 18 probe tests, one waited-descendant scope
+test, eight native-owner tests, and five worker tests. Ironhide's Cargo output
+layout places tests under `release/build/.../out`; three direct worker tests
+initially failed executable discovery. Supplying the supported explicit
+`TQ_BENCH_WORKER` release path made all five pass. The macOS release worker
+suite also passed all five tests.
+
+Initial independent-time spot checks are retained in the external archive at
+`.work/worker-proof-linux.L4EUbX/` and `.work/worker-proof-macos.vQNGzk/`.
+Linux no-op target RSS remained between 2,527,232 and 2,584,576 bytes with
+0, 32 MiB, and 128 MiB retained in the coordinator. GNU time reported
+2,461,696 to 2,576,384 bytes. The 32 MiB stdin payload round-tripped with a
+2,580,480-byte target peak. macOS no-op target RSS was 6,094,848 bytes for
+all three coordinator allocations and matched BSD time exactly; the large
+stdin target peak was 6,144,000 bytes. These are spot checks, not repeated
+proof or campaign calibration.
+
 ## Isolated-worker implementation checkpoint
 
 Commit `d8398ca` records the native accounting implementation and approved

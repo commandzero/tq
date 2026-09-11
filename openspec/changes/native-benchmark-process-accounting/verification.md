@@ -29,10 +29,15 @@ Each item below remains an acceptance blocker in `tasks.md`.
 - 5.2: Repeat this verification against the completed implementation and
   retained native evidence.
 
-The permissions reviewer blocked refreshing private source at
-`ironhide.local:/var/tmp/tq-native-accounting-bre76E/src/`. Explicit approval
-for that source transfer is required to resume the Linux proof. No alternative
-transfer was attempted. Earlier Linux evidence belongs to an older collector.
+The earlier source-transfer restriction was resolved by the user's explicit
+standing Ironhide testing permission on 2026-09-11. The source refresh and
+native release build succeeded. Final native calibration and campaign
+acceptance remain incomplete; permission is no longer the blocker.
+
+The resumed [native worker proof](worker-proof.md) produced 480 paired
+observations across two runs per host. All RSS comparisons passed; 11 CPU
+comparisons failed. The unchanged repeat reproduced the discrepancy. Task 1.4
+remains critical and open, and the worker has not been adopted.
 
 ## Correctness checks
 
