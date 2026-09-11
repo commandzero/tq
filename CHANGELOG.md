@@ -19,11 +19,26 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Added execution of user-defined filters inside supported callback builtins (#8).
 - Added jq format strings and bounded formatters such as `@base64` (#18).
 - Added JSON5 input, including kibana-sync triple-quoted multiline strings (#13).
+- Added a pinned jq manual conformance campaign with separate JSON, compact-byte, and TOON checks.
+- Added safe-Rust implementations of the jq math function families.
+- Added safe-Rust jq manual behavior coverage for filter composition and user-defined filter binding.
+- Added reviewed jq-library disparity evidence for macOS and Linux ([disparity review](docs/jq-compatibility-disparities.md)); the reviewed exceptions are not a claim of 100% exact parity, and Windows runtime evidence remains unverified.
 
 ### Changed
 
+- Changed benchmark correctness checks to support default TOON result streams and retain failure diagnostics.
+- Changed benchmark campaigns to return a failing exit status after saving failed observations.
+- Changed benchmark campaigns to abort immediately when authoritative RSS collection is unavailable.
+- Changed the benchmark catalog to enable verified YAML, TOON, and yq adapters and explain remaining exclusions.
+- Changed optimized JSON execution to validate each input value before running its filter, preserving duplicate-key replacement and continuing after recoverable errors at the next input value.
+- Changed `acos` and `exp` to use safe standard-library operations, matching the pinned macOS jq rounding witnesses.
+- Raised the minimum Rust version to 1.88 to match existing language and dependency requirements.
+- Corrected Linux CPU-time and process-group RSS measurements in benchmark reports.
 - Changed streamed `inputs` processing to use bounded buffering and reduce per-document scheduling overhead (#5).
 - Changed format conversion to preserve oversized JSON numbers instead of silently falling back to YAML strings (#18).
+- Changed `-c` and `--compact-output` to select compact JSON while retaining TOON as the default output.
+- Changed default TOON output to emit zero or more LF-terminated values, preserving earlier results on later errors. Use `--seq` for RS framing or `--unframed` to require exactly one document.
+- Changed the process CLI to permit jq environment and platform access without extra allow flags; embedded capability controls remain available.
 
 ### Fixed
 

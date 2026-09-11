@@ -1,9 +1,16 @@
+---
+type: Report
+title: jq compatibility
+description: Supported jq behavior and the manual compatibility evidence policy.
+generated: { by: codex/gpt-5, at: 2026-09-09T17:44:58Z }
+---
+
 # jq compatibility
 
 `tq` follows jq 1.8.x semantics for the features it supports. That includes
 navigation, pipes and comma generators, arrays and ordered objects, variables,
 conditionals, operators, common built-ins, optional access, `try/catch`, path
-updates, user filters, and modules from explicit roots. Stateful `reduce` and
+updates, user filters, and modules. Stateful `reduce` and
 `foreach` folds preserve jq's generator order, accumulator scope, update count,
 intermediate results, and output produced before a later error.
 
@@ -34,7 +41,7 @@ object or array opener selects JSON before YAML, while YAML document,
 directive, and root-sequence markers select YAML. `.jsonl` and `.ndjson` files
 select strict one-value-per-line JSON Lines input. A `.json5` extension selects
 document-at-a-time JSON5 input. Use
-`--input-format toon|yaml|json|json5|jsonl` to select exactly one parser;
+`--input-format toon|yaml|json|json5|jsonl|json-seq|toon-seq` to select exactly one parser;
 `ndjson` is an alias for `jsonl`. JSON5 is input-only and is never selected by
 content detection. See the [format compatibility matrix](formats.md) for the
 native formats supported by jq, yq, and tq.
@@ -47,14 +54,24 @@ where any parse rejection proxies the complete ordered source set.
 `--stream-errors` is incompatible because it assigns a different meaning to
 parse failures.
 
-Structured output is a TOON Text Sequence. Each result is `RS`, canonical TOON,
-and `LF`. This differs from jq's newline-delimited JSON. The framing separates
-multiple results and preserves complete records before a late error. Select
-`--output-format json` for JSON output, `--output-format jsonl` for compact
-LF-terminated JSON Lines, `--output-format yaml` for exact-number-preserving
-YAML 1.2 output, `-r` for raw strings, `-j` to join raw outputs, or `--unframed`
-for exactly one TOON value. `--unframed` rejects zero or multiple results
-instead of choosing one silently.
+Default structured TOON output writes each result as canonical TOON followed by
+LF, without RS. Zero results produce empty stdout; multiple results and late
+errors do not require another mode. Completed results survive later errors.
+Use `--seq` for explicit RS-framed records with unambiguous boundaries.
+Select `-c` or
+`--compact-output` for compact JSON, `--output-format json` for pretty JSON,
+`--output-format jsonl` for compact LF-terminated JSON Lines,
+`--output-format yaml` for exact-number-preserving YAML 1.2 output, `-r` for raw
+strings, or `-j` to join raw outputs. `--unframed` explicitly requires one standalone TOON document and rejects zero
+or multiple results before publishing output.
+
+`-c` does not require `-o json` and does not change the input parser. Combining
+it with an explicit `-o toon` is an error in either argument order. `--seq`
+selects JSON Text Sequence input, JSON record framing when JSON output is
+selected, and TOON Text Sequence framing when TOON output is selected. Use
+`-i toon-seq` for TOON sequence input. JSON sequence recovery and stream-error
+details remain part of the manual conformance gate, not a claim implied by
+format support.
 
 The extended jq-shaped CLI supports short clusters plus `--raw-output0`,
 `-a/--ascii-output`, `-S/--sort-keys`, explicit color/monochrome output,
@@ -68,11 +85,17 @@ and `--rawfile`/`--slurpfile` use the configured per-source byte limit. See
 `def` uses jq lexical scope and supports both lazy filter parameters (`f`) and
 eager value parameters (`$value`), including recursive references. Calls are
 resolved by name and arity before input is read and execute through bounded VM
-frames. `-L DIR` adds an explicit module root; repeat it to establish lookup
-order. `include "name"` imports definitions in place, while `import "name" as
-alias` exposes `alias::filter`. Canonical paths must remain within a configured
-root. Module count, bytes, cycles, paths, metadata, and SHA-256 identities are
-bounded or reported during compilation.
+frames. Repeated `-L DIR` options set explicit module lookup order. Without
+them, the process CLI searches its default roots and loads a `~/.jq` startup
+file when present. Prefix substitutions support `~/` and `$ORIGIN/`.
+`include "name"` imports definitions in place, while `import "name" as alias`
+exposes `alias::filter`. JSON data imports use the variable namespace, such as
+`import "data" as $d; $d::d`.
+
+Canonical paths must remain within configured roots. Module reads, counts, and
+dependency cycles are bounded. `modulemeta` also accepts runtime-derived module
+names and shares a bounded metadata cache. Embedded callers that deny filesystem
+access cannot load implicit modules or startup files.
 
 ## Memory and limits
 
@@ -88,23 +111,44 @@ result count, output bytes, and TOON preparation/spool ceilings. A resource
 limit produces a classified diagnostic; it is never reported as a successful
 query. SIGINT is cooperative and a closed downstream pipe is successful.
 
-## Reviewed differences
+## Compatibility evidence and disparities
 
-The current jq 1.8.2, yq, and tq report is
-`tests/compatibility/reviews/coverage-v1.toon`. Its jq/tq difference allowlist is
-small:
+The manual campaign pins jq 1.8.1, the imported source documents, and the
+original 518 cases, including 303 protected matches. It compares ordered JSON
+results and process behavior, exact compact JSON bytes, and whether TOON
+preserves the JSON execution contract. See the
+[campaign instructions and review inventories](../tests/compatibility/README.md).
+The older `coverage-v1.toon` campaign is historical evidence, not approval for
+the current implementation or its former expected-difference labels.
 
-| Case | Difference | Reason |
-| --- | --- | --- |
-| `cli.sequence-framing` | raw bytes | tq's default is TOON Text Sequence framing |
-| `numeric.policy-digits-over` | result/exit/error | bounded numeric digit envelope |
-| `numeric.policy-exponent-over` | result/exit/error | bounded exponent expansion envelope |
-| `numeric.policy-index-over` | result/exit/error | bounded index envelope |
-| `date.range-error` | result/exit/error | portable UTC support stops at years 0000 and 9999 |
-| `regex.unsupported-lookaround` | result/exit/error | the linear-time regex engine rejects Oniguruma look-around |
+The [current macOS report](tests/jq-manual/index.md)
+records 905 cases: 900 exact matches, five reviewed safe-library disparities,
+and zero unresolved failures. Compact JSON matches 871 of 876 applicable cases;
+TOON preserves all 876 JSON execution contracts. The frozen macOS tq executable
+is `target/release/tq-bind-final-AxfMRp`, SHA-256
+`e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c`.
+All original protected matches remain exact. These results are macOS evidence
+only and do not establish native Linux or Windows compatibility. The [final
+Linux report](tests/comparison-x86-64-linux.md)
+records 896 exact results and nine reviewed observations across the same
+905-case inventory, with zero unreviewed failures. Compact JSON matches 867 of
+876 applicable cases and TOON preserves all 876 JSON execution contracts. The
+Linux completion report is green for the recorded x86_64 executable; these
+campaign reports are checkpoints, not a claim that every remaining parity
+requirement or release gate is complete. Its target-scoped approvals are not
+waivers for other builds or platforms. Native
+Windows execution is explicitly deferred until a runner is available, with
+its tests retained and no passing claim.
 
-Features outside the MVP report a stable unsupported or deferred status.
-Labels and breaks are deferred. Regex and UTC date built-ins work without extra
-permissions. Environment, clock, local-timezone, and input-metadata access need
-capability flags. See [regex, date, and platform compatibility](jq-regex-date-platform.md)
-for engine and release-host differences.
+Manual parity remains under implementation and review. Missing behavior,
+timeouts, skips, crashes, and unexplained mismatches fail the gate. A specifically
+reviewed safe-library disparity can satisfy the separate completion gate but
+never becomes an exact match. The
+[disparity register](jq-compatibility-disparities.md) records measured math,
+regex, and platform restrictions and their reconsideration criteria.
+
+Labels and breaks are implemented. The process CLI permits environment, clock,
+local-timezone, and input-metadata access without extra allow flags; embedded
+callers retain capability controls. See
+[migration and security notes](jq-parity-migration.md) and
+[regex, date, and platform compatibility](jq-regex-date-platform.md).

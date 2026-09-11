@@ -31,7 +31,7 @@ not the basis of Saved %.
 Three retained JSON-to-TOON conversions also increase token counts. Their
 negative savings remain visible in the per-file table.
 
-The corrected [math ledger](../tests/compatibility/reviews/manual-math.toon)
+The corrected [math ledger](../tests/compatibility/reviews/jq-manual/math.toon)
 remains a useful tabular example. Its 62 executable examples and 6 coverage notes
 use scalar columns. It shrinks from 5,518 to 2,409 o200k_base tokens, saving
 56.34%. Its character count falls from 21,091 to 10,486.
@@ -181,7 +181,7 @@ for filename in sys.argv[1:]:
     ]
     print(filename, "bytes", len(raw), "characters", len(text), "tokens", counts)
 ' target/fixture-json-backup/tests/compatibility/reviews/manual-math.json \
-  tests/compatibility/reviews/manual-math.toon
+  tests/compatibility/reviews/jq-manual/math.toon
 ```
 
 ## Per-file measurements
@@ -202,23 +202,23 @@ replacement TOON file.
 | [tests/compatibility/baselines/jq-yq-mvp-v1.json](../tests/compatibility/baselines/jq-yq-mvp-v1.toon) | Formatted JSON | 65,421 | 56,436 | 13.73 | 219,238 | 180,664 |
 | [tests/compatibility/reviews/coverage-v1.json](../tests/compatibility/reviews/coverage-v1.toon) | Formatted JSON | 216,909 | 178,167 | 17.86 | 770,553 | 584,084 |
 | [tests/compatibility/reviews/jq-yq-mvp-v1.json](../tests/compatibility/reviews/jq-yq-mvp-v1.toon) | Formatted JSON | 14,194 | 6,399 | 54.92 | 57,195 | 27,743 |
-| [tests/compatibility/reviews/manual-advanced-features.json](../tests/compatibility/reviews/manual-advanced-features.toon) | Formatted JSON | 5,618 | 4,668 | 16.91 | 19,308 | 15,358 |
-| [tests/compatibility/reviews/manual-assignment.json](../tests/compatibility/reviews/manual-assignment.toon) | Formatted JSON | 2,349 | 2,234 | 4.90 | 9,222 | 8,832 |
-| [tests/compatibility/reviews/manual-basic-filters.json](../tests/compatibility/reviews/manual-basic-filters.toon) | Formatted JSON | 6,380 | 5,287 | 17.13 | 23,550 | 19,340 |
-| [tests/compatibility/reviews/manual-builtin-operators-and-functions.json](../tests/compatibility/reviews/manual-builtin-operators-and-functions.toon) | Formatted JSON | 27,476 | 18,875 | 31.30 | 95,275 | 57,387 |
-| [tests/compatibility/reviews/manual-colors.json](../tests/compatibility/reviews/manual-colors.toon) | Formatted JSON | 3,262 | 2,491 | 23.64 | 12,289 | 9,561 |
-| [tests/compatibility/reviews/manual-comparison.json](../tests/compatibility/reviews/manual-comparison.toon) | Formatted JSON | 320,112 | 262,515 | 17.99 | 1,055,087 | 812,434 |
-| [tests/compatibility/reviews/manual-conditionals-and-comparisons.json](../tests/compatibility/reviews/manual-conditionals-and-comparisons.toon) | Formatted JSON | 2,655 | 1,909 | 28.10 | 9,815 | 6,710 |
-| [tests/compatibility/reviews/manual-execution.json](../tests/compatibility/reviews/manual-execution.toon) | Formatted JSON | 97,165 | 75,602 | 22.19 | 358,100 | 270,958 |
-| [tests/compatibility/reviews/manual-introduction.json](../tests/compatibility/reviews/manual-introduction.toon) | Formatted JSON | 291 | 301 | -3.44 | 1,126 | 1,337 |
-| [tests/compatibility/reviews/manual-invoking-jq.json](../tests/compatibility/reviews/manual-invoking-jq.toon) | Formatted JSON | 6,136 | 5,248 | 14.47 | 24,421 | 22,041 |
-| [tests/compatibility/reviews/manual-io.json](../tests/compatibility/reviews/manual-io.toon) | Formatted JSON | 1,533 | 1,140 | 25.64 | 5,779 | 4,582 |
-| [tests/compatibility/reviews/manual-math.json](../tests/compatibility/reviews/manual-math.toon) | Formatted JSON | 5,518 | 2,409 | 56.34 | 21,091 | 10,486 |
-| [tests/compatibility/reviews/manual-modules.json](../tests/compatibility/reviews/manual-modules.toon) | Formatted JSON | 2,812 | 3,072 | -9.25 | 12,129 | 13,530 |
-| [tests/compatibility/reviews/manual-regular-expressions.json](../tests/compatibility/reviews/manual-regular-expressions.toon) | Formatted JSON | 2,752 | 1,833 | 33.39 | 9,524 | 6,355 |
-| [tests/compatibility/reviews/manual-source-examples.json](../tests/compatibility/reviews/manual-source-examples.toon) | Formatted JSON | 52,091 | 47,634 | 8.56 | 129,300 | 107,099 |
-| [tests/compatibility/reviews/manual-streaming.json](../tests/compatibility/reviews/manual-streaming.toon) | Formatted JSON | 1,518 | 1,029 | 32.21 | 5,612 | 3,984 |
-| [tests/compatibility/reviews/manual-types-and-values.json](../tests/compatibility/reviews/manual-types-and-values.toon) | Formatted JSON | 2,600 | 1,820 | 30.00 | 10,382 | 7,171 |
+| [tests/compatibility/reviews/manual-advanced-features.json](../tests/compatibility/reviews/jq-manual/advanced-features.toon) | Formatted JSON | 5,618 | 4,668 | 16.91 | 19,308 | 15,358 |
+| [tests/compatibility/reviews/manual-assignment.json](../tests/compatibility/reviews/jq-manual/assignment.toon) | Formatted JSON | 2,349 | 2,234 | 4.90 | 9,222 | 8,832 |
+| [tests/compatibility/reviews/manual-basic-filters.json](../tests/compatibility/reviews/jq-manual/basic-filters.toon) | Formatted JSON | 6,380 | 5,287 | 17.13 | 23,550 | 19,340 |
+| [tests/compatibility/reviews/manual-builtin-operators-and-functions.json](../tests/compatibility/reviews/jq-manual/builtin-operators-and-functions.toon) | Formatted JSON | 27,476 | 18,875 | 31.30 | 95,275 | 57,387 |
+| [tests/compatibility/reviews/manual-colors.json](../tests/compatibility/reviews/jq-manual/colors.toon) | Formatted JSON | 3,262 | 2,491 | 23.64 | 12,289 | 9,561 |
+| [tests/compatibility/reviews/manual-comparison.json](../tests/compatibility/reviews/jq-manual/comparison.toon) | Formatted JSON | 320,112 | 262,515 | 17.99 | 1,055,087 | 812,434 |
+| [tests/compatibility/reviews/manual-conditionals-and-comparisons.json](../tests/compatibility/reviews/jq-manual/conditionals-and-comparisons.toon) | Formatted JSON | 2,655 | 1,909 | 28.10 | 9,815 | 6,710 |
+| [tests/compatibility/reviews/manual-execution.json](../tests/compatibility/reviews/jq-manual/execution.toon) | Formatted JSON | 97,165 | 75,602 | 22.19 | 358,100 | 270,958 |
+| [tests/compatibility/reviews/manual-introduction.json](../tests/compatibility/reviews/jq-manual/introduction.toon) | Formatted JSON | 291 | 301 | -3.44 | 1,126 | 1,337 |
+| [tests/compatibility/reviews/manual-invoking-jq.json](../tests/compatibility/reviews/jq-manual/invoking-jq.toon) | Formatted JSON | 6,136 | 5,248 | 14.47 | 24,421 | 22,041 |
+| [tests/compatibility/reviews/manual-io.json](../tests/compatibility/reviews/jq-manual/io.toon) | Formatted JSON | 1,533 | 1,140 | 25.64 | 5,779 | 4,582 |
+| [tests/compatibility/reviews/manual-math.json](../tests/compatibility/reviews/jq-manual/math.toon) | Formatted JSON | 5,518 | 2,409 | 56.34 | 21,091 | 10,486 |
+| [tests/compatibility/reviews/manual-modules.json](../tests/compatibility/reviews/jq-manual/modules.toon) | Formatted JSON | 2,812 | 3,072 | -9.25 | 12,129 | 13,530 |
+| [tests/compatibility/reviews/manual-regular-expressions.json](../tests/compatibility/reviews/jq-manual/regular-expressions.toon) | Formatted JSON | 2,752 | 1,833 | 33.39 | 9,524 | 6,355 |
+| [tests/compatibility/reviews/manual-source-examples.json](../tests/compatibility/reviews/jq-manual/source-examples.toon) | Formatted JSON | 52,091 | 47,634 | 8.56 | 129,300 | 107,099 |
+| [tests/compatibility/reviews/manual-streaming.json](../tests/compatibility/reviews/jq-manual/streaming.toon) | Formatted JSON | 1,518 | 1,029 | 32.21 | 5,612 | 3,984 |
+| [tests/compatibility/reviews/manual-types-and-values.json](../tests/compatibility/reviews/jq-manual/types-and-values.toon) | Formatted JSON | 2,600 | 1,820 | 30.00 | 10,382 | 7,171 |
 | [tests/compatibility/reviews/numeric-policy-v1.json](../tests/compatibility/reviews/numeric-policy-v1.toon) | Formatted JSON | 622 | 522 | 16.08 | 2,685 | 2,385 |
 | [tests/corpus/sources/microsoft-us-buildings-georgia.json](../tests/corpus/sources/microsoft-us-buildings-georgia.toon) | Formatted JSON | 272 | 203 | 25.37 | 948 | 743 |
 | [tests/corpus/sources/usgs-all-day.json](../tests/corpus/sources/usgs-all-day.toon) | Formatted JSON | 254 | 197 | 22.44 | 854 | 682 |

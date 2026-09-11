@@ -1,3 +1,10 @@
+---
+type: Report
+title: YAML adapter spike
+description: MVP YAML adapter behavior and limits of scalar fidelity.
+generated: { by: codex/gpt-6-astra, at: 2026-09-09T04:09:20Z }
+---
+
 # `yaml_serde` adapter spike
 
 The MVP adapter uses `yaml_serde` 0.10.x. Its streaming `Deserializer` yields

@@ -1,3 +1,10 @@
+---
+type: Report
+title: jq regex, date, and platform compatibility
+description: Safe-library behavior, resource limits, and ambient capability controls.
+generated: { by: codex/gpt-6-astra, at: 2026-09-09T01:24:47Z }
+---
+
 # jq regex, date, and platform compatibility
 
 ## Reviewed baseline
@@ -5,26 +12,33 @@
 The cases cover syntax, Unicode scalar offsets, optional captures, match order,
 flags, splitting and substitution, UTC arrays, epoch ranges, environment shape,
 and input metadata. The 2026-08-10 exploratory run used Apple jq 1.7.1 on arm64
-macOS 26.5. The full campaign uses the repository's pinned jq 1.8.x binary and
-records its exact identity in `tests/compatibility/reviews/coverage-v1.toon`.
+macOS 26.5. The active manual campaign pins jq 1.8.1 through
+`tests/compatibility/reviews/jq-manual/reference-pin.toon` and records the observed
+executable identities in each generated report. `coverage-v1.toon` is historical.
 
 ## Selected dependencies and limits
 
-`tq` uses Rust `regex` 1.13.1 and Jiff 0.2.35. The regex engine provides
-linear-time Unicode matching without backtracking. Each VM invocation bounds
-the UTF-8 pattern, searched input, compiled program, result count, instruction
-work, and output bytes. The CLI maps `--max-token-bytes` to the pattern limit
-and `--max-input-bytes` to the searched-input limit.
+`tq` uses `fancy-regex` 0.19.1 for the jq-compatible regex surface and Jiff
+0.2.35 for UTC-first date/time conversion. `fancy-regex` is a safe Rust
+backtracking engine, so every compiled pattern receives an explicit
+backtracking limit plus compiled/delegated-size limits. The VM also checks
+input/pattern bytes, match and replacement counts, retained output, and
+cancellation between bounded engine calls. The CLI maps
+`--max-token-bytes` to the pattern limit and `--max-input-bytes` to the
+searched-input limit; these are resource envelopes, not wall-clock
+guarantees.
 
 Supported regex built-ins are `test`, `match`, `capture`, `scan`, `split`,
 `splits`, `sub`, and `gsub`. Supported flags are `g`, `i`, `m`, `s`, `p`, `x`,
-and `n`. The `l` longest-match flag, look-around, backreferences, atomic groups,
-and other Oniguruma-only syntax return a stable unsupported diagnostic. `m`
-matches jq's dot-newline behavior; `s` retains single-line anchors; `p`
-combines those modes. Offsets and lengths count Unicode scalar values, matching
-jq's reviewed UTF-8 behavior.
+and `n`; array pattern/flag forms are accepted only by the jq operations that
+document them. The `l` longest-match flag returns a stable unsupported
+diagnostic. Other patterns are parsed by the selected Rust engine; rejected
+syntax produces a pattern error. `m` matches jq's dot-newline behavior; `s` retains single-line
+anchors; `p` combines those modes. Offsets and lengths count Unicode scalar
+values, matching jq's reviewed UTF-8 behavior. The `l` mode remains an
+explicit safe-engine limitation and is not silently approximated.
 
-Compatibility reports classify rejected engine syntax as
+Compatibility reports classify the rejected longest-match flag as
 `unsupported-capability`, configured regex envelopes as `resource`, portable
 date bounds as `runtime-range`, and denied ambient effects as `runtime-policy`.
 
@@ -37,11 +51,13 @@ range from `0000-01-01T00:00:00Z` through
 Broken-down arrays use jq's zero-based month and year-day plus Sunday-based
 weekday fields.
 
-`localtime`, `strflocaltime`, and `now` read platform state. They require
-`--allow-platform`; otherwise evaluation fails without consulting the clock or
-timezone. Local results use the release host's configured timezone and are
-classified as platform-dependent in
-`tests/platform/regex-date-platform-v1.toon`.
+`localtime`, `strflocaltime`, and `now` read platform state. The process CLI
+permits this access by default. Embedded callers must enable platform access;
+denied evaluation does not consult the clock or timezone. Local results use the
+release host's configured timezone and are
+classified as platform-dependent in the compatibility catalog. UTC/date
+conversion remains safe Rust through Jiff; no C/FFI or `unsafe` exception is
+used.
 Run the UTC boundary and ambient-policy checks locally during PR preflight:
 
 ```console
@@ -49,21 +65,25 @@ cargo test -p tq-core regex_date_platform_release_host_contract
 cargo test -p tq-cli ambient
 ```
 
-The same checks run on Linux, macOS, and Windows when a GitHub release is
-published by `.github/workflows/regex-date-platform.yml`.
+The same checks run on Linux and macOS when a GitHub release is published by
+`.github/workflows/regex-date-platform.yml`. Native Windows execution is deferred
+until a runner is available. Windows test definitions remain in the repository;
+their presence does not establish Windows compatibility.
 
 ## Environment and input metadata
 
-`env`, `input_filename`, and `input_line_number` are denied by default.
-`--allow-environment` captures Unicode process environment pairs into a
-query-visible object. `--allow-platform` admits input identity/line metadata.
-Library callers can independently deny either capability with
-`CapabilityPolicy`, even if the command requests it.
+The process CLI permits `env`, `$ENV`, `input_filename`, and
+`input_line_number` without extra flags. Embedded `run_with_io` callers retain
+deny-by-default environment and platform access. `--allow-environment` and
+`--allow-platform` request access for embedded command evaluation; callers can
+independently deny either capability with `CapabilityPolicy`, even if the
+command requests it.
 
 Policy failures name only the requested operation and policy class. Reports do
 not serialize environment values unless the query returns them. The executable
 compatibility case checks only `env | type`.
 
-For multi-document decoded input, `input_line_number` currently identifies the
-first admitted logical input. Per-record physical line tracking and jq's exact
-non-Unicode environment behavior remain documented platform divergences.
+The shared input cursor updates source identity and physical line metadata as
+it consumes records, including reads through `input` and `inputs`. Native target
+and non-Unicode environment behavior still require platform-specific evidence;
+an unverified target is not an accepted disparity.

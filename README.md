@@ -1,8 +1,8 @@
 # tq
 
 `tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, JSON5, and JSON Lines. It
-writes TOON Text Sequences by default and can stream JSON, JSON Lines, and TOON
-without loading the complete input.
+writes LF-terminated TOON values by default and can stream JSON, JSON Lines, and
+explicit TOON sequences without loading the complete input.
 
 `tq` supports common jq filters, including navigation, pipes, generators,
 conditionals, operators, variables, path updates, user filters, modules, and
@@ -13,11 +13,11 @@ supported syntax and known differences.
 
 ## Install and use
 
-Rust 1.87 or newer is required.
+Rust 1.88 or newer is required.
 
 ```console
 cargo install tq-cli
-tq '.features[] | {id, magnitude: .properties.mag}' feed.json
+tq --seq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
 To build from a checkout instead, run `cargo build --release` and use
@@ -51,13 +51,17 @@ For multiple sources, the fallback applies to each source separately. With
 slurp evaluates the set as one input. `--proxy-on-error` cannot be used with
 `--stream-errors`.
 
-By default, each structured result contains an ASCII RS byte, one canonical
-TOON document, and LF. This framing distinguishes zero, one, and many results.
-If a later result fails, earlier complete records remain valid. Use
+By default, structured TOON output emits each result as canonical TOON followed
+by LF. Zero results produce no output; multiple results need no extra option.
+Use `--seq` for explicitly RS-framed records and `--unframed` to require exactly
+one standalone document. Use
 `--output-format json` for jq-style JSON or `--output-format jsonl` for one
-compact, LF-terminated JSON value per result. `-r` writes raw strings, `-j`
-joins raw output, and `--unframed` is available when the query must return
-exactly one TOON value.
+compact, LF-terminated JSON value per result. `-r` writes raw strings and `-j`
+joins raw output.
+
+`-c` selects compact JSON without requiring `-o json`. Use `--seq` when a
+consumer needs explicit TOON record boundaries, as in the streaming examples
+above.
 
 ## Streaming and memory
 
@@ -67,7 +71,7 @@ the root path for every physical record. YAML and JSON5 decode one document at a
 time. On large inputs, streaming avoids retaining the whole document:
 
 ```console
-tq --stream --input-format json \
+tq --stream --seq --input-format json \
   'select(length == 2 and (.[0] | length) == 1)' buildings.geojson
 ```
 
@@ -213,7 +217,11 @@ framing, limits, and known differences.
 
 Parameterized `def` filters support lexical capture, filter and value
 parameters, generator cardinality, shadowing, and recursion on tq's bounded
-managed call stack. Modules load only from explicit roots:
+managed call stack. The process CLI resolves modules from confined default roots:
+the filter's directory or current directory, `JQ_LIBRARY_PATH`, `HOME/.jq`, and
+install-relative library roots. `-L` replaces those defaults with explicit
+confined roots; embedded callers retain their explicit filesystem and module
+policy:
 
 ```console
 tq -L ./jq-libs 'import "metrics" as m; m::normalize' input.json
@@ -229,23 +237,30 @@ reads.
 ## Regex, dates, and platform data
 
 The Unicode-aware `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`,
-and `gsub` built-ins use a bounded linear-time regex engine. UTC parsing,
-formatting, broken-down time, and epoch conversion support jq's date arrays for
-the documented range from year 0000 through 9999.
+and `gsub` built-ins use a safe Rust bounded-backtracking regex engine. Pattern,
+input, match, replacement, and VM-work limits bound resource use, but the engine
+does not promise linear-time matching. UTC parsing, formatting, broken-down time,
+and epoch conversion support jq's date arrays for the documented range from year
+0000 through 9999.
 
-Environment and platform data are opt-in. `--allow-environment` enables `env`.
-`--allow-platform` enables `now`, local timezone conversion, and input metadata.
-See [the compatibility policy](docs/jq-regex-date-platform.md) for engine
-differences, limits, redaction, and release-host classifications.
+The process CLI enables environment and platform data by default, including
+`env`, `now`, local timezone conversion, and input metadata. Embedded callers
+retain explicit capability controls and can deny those authorities. See [the
+compatibility policy](docs/jq-regex-date-platform.md) for engine differences,
+limits, redaction, and release-host classifications; Windows remains unverified,
+and reviewed target-specific disparities do not waive other targets.
 
 ## Current boundaries
 
-`tq` does not implement labels, breaks, or many less common jq CLI switches. It
-reports them as unsupported capabilities.
+Labels and `break` are implemented with jq-compatible manual behavior. The
+[option inventory](docs/jq-1.8-cli-options.md) distinguishes supported options,
+native-output adaptations, and options removed upstream.
 
 The numeric model preserves accepted input literals as written. Arithmetic uses
 jq-compatible binary64 behavior when needed. Digit, exponent-expansion, and
 index limits return resource or range errors instead of silently losing data.
-These errors and TOON sequence framing are known differences from jq.
+TOON output and configured resource limits differ from jq's default contract.
+The [compatibility guide](docs/compatibility.md) separates tested matches,
+reviewed library disparities, and remaining implementation gaps.
 
 Licensed under MIT.

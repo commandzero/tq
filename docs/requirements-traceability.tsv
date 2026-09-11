@@ -57,10 +57,10 @@ jq-core-language.cross-type-ordering	jq-core-language	Comparison and ordering	Cr
 jq-core-language.numeric-arithmetic	jq-core-language	Arithmetic and overloaded addition	Numeric arithmetic	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
 jq-core-language.object-addition	jq-core-language	Arithmetic and overloaded addition	Object addition	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
 jq-core-language.invalid-arithmetic-types	jq-core-language	Arithmetic and overloaded addition	Invalid arithmetic types	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.large-exact-integer-identity	jq-core-language	jq decimal-literal hybrid numbers	Large exact integer identity	test:crates/tq-core/src/number.rs#preserves_and_normalizes_exact_literals
-jq-core-language.arithmetic-leaves-the-literal-domain	jq-core-language	jq decimal-literal hybrid numbers	Arithmetic leaves the literal domain	test:crates/tq-core/src/number.rs#arithmetic_invalidates_literal_and_clamps_overflow
+jq-core-language.large-exact-integer-identity	jq-core-language	jq decimal-literal hybrid numbers	Large exact integer identity	test:crates/tq-core/src/number.rs#preserves_jq_literal_representation
+jq-core-language.arithmetic-leaves-the-literal-domain	jq-core-language	jq decimal-literal hybrid numbers	Arithmetic leaves the literal domain	test:crates/tq-core/src/number.rs#arithmetic_invalidates_literal_and_keeps_runtime_overflow
 jq-core-language.numeric-envelope-exceeded	jq-core-language	jq decimal-literal hybrid numbers	Numeric envelope exceeded	test:crates/tq-core/src/number.rs#enforces_digit_and_exponent_limits
-jq-core-language.non-finite-input	jq-core-language	jq decimal-literal hybrid numbers	Non-finite input	test:crates/tq-core/src/number.rs#arithmetic_invalidates_literal_and_clamps_overflow
+jq-core-language.non-finite-input	jq-core-language	jq decimal-literal hybrid numbers	Non-finite input	test:crates/tq-core/tests/runtime_numbers.rs#runtime_nan_projects_to_json_null_without_becoming_runtime_null
 jq-core-language.bind-multiple-values	jq-core-language	Variable binding	Bind multiple values	test:crates/tq-core/src/resolve.rs#resolves_scope_shadowing_cli_variables_and_unknowns
 jq-core-language.unknown-variable	jq-core-language	Variable binding	Unknown variable	test:crates/tq-core/src/resolve.rs#resolves_scope_shadowing_cli_variables_and_unknowns
 jq-core-language.map	jq-core-language	Core built-in functions	Map	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
@@ -160,7 +160,7 @@ toon-stream-io.event-and-dom-agreement	toon-stream-io	I/O conformance and differ
 tq-cli.pipe-input	tq-cli	jq-like command shape	Pipe input	test:crates/tq-cli/src/args.rs#parses_jq_shape_files_stdin_and_filter_file
 tq-cli.multiple-files	tq-cli	jq-like command shape	Multiple files	test:crates/tq-cli/src/args.rs#parses_jq_shape_files_stdin_and_filter_file
 tq-cli.filter-file	tq-cli	jq-like command shape	Filter file	test:crates/tq-cli/src/args.rs#parses_jq_shape_files_stdin_and_filter_file
-tq-cli.default-format	tq-cli	Best-effort input detection with strict override	Default format	test:crates/tq-cli/src/runner.rs#identity_uses_toon_sequence_and_keeps_stderr_clean
+tq-cli.default-format	tq-cli	Best-effort input detection with strict override	Default format	test:crates/tq-cli/src/runner.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
 tq-cli.json-interoperability	tq-cli	Best-effort input detection with strict override	JSON interoperability	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.yaml-interoperability	tq-cli	Best-effort input detection with strict override	YAML interoperability	test:crates/tq-formats/src/adapters.rs#equivalent_formats_share_one_ordered_value_model
 tq-cli.yaml-output-remains-deferred	tq-cli	Best-effort input detection with strict override	YAML output remains deferred	test:crates/tq-cli/src/args.rs#validates_conflicts_missing_values_and_unsupported_options
@@ -188,10 +188,10 @@ tq-cli.invalid-strict-count	tq-cli	Strictness	Invalid strict count	test:crates/t
 tq-cli.multi-document-yaml	tq-cli	YAML input profile	Multi-document YAML	test:crates/tq-formats/src/adapters.rs#yaml_is_multi_document_and_rejects_profile_violations
 tq-cli.non-string-mapping-key	tq-cli	YAML input profile	Non-string mapping key	test:crates/tq-formats/src/adapters.rs#yaml_is_multi_document_and_rejects_profile_violations
 tq-cli.yaml-numeric-fidelity	tq-cli	YAML input profile	YAML numeric fidelity	test:crates/tq-formats/src/adapters.rs#yaml_never_silently_rounds_large_json_subset_integers
-tq-cli.normal-success	tq-cli	jq-aligned exit statuses	Normal success	test:crates/tq-cli/src/runner.rs#identity_uses_toon_sequence_and_keeps_stderr_clean
+tq-cli.normal-success	tq-cli	jq-aligned exit statuses	Normal success	test:crates/tq-cli/src/runner.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
 tq-cli.exit-status-false	tq-cli	jq-aligned exit statuses	Exit status false	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.exit-status-no-output	tq-cli	jq-aligned exit statuses	Exit status no output	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.compile-failure	tq-cli	jq-aligned exit statuses	Compile failure	report:crates/tq-test-support/tests/compatibility_reporting.rs#published_full_report_has_only_reviewed_jq_target_divergences
-tq-cli.pipeline	tq-cli	stdout and stderr discipline	Pipeline	test:crates/tq-cli/src/runner.rs#identity_uses_toon_sequence_and_keeps_stderr_clean
+tq-cli.pipeline	tq-cli	stdout and stderr discipline	Pipeline	test:crates/tq-cli/src/runner.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
 tq-cli.compatibility-report	tq-cli	Help, version, and support matrix	Compatibility report	test:crates/tq-cli/src/runner.rs#help_version_and_compatibility_write_only_stdout
 tq-cli.deferred-module-path	tq-cli	Deferred jq CLI options are rejected clearly	Deferred module path	test:crates/tq-cli/src/args.rs#validates_conflicts_missing_values_and_unsupported_options

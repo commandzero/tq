@@ -13,3 +13,6 @@ okf_version: "0.2"
 7. [Requirements traceability](requirements-traceability.md) - Requirements mapped to implementation and test evidence.
 8. [TOON event boundary](toon-event-boundary.md) - Decoder and event-boundary design.
 9. [YAML adapter spike](yaml-adapter-spike.md) - YAML adapter investigation.
+10. [jq compatibility disparities](jq-compatibility-disparities.md) - Measured safe-library limitations and post-implementation reconsideration.
+11. [jq parity migration and security notes](jq-parity-migration.md) - Unreleased output, numeric, and ambient-access changes.
+12. [Test reviews](tests/index.md) - Section reviews and generated jq/tq token comparisons.
