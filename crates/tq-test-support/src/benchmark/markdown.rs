@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use super::{
     BenchmarkCampaignReport, BenchmarkFinalStatus, BenchmarkOutcome, BenchmarkRow, BenchmarkSample,
-    ComparisonFamily, MetricSummary, RowSummary, RssProvenance,
+    ComparisonFamily, MetricSummary, RowSummary,
 };
 
 /// The marker that starts the harness-owned part of a workload page.
@@ -125,48 +125,9 @@ pub fn render_markdown_campaigns(
 fn validate_native_publication(
     report: &BenchmarkCampaignReport,
 ) -> Result<(), MarkdownRenderError> {
-    let has_native_samples = report.cases.iter().any(|row| {
-        row.samples
-            .iter()
-            .chain(&row.instrumented_samples)
-            .any(|sample| is_native_provenance(sample.rss_provenance))
-    });
-    if !has_native_samples {
-        return Ok(());
-    }
-
     report
-        .validate_authoritative_rss()
-        .map_err(MarkdownRenderError::InvalidNativeReport)?;
-    for row in &report.cases {
-        for (family, samples) in [
-            ("primary", &row.samples),
-            ("instrumented", &row.instrumented_samples),
-        ] {
-            for sample in samples {
-                if is_native_provenance(sample.rss_provenance)
-                    && sample
-                        .measurement_protocol
-                        .as_ref()
-                        .and_then(|protocol| protocol.validated_accuracy_micros)
-                        .is_none_or(|accuracy| accuracy == 0)
-                {
-                    return Err(MarkdownRenderError::InvalidNativeReport(format!(
-                        "{} {} {family} sample requires positive validated timing accuracy",
-                        row.case_id, row.adapter_id
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn is_native_provenance(provenance: Option<RssProvenance>) -> bool {
-    matches!(
-        provenance,
-        Some(RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4)
-    )
+        .validate_for_publication()
+        .map_err(MarkdownRenderError::InvalidNativeReport)
 }
 
 fn render_markdown_pages_single(
@@ -1074,11 +1035,12 @@ fn measurement_method_summary(rows: &[&BenchmarkRow]) -> String {
                 .validated_accuracy_micros
                 .map_or_else(|| "unknown".to_owned(), |micros| format!("{micros} us"));
             methods.insert(format!(
-                "timing `{}` (observed exit-control bound `{accuracy}`, requested exit observation interval `{}` us), input `{}`, RSS scope `{}`",
+                "timing `{}` (observed exit-control bound `{accuracy}`, requested exit observation interval `{}` us), input `{}`, RSS scope `{}`, {}",
                 escape_cell(&single_line(&protocol.timing_method)),
                 protocol.exit_poll_interval_micros,
                 escape_cell(&single_line(&protocol.input_delivery)),
                 escape_cell(&single_line(&protocol.rss_scope)),
+                protocol_identity_summary(protocol),
             ));
         }
         for sample in &row.instrumented_samples {
@@ -1090,11 +1052,12 @@ fn measurement_method_summary(rows: &[&BenchmarkRow]) -> String {
                 .validated_accuracy_micros
                 .map_or_else(|| "unknown".to_owned(), |micros| format!("{micros} us"));
             methods.insert(format!(
-                "instrumented timing `{}` (observed exit-control bound `{accuracy}`, requested exit observation interval `{}` us), input `{}`, RSS scope `{}`",
+                "instrumented timing `{}` (observed exit-control bound `{accuracy}`, requested exit observation interval `{}` us), input `{}`, RSS scope `{}`, {}",
                 escape_cell(&single_line(&protocol.timing_method)),
                 protocol.exit_poll_interval_micros,
                 escape_cell(&single_line(&protocol.input_delivery)),
                 escape_cell(&single_line(&protocol.rss_scope)),
+                protocol_identity_summary(protocol),
             ));
         }
     }
@@ -1109,6 +1072,33 @@ fn measurement_method_summary(rows: &[&BenchmarkRow]) -> String {
     } else {
         methods.into_iter().collect::<Vec<_>>().join("; ")
     }
+}
+
+fn protocol_identity_summary(protocol: &super::MeasurementProtocol) -> String {
+    let worker = protocol.worker.as_ref().map_or_else(
+        || "worker identity unavailable".to_owned(),
+        |worker| {
+            format!(
+                "worker executable SHA-256 `{}`, launch protocol `{}`, collector sources SHA-256 `{}`",
+                escape_cell(&single_line(&worker.executable_sha256)),
+                escape_cell(&single_line(&worker.launch_protocol)),
+                escape_cell(&single_line(&worker.collector_source_sha256)),
+            )
+        },
+    );
+    let isolation = protocol.isolation_evidence.as_ref().map_or_else(
+        || "launch-floor evidence unavailable".to_owned(),
+        |evidence| {
+            format!(
+                "launch-floor controls `{}` bytes (max parent delta `{}` bytes, tolerance `{}` bytes, summary SHA-256 `{}`)",
+                evidence.control_peak_rss_bytes,
+                evidence.max_parent_delta_bytes,
+                evidence.tolerance_bytes,
+                escape_cell(&single_line(&evidence.summary_sha256)),
+            )
+        },
+    );
+    format!("{worker}; {isolation}")
 }
 
 fn outcome_name(outcome: &BenchmarkOutcome) -> &'static str {
@@ -1167,7 +1157,8 @@ mod tests {
     use super::super::{
         BenchmarkCampaignReport, BenchmarkFinalStatus, BenchmarkLimits, BenchmarkOutcome,
         BenchmarkRow, BenchmarkSample, Comparability, ComparisonFamily, ExecutionClass,
-        InputFormat, RegressionGate, RssProvenance, summarize_samples,
+        InputFormat, LaunchIsolationEvidence, RegressionGate, RssProvenance, WorkerIdentity,
+        summarize_samples,
     };
     use super::{
         RESULTS_END_MARKER, RESULTS_START_MARKER, render_markdown_campaigns, render_markdown_pages,
@@ -1333,10 +1324,13 @@ mod tests {
         native.samples[0].measurement_protocol = Some(super::super::MeasurementProtocol {
             timing_method: "native wait4".to_owned(),
             input_delivery: "preloaded stdin".to_owned(),
-            rss_scope: "specific child".to_owned(),
+            rss_scope: "specific child lifetime including pre-exec and waited descendants"
+                .to_owned(),
             exit_poll_interval_micros: 100,
             rss_poll_interval_micros: None,
             validated_accuracy_micros: None,
+            worker: Some(worker_identity()),
+            isolation_evidence: Some(isolation_evidence()),
         });
         native.samples[0].rss_provenance = Some(RssProvenance::LinuxWait4);
         native.samples[0].user_cpu_micros = Some(10);
@@ -1361,6 +1355,8 @@ mod tests {
         let rendered = fs::read_to_string(&page).expect("rendered calibrated page");
         assert!(rendered.contains("Measurement method (outside measurement tables):"));
         assert!(rendered.contains("native wait4"));
+        assert!(rendered.contains("worker executable SHA-256 `worker`"));
+        assert!(rendered.contains("launch-floor controls `1` bytes"));
     }
 
     #[test]
@@ -1376,10 +1372,13 @@ mod tests {
         native.samples[0].measurement_protocol = Some(super::super::MeasurementProtocol {
             timing_method: "native wait4".to_owned(),
             input_delivery: "preloaded stdin".to_owned(),
-            rss_scope: "specific child".to_owned(),
+            rss_scope: "specific child lifetime including pre-exec and waited descendants"
+                .to_owned(),
             exit_poll_interval_micros: 100,
             rss_poll_interval_micros: None,
             validated_accuracy_micros: Some(1_000),
+            worker: Some(worker_identity()),
+            isolation_evidence: Some(isolation_evidence()),
         });
         native.samples[0].rss_provenance = Some(RssProvenance::LinuxWait4);
         native.samples[0].user_cpu_micros = Some(10);
@@ -1388,10 +1387,13 @@ mod tests {
         instrumented.measurement_protocol = Some(super::super::MeasurementProtocol {
             timing_method: "native wait4 sampled".to_owned(),
             input_delivery: "preloaded stdin".to_owned(),
-            rss_scope: "sampled process group".to_owned(),
+            rss_scope: "sampled process-group lifetime including pre-exec and waited descendants"
+                .to_owned(),
             exit_poll_interval_micros: 100,
             rss_poll_interval_micros: Some(100),
             validated_accuracy_micros: Some(1_000),
+            worker: Some(worker_identity()),
+            isolation_evidence: Some(isolation_evidence()),
         });
         instrumented.peak_rss_bytes = None;
         native.instrumented_samples = vec![instrumented];
@@ -1453,6 +1455,8 @@ mod tests {
                 exit_poll_interval_micros: 100,
                 rss_poll_interval_micros: Some(100),
                 validated_accuracy_micros: None,
+                worker: None,
+                isolation_evidence: None,
             }),
             wall_time_micros: 1_345,
             user_cpu_micros: Some(210),
@@ -1712,6 +1716,23 @@ mod tests {
             reference_ratios: BTreeMap::new(),
             reference_peak_rss_ratios: BTreeMap::new(),
             soft_performance_objective: None,
+        }
+    }
+
+    fn worker_identity() -> WorkerIdentity {
+        WorkerIdentity {
+            executable_sha256: "worker".to_owned(),
+            launch_protocol: "direct-target-v1".to_owned(),
+            collector_source_sha256: "collector".to_owned(),
+        }
+    }
+
+    fn isolation_evidence() -> LaunchIsolationEvidence {
+        LaunchIsolationEvidence {
+            summary_sha256: "summary".to_owned(),
+            control_peak_rss_bytes: 1,
+            max_parent_delta_bytes: 0,
+            tolerance_bytes: 1,
         }
     }
 }

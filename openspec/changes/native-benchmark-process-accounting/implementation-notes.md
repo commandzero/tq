@@ -1,5 +1,43 @@
 # Implementation evidence
 
+## Isolated-worker implementation checkpoint
+
+Commit `d8398ca` records the native accounting implementation and approved
+Rust 1.95 upgrade. Subsequent work adds an explicit, diagnostic
+`measure_process_worker` entry point. The default collector has not switched
+to this prototype. Worker adoption still requires the two-host proof in
+task 1.4, followed by the lifecycle and limit integration in task 2.7.
+
+Elevated macOS tests passed coordinator allocations of 0, 32 MiB, and 128 MiB,
+plus a 32 MiB prepared stdin payload. These are coarse regression checks, not
+the required repeated, independent BSD-time calibration. Literal arguments,
+binary stdin and EOF, nonzero target exits, and blocked-input timeout checks
+also passed. The first test run found a serde reply-decoding failure for
+`u128`; externally tagged replies corrected that failure.
+
+Report/schema tests passed 36 checks and Markdown tests passed 16. New report
+gates require worker identity and launch-isolation evidence for publication,
+while retaining uncalibrated native records as diagnostics. Stable comparison
+Results blocks have not been regenerated.
+
+The permissions reviewer rejected the attempted refresh of private source to
+`ironhide.local:/var/tmp/tq-native-accounting-bre76E/src/`. Earlier transfers
+documented below do not constitute execution evidence for this worker build.
+No alternative transfer was attempted after this rejection. A newly approved
+source refresh is required before the native Linux proof can proceed.
+
+No completed-worker calibration, paired matrix, or issue #30 acceptance is
+claimed. The outstanding task checkboxes remain open.
+
+The final local prototype preflight passed with exit 0: formatting,
+all-target checking, strict all-feature Clippy, workspace tests and doc-tests,
+documentation validation with zero errors and warnings, and all 20 strict
+OpenSpec items. The workspace also passed all-target checking with the actual
+Rust 1.95.0 compiler selected explicitly. Five worker integration tests,
+16 calibration-loader tests, and the u128 reply and shared-group-drop
+regressions passed. This completes local checkpoint validation, not task 5.1's
+post-adoption verification.
+
 ## Approved MSRV and wait4 upgrade
 
 The user approved Rust 1.95 as the workspace minimum and `wait4 = 0.2.0`.

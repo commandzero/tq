@@ -10,6 +10,8 @@ mod native_process;
 mod probe;
 mod report;
 mod runner;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub mod worker;
 
 pub use probe::{AllocationProbeError, run_allocation_probe};
 
@@ -32,14 +34,14 @@ pub use markdown::{
 pub use measure::{
     BenchmarkInvocation, MeasureError, MeasuredOutcome, MeasuredStatus, RssPreflight,
     RssProvenance, collector_source_sha256, measure_process, measure_process_uninstrumented,
-    preflight_rss,
+    measure_process_worker, preflight_rss,
 };
 pub use report::{
     BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
-    BenchmarkRow, BenchmarkSample, Comparability, MeasurementProtocol, MetricSummary,
-    RegressionGate, RegressionThresholds, RowSummary, SoftObjectiveStatus,
-    SoftPerformanceObjective, compare_reports, evaluate_regression, populate_reference_ratios,
-    summarize_samples,
+    BenchmarkRow, BenchmarkSample, Comparability, LaunchIsolationEvidence, MeasurementProtocol,
+    MetricSummary, RegressionGate, RegressionThresholds, RowSummary, SoftObjectiveStatus,
+    SoftPerformanceObjective, WorkerIdentity, compare_reports, evaluate_regression,
+    populate_reference_ratios, summarize_samples,
 };
 pub use runner::{
     BenchmarkRunnerError, is_correctness_output_limit, normalize_correctness_run,

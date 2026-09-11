@@ -9,7 +9,7 @@ use std::{
 
 use nix::{
     errno::Errno,
-    sys::signal::{Signal, killpg},
+    sys::signal::{Signal, kill, killpg},
     unistd::Pid,
 };
 use rustix::process::{WaitId, WaitIdOptions, waitid};
@@ -19,9 +19,19 @@ use wait4::{ResUse, Wait4 as _};
 pub(super) const EXIT_POLL: Duration = Duration::from_micros(100);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ProcessGroupOwnership {
+    /// This owner may signal and verify the target's dedicated process group.
+    Dedicated,
+    /// The worker/coordinator owns group cleanup; this owner only handles its PID.
+    Shared,
+}
+
 pub(super) struct NativeChild {
     child: Option<Child>,
     pid: Pid,
+    process_group: Pid,
+    group_ownership: ProcessGroupOwnership,
     exited: bool,
     termination_requested: bool,
     group_cleanup_verified: bool,
@@ -31,11 +41,27 @@ pub(super) struct NativeChild {
 
 impl NativeChild {
     pub(super) fn new(child: Child) -> Self {
+        Self::new_with_group(child, None)
+    }
+
+    /// Owns a target that shares a process group with an external lifecycle
+    /// owner. The target is still reaped by its exact PID, but this owner must
+    /// not signal or enumerate the shared group (which also contains the
+    /// worker that will perform final cleanup).
+    pub(super) fn new_in_shared_group(child: Child, group: Pid) -> Self {
+        Self::new_with_group(child, Some(group))
+    }
+
+    fn new_with_group(child: Child, shared_group: Option<Pid>) -> Self {
         // All supported kernels use signed positive process identifiers.
         let pid = Pid::from_raw(i32::try_from(child.id()).expect("native child PID fits i32"));
         Self {
             child: Some(child),
             pid,
+            process_group: shared_group.unwrap_or(pid),
+            group_ownership: shared_group.map_or(ProcessGroupOwnership::Dedicated, |_| {
+                ProcessGroupOwnership::Shared
+            }),
             exited: false,
             termination_requested: false,
             group_cleanup_verified: false,
@@ -90,7 +116,12 @@ impl NativeChild {
         }
         let deadline = Instant::now() + CLEANUP_TIMEOUT;
         loop {
-            match killpg(self.pid, Signal::SIGKILL) {
+            let signal_result = if self.group_ownership == ProcessGroupOwnership::Dedicated {
+                killpg(self.process_group, Signal::SIGKILL)
+            } else {
+                kill(self.pid, Signal::SIGKILL)
+            };
+            match signal_result {
                 Ok(()) | Err(Errno::ESRCH) => {
                     self.termination_requested = true;
                     return Ok(());
@@ -102,7 +133,7 @@ impl NativeChild {
                 // path verifies the group with libproc before allowing the reap.
                 Err(Errno::EPERM) if cfg!(target_os = "macos") => {
                     if !self.exited && !self.observe_exit()? {
-                        return Err(signal_error(self.pid, Errno::EPERM));
+                        return Err(signal_error(self.process_group, Errno::EPERM));
                     }
                     self.termination_requested = true;
                     return Ok(());
@@ -114,7 +145,7 @@ impl NativeChild {
                         "process-group termination remained interrupted",
                     ));
                 }
-                Err(error) => return Err(signal_error(self.pid, error)),
+                Err(error) => return Err(signal_error(self.process_group, error)),
             }
         }
     }
@@ -125,7 +156,11 @@ impl NativeChild {
                 "child must exit before resource collection",
             ));
         }
-        self.finish_after_cleanup(Self::ensure_group_cleanup)
+        if self.group_ownership == ProcessGroupOwnership::Dedicated {
+            self.finish_after_cleanup(Self::ensure_group_cleanup)
+        } else {
+            self.finish_after_cleanup(|_| Ok(()))
+        }
     }
 
     fn finish_after_cleanup<F>(mut self, cleanup: F) -> io::Result<ResUse>
@@ -214,7 +249,14 @@ impl NativeChild {
     }
 
     fn ensure_group_cleanup(&mut self) -> io::Result<()> {
-        if self.child.is_none() || self.group_cleanup_verified {
+        if self.child.is_none()
+            || self.group_cleanup_verified
+            || self.group_ownership == ProcessGroupOwnership::Shared
+        {
+            // A shared-group target is owned only for exact-PID observation
+            // and reap. Its worker owns group cleanup; signaling or querying
+            // this group here could terminate the coordinator/worker itself.
+            self.group_cleanup_verified = true;
             return Ok(());
         }
 
@@ -543,5 +585,33 @@ mod tests {
             process_is_gone(pid),
             "leader must be reaped after cleanup error"
         );
+    }
+
+    #[test]
+    fn dropping_shared_target_does_not_signal_its_group_owner() {
+        use nix::unistd::Pid;
+        use std::os::unix::process::CommandExt as _;
+
+        let mut leader_command = Command::new("/bin/sh");
+        leader_command.args(["-c", "sleep 30"]).process_group(0);
+        let leader_child = leader_command.spawn().expect("spawn shared-group leader");
+        let leader_pid = leader_child.id();
+        let group = Pid::from_raw(i32::try_from(leader_pid).expect("leader PID fits i32"));
+
+        let mut target_command = Command::new("/bin/sh");
+        target_command
+            .args(["-c", "sleep 30"])
+            .process_group(group.as_raw());
+        let target_child = target_command.spawn().expect("spawn shared-group target");
+        let target_pid = target_child.id();
+        let leader = NativeChild::new(leader_child);
+        let target = NativeChild::new_in_shared_group(target_child, group);
+
+        drop(target);
+        assert!(!process_is_gone(leader_pid));
+        assert!(process_is_gone(target_pid));
+
+        drop(leader);
+        wait_until_gone(leader_pid);
     }
 }

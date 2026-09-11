@@ -87,7 +87,40 @@
         "rss_scope": {"type": "string", "minLength": 1},
         "exit_poll_interval_micros": {"type": "integer", "minimum": 1},
         "rss_poll_interval_micros": {"type": ["integer", "null"], "minimum": 1},
-        "validated_accuracy_micros": {"type": ["integer", "null"], "minimum": 1}
+        "validated_accuracy_micros": {"type": ["integer", "null"], "minimum": 1},
+        "worker": {
+          "anyOf": [
+            {"$ref": "#/$defs/worker_identity"},
+            {"type": "null"}
+          ]
+        },
+        "isolation_evidence": {
+          "anyOf": [
+            {"$ref": "#/$defs/launch_isolation_evidence"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "worker_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable_sha256", "launch_protocol", "collector_source_sha256"],
+      "properties": {
+        "executable_sha256": {"type": "string", "minLength": 1},
+        "launch_protocol": {"type": "string", "minLength": 1},
+        "collector_source_sha256": {"type": "string", "minLength": 1}
+      }
+    },
+    "launch_isolation_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary_sha256", "control_peak_rss_bytes", "max_parent_delta_bytes", "tolerance_bytes"],
+      "properties": {
+        "summary_sha256": {"type": "string", "minLength": 1},
+        "control_peak_rss_bytes": {"type": "integer", "minimum": 1},
+        "max_parent_delta_bytes": {"type": "integer", "minimum": 0},
+        "tolerance_bytes": {"type": "integer", "minimum": 1}
       }
     }
   }

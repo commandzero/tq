@@ -161,6 +161,12 @@ pub struct MeasurementProtocol {
     pub rss_poll_interval_micros: Option<u64>,
     /// Host-validated timing accuracy, unavailable until calibrated.
     pub validated_accuracy_micros: Option<u64>,
+    /// Identity of the worker and collector that launched the target.
+    #[serde(default)]
+    pub worker: Option<WorkerIdentity>,
+    /// Evidence that the worker's launch RSS floor was independently checked.
+    #[serde(default)]
+    pub isolation_evidence: Option<LaunchIsolationEvidence>,
 }
 
 impl MeasurementProtocol {
@@ -171,6 +177,11 @@ impl MeasurementProtocol {
             && self.exit_poll_interval_micros > 0
             && self.rss_poll_interval_micros != Some(0)
             && self.validated_accuracy_micros != Some(0)
+            && self.worker.as_ref().is_none_or(WorkerIdentity::is_valid)
+            && self
+                .isolation_evidence
+                .as_ref()
+                .is_none_or(LaunchIsolationEvidence::is_valid)
     }
 
     fn is_calibrated(&self) -> bool {
@@ -179,7 +190,60 @@ impl MeasurementProtocol {
     }
 
     fn is_valid_for_comparison(&self) -> bool {
-        self.is_valid() && self.is_calibrated()
+        self.is_valid()
+            && self.is_calibrated()
+            && self.worker.as_ref().is_some_and(WorkerIdentity::is_valid)
+            && self
+                .isolation_evidence
+                .as_ref()
+                .is_some_and(LaunchIsolationEvidence::is_valid)
+            && self.has_explicit_lifetime_scope()
+    }
+
+    fn has_explicit_lifetime_scope(&self) -> bool {
+        let scope = self.rss_scope.to_ascii_lowercase().replace(['-', '_'], " ");
+        scope.contains("pre exec") && scope.contains("waited") && scope.contains("descendant")
+    }
+}
+
+/// Immutable identity of the executable that owns target launch and waiting.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkerIdentity {
+    /// SHA-256 of the worker executable bytes.
+    pub executable_sha256: String,
+    /// Versioned protocol used to transfer a prepared invocation.
+    pub launch_protocol: String,
+    /// SHA-256 of the compiled native collector sources.
+    pub collector_source_sha256: String,
+}
+
+impl WorkerIdentity {
+    fn is_valid(&self) -> bool {
+        !self.executable_sha256.trim().is_empty()
+            && !self.launch_protocol.trim().is_empty()
+            && !self.collector_source_sha256.trim().is_empty()
+    }
+}
+
+/// Retained proof that worker launch memory does not determine target RSS.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LaunchIsolationEvidence {
+    /// SHA-256 of the native validation summary containing the controls.
+    pub summary_sha256: String,
+    /// Matched-control peak RSS in bytes.
+    pub control_peak_rss_bytes: u64,
+    /// Maximum observed parent-allocation delta in bytes.
+    pub max_parent_delta_bytes: u64,
+    /// Declared page-aware tolerance in bytes.
+    pub tolerance_bytes: u64,
+}
+
+impl LaunchIsolationEvidence {
+    fn is_valid(&self) -> bool {
+        !self.summary_sha256.trim().is_empty()
+            && self.control_peak_rss_bytes > 0
+            && self.tolerance_bytes > 0
+            && self.max_parent_delta_bytes <= self.tolerance_bytes
     }
 }
 
@@ -290,6 +354,55 @@ impl BenchmarkCampaignReport {
                 ));
             }
         }
+        Ok(())
+    }
+
+    /// Validates the stricter evidence contract required for stable publication.
+    ///
+    /// Reports without native samples remain publishable for historical pages.
+    /// Native samples may still be retained as diagnostic JSON until calibration
+    /// and launch-isolation evidence are attached.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when native samples lack calibrated timing, explicit
+    /// lifetime scope, worker identity, or validated launch-isolation evidence.
+    pub fn validate_for_publication(&self) -> Result<(), String> {
+        let has_native_samples = self.cases.iter().any(|row| {
+            row.samples
+                .iter()
+                .chain(&row.instrumented_samples)
+                .any(|sample| sample.rss_provenance.is_some_and(is_native_rss_provenance))
+        });
+        if !has_native_samples {
+            return Ok(());
+        }
+
+        for row in &self.cases {
+            for (family, samples) in [
+                ("primary", &row.samples),
+                ("instrumented", &row.instrumented_samples),
+            ] {
+                for sample in samples {
+                    if !sample.rss_provenance.is_some_and(is_native_rss_provenance) {
+                        continue;
+                    }
+                    let Some(protocol) = sample.measurement_protocol.as_ref() else {
+                        return Err(format!(
+                            "{} {} {family} sample requires a measurement protocol",
+                            row.case_id, row.adapter_id
+                        ));
+                    };
+                    if !protocol.is_valid_for_comparison() {
+                        return Err(format!(
+                            "{} {} {family} sample requires positive validated timing accuracy plus calibrated worker, lifetime-scope, and launch-isolation evidence",
+                            row.case_id, row.adapter_id
+                        ));
+                    }
+                }
+            }
+        }
+        self.validate_authoritative_rss()?;
         Ok(())
     }
 }
@@ -573,32 +686,48 @@ fn measurement_contracts_match(
     left: &BenchmarkCampaignReport,
     right: &BenchmarkCampaignReport,
 ) -> bool {
-    let left_contracts = left
-        .cases
-        .iter()
-        .flat_map(|row| {
-            row.samples
-                .iter()
-                .chain(row.instrumented_samples.iter())
-                .map(|sample| (sample.rss_provenance, sample.measurement_protocol.clone()))
-        })
-        .collect::<Vec<_>>();
-    let right_contracts = right
-        .cases
-        .iter()
-        .flat_map(|row| {
-            row.samples
-                .iter()
-                .chain(row.instrumented_samples.iter())
-                .map(|sample| (sample.rss_provenance, sample.measurement_protocol.clone()))
-        })
-        .collect::<Vec<_>>();
+    left.cases.iter().all(|left_row| {
+        right
+            .cases
+            .iter()
+            .find(|right_row| same_row_identity(left_row, right_row))
+            .is_none_or(|right_row| row_measurement_contracts_match(left_row, right_row))
+    }) && right.cases.iter().all(|right_row| {
+        left.cases
+            .iter()
+            .find(|left_row| same_row_identity(left_row, right_row))
+            .is_none_or(|left_row| row_measurement_contracts_match(left_row, right_row))
+    })
+}
+
+fn same_row_identity(left: &BenchmarkRow, right: &BenchmarkRow) -> bool {
+    left.case_id == right.case_id
+        && left.adapter_id == right.adapter_id
+        && left.source_id == right.source_id
+        && left.tier == right.tier
+        && left.input_format == right.input_format
+        && left.execution_class == right.execution_class
+}
+
+fn row_measurement_contracts_match(left: &BenchmarkRow, right: &BenchmarkRow) -> bool {
+    let left_contracts = row_measurement_contracts(left);
+    let right_contracts = row_measurement_contracts(right);
     left_contracts
         .iter()
         .all(|contract| right_contracts.contains(contract))
         && right_contracts
             .iter()
             .all(|contract| left_contracts.contains(contract))
+}
+
+fn row_measurement_contracts(
+    row: &BenchmarkRow,
+) -> Vec<(Option<RssProvenance>, Option<MeasurementProtocol>)> {
+    row.samples
+        .iter()
+        .chain(row.instrumented_samples.iter())
+        .map(|sample| (sample.rss_provenance, sample.measurement_protocol.clone()))
+        .collect()
 }
 
 /// Adds independent wall-time ratios to matching named reference adapters.

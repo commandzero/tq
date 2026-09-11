@@ -117,6 +117,59 @@ fn native_samples_require_protocol_positive_rss_and_cpu() {
 }
 
 #[test]
+fn native_protocol_schema_records_worker_and_isolation_identity() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema = serde_json::from_slice::<serde_json::Value>(
+        &fs::read(root.join("schemas/benchmark-campaign-v1.schema.json")).unwrap(),
+    )
+    .unwrap();
+    let validator = jsonschema::Validator::new(&schema).unwrap();
+    let mut report = report_with_cases(&json!([{"samples": [{
+        "rss_provenance": "linux-wait4", "peak_rss_bytes": 4096,
+        "user_cpu_micros": 0, "system_cpu_micros": 12,
+        "measurement_protocol": {
+            "timing_method": "direct-spawn-to-exit-observation",
+            "input_delivery": "prepared-file",
+            "rss_scope": "wait4-child-lifetime-including-pre-exec-and-waited-descendants",
+            "exit_poll_interval_micros": 100,
+            "rss_poll_interval_micros": null,
+            "validated_accuracy_micros": 1000,
+            "worker": {
+                "executable_sha256": "worker",
+                "launch_protocol": "direct-target-v1",
+                "collector_source_sha256": "collector"
+            },
+            "isolation_evidence": {
+                "summary_sha256": "summary",
+                "control_peak_rss_bytes": 4096,
+                "max_parent_delta_bytes": 0,
+                "tolerance_bytes": 4096
+            }
+        }
+    }]}]));
+    assert!(validator.is_valid(&report));
+
+    report["cases"][0]["samples"][0]["measurement_protocol"]["worker"]
+        .as_object_mut()
+        .unwrap()
+        .remove("launch_protocol");
+    assert!(!validator.is_valid(&report));
+
+    let historical: tq_test_support::benchmark::MeasurementProtocol =
+        serde_json::from_value(json!({
+            "timing_method": "historical",
+            "input_delivery": "pipe",
+            "rss_scope": "unknown",
+            "exit_poll_interval_micros": 1,
+            "rss_poll_interval_micros": null,
+            "validated_accuracy_micros": null
+        }))
+        .expect("historical protocol remains readable");
+    assert!(historical.worker.is_none());
+    assert!(historical.isolation_evidence.is_none());
+}
+
+#[test]
 fn regression_gate_persists_disclosures_and_unavailable_reasons() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema: serde_json::Value = serde_json::from_slice(

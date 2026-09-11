@@ -44,6 +44,16 @@ fn main() -> ExitCode {
 
 fn run_mode(mode: &str, arguments: &mut impl Iterator<Item = String>) -> Result<ExitCode, String> {
     match mode {
+        "measure-worker-parent" => {
+            let parent_bytes = parse_bytes(arguments.next(), "parent allocation bytes")?;
+            let input_bytes = arguments
+                .next()
+                .map(|value| parse_bytes(Some(value), "stdin bytes"))
+                .transpose()?
+                .unwrap_or(0);
+            ensure_no_arguments(arguments)?;
+            measured_worker_parent(parent_bytes, input_bytes)
+        }
         "-axo" => {
             if arguments.next().as_deref() != Some("pgid=,rss=") {
                 return Err("empty inspection probe requires pgid=,rss=".to_owned());
@@ -164,6 +174,64 @@ fn measured_probe(mode: &str) -> Result<ExitCode, String> {
     if outcome.exit_code != Some(0) {
         return Err("measured child failed".to_owned());
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn measured_worker_parent(parent_bytes: usize, input_bytes: usize) -> Result<ExitCode, String> {
+    use tq_test_support::benchmark::{BenchmarkInvocation, measure_process_worker};
+
+    // Keep touched coordinator pages alive across the actual public measurement
+    // call. Allocation before worker startup is the Linux regression trigger.
+    let mut parent = vec![0_u8; parent_bytes];
+    for page in parent.chunks_mut(4096) {
+        page[0] = 1;
+    }
+    let invocation = BenchmarkInvocation {
+        cancellation: None,
+        executable: env::current_exe().map_err(|error| error.to_string())?,
+        args: vec![
+            if input_bytes == 0 {
+                "noop"
+            } else {
+                "stdin-echo"
+            }
+            .to_owned(),
+        ],
+        stdin: vec![b'q'; input_bytes],
+        current_dir: None,
+        timeout: Duration::from_secs(10),
+        output_limit: u64::try_from(input_bytes)
+            .ok()
+            .and_then(|bytes| bytes.checked_add(1024))
+            .ok_or_else(|| "input size exceeds the output-limit range".to_string())?,
+        rss_limit: None,
+        retain_output: input_bytes > 0,
+    };
+    let outcome = measure_process_worker(&invocation).map_err(|error| error.to_string())?;
+    std::hint::black_box(&parent);
+    if outcome.exit_code != Some(0) {
+        return Err(format!("worker target failed: {:?}", outcome.status));
+    }
+    if input_bytes > 0 {
+        let path = outcome
+            .stdout_path
+            .as_ref()
+            .ok_or("missing retained stdout")?;
+        let actual = std::fs::read(path).map_err(|error| error.to_string())?;
+        if actual != invocation.stdin {
+            return Err("worker changed prepared stdin bytes".to_owned());
+        }
+        for path in [&outcome.stdout_path, &outcome.stderr_path]
+            .into_iter()
+            .flatten()
+        {
+            std::fs::remove_file(path).map_err(|error| error.to_string())?;
+        }
+    }
+    println!(
+        "{}",
+        serde_json::to_string(&outcome).map_err(|error| error.to_string())?
+    );
     Ok(ExitCode::SUCCESS)
 }
 
@@ -358,6 +426,7 @@ modes:\n\
   allocate-threads BYTES THREADS\n\
   waited-allocation-child BYTES\n\
   measure-noop | measure-limit | measure-uninstrumented-noop\n\
+  measure-worker-parent PARENT_BYTES [STDIN_BYTES]\n\
   sleep MILLIS\n\
   literal-args ARG...\n\
   stdin-echo\n\

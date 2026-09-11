@@ -1,6 +1,7 @@
 //! Per-process wall, latency, CPU, memory, and byte measurement.
 
 use std::{
+    fs::{self, File, OpenOptions},
     io::{self, Write},
     path::PathBuf,
     process::{Command, Stdio},
@@ -19,6 +20,8 @@ use thiserror::Error;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::native_process::{EXIT_POLL, NativeChild};
 use super::report::MeasurementProtocol;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use nix::unistd::Pid;
 
 /// Identity of the collector sources and dependency lock compiled into this binary.
 ///
@@ -33,7 +36,9 @@ pub fn collector_source_sha256() -> String {
         include_bytes!("measure.rs").as_slice(),
         include_bytes!("native_process.rs").as_slice(),
         include_bytes!("probe.rs").as_slice(),
+        include_bytes!("worker.rs").as_slice(),
         include_bytes!("../bin/tq-bench-probe.rs").as_slice(),
+        include_bytes!("../bin/tq-bench-worker.rs").as_slice(),
         include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).as_slice(),
     ] {
         hash.update(source.len().to_le_bytes());
@@ -110,6 +115,39 @@ pub struct BenchmarkInvocation {
     pub rss_limit: Option<u64>,
     /// Retain output files after a successful invocation for semantic checks.
     pub retain_output: bool,
+}
+
+pub(crate) struct PreparedCaptureFiles {
+    stdin: NamedTempFile,
+    stdout: NamedTempFile,
+    stderr: NamedTempFile,
+    reply: NamedTempFile,
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) struct PreparedCapturePaths {
+    pub(crate) stdin: PathBuf,
+    pub(crate) stdout: PathBuf,
+    pub(crate) stderr: PathBuf,
+    pub(crate) reply: PathBuf,
+}
+
+impl PreparedCaptureFiles {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub(crate) fn paths(&self) -> PreparedCapturePaths {
+        PreparedCapturePaths {
+            stdin: self.stdin.path().to_owned(),
+            stdout: self.stdout.path().to_owned(),
+            stderr: self.stderr.path().to_owned(),
+            reply: self.reply.path().to_owned(),
+        }
+    }
+
+    pub(crate) fn keep_output(self) -> io::Result<(PathBuf, PathBuf)> {
+        let stdout = self.stdout.keep().map_err(|error| error.error)?.1;
+        let stderr = self.stderr.keep().map_err(|error| error.error)?.1;
+        Ok((stdout, stderr))
+    }
 }
 
 /// First-class process measurement outcome.
@@ -314,6 +352,33 @@ pub fn measure_process_uninstrumented(
     measure_process_with_sampling(invocation, false)
 }
 
+/// Measures one invocation through the isolated Rust worker.
+///
+/// This explicit seam is used by the worker-isolation validation before the
+/// default campaign path is switched over. Input and capture payloads stay in
+/// coordinator-owned files; only bounded command metadata and file paths cross
+/// the worker channel.
+///
+/// # Errors
+///
+/// Returns a worker startup, protocol, target lifecycle, capture, or native
+/// accounting failure. Worker failures never fall back to direct measurement.
+pub fn measure_process_worker(
+    invocation: &BenchmarkInvocation,
+) -> Result<MeasuredOutcome, MeasureError> {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        super::worker::measure_process(invocation)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = invocation;
+        Err(MeasureError::Unsupported(
+            "isolated native worker is implemented only on macOS and Linux".to_owned(),
+        ))
+    }
+}
+
 fn measure_process_with_sampling(
     invocation: &BenchmarkInvocation,
     sample_process_group: bool,
@@ -330,6 +395,20 @@ fn measure_process_with_sampling(
             "native wait4 accounting is implemented only on macOS and Linux".to_owned(),
         ))
     }
+}
+
+pub(crate) fn prepare_capture_files(
+    invocation: &BenchmarkInvocation,
+) -> io::Result<PreparedCaptureFiles> {
+    let mut stdin = NamedTempFile::new()?;
+    stdin.write_all(&invocation.stdin)?;
+    stdin.flush()?;
+    Ok(PreparedCaptureFiles {
+        stdin,
+        stdout: NamedTempFile::new()?,
+        stderr: NamedTempFile::new()?,
+        reply: NamedTempFile::new()?,
+    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -351,6 +430,57 @@ fn measure_with_hooks(
     before_spawn: impl FnOnce(),
     after_observation: impl FnOnce(),
 ) -> Result<MeasuredOutcome, MeasureError> {
+    let captures = prepare_capture_files(invocation)?;
+    let paths = captures.paths();
+    let measured = measure_prepared(
+        invocation,
+        sample_process_group,
+        None,
+        &paths,
+        before_spawn,
+        after_observation,
+    );
+    match measured {
+        Ok(mut outcome) => {
+            if invocation.retain_output
+                || outcome.status != MeasuredStatus::Exited
+                || outcome.exit_code != Some(0)
+            {
+                let (stdout, stderr) = captures.keep_output()?;
+                outcome.stdout_path = Some(stdout);
+                outcome.stderr_path = Some(stderr);
+            }
+            Ok(outcome)
+        }
+        Err(mut error) => {
+            let (stdout, stderr) = captures.keep_output()?;
+            if let MeasureError::Collection {
+                stdout_path,
+                stderr_path,
+                ..
+            } = &mut error
+            {
+                *stdout_path = stdout;
+                *stderr_path = stderr;
+            }
+            Err(error)
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[allow(
+    clippy::too_many_lines,
+    reason = "keep prepared target lifecycle and diagnostic cleanup together"
+)]
+pub(crate) fn measure_prepared(
+    invocation: &BenchmarkInvocation,
+    sample_process_group: bool,
+    shared_process_group: Option<Pid>,
+    paths: &PreparedCapturePaths,
+    before_spawn: impl FnOnce(),
+    after_observation: impl FnOnce(),
+) -> Result<MeasuredOutcome, MeasureError> {
     if invocation
         .cancellation
         .as_ref()
@@ -358,22 +488,26 @@ fn measure_with_hooks(
     {
         return Err(MeasureError::Cancelled);
     }
-    let mut stdin_file = NamedTempFile::new()?;
-    stdin_file.write_all(&invocation.stdin)?;
-    stdin_file.flush()?;
-    let stdout_file = NamedTempFile::new()?;
-    let stderr_file = NamedTempFile::new()?;
+    let stdin_file = File::open(&paths.stdin)?;
+    let stdout_file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&paths.stdout)?;
+    let stderr_file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&paths.stderr)?;
 
     let mut command = Command::new(&invocation.executable);
     command
         .args(&invocation.args)
-        .stdin(Stdio::from(stdin_file.reopen()?))
-        .stdout(Stdio::from(stdout_file.reopen()?))
-        .stderr(Stdio::from(stderr_file.reopen()?));
+        .stdin(Stdio::from(stdin_file))
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file));
     if let Some(directory) = &invocation.current_dir {
         command.current_dir(directory);
     }
-    configure_process_group(&mut command);
+    configure_process_group(&mut command, shared_process_group);
     before_spawn();
 
     // Keep this immediately adjacent to spawn. All command and capture setup
@@ -384,7 +518,10 @@ fn measure_with_hooks(
     let mut diagnostic_signal = None;
     let mut diagnostic_wall = None;
     let measured = (|| {
-        let mut owner = NativeChild::new(child);
+        let mut owner = match shared_process_group {
+            Some(group) => NativeChild::new_in_shared_group(child, group),
+            None => NativeChild::new(child),
+        };
         let process_id = owner.id();
         let mut sampler = if sample_process_group {
             invocation
@@ -436,12 +573,12 @@ fn measure_with_hooks(
                 break started.elapsed().as_micros();
             }
 
-            if first_result_micros.is_none() && stdout_file.as_file().metadata()?.len() > 0 {
+            if first_result_micros.is_none() && fs::metadata(&paths.stdout)?.len() > 0 {
                 first_result_micros = Some(started.elapsed().as_micros());
             }
 
             if forced_status.is_none() {
-                let output_bytes = stdout_file.as_file().metadata()?.len();
+                let output_bytes = fs::metadata(&paths.stdout)?.len();
                 if output_bytes > invocation.output_limit {
                     forced_status = Some(MeasuredStatus::OutputLimit);
                 } else if sample_process_group
@@ -481,7 +618,7 @@ fn measure_with_hooks(
         let process_group_peak_rss_bytes = sampler_result?.flatten();
         let process_group_rss_observed = process_group_peak_rss_bytes.is_some();
 
-        let output_bytes = stdout_file.as_file().metadata()?.len();
+        let output_bytes = fs::metadata(&paths.stdout)?.len();
         let signal = exit_signal(resources.status);
         let status = if output_bytes > invocation.output_limit {
             MeasuredStatus::OutputLimit
@@ -523,26 +660,14 @@ fn measure_with_hooks(
             process_group_rss_observed,
         })
     })();
-    match measured {
-        Ok(mut outcome) => {
-            if invocation.retain_output
-                || outcome.status != MeasuredStatus::Exited
-                || outcome.exit_code != Some(0)
-            {
-                outcome.stdout_path = Some(stdout_file.keep().map_err(|error| error.error)?.1);
-                outcome.stderr_path = Some(stderr_file.keep().map_err(|error| error.error)?.1);
-            }
-            Ok(outcome)
-        }
-        Err(error) => Err(MeasureError::Collection {
-            source: Box::new(error),
-            exit_code: diagnostic_exit,
-            signal: diagnostic_signal,
-            wall_time_micros: diagnostic_wall,
-            stdout_path: stdout_file.keep().map_err(|error| error.error)?.1,
-            stderr_path: stderr_file.keep().map_err(|error| error.error)?.1,
-        }),
-    }
+    measured.map_err(|error| MeasureError::Collection {
+        source: Box::new(error),
+        exit_code: diagnostic_exit,
+        signal: diagnostic_signal,
+        wall_time_micros: diagnostic_wall,
+        stdout_path: paths.stdout.clone(),
+        stderr_path: paths.stderr.clone(),
+    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -776,6 +901,8 @@ fn measurement_protocol(has_rss_sampler: bool) -> MeasurementProtocol {
             u64::try_from(RSS_SAMPLE_INTERVAL.as_micros()).expect("fixed sample interval fits u64"),
         ),
         validated_accuracy_micros: None,
+        worker: None,
+        isolation_evidence: None,
     }
 }
 
@@ -815,13 +942,13 @@ fn validate_resources(
 }
 
 #[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
+fn configure_process_group(command: &mut Command, shared_group: Option<Pid>) {
     use std::os::unix::process::CommandExt as _;
-    command.process_group(0);
+    command.process_group(shared_group.map_or(0, Pid::as_raw));
 }
 
 #[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command) {}
+fn configure_process_group(_command: &mut Command, _shared_group: Option<()>) {}
 
 #[cfg(unix)]
 fn exit_signal(status: std::process::ExitStatus) -> Option<i32> {

@@ -27,6 +27,14 @@ fi
 benchmark_archive_root="${benchmark_archive_root:-benchmarks}"
 work_root="$benchmark_archive_root/.work"
 
+# The coordinator and worker must come from the same collector build. Cargo
+# running a selected coordinator binary does not build its sibling worker.
+build_benchmark_worker() {
+    cargo build --quiet --release --locked -p tq-test-support --bin tq-bench-worker
+    TQ_BENCH_WORKER="${TQ_BENCH_WORKER:-$PWD/target/release/tq-bench-worker}"
+    export TQ_BENCH_WORKER
+}
+
 case "$campaign:$profile" in
     compatibility:strict)
         mkdir -p target/compatibility
@@ -52,6 +60,7 @@ case "$campaign:$profile" in
     benchmark:smoke)
         mkdir -p "$work_root"
         cargo build --quiet --release -p tq-cli
+        build_benchmark_worker
         TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
         export TQ_BIN
         set --
@@ -74,6 +83,7 @@ case "$campaign:$profile" in
         corpus_origin="${TQ_CORPUS_ORIGIN:-frozen}"
         corpus_profile="$profile"
         cargo build --quiet --release -p tq-cli
+        build_benchmark_worker
         TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
         export TQ_BIN
         cargo run --quiet --release --locked -p tq-test-support --bin tq-bench -- \
@@ -165,6 +175,7 @@ case "$campaign:$profile" in
     benchmark:stack-overflow)
         mkdir -p "$work_root"
         cargo build --quiet --release -p tq-cli
+        build_benchmark_worker
         TQ_BIN="${TQ_BIN:-$PWD/target/release/tq}"
         export TQ_BIN
         exec cargo run --quiet -p tq-test-support --bin tq-stack-overflow -- run \

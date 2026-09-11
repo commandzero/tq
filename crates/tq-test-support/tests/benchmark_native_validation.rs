@@ -39,7 +39,7 @@ use sha2::{Digest as _, Sha256};
 use tq_test_support::benchmark::{
     BenchmarkInvocation, EnvironmentManifest, MeasuredOutcome, MeasuredStatus, MeasurementProtocol,
     RssProvenance, collect_environment, collector_source_sha256, measure_process,
-    measure_process_uninstrumented,
+    measure_process_uninstrumented, measure_process_worker,
 };
 
 const PROBE: &str = env!("CARGO_BIN_EXE_tq-bench-probe");
@@ -213,6 +213,32 @@ struct CalibrationLinkage {
 }
 
 #[derive(Debug, Serialize)]
+struct WorkerAllocationControl {
+    coordinator_allocation_bytes: u64,
+    repetitions: usize,
+    native_rss_median_bytes: u64,
+    independent_time_rss_median_bytes: Option<u64>,
+    rss_comparisons_within_tolerance: usize,
+    cpu_comparisons_within_tolerance: usize,
+    max_delta_from_zero_bytes: u64,
+    tolerance_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct WorkerIsolationEvidence {
+    collector_source_sha256: String,
+    coordinator_controls: Vec<WorkerAllocationControl>,
+    residual_floor_bytes: u64,
+    prepared_stdin_bytes: u64,
+    prepared_stdin_repetitions: usize,
+    prepared_stdin_verified: bool,
+    high_low_request_repetitions: usize,
+    high_low_request_verified: bool,
+    independent_time_repetitions: usize,
+    independent_time_verified: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct SamplerDistortion {
     normal_case: String,
     sampler_case: String,
@@ -259,6 +285,7 @@ struct Summary {
     allocation_delta_checks: Vec<AllocationDeltaCheck>,
     short_burst_check: ShortBurstCheck,
     sampler_distortion_checks: Vec<SamplerDistortion>,
+    worker_isolation: Option<WorkerIsolationEvidence>,
     calibration_linkage: CalibrationLinkage,
     sampler_calibration_linkage: CalibrationLinkage,
     validation_failures: Vec<String>,
@@ -270,6 +297,31 @@ struct Summary {
 fn native_accounting_validation_writes_retained_evidence() {
     let output_directory = run_validation().expect("native validation run");
     eprintln!("native validation evidence: {}", output_directory.display());
+}
+
+#[test]
+#[ignore = "explicit worker-interface validation; run with --ignored on macOS/Linux"]
+fn worker_public_measurement_returns_fresh_worker_identity() {
+    let invocation = BenchmarkInvocation {
+        cancellation: None,
+        executable: PathBuf::from(PROBE),
+        args: vec!["noop".to_owned()],
+        stdin: Vec::new(),
+        current_dir: None,
+        timeout: TIMEOUT,
+        output_limit: OUTPUT_LIMIT,
+        rss_limit: None,
+        retain_output: false,
+    };
+    let outcome = measure_process_worker(&invocation).expect("worker measurement");
+    let worker = outcome
+        .measurement_protocol
+        .worker
+        .expect("worker identity in public measurement protocol");
+    assert!(!worker.executable_sha256.is_empty());
+    assert!(!worker.launch_protocol.is_empty());
+    assert_eq!(worker.collector_source_sha256, collector_source_sha256());
+    assert!(outcome.peak_rss_bytes.is_some_and(|rss| rss > 0));
 }
 
 #[allow(clippy::too_many_lines)]
@@ -517,6 +569,10 @@ fn run_validation() -> io::Result<PathBuf> {
     let allocation_delta_checks = allocation_delta_checks(&summaries, page_size);
     let short_burst_check = short_burst_check(&records);
     let sampler_distortion_checks = sampler_distortion_checks(&summaries);
+    // The worker-backed controls populate this block once the worker seam is
+    // enabled. Keeping it absent is intentional: direct-launch evidence must
+    // never be presented as worker-isolated calibration.
+    let worker_isolation = None;
     let native_measurement_protocol = records
         .iter()
         .find(|record| record.rss_limit_bytes.is_none())
@@ -556,7 +612,10 @@ fn run_validation() -> io::Result<PathBuf> {
             short_burst_check.duration_limit_micros
         ));
     }
-    let calibration_verified = validation_failures.is_empty();
+    let worker_isolation_verified = worker_isolation.as_ref().is_some_and(|evidence| {
+        worker_isolation_passes(evidence, &metadata, repetitions, page_size)
+    });
+    let calibration_verified = validation_failures.is_empty() && worker_isolation_verified;
     let calibration_linkage =
         make_calibration_linkage(&metadata, &records, &summaries, None, calibration_verified);
     let sampler_calibration_linkage = make_calibration_linkage(
@@ -578,6 +637,7 @@ fn run_validation() -> io::Result<PathBuf> {
         allocation_delta_checks,
         short_burst_check,
         sampler_distortion_checks,
+        worker_isolation,
         calibration_linkage,
         sampler_calibration_linkage,
         validation_failures: validation_failures.clone(),
@@ -598,6 +658,7 @@ fn run_validation() -> io::Result<PathBuf> {
             "Sampler-on calibration uses its own sampler protocol and 20/100/250 ms controls; it must not be applied to no-sampler or differently instrumented records.",
             "Sampler distortion is compared with the matching no-sampler median and MAD; within-MAD is an observed bound for these repetitions, not proof of zero overhead or a universal accuracy guarantee.",
             "Any RSS/CPU counter, no-op isolation, allocation-delta, or short-burst validation failure marks both calibration linkages unverified; retained evidence is diagnostic only.",
+            "Worker calibration requires retained 0/32/128 MiB coordinator controls, residual-floor data, large prepared-stdin and high-to-low request controls, and independent time agreement; direct-launch records cannot satisfy this gate.",
             "The calibration linkage is host/build/source specific. A loader must hash this summary artifact and include that digest in timing_method; the observed bound is not a universal timing-accuracy guarantee.",
         ],
     };
@@ -1204,6 +1265,97 @@ fn make_calibration_linkage(
             "unverified-missing-no-sampler-duration-controls"
         },
     }
+}
+
+fn worker_isolation_passes(
+    evidence: &WorkerIsolationEvidence,
+    metadata: &Metadata,
+    repetitions: usize,
+    page_size: u64,
+) -> bool {
+    const EXPECTED_ALLOCATIONS: [u64; 3] = [0, 32 * 1024 * 1024, 128 * 1024 * 1024];
+    const MIN_PREPARED_STDIN_BYTES: u64 = 1 << 20;
+
+    if evidence.collector_source_sha256 != metadata.collector_source_sha256
+        || page_size == 0
+        || evidence.residual_floor_bytes == 0
+        || evidence.prepared_stdin_bytes < MIN_PREPARED_STDIN_BYTES
+        || evidence.prepared_stdin_repetitions < repetitions
+        || !evidence.prepared_stdin_verified
+        || evidence.high_low_request_repetitions < repetitions
+        || !evidence.high_low_request_verified
+        || evidence.independent_time_repetitions < repetitions
+        || !evidence.independent_time_verified
+    {
+        return false;
+    }
+
+    if evidence.coordinator_controls.len() != EXPECTED_ALLOCATIONS.len() {
+        return false;
+    }
+    let Some(zero_control) = evidence
+        .coordinator_controls
+        .iter()
+        .find(|control| control.coordinator_allocation_bytes == 0)
+    else {
+        return false;
+    };
+    if evidence.residual_floor_bytes != zero_control.native_rss_median_bytes {
+        return false;
+    }
+    EXPECTED_ALLOCATIONS.iter().all(|expected| {
+        evidence
+            .coordinator_controls
+            .iter()
+            .find(|control| control.coordinator_allocation_bytes == *expected)
+            .is_some_and(|control| {
+                control.repetitions >= repetitions
+                    && control.native_rss_median_bytes > 0
+                    && control
+                        .independent_time_rss_median_bytes
+                        .is_some_and(|rss| {
+                            rss > 0
+                                && rss_comparison_tolerance(
+                                    control.native_rss_median_bytes,
+                                    rss,
+                                    page_size,
+                                )
+                                .is_some_and(|bound| {
+                                    control.native_rss_median_bytes.abs_diff(rss) <= bound
+                                })
+                        })
+                    && control.rss_comparisons_within_tolerance == control.repetitions
+                    && control.cpu_comparisons_within_tolerance == control.repetitions
+                    && control.tolerance_bytes >= page_size
+                    && noop_tolerance(
+                        zero_control.native_rss_median_bytes,
+                        control.native_rss_median_bytes,
+                        page_size,
+                    )
+                    .is_some_and(|bound| control.tolerance_bytes <= bound)
+                    && control.max_delta_from_zero_bytes <= control.tolerance_bytes
+                    && control
+                        .native_rss_median_bytes
+                        .abs_diff(zero_control.native_rss_median_bytes)
+                        <= control.max_delta_from_zero_bytes
+            })
+    })
+}
+
+fn noop_tolerance(zero_rss: u64, control_rss: u64, page_size: u64) -> Option<u64> {
+    zero_rss
+        .max(control_rss)
+        .checked_div(4)
+        .zip(page_size.checked_mul(8))
+        .map(|(relative, page)| relative.max(page))
+}
+
+fn rss_comparison_tolerance(native_rss: u64, independent_rss: u64, page_size: u64) -> Option<u64> {
+    native_rss
+        .max(independent_rss)
+        .checked_div(4)
+        .zip(page_size.checked_mul(4))
+        .map(|(relative, page)| relative.max(page))
 }
 
 fn median<T: Ord + Copy>(values: &mut [T]) -> T {

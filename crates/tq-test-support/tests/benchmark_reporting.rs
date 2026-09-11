@@ -8,9 +8,10 @@ use tq_test_support::{
         BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
         BenchmarkRow, BenchmarkSample, Comparability, ComparisonFamily, CorrectnessDecision,
         CorrectnessObservation, CorrectnessPayload, ExecutionClass, InputFormat,
-        MeasurementProtocol, OutputContractKind, RegressionGate, RegressionThresholds,
-        RssProvenance, SoftObjectiveStatus, collect_environment, compare_reports, correctness_gate,
-        evaluate_regression, populate_reference_ratios, semantic_digest, summarize_samples,
+        LaunchIsolationEvidence, MeasurementProtocol, OutputContractKind, RegressionGate,
+        RegressionThresholds, RssProvenance, SoftObjectiveStatus, WorkerIdentity,
+        collect_environment, compare_reports, correctness_gate, evaluate_regression,
+        populate_reference_ratios, semantic_digest, summarize_samples,
     },
     compatibility::{ProcessStatus, ToolIdentity, ToolKind},
     corpus::ArtifactIdentity,
@@ -463,6 +464,144 @@ fn uncalibrated_native_samples_remain_valid_diagnostic_records() {
             .validated_accuracy_micros = None;
     }
     assert!(report.validate_authoritative_rss().is_ok());
+    let error = report
+        .validate_for_publication()
+        .expect_err("uncalibrated native samples cannot be published");
+    assert!(error.contains("calibrated worker"), "{error}");
+}
+
+#[test]
+fn native_publication_requires_worker_identity_floor_evidence_and_scope() {
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    let protocol = report.cases[0].samples[0]
+        .measurement_protocol
+        .as_mut()
+        .expect("native protocol");
+    protocol.worker = None;
+    let error = report
+        .validate_for_publication()
+        .expect_err("worker identity is required");
+    assert!(error.contains("calibrated worker"), "{error}");
+
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    for sample in &mut report.cases[0].samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .expect("native protocol")
+            .isolation_evidence = None;
+    }
+    assert!(
+        report.validate_authoritative_rss().is_ok(),
+        "diagnostic native reports may omit isolation evidence"
+    );
+    let error = report
+        .validate_for_publication()
+        .expect_err("launch isolation evidence is required");
+    assert!(error.contains("launch-isolation evidence"), "{error}");
+
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    report.cases[0].samples[0]
+        .measurement_protocol
+        .as_mut()
+        .expect("native protocol")
+        .isolation_evidence
+        .as_mut()
+        .expect("isolation evidence")
+        .max_parent_delta_bytes = 2;
+    let error = report
+        .validate_for_publication()
+        .expect_err("failed isolation tolerance is not publication evidence");
+    assert!(error.contains("launch-isolation evidence"), "{error}");
+
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    report.cases[0].samples[0]
+        .measurement_protocol
+        .as_mut()
+        .expect("native protocol")
+        .rss_scope = "wait4-child".to_owned();
+    let error = report
+        .validate_for_publication()
+        .expect_err("lifetime scope is required");
+    assert!(error.contains("lifetime-scope"), "{error}");
+}
+
+#[test]
+fn worker_identity_mismatch_blocks_pooling_and_self_regression() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut candidate = baseline.clone();
+    candidate.cases[0].samples[0]
+        .measurement_protocol
+        .as_mut()
+        .expect("native protocol")
+        .worker
+        .as_mut()
+        .expect("worker identity")
+        .executable_sha256 = "different-worker".to_owned();
+
+    let comparison = compare_reports(&baseline, &candidate);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("measurement protocol"))
+    );
+    let gate = evaluate_regression(&baseline, &candidate, regression_thresholds());
+    assert!(!gate.evaluated);
+    assert!(
+        gate.unavailable
+            .iter()
+            .any(|reason| reason.contains("measurement"))
+    );
+}
+
+#[test]
+fn worker_protocol_mismatch_cannot_hide_in_another_row_contract() {
+    let mut baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut peer = baseline.cases[0].clone();
+    peer.adapter_id = "tq-yaml".to_owned();
+    for sample in &mut peer.samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .expect("native protocol")
+            .worker
+            .as_mut()
+            .expect("worker identity")
+            .launch_protocol = "peer-worker-v1".to_owned();
+    }
+    baseline.cases.push(peer);
+
+    let mut candidate = baseline.clone();
+    let baseline_worker = worker_identity();
+    let peer_worker = WorkerIdentity {
+        launch_protocol: "peer-worker-v1".to_owned(),
+        ..baseline_worker.clone()
+    };
+    for sample in &mut candidate.cases[0].samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .expect("native protocol")
+            .worker = Some(peer_worker.clone());
+    }
+    for sample in &mut candidate.cases[1].samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .expect("native protocol")
+            .worker = Some(baseline_worker.clone());
+    }
+
+    let comparison = compare_reports(&baseline, &candidate);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("measurement protocol"))
+    );
 }
 
 #[test]
@@ -602,10 +741,30 @@ fn native_protocol() -> MeasurementProtocol {
     MeasurementProtocol {
         timing_method: "direct-spawn-to-exit-observation".to_owned(),
         input_delivery: "prepared-seekable-stdin-file".to_owned(),
-        rss_scope: "wait4-child-including-waited-descendants-and-threads".to_owned(),
+        rss_scope: "wait4-child-lifetime-including-pre-exec-and-waited-descendants-and-threads"
+            .to_owned(),
         exit_poll_interval_micros: 100,
         rss_poll_interval_micros: None,
         validated_accuracy_micros: Some(1_000),
+        worker: Some(worker_identity()),
+        isolation_evidence: Some(isolation_evidence()),
+    }
+}
+
+fn worker_identity() -> WorkerIdentity {
+    WorkerIdentity {
+        executable_sha256: "worker".to_owned(),
+        launch_protocol: "direct-target-v1".to_owned(),
+        collector_source_sha256: "collector".to_owned(),
+    }
+}
+
+fn isolation_evidence() -> LaunchIsolationEvidence {
+    LaunchIsolationEvidence {
+        summary_sha256: "summary".to_owned(),
+        control_peak_rss_bytes: 1,
+        max_parent_delta_bytes: 0,
+        tolerance_bytes: 1,
     }
 }
 
@@ -833,9 +992,12 @@ fn instrumented_protocol() -> MeasurementProtocol {
     MeasurementProtocol {
         timing_method: "direct-spawn-to-exit-observation-with-rss-sampler".to_owned(),
         input_delivery: "prepared-seekable-stdin-file".to_owned(),
-        rss_scope: "process-group-including-descendants".to_owned(),
+        rss_scope: "process-group-lifetime-including-pre-exec-and-waited-descendants-and-threads"
+            .to_owned(),
         exit_poll_interval_micros: 100,
         rss_poll_interval_micros: Some(25_000),
         validated_accuracy_micros: Some(1_000),
+        worker: Some(worker_identity()),
+        isolation_evidence: Some(isolation_evidence()),
     }
 }
