@@ -1,5 +1,5 @@
 baseline_commit: dcabecc
-source: tests/compatibility/reviews/manual-comparison.toon
+source: tests/compatibility/reviews/jq-manual/comparison.toon
 entries[215]{case_id,baseline_verdict,workstream}:
   manual-bof-prose-halt-error,failure,builtins
   manual-bof-synth-format-urid,failure,builtins

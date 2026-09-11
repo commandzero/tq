@@ -33,7 +33,7 @@ When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file pat
 
 #### Scenario: Default format
 - **WHEN** no format option is provided for a source without a recognized extension
-- **THEN** bounded syntax probing selects TOON, strict JSON, or YAML and structured output uses TOON Text Sequence framing
+- **THEN** bounded syntax probing selects TOON, strict JSON, or YAML and structured output emits LF-terminated canonical TOON values without RS
 
 #### Scenario: JSON interoperability
 - **WHEN** both input and output formats are explicitly set to JSON
@@ -108,7 +108,7 @@ When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file pat
 - **THEN** tq reports that format's parse error and does not reinterpret the source with another parser
 
 ### Requirement: Structured and raw output modes
-Structured TOON output SHALL use TOON Text Sequence framing by default. `--unframed` SHALL require exactly one result. `-r/--raw-output` SHALL write strings without structured quoting, and `-j/--join-output` SHALL suppress raw-output separators as defined by jq-compatible cases.
+Structured TOON output SHALL emit zero or more canonical values, each followed by LF, without RS by default. Only explicit `--seq` SHALL select TOON Text Sequence framing. `--unframed` SHALL require exactly one result. `-r/--raw-output` SHALL write strings without structured quoting, and `-j/--join-output` SHALL suppress raw-output separators as defined by jq-compatible cases.
 
 #### Scenario: Raw string
 - **WHEN** `-r '.name'` emits a string

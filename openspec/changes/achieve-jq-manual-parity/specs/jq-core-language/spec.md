@@ -1,5 +1,7 @@
 ## MODIFIED Requirements
 
+All reference-matching requirements below are subject to the reviewed safe-library disparity contract in `cross-tool-compatibility`. This exception does not excuse missing functions, wrong arities, uninvestigated errors, or regressions. Safe Rust math implementations need not reproduce platform C math bit for bit; measured differences remain visible and individually bounded.
+
 ### Requirement: jq decimal-literal hybrid numbers
 The runtime SHALL preserve decimal literals and derive IEEE-754 binary64 values according to the pinned decimal-enabled jq reference. Literal identity, precision, lexical representation observable through JSON output and `tojson`, comparison, signed zero, rounding, and arithmetic SHALL match the reference. Arithmetic SHALL discard literal provenance when jq does. Large exponents MUST NOT require expansion into an unbounded decimal string. Configured resource limits remain enforceable, but an obsolete numeric envelope MUST NOT reject an admitted manual example. Runtime NaN and infinities SHALL be supported where jq produces them, with jq-compatible JSON projection and numeric predicates. Non-finite spellings in native TOON and YAML input remain invalid; strict JSON and `fromjson` acceptance SHALL follow the pinned reference. TOON output MUST remain valid TOON and MUST NOT invent non-finite syntax.
 
@@ -109,7 +111,7 @@ Path-producing filters and assignment SHALL preserve the original root and selec
 - **THEN** only those paths change and each emitted root preserves unaffected values and encounter order
 
 ### Requirement: Full manual math and numeric behavior
-All functions listed in the pinned Math section SHALL exist at the reference arity, including the corrected `frexp/0` and `modf/0`. Available functions SHALL match the matched-platform jq result, including domain errors, overflow, underflow, signed zero, and non-finite projection. Platform-unavailable functions SHALL implement the reference runtime-error contract rather than being absent or silently skipped. `have_decnum` SHALL describe actual numeric behavior truthfully. A comparison tolerance MUST NOT hide a different JSON value.
+All functions listed in the pinned Math section SHALL exist at the reference arity, including the corrected `frexp/0` and `modf/0`. Safe standard-library and pure-Rust math implementations SHALL target jq domain errors, overflow, underflow, signed zero, and non-finite projection. Measured platform or rounding disparities SHALL follow the reviewed disparity contract and retain both observed values. Platform-unavailable functions SHALL have a tested runtime availability contract rather than being absent or silently skipped. `have_decnum` SHALL describe actual numeric behavior truthfully. A comparison tolerance MUST NOT hide a different JSON value or label it an exact match.
 
 #### Scenario: Math inventory
 - **WHEN** the complete Math-section function inventory is compared with registered functions and executable witnesses

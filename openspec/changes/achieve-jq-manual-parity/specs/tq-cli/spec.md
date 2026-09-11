@@ -1,11 +1,15 @@
 ## MODIFIED Requirements
 
 ### Requirement: Output formatting controls
-TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. Without an output selector, structured output SHALL remain TOON. `-o json` SHALL select JSON, pretty by default. `-c` and `--compact-output`, including bundled short options, SHALL select compact JSON without requiring `-o json`. An explicit TOON output selection combined with compact JSON SHALL fail before input consumption regardless of argument order. Explicit JSON selection with `-c` SHALL be valid in either order. JSON Lines output SHALL remain compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, forced color, and raw or joined output modes. Compact output, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible options MUST fail before input is consumed. Output selection MUST NOT silently select an input parser.
+TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. Without an output selector, structured output SHALL emit zero or more canonical TOON values, each followed by LF without RS. `--seq` SHALL select RS-framed TOON Text Sequence output for zero or more results. `-o json` SHALL select JSON, pretty by default. `-c` and `--compact-output`, including bundled short options, SHALL select compact JSON without requiring `-o json`. An explicit TOON output selection combined with compact JSON SHALL fail before input consumption regardless of argument order. Explicit JSON selection with `-c` SHALL be valid in either order. JSON Lines output SHALL remain compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, forced color, and raw or joined output modes. Compact output, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible options MUST fail before input is consumed. Output selection MUST NOT silently select an input parser.
 
 #### Scenario: Default TOON
 - **WHEN** `tq '.'` runs without output options
-- **THEN** it emits TOON Text Sequence records
+- **THEN** it emits each canonical TOON value followed by LF without RS; zero results produce empty stdout and multiple results succeed
+
+#### Scenario: Explicit TOON sequence output
+- **WHEN** `tq --seq '.'` runs without a JSON output selector
+- **THEN** it emits one RS-framed canonical TOON record for each result and preserves completed records before a later error
 
 #### Scenario: Compact JSON selector
 - **WHEN** `tq -c '.'` or `tq --compact-output '.'` processes structured input
@@ -72,15 +76,15 @@ Every option documented in the pinned jq manual SHALL implement its documented c
 ## ADDED Requirements
 
 ### Requirement: JSON sequence and stream parity
-JSON input SHALL accept jq's whitespace-separated value stream. Explicit strict JSON input SHALL disable native-format probing, including for malformed-input conformance cases. JSON `--seq` input and JSON output SHALL implement jq record framing, malformed-record diagnostics, and recovery. `--seq` alone SHALL NOT change the default output format to JSON; native TOON sequence behavior SHALL remain intact. JSON `--stream` and `--stream-errors` SHALL preserve reference event order, container-end events, parse-error events, source positions, and partial output.
+JSON input SHALL accept jq's whitespace-separated value stream. Explicit strict JSON input SHALL disable native-format probing, including for malformed-input conformance cases. JSON `--seq` input and JSON output SHALL implement jq record framing, malformed-record diagnostics, and recovery. `--seq` SHALL select sequence framing for the selected structured output format, while leaving the output syntax unchanged. JSON `--stream` and `--stream-errors` SHALL preserve reference event order, container-end events, parse-error events, source positions, and partial output.
 
 #### Scenario: JSON sequence output
 - **WHEN** `--seq -o json` or `--seq -c` processes JSON sequence input
 - **THEN** record framing and recovery match the equivalent jq invocation
 
 #### Scenario: Native sequence output
-- **WHEN** TOON sequence input is processed without an output selector
-- **THEN** output remains TOON Text Sequence rather than implicitly becoming JSON
+- **WHEN** TOON sequence input is processed with `--seq` and without a JSON output selector
+- **THEN** output remains RS-framed TOON Text Sequence rather than implicitly becoming JSON
 
 #### Scenario: Recover after malformed record
 - **WHEN** a malformed JSON sequence record precedes a valid record

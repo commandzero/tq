@@ -8,9 +8,17 @@ The current evaluator shares parsing, resolution, VM execution, and values acros
 
 The design uses one evaluator for native formats and jq parity. Fixes belong in language, value, I/O, and standard-library behavior, not in special cases for manual case IDs. Every recorded gap gets an execution result and every existing match remains a regression test.
 
-This work does not replace TOON as the default, change TOON syntax, run jq as a production subprocess, embed libjq, or claim that finite tests prove equivalence for every possible jq program. The release claim is complete behavioral coverage of the pinned manual on verified release targets, with the explicit native-output and product-identity contracts.
+This work does not replace TOON as the default, change TOON syntax, run jq as a production subprocess, embed libjq, or claim that finite tests prove equivalence for every possible jq program. The release claim is complete tested coverage of the pinned manual on verified targets, with explicit native-output, product-identity, and reviewed safe-library disparities. It is not an exact-parity claim.
 
 ## Decisions
+
+### Safe Rust compatibility takes precedence over exact parity
+
+Use safe Rust and existing Rust libraries. Keep `unsafe_code = forbid`; do not introduce direct FFI, a native engine dependency, or a maintained unsafe bridge to chase exact jq behavior. Existing platform implementation details behind the Rust standard library are not a request to replace the standard library.
+
+The matching requirements below describe the target behavior, subject to narrowly reviewed safe-library disparities. Implement missing functions, argument forms, and language behavior before considering an exception. A dependency limitation must be demonstrated, not inferred from missing API names or untested concerns.
+
+Maintain `docs/jq-compatibility-disparities.md` with reproducible query/input, jq and tq observations, reference and target identity, cause, practical impact, safety or implementation tradeoff, regression evidence, and a future reconsideration condition. Reconsider these disparities after the spec is fully implemented. Exact matches, documented disparities, and unresolved failures remain separate counts. Never turn a disparity into an exact match or hide it with blanket normalization. Numeric differences require a function-specific justified error bound and boundary tests; changed types, result cardinality, domain handling, or unknown functions are not rounding differences. Resource tests verify the chosen engine's real limits without claiming an unmeasured cancellation deadline.
 
 ### One strict campaign, separate source provenance
 
@@ -28,14 +36,14 @@ Resolve output options before opening input, with default TOON distinct from exp
 
 | Invocation | Structured output |
 | --- | --- |
-| `tq '.'` | TOON Text Sequence |
+| `tq '.'` | Standalone TOON document |
 | `tq -o json '.'` | Pretty JSON |
 | `tq -c '.'` | Compact JSON |
 | `tq -c -o json '.'` | Compact JSON |
 | `tq -o toon -c '.'` | Usage error before input |
 | `tq --seq -c '.'` | Compact JSON sequence |
 
-Explicit TOON with `-c` is an order-independent conflict. This avoids silently overriding an explicit native-format request. Explicit JSON Lines remains compatible with compact output under its existing constraints. Raw/join flags retain jq semantics. Other flags do not implicitly select JSON. Input selection remains independent; `--seq` without JSON output selection does not change TOON's default framing.
+Explicit TOON with `-c` is an order-independent conflict. This avoids silently overriding an explicit native-format request. Explicit JSON Lines remains compatible with compact output under its existing constraints. Raw/join flags retain jq semantics. Other flags do not implicitly select JSON. Input selection remains independent. Default TOON emits zero or more canonical values, each followed by LF without RS. Filter keywords and result counts never select framing. `--seq` explicitly selects RS-framed TOON sequence output; `--unframed` alone requires exactly one standalone document. Default output preserves completed results when evaluation later fails. The comparison campaign uses independently captured JSON results to resolve TOON value boundaries, verifies each decoded value, and requires every stdout byte to be consumed.
 
 ### Repair shared language semantics before adding wrappers
 
@@ -43,19 +51,73 @@ Add failing behavior tests at parser/resolver, evaluator, and CLI boundaries as 
 
 Use the same corrected semantics in DOM, decoder-event, and optimized execution. Unsupported optimization must fall back before consuming input; it must not become unsupported language. Compare execution modes for affected cases and preserve existing resource accounting and immutable branch behavior.
 
+### Complete bounded user-filter composition
+
+The integrated evaluator still routes user calls through a restricted managed
+operation set. As a result, operations accepted at top level can fail with
+`TQ-CAP-USER-FUNCTIONS` when placed inside a definition or around a user call.
+This contradicts the shared-language design; it is not a library disparity.
+
+Extend the existing bounded, resumable execution machinery so that user calls
+and built-in filter arguments share lexical environments, input cursors,
+effects, and resource accounting with the surrounding program. Use explicit
+continuations for operations that suspend or branch. Reuse scalar operation
+implementations where they cannot invoke user filters, while routing callback
+evaluation back through the same managed machinery. Keep the public evaluator
+interface unchanged and avoid a parallel language implementation.
+
+Audit every operation and documented built-in arity for composition admission.
+Implement in dependency order: constructors and slices; folds and path updates;
+scalar/generator built-ins; callback-driven and effectful built-ins. Object
+fields, computed keys, fold updates, replacement filters, and assignment RHS
+must retain their reference evaluation order, empty branches, errors, and
+independent state. Consumers such as `first` must abandon pending work once
+their result is determined. Recursion must not move onto the native stack.
+
+Do not simply remove the admission guard or send unsupported calls through an
+eager collector. Those alternatives can accept compilation while losing
+closures, early termination, or bounded work. An optimization may fall back
+before input consumption only to an execution path with the same language and
+resource contracts. Preserve existing optimized paths where they remain valid.
+
+Add source-linked composition witnesses without modifying the original manual
+snapshot or its protected case IDs. Test each affected operation both inside a
+definition and around a call, plus filter/value parameters, nested captures,
+recursion, empty/multiple results, errors, cancellation, and tight limits.
+Regenerate both native campaigns and executable-bound approvals after the
+implementation stabilizes. Earlier matching reports remain checkpoint evidence.
+
 ### Separate numeric provenance from computed values
 
 Retain the decimal literal representation needed by identity and `tojson`, together with lazily derived binary64 semantics. Avoid expanding large exponents. Computation discards literal provenance when jq does. Represent runtime non-finite results explicitly, then apply jq's JSON projection at serialization. Native TOON serializes the resulting JSON-compatible projection, not invented NaN/infinity spellings. This does not broaden native YAML/TOON parser acceptance.
 
-Implement the complete math inventory against the matched platform's math behavior through audited dependencies exposing safe APIs. Keep first-party `unsafe_code = forbid`. Before choosing dependencies, prove target availability, correct arities, rounding, signed zero, non-finite behavior, fused operations, resource accounting, and license compatibility. Pure arithmetic substitutions such as multiply-plus-add for fused operations are unacceptable when they change observable results. A failed dependency feasibility check blocks that workstream; it does not permit relaxing parity or the unsafe-code policy.
+Implement the complete math inventory using safe standard-library APIs and pure-Rust math libraries. Test arities, signed zero, non-finite behavior, fused operations, resource accounting, and licenses. Compare against jq on verified targets and document measured rounding or platform disparities with specific bounds. Prefer a library's fused operation over multiply-plus-add. Lack of bit-for-bit platform equality is not an integration blocker and does not authorize unsafe code or FFI.
 
 ### Use a bounded jq-compatible regex engine
 
-The current engine's syntax and semantics cannot define the compatibility contract. Use the engine family required to reproduce the pinned jq behavior through an audited safe dependency. Before integration, require passing probes for longest-match behavior, scoped flags, Unicode offsets, empty matches, and replacement generators, plus enforceable engine work/stack limits and cancellation on all release targets. A timeout around an uncancellable worker is not sufficient resource enforcement.
+Use an existing Rust regex library through safe APIs, with bounded backtracking and input/pattern limits. Test scoped flags, Unicode offsets, empty matches, replacement generators, and actual limit exhaustion. Investigate longest-match support, but document a demonstrated library limitation rather than adding Oniguruma FFI or unsafe callbacks. Check cancellation around bounded engine operations and document that it is not an immediate mid-match callback. A timeout around an uncancellable worker is not resource enforcement. Unverified targets remain unverified, not a reason to block unrelated host implementation.
 
 Keep argument normalization and replacement filter evaluation in the standard library. This separates array/null flag forms and jq generator semantics from engine matching. Avoid partial rewrites of patterns into the existing engine when those rewrites change captures, backtracking, or offsets.
 
 ### Share input state and model process termination separately
+
+Use one shared safe-Rust incremental JSON parser in `tq-core` for jq-compatible
+input and `fromjson`. The user approved this parser expansion after final review
+found that `serde_json` rejects non-finite input before custom visitors can see
+it. A value reader and an event reader must share the same grammar and lexer;
+streaming adapters must not materialize whole documents to obtain events.
+Document, line, sequence, structural-event, selected/parallel, argument-file,
+and module-data routes must agree on JSON admission.
+
+Preserve runtime numeric identity for NaN and infinities until output projection.
+Preserve exact finite numeric provenance, key ordering, duplicate-key event
+delivery, source positions, partial output, and early cancellation. Verify token
+boundaries and accepted numeric spellings against the pinned jq executable,
+including rejection of invalid suffixes. Enforce depth, token, and input/work
+limits while parsing, before unbounded allocation. Do not rewrite input with
+sentinel strings, use an eager fallback after consuming input, or introduce FFI
+or first-party unsafe code. Native TOON, YAML, and JSON5 admission remains
+unchanged; JSON compatibility does not authorize broader native-format syntax.
 
 Give top-level evaluation, `input`, and `inputs` one ordered source cursor. It owns filename/line state, decoding, EOF, stream events, and sequence recovery. Null-input mode suppresses the initial pull only. Preserve already emitted results when a later input fails. Test sequence recovery and stream errors at the byte boundary, not only as pre-decoded values.
 
@@ -67,9 +129,20 @@ The process CLI admits the manual's environment, clock, file metadata, module lo
 
 This is a deliberate change to earlier CLI confinement. Document the security consequence of executing startup/module code from jq-compatible locations. Tests use controlled home directories, environment variables, clocks, paths, and terminal state rather than a developer's ambient configuration. Never add tq-specific allow flags merely to make a reference case pass.
 
+## Native Windows verification deferral
+
+Native Windows execution is deferred because no runner is available. Retain the
+PowerShell/cmd and binary/newline tests, but do not count non-Windows PowerShell
+execution or compilation as Windows evidence. macOS and Linux campaigns remain
+required for this change. Record Windows as unverified in release evidence and
+documentation; do not approve Windows disparities or advertise verified Windows
+manual compatibility without a native pinned-jq campaign. Reopen verification
+when a native runner is available. This explicit deferral does not waive missing
+cases, failed tests on verified hosts, or any other release target.
+
 ## Risks / Trade-offs
 
-- Numeric and regex dependencies may fail portability or bounded-execution requirements. Run feasibility tests early and keep the release gate red until both constraints hold.
+- Numeric and regex dependencies may have portability or semantic limitations. Keep resource failures bounded, record verified targets, and distinguish measured safe-library disparities from unresolved implementation gaps. Do not block unrelated implementation on hypothetical exactness concerns.
 - CLI startup/module parity increases ambient access. Keep library restrictions, OS permissions, bounded reads, and explicit migration guidance; do not present ordinary CLI execution as a sandbox.
 - Parser and generator repairs can regress the 303 matching cases or optimized execution. Run the full regression set after each workstream, not only its newly fixed cases.
 - Platform math and shell behavior differ. Run matched jq builds on every advertised OS/architecture, with POSIX, PowerShell/cmd, binary mode, PTY, and unbuffered tests where applicable. Missing target evidence blocks an unqualified claim.

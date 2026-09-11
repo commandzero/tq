@@ -1,5 +1,7 @@
 ## MODIFIED Requirements
 
+The matching requirements below are subject to the reviewed safe-library disparity contract in `cross-tool-compatibility`. Use existing Rust libraries through safe APIs; do not introduce native FFI engines or unsafe bridges for exact matching. Test actual engine work limits and cancellation between bounded operations. Document measured syntax, match-selection, platform, and cancellation limitations without treating them as exact matches or permitting unbounded hostile-pattern execution.
+
 ### Requirement: Regex built-ins
 The system SHALL provide bounded jq-compatible `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`, and `gsub`, including every argument form and flag combination documented by the pinned manual. Array-supplied pattern/flag forms, null flags, scoped inline flags, extended-mode whitespace, longest-match mode, multiline/singleline behavior, and empty-match suppression SHALL follow jq. Offsets and lengths SHALL use jq's Unicode units. Replacement filters SHALL preserve capture scope, generator cardinality, and ordering rather than silently selecting a single replacement.
 

@@ -1,5 +1,18 @@
 ## ADDED Requirements
 
+### Requirement: Reviewed safe-library disparities
+The implementation SHALL prioritize safe Rust and existing Rust libraries over exact parity requiring unsafe code or native FFI dependencies. Every manual behavior SHALL remain in the coverage inventory. A measured library or platform limitation MAY be accepted as a documented disparity only with a reproducible witness, pinned reference/target observations, a cause, practical impact, regression test, and future reconsideration condition. Missing implementation, uninvestigated failures, skipped cases, crashes, and timeouts SHALL NOT qualify. Previously matching cases SHALL remain regression requirements. These scoped disparities qualify the matching requirements in this change; they do not count as exact matches.
+
+The suite SHALL publish exact matches, reviewed disparities, and unresolved failures separately. Exact-parity mode SHALL continue to fail on any disparity. Completion mode MAY accept only explicitly reviewed disparities whose recorded observations still match the witness contract. Unknown, stale, or overly broad approvals SHALL fail validation. Numeric bounds SHALL be specific to a function and supported by boundary evidence, never a blanket tolerance. `docs/jq-compatibility-disparities.md` SHALL retain evidence and post-implementation reconsideration criteria.
+
+#### Scenario: A safe implementation differs from platform math
+- **WHEN** a tested function produces a measured rounding difference within its reviewed bound
+- **THEN** the report retains both values and records a disparity, not an exact match
+
+#### Scenario: A dependency does not expose a jq feature
+- **WHEN** existing safe Rust libraries demonstrably cannot reproduce a behavior within the chosen resource contract
+- **THEN** the limitation has an executable witness and documented impact for reconsideration after full implementation, without introducing unsafe or FFI code
+
 ### Requirement: Complete pinned manual parity inventory
 The suite SHALL version the jq manual source fingerprint, section inventory, source-to-case relationships, reference executable identity and build configuration, and a closure inventory for every baseline failure and policy difference. The initial inventory SHALL include all 518 referenced cases at commit `dcabecc`, all 251 published input/output examples, all 13 manual sections plus introduction, and all 68 fenced snippets. These numbers SHALL be lower bounds for coverage, not caps. Every documented runnable behavior SHALL have an executable case; prose-only explanations and incomplete syntax SHALL retain reviewed source notes with reasons rather than fabricated successful executions.
 
@@ -60,6 +73,12 @@ Reference-text errors SHALL be recorded as provenance separately from a case's e
 
 ### Requirement: Reproducible platform and resource scope
 The parity campaign SHALL run on every advertised supported operating-system/architecture combination with a pinned jq build, matched C math environment, locale, timezone, environment variables, filesystem fixtures, and recorded resource limits. It SHALL cover POSIX shell, PowerShell and cmd invocation forms where applicable, Windows binary/newline behavior, terminal color detection, and observable unbuffered writes. An unavailable required platform check SHALL be unverified and SHALL block an unqualified cross-platform compatibility claim. Defined platform-conditional errors SHALL be tested against the reference rather than skipped.
+
+Native Windows verification is explicitly deferred for this change until a runner is available. Windows test definitions SHALL remain intact, and Windows SHALL remain unverified without contributing passing executions or accepted disparities. macOS and Linux verification remain completion requirements. This scoped deferral SHALL NOT permit a Windows or unqualified cross-platform compatibility claim, and SHALL NOT waive failed cases on verified targets.
+
+#### Scenario: Native Windows runner is unavailable
+- **WHEN** this change completes without native Windows execution
+- **THEN** the release evidence records Windows verification as deferred and unverified, retains the pending shell and binary/newline tests, and limits compatibility claims to verified targets
 
 #### Scenario: Math symbol is unavailable on a platform
 - **WHEN** jq defines a documented function but raises a runtime availability error on the current platform
