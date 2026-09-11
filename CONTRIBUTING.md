@@ -46,9 +46,13 @@ jq/yq ratios are comparisons, not universal tq pass/fail gates. Preserve
 incorrect, unsupported, timeout, signal/OOM, and resource-limit rows.
 
 Run every benchmark command outside restricted sandboxes with elevated
-permission to inspect child processes. On macOS, use `/usr/bin/time -l` for
-every authoritative peak RSS sample and record `maximum resident set size`.
-Discard and rerun campaigns whose permissions leave RSS unavailable.
+permission to inspect child processes. On macOS, use `/usr/bin/time -l`; on
+Linux, use GNU `/usr/bin/time -v`. Every campaign must also inspect the complete
+measured process group with `ps`. The harness runs an allocation preflight before
+corpus preparation. If either authoritative time RSS or process-group RSS is
+missing, abandon the campaign immediately, repair the sandbox or host
+permissions, and rerun it. If any later measured sample lacks authoritative
+RSS, abort immediately and discard the partial run.
 
 ## Capability promotion
 

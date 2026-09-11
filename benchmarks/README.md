@@ -1,11 +1,31 @@
 # Benchmark campaigns
 
 The benchmark scripts, catalog, and Rust harness live in this repository.
-Reviewed reports and generated results live in the separate
-`commandzero/tq-benchmarks` repository. Do not commit downloaded corpora,
-generated formats, full JSON sample data, or reviewed reports here. The
-campaign runner discovers a sibling `tq-benchmarks` checkout automatically;
-set `TQ_BENCHMARK_ARCHIVE_ROOT` when the archive lives elsewhere.
+Reviewed findings and generated comparison pages live here under
+`docs/tests/comparison/`. Raw reports, logs, provenance, downloaded corpora,
+generated formats, and full JSON sample data live in the separate
+`commandzero/tq-benchmarks` archive repository; do not commit those artifacts
+here. The campaign runner discovers a sibling `tq-benchmarks` checkout
+automatically; set `TQ_BENCHMARK_ARCHIVE_ROOT` when the archive lives elsewhere.
+
+The saved-report renderer updates the `## Results` blocks in the stable
+user-facing pages under `docs/tests/comparison/`. Each workload has an authored
+explanation that regeneration preserves. These pages show a last-updated date,
+not dated filenames or historical run records. Do not embed archive paths,
+local executable paths, or exhaustive provenance in them. Raw samples, logs,
+and corpus artifacts remain in the benchmark archive. Render smoke before
+standard; rendering standard last leaves the index on the full standard review.
+
+To update only these result blocks from saved measurements without rerunning
+the tools, use:
+
+```console
+cargo run -p tq-test-support --bin tq-bench -- \
+  --render-only REPORT_PATH --markdown-dir docs/tests/comparison
+```
+
+Rapid and large runs do not replace the standard reference pages. Smoke fills
+the three additional workload pages included in the current review.
 
 ## Required execution permissions
 
@@ -18,8 +38,18 @@ On macOS, `/usr/bin/time -l` is required for every authoritative peak RSS
 sample. Record its `maximum resident set size` value for each measured jq, yq,
 or tq invocation under the campaign's normal warmup and sample policy. The
 harness may also sample the child process group with `ps`, but that does not
-replace `/usr/bin/time -l`. If either process inspection or `time` output is
-blocked, discard the campaign and rerun it elevated.
+replace the authoritative `time` measurement. On Linux, GNU `/usr/bin/time -v`
+must provide `Maximum resident set size` for every measured invocation. Before
+starting any campaign, run the harness RSS preflight and confirm that the
+selected `time` implementation, process-group inspection, and one allocated
+measured child all produce positive numeric RSS values. The `tq-bench run`
+command performs this preflight before it prepares or replays the corpus. If
+preflight cannot collect authoritative RSS, abandon the campaign immediately
+and repair the sandbox or benchmark host environment before retrying. If any
+measured sample later lacks authoritative RSS, abort the campaign immediately;
+do not write or review a partial report.
+The harness must enforce both checks rather than treating missing RSS as an
+optional metric.
 
 The catalog in `cases/workloads.jsonl` runs jq on JSON, yq on JSON and YAML, and
 tq on JSON, YAML, and TOON. It reports native-format views separately. The
@@ -121,14 +151,23 @@ Binary discovery prefers `../jq/jq` and `../yq/yq`, then
 binaries. A source checkout without a built binary cannot be mistaken for the
 binary under test.
 
+Before a full review, verify that jq, yq, and tq are all discoverable and that
+their recorded paths, versions, and build identities match that campaign's
+pinned inputs. For the current Ironhide review, the pinned yq identity is
+4.53.2. A missing or mismatched required executable is an environment blocker:
+stop and repair discovery or installation instead of recording its adapters as
+unsupported. Claim a final comparison only after all three tools have completed
+the requested suite.
+
 Frozen investigations add `--origin frozen --manifest PATH`. `--max-samples 1`
 is useful for validation, and `--case benchmark.event-stream` selects one
 workload. A reviewed long-running campaign may also use `--timeout-seconds N`
 and `--rss-limit-bytes N`; these overrides are copied into every report row,
 and an existing stricter per-case RSS limit still wins. The working JSON
 retains host, compiler, tool, corpus, command, limit, and environment data. It
-lives in the archive checkout's `.work/` directory beside the concise
-`YYYY-MM-DD.md` Markdown summary.
+lives in the archive checkout's `.work/` directory. The reviewed findings are
+rendered into the committed pages under `docs/tests/comparison/`; raw archive
+files do not have a second dated Markdown summary.
 
 Correctness normalization uses a file and has a 32 MiB limit. If the reference
 result exceeds that limit, the campaign runs one bounded probe for each adapter
@@ -136,9 +175,20 @@ and records `resource-limit`, timeout, or signal outcomes. It does not time
 unverified output or load a multi-gigabyte result into the runner.
 
 On macOS, RSS enforcement samples the complete child process group with
-`ps -axo pgid=,rss=`. This requires the elevated execution described above.
-`/usr/bin/time -l` supplies the authoritative per-process peak RSS evidence.
-Do not accept a sandboxed report that marks RSS unavailable.
+`ps -axo pgid=,rss=`. On Linux, it uses the equivalent process-group query
+available on the host. This requires the elevated execution described above.
+`/usr/bin/time -l` on macOS and GNU `/usr/bin/time -v` on Linux supply the
+authoritative per-process peak RSS evidence. Do not accept a report that marks
+RSS unavailable: stop, repair the execution environment, and rerun the entire
+campaign.
+
+Harness wall time is end to end: it includes process wrapping, polling, and
+sampler shutdown, so startup and other short-run overhead can be material. It
+does not represent pure executable time. First-result latency is the first
+captured output when available; fallback on completed output is not a precise
+first-write timestamp. GNU-time per-process RSS is authoritative on Linux;
+sampled process-group RSS is a separate inspection signal. Apply these limits
+when interpreting existing Ironhide reports as well as new reviews.
 
 Pass `--baseline PATH` to evaluate a manifest-aware tq self-regression. The
 accepted local defaults are 50% median wall time, 20% peak RSS, and at least
@@ -152,8 +202,12 @@ RSS, output bytes, plan class, and every failure row. On the recorded local
 host, the large explicit-stream release gate requires peak RSS at or below 128
 MiB.
 
-The latest full `tq`/`yq`/`jq` campaign is stored in the archive repository. It
-includes the complete standard matrix and a bounded large-corpus diagnostic.
+The current reviewed `tq`/`yq`/`jq` comparison is the accepted Linux rapid and
+standard campaigns plus the three smoke-only workloads. Its findings are
+documented in `docs/tests/comparison/`. The archive stores the corresponding
+raw reports, logs, and provenance. This review does not include a new large
+corpus campaign; the large and extra-large procedures below remain separate
+diagnostic campaigns.
 
 The extra-large parallel campaign is intentionally narrower than the full
 large matrix. It correctness-checks `[.features[].properties.release] | sort`
