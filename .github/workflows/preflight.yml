@@ -12,7 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly-2026-08-30
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: nightly-2026-08-30
+          components: clippy, rustfmt, llvm-tools-preview
       - uses: actions/setup-node@v4
         with:
           node-version: 20.19.0
