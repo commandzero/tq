@@ -9,7 +9,16 @@ use crate::{Number, Object, Value, VmError};
 pub(crate) fn is_supported(name: &str) -> bool {
     matches!(
         name,
-        "@text" | "@json" | "@html" | "@uri" | "@csv" | "@tsv" | "@sh" | "@base64" | "@base64d"
+        "@text"
+            | "@json"
+            | "@html"
+            | "@uri"
+            | "@urid"
+            | "@csv"
+            | "@tsv"
+            | "@sh"
+            | "@base64"
+            | "@base64d"
     )
 }
 

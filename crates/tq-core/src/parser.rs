@@ -3,10 +3,11 @@
 use std::sync::Arc;
 
 use crate::{
-    Diagnostic, DiagnosticClass, Number, Parsed, Query, SourceFile, SourceId, Span, Value,
+    Diagnostic, DiagnosticClass, Label, Number, Parsed, Query, SourceFile, SourceId, Span, Value,
     ast::{
-        Access, AssignmentOperator, BinaryOperator, Definition, Expr, ExprKind, FunctionParameter,
-        InterpolationSegment, ObjectEntry, ObjectKey, ParameterKind, UnaryOperator,
+        Access, AssignmentOperator, BinaryOperator, BindingPattern, BindingPatternEntry,
+        Definition, Expr, ExprKind, FunctionParameter, InterpolationSegment, ObjectEntry,
+        ObjectKey, ParameterKind, UnaryOperator,
     },
     format,
     lexer::{Token, TokenKind, lex, validate_utf8},
@@ -28,6 +29,34 @@ pub fn parse(source: &str) -> Result<Query<Parsed>, Box<Diagnostic>> {
 /// Returns a source-spanned lexical, syntax, numeric, or deferred-capability diagnostic.
 pub fn parse_bytes(name: &str, bytes: &[u8]) -> Result<Query<Parsed>, Box<Diagnostic>> {
     parse_named(name, validate_utf8(bytes, name)?)
+}
+
+/// Parses a query together with a jq startup file while retaining source spans.
+///
+/// Startup files contribute definitions before the command-line filter. Their
+/// source identity and line offsets remain independent so `__loc__` reports
+/// the startup path for startup definitions and the top-level query for the
+/// command-line filter.
+///
+/// # Errors
+///
+/// Returns a source-spanned UTF-8, lexical, syntax, numeric, or deferred-
+/// capability diagnostic from either source.
+pub fn parse_with_startup(
+    name: &str,
+    bytes: &[u8],
+    startup_name: &str,
+    startup_bytes: &[u8],
+) -> Result<Query<Parsed>, Box<Diagnostic>> {
+    let text = validate_utf8(bytes, name)?;
+    let startup_text = validate_utf8(startup_bytes, startup_name)?;
+    let source = SourceFile::new(SourceId::new(0), name, text);
+    let startup_source = SourceFile::new(SourceId::new(1), startup_name, startup_text);
+    let query = parse_source(&source)?;
+    let mut startup = parse_source(&startup_source)?;
+    crate::resolve::replace_location_variables(&mut startup, startup_name, startup_text);
+    let ast = prepend_startup(startup, query)?;
+    Ok(Query::from_ast(source, ast))
 }
 
 fn parse_named(name: &str, text: &str) -> Result<Query<Parsed>, Box<Diagnostic>> {
@@ -54,11 +83,44 @@ fn parse_source(source: &SourceFile) -> Result<Expr, Box<Diagnostic>> {
     .complete()
 }
 
+fn prepend_startup(startup: Expr, query: Expr) -> Result<Expr, Box<Diagnostic>> {
+    match startup.kind {
+        ExprKind::Define { definition, body } => {
+            let body = prepend_startup(*body, query)?;
+            // A single span cannot cover two source files. Keep the wrapper's
+            // source-local span valid; child spans retain the main query and
+            // startup identities independently.
+            let span = definition.span;
+            Ok(Expr::new(
+                ExprKind::Define {
+                    definition,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::Empty => Ok(query),
+        _ => Err(Box::new(
+            Diagnostic::new(
+                "TQ-STARTUP-CONTENT-001",
+                DiagnosticClass::Compile,
+                "startup file may contain only definitions",
+            )
+            .at(
+                startup.span,
+                "startup file may contain only definitions".to_owned(),
+            ),
+        )),
+    }
+}
+
 struct Parser<'a> {
     source: &'a SourceFile,
     tokens: Vec<Token>,
     index: usize,
 }
+
+const MAX_BINDING_PATTERN_DEPTH: usize = 256;
 
 impl Parser<'_> {
     fn complete(mut self) -> Result<Expr, Box<Diagnostic>> {
@@ -121,31 +183,51 @@ impl Parser<'_> {
         if self.take(|kind| matches!(kind, TokenKind::As)).is_none() {
             return Ok(value);
         }
-        let variable = self.advance().clone();
-        let TokenKind::Variable(name) = variable.kind else {
-            return Err(self.error_at(
-                "TQ-PARSE-BIND-001",
-                "expected variable after 'as'",
-                variable.span,
-            ));
-        };
+        let first_pattern = self.binding_pattern()?;
+        let mut patterns = vec![first_pattern];
+        while self
+            .take(|kind| matches!(kind, TokenKind::Question))
+            .is_some()
+        {
+            self.expect(
+                |kind| matches!(kind, TokenKind::Alternative),
+                "'//' after '?' in destructuring alternative",
+            )?;
+            patterns.push(self.binding_pattern()?);
+        }
         self.expect(
             |kind| matches!(kind, TokenKind::Pipe),
-            "'|' after variable binding",
+            "'|' after binding pattern",
         )?;
         let body = self.expression()?;
         let span = joined(value.span, body.span);
-        Ok(Expr::new(
+        let kind = if patterns.len() == 1 {
             ExprKind::Bind {
                 value: Box::new(value),
-                name,
+                pattern: patterns.pop().expect("one binding pattern remains"),
                 body: Box::new(body),
-            },
-            span,
-        ))
+            }
+        } else {
+            ExprKind::BindAlternatives {
+                value: Box::new(value),
+                patterns,
+                body: Box::new(body),
+            }
+        };
+        Ok(Expr::new(kind, span))
     }
 
     fn pipe(&mut self) -> Result<Expr, Box<Diagnostic>> {
+        let mut expression = self.comma()?;
+        while self.take(|kind| matches!(kind, TokenKind::Pipe)).is_some() {
+            let right = self.comma()?;
+            let span = joined(expression.span, right.span);
+            expression = Expr::new(ExprKind::Pipe(Box::new(expression), Box::new(right)), span);
+        }
+        Ok(expression)
+    }
+
+    fn pipe_without_comma(&mut self) -> Result<Expr, Box<Diagnostic>> {
         let mut expression = self.alternative()?;
         while self.take(|kind| matches!(kind, TokenKind::Pipe)).is_some() {
             let right = self.alternative()?;
@@ -263,12 +345,23 @@ impl Parser<'_> {
             }
             if self.take(|kind| matches!(kind, TokenKind::Dot)).is_some() {
                 let field = self.advance().clone();
-                let TokenKind::Identifier(name) = field.kind else {
-                    return Err(self.error_at(
-                        "TQ-PARSE-FIELD-001",
-                        "expected field name after '.'",
-                        field.span,
-                    ));
+                let name = match field.kind {
+                    TokenKind::Identifier(name) if !name.contains("::") => name,
+                    TokenKind::String(name) => name,
+                    TokenKind::Identifier(_) => {
+                        return Err(self.error_at(
+                            "TQ-PARSE-FIELD-001",
+                            "field names cannot use namespace separators",
+                            field.span,
+                        ));
+                    }
+                    _ => {
+                        return Err(self.error_at(
+                            "TQ-PARSE-FIELD-001",
+                            "expected field name after '.'",
+                            field.span,
+                        ));
+                    }
                 };
                 let span = joined(expression.span, field.span);
                 expression = Expr::new(
@@ -341,17 +434,26 @@ impl Parser<'_> {
         match token.kind {
             TokenKind::Dot => {
                 let identity = Expr::new(ExprKind::Identity, token.span);
-                if let TokenKind::Identifier(name) = self.current().kind.clone() {
-                    let field = self.advance().span;
-                    Ok(Expr::new(
-                        ExprKind::Access {
-                            base: Box::new(identity),
-                            access: Access::Field(name),
-                        },
-                        joined(token.span, field),
-                    ))
-                } else {
-                    Ok(identity)
+                match self.current().kind.clone() {
+                    TokenKind::Identifier(name) if name.contains("::") => {
+                        let field = self.advance().clone();
+                        Err(self.error_at(
+                            "TQ-PARSE-FIELD-001",
+                            "field names cannot use namespace separators",
+                            field.span,
+                        ))
+                    }
+                    TokenKind::Identifier(name) | TokenKind::String(name) => {
+                        let field = self.advance().span;
+                        Ok(Expr::new(
+                            ExprKind::Access {
+                                base: Box::new(identity),
+                                access: Access::Field(name),
+                            },
+                            joined(token.span, field),
+                        ))
+                    }
+                    _ => Ok(identity),
                 }
             }
             TokenKind::DotDot => Ok(Expr::new(ExprKind::RecursiveDescent, token.span)),
@@ -548,10 +650,12 @@ impl Parser<'_> {
         let mut entries = Vec::new();
         while !matches!(self.current().kind, TokenKind::RightBrace) {
             let key_token = self.advance().clone();
-            let (key, shorthand) = match key_token.kind {
+            let variable_shorthand = matches!(key_token.kind, TokenKind::Variable(_));
+            let (mut key, shorthand) = match key_token.kind {
                 TokenKind::Identifier(key) | TokenKind::String(key) => {
                     (ObjectKey::Static(key.clone()), Some(key))
                 }
+                TokenKind::Variable(name) => (ObjectKey::Static(Arc::clone(&name)), Some(name)),
                 TokenKind::LeftParen => {
                     let key = self.expression()?;
                     self.expect(
@@ -569,15 +673,37 @@ impl Parser<'_> {
                 }
             };
             let value = if self.take(|kind| matches!(kind, TokenKind::Colon)).is_some() {
+                // A bare `$name` is jq's object shorthand (`{$name}`), whose
+                // key is the variable's lexical name. Once a colon follows,
+                // the same token is an explicit computed key (`{$name: ...}`).
+                if variable_shorthand {
+                    let ObjectKey::Static(name) = &key else {
+                        unreachable!("variable shorthand starts as a static key")
+                    };
+                    let key_expression =
+                        Expr::new(ExprKind::Variable(Arc::clone(name)), key_token.span);
+                    key = ObjectKey::Computed(key_expression);
+                }
+                if matches!(self.current().kind, TokenKind::RightBrace) {
+                    return Err(Self::with_context(
+                        self.unexpected("object value"),
+                        self.current().span,
+                        "object value",
+                    ));
+                }
                 self.object_value()?
             } else if let Some(name) = shorthand {
-                Expr::new(
-                    ExprKind::Access {
-                        base: Box::new(Expr::new(ExprKind::Identity, key_token.span)),
-                        access: Access::Field(name),
-                    },
-                    key_token.span,
-                )
+                if variable_shorthand {
+                    Expr::new(ExprKind::Variable(name), key_token.span)
+                } else {
+                    Expr::new(
+                        ExprKind::Access {
+                            base: Box::new(Expr::new(ExprKind::Identity, key_token.span)),
+                            access: Access::Field(name),
+                        },
+                        key_token.span,
+                    )
+                }
             } else {
                 return Err(self.unexpected("':' after computed object key"));
             };
@@ -611,19 +737,44 @@ impl Parser<'_> {
 
     fn conditional(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
         let mut branches = Vec::new();
-        let condition = self.expression()?;
-        self.expect(|kind| matches!(kind, TokenKind::Then), "'then'")?;
-        let body = self.expression()?;
+        let condition = self
+            .expression()
+            .map_err(|error| self.with_if_context(error, open))?;
+        let then = self.expect(|kind| matches!(kind, TokenKind::Then), "'then'");
+        let _then = match then {
+            Ok(token) => token,
+            Err(error) => {
+                let error = Self::with_context(error, condition.span, "if condition");
+                return Err(self.with_if_context(error, open));
+            }
+        };
+        let body = self
+            .expression()
+            .map_err(|error| self.with_if_context(error, open))?;
         branches.push((condition, body));
         while self.take(|kind| matches!(kind, TokenKind::Elif)).is_some() {
-            let condition = self.expression()?;
-            self.expect(|kind| matches!(kind, TokenKind::Then), "'then'")?;
-            let body = self.expression()?;
+            let condition = self
+                .expression()
+                .map_err(|error| self.with_if_context(error, open))?;
+            let then = self.expect(|kind| matches!(kind, TokenKind::Then), "'then'");
+            if let Err(error) = then {
+                let error = Self::with_context(error, condition.span, "if condition");
+                return Err(self.with_if_context(error, open));
+            }
+            let body = self
+                .expression()
+                .map_err(|error| self.with_if_context(error, open))?;
             branches.push((condition, body));
         }
-        self.expect(|kind| matches!(kind, TokenKind::Else), "'else'")?;
-        let alternative = self.expression()?;
-        let end = self.expect(|kind| matches!(kind, TokenKind::End), "'end'")?;
+        let alternative = if self.take(|kind| matches!(kind, TokenKind::Else)).is_some() {
+            self.expression()
+                .map_err(|error| self.with_if_context(error, open))?
+        } else {
+            Expr::new(ExprKind::Identity, self.current().span)
+        };
+        let end = self
+            .expect(|kind| matches!(kind, TokenKind::End), "'end'")
+            .map_err(|error| self.with_if_context(error, open))?;
         Ok(Expr::new(
             ExprKind::Conditional {
                 branches,
@@ -634,7 +785,9 @@ impl Parser<'_> {
     }
 
     fn try_catch(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
-        let expression = self.assignment()?;
+        let expression = self
+            .assignment()
+            .map_err(|error| Self::with_context(error, open, "try expression"))?;
         let catch = if self.take(|kind| matches!(kind, TokenKind::Catch)).is_some() {
             Some(Box::new(self.assignment()?))
         } else {
@@ -651,19 +804,12 @@ impl Parser<'_> {
     }
 
     fn fold(&mut self, open: Span, foreach: bool) -> Result<Expr, Box<Diagnostic>> {
-        let generator = self.pipe()?;
+        let generator = self.pipe_without_comma()?;
         self.expect(
             |kind| matches!(kind, TokenKind::As),
             "'as' after fold generator",
         )?;
-        let variable = self.advance().clone();
-        let TokenKind::Variable(name) = variable.kind else {
-            return Err(self.error_at(
-                "TQ-PARSE-FOLD-VARIABLE-001",
-                "expected variable after 'as'",
-                variable.span,
-            ));
-        };
+        let pattern = self.binding_pattern()?;
         self.expect(
             |kind| matches!(kind, TokenKind::LeftParen),
             "'(' before fold initializer",
@@ -674,12 +820,12 @@ impl Parser<'_> {
             "';' after fold initializer",
         )?;
         let update = self.expression()?;
-        let extract = if foreach {
+        let extract = if foreach && !matches!(self.current().kind, TokenKind::RightParen) {
             self.expect(
                 |kind| matches!(kind, TokenKind::Semicolon),
                 "';' after foreach update",
             )?;
-            Some(self.expression()?)
+            Some(Box::new(self.expression()?))
         } else {
             None
         };
@@ -687,18 +833,18 @@ impl Parser<'_> {
             |kind| matches!(kind, TokenKind::RightParen),
             "')' after fold body",
         )?;
-        let kind = if let Some(extract) = extract {
+        let kind = if foreach {
             ExprKind::Foreach {
                 generator: Box::new(generator),
-                name,
+                pattern,
                 initial: Box::new(initial),
                 update: Box::new(update),
-                extract: Box::new(extract),
+                extract,
             }
         } else {
             ExprKind::Reduce {
                 generator: Box::new(generator),
-                name,
+                pattern,
                 initial: Box::new(initial),
                 update: Box::new(update),
             }
@@ -706,13 +852,92 @@ impl Parser<'_> {
         Ok(Expr::new(kind, joined(open, close.span)))
     }
 
+    fn binding_pattern(&mut self) -> Result<BindingPattern, Box<Diagnostic>> {
+        self.binding_pattern_at_depth(0)
+    }
+
+    fn binding_pattern_at_depth(
+        &mut self,
+        depth: usize,
+    ) -> Result<BindingPattern, Box<Diagnostic>> {
+        if depth >= MAX_BINDING_PATTERN_DEPTH {
+            return Err(self.error_at(
+                "TQ-RESOURCE-BIND-PATTERN-001",
+                "binding pattern nesting limit exceeded",
+                self.current().span,
+            ));
+        }
+        let token = self.advance().clone();
+        match token.kind {
+            TokenKind::Variable(name) => Ok(BindingPattern::Variable(name)),
+            TokenKind::LeftBracket => {
+                let mut patterns = Vec::new();
+                while !matches!(self.current().kind, TokenKind::RightBracket) {
+                    patterns.push(self.binding_pattern_at_depth(depth + 1)?);
+                    if self.take(|kind| matches!(kind, TokenKind::Comma)).is_none() {
+                        break;
+                    }
+                }
+                self.expect(
+                    |kind| matches!(kind, TokenKind::RightBracket),
+                    "']' after array binding pattern",
+                )?;
+                Ok(BindingPattern::Array(patterns))
+            }
+            TokenKind::LeftBrace => {
+                let mut entries = Vec::new();
+                while !matches!(self.current().kind, TokenKind::RightBrace) {
+                    let key = self.advance().clone();
+                    let (key, pattern) = match key.kind {
+                        TokenKind::Variable(name) => {
+                            let pattern = BindingPattern::Variable(Arc::clone(&name));
+                            (name, pattern)
+                        }
+                        TokenKind::Identifier(name) | TokenKind::String(name) => {
+                            self.expect(
+                                |kind| matches!(kind, TokenKind::Colon),
+                                "':' after object binding key",
+                            )?;
+                            (name, self.binding_pattern_at_depth(depth + 1)?)
+                        }
+                        _ => {
+                            return Err(self.error_at(
+                                "TQ-PARSE-BIND-OBJECT-001",
+                                "expected object binding key",
+                                key.span,
+                            ));
+                        }
+                    };
+                    entries.push(BindingPatternEntry { key, pattern });
+                    if self.take(|kind| matches!(kind, TokenKind::Comma)).is_none() {
+                        break;
+                    }
+                }
+                self.expect(
+                    |kind| matches!(kind, TokenKind::RightBrace),
+                    "'}' after object binding pattern",
+                )?;
+                Ok(BindingPattern::Object(entries))
+            }
+            _ => Err(self.error_at(
+                "TQ-PARSE-BIND-001",
+                "expected variable, array, or object binding pattern",
+                token.span,
+            )),
+        }
+    }
+
     fn label(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
         let variable = self.advance().clone();
         let TokenKind::Variable(name) = variable.kind else {
-            return Err(self.error_at(
-                "TQ-PARSE-LABEL-001",
-                "expected label variable after 'label'",
-                variable.span,
+            return Err(Self::with_context(
+                self.error_at(
+                    "TQ-PARSE-LABEL-001",
+                    "expected label variable after 'label'",
+                    variable.span,
+                ),
+                open,
+                "label context",
             ));
         };
         self.expect(
@@ -749,10 +974,14 @@ impl Parser<'_> {
     fn definition(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
         let name = self.advance().clone();
         let TokenKind::Identifier(name_value) = name.kind else {
-            return Err(self.error_at(
-                "TQ-PARSE-DEF-001",
-                "expected filter name after 'def'",
-                name.span,
+            return Err(Self::with_context(
+                self.error_at(
+                    "TQ-PARSE-DEF-001",
+                    "expected filter name after 'def'",
+                    name.span,
+                ),
+                open,
+                "definition context",
             ));
         };
         let mut parameters = Vec::new();
@@ -846,12 +1075,16 @@ impl Parser<'_> {
             "'as' after import path",
         )?;
         let alias = self.advance().clone();
-        let TokenKind::Identifier(alias) = alias.kind else {
-            return Err(self.error_at(
-                "TQ-PARSE-IMPORT-001",
-                "expected module alias after 'as'",
-                alias.span,
-            ));
+        let alias = match alias.kind {
+            TokenKind::Identifier(alias) => alias,
+            TokenKind::Variable(alias) => Arc::from(format!("${alias}")),
+            _ => {
+                return Err(self.error_at(
+                    "TQ-PARSE-IMPORT-001",
+                    "expected module alias after 'as'",
+                    alias.span,
+                ));
+            }
         };
         let metadata = self.optional_module_metadata()?;
         let semicolon = self.expect(
@@ -872,7 +1105,7 @@ impl Parser<'_> {
     }
 
     fn module(&mut self, open: Span) -> Result<Expr, Box<Diagnostic>> {
-        let metadata = self.assignment()?;
+        let metadata = self.pipe()?;
         let semicolon = self.expect(
             |kind| matches!(kind, TokenKind::Semicolon),
             "';' after module metadata",
@@ -904,7 +1137,7 @@ impl Parser<'_> {
         if matches!(self.current().kind, TokenKind::Semicolon) {
             Ok(None)
         } else {
-            self.assignment().map(Box::new).map(Some)
+            self.pipe().map(Box::new).map(Some)
         }
     }
 
@@ -960,6 +1193,32 @@ impl Parser<'_> {
             format!("{message}; near {context:?}")
         };
         Box::new(Diagnostic::new(code, DiagnosticClass::Compile, message).at(span, label))
+    }
+
+    fn with_context(mut diagnostic: Box<Diagnostic>, span: Span, message: &str) -> Box<Diagnostic> {
+        diagnostic.labels.push(Label {
+            span,
+            message: message.to_owned(),
+            primary: false,
+        });
+        diagnostic
+    }
+
+    fn with_if_context(&self, diagnostic: Box<Diagnostic>, open: Span) -> Box<Diagnostic> {
+        let has_expression_after_opener = diagnostic
+            .labels
+            .iter()
+            .find(|label| label.primary)
+            .is_some_and(|label| label.span.start > open.end);
+        if !has_expression_after_opener {
+            return diagnostic;
+        }
+        let end = self.current().span.start.max(open.end);
+        Self::with_context(
+            diagnostic,
+            Span::new(open.source, open.start, end),
+            "unterminated if expression",
+        )
     }
 }
 
@@ -1126,6 +1385,10 @@ mod tests {
             foreach.hir(),
             "foreach(access(., iterate) as $x; init: 0; update: add(., $x); extract: .)"
         );
+        assert_eq!(
+            parse("foreach .[] as $x (0; . + $x)").unwrap().hir(),
+            "foreach(access(., iterate) as $x; init: 0; update: add(., $x))"
+        );
     }
 
     #[test]
@@ -1154,7 +1417,6 @@ mod tests {
             "reduce . as $x (",
             "reduce . as $x (0)",
             "reduce . as $x (0;)",
-            "foreach . as $x (0; .)",
             "foreach . as $x (0; .;)",
             "foreach . as $x (0; .; .",
         ] {

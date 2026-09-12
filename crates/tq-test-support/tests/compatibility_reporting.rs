@@ -2,19 +2,47 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
     path::PathBuf,
 };
 
+use serde::Deserialize;
 use serde_json::json;
 use tq_test_support::{
     compatibility::{
         CapabilityCounts, CapabilityDisposition, CompatibilityBaseline, CompatibilityReport,
-        CoverageCount, FinalStatus, FixtureFormat, ObservationState, ProcessStatus, ToolKind,
-        ToolObservation, accept_reviewed_candidate, diff_baselines,
+        CoverageCount, ErrorClass, FinalStatus, FixtureFormat, ObservationState, ProcessStatus,
+        ToolKind, ToolObservation, accept_reviewed_candidate, diff_baselines,
     },
     corpus::ArtifactIdentity,
 };
+
+#[derive(Debug, Deserialize)]
+struct HistoricalCoverageSummary {
+    source_artifact: HistoricalArtifact,
+    historical_scope: String,
+    case_ids: Vec<String>,
+    jq_target_diffs: Vec<HistoricalDiff>,
+    tq_error_classes: Vec<HistoricalErrorClass>,
+    capability_counts: CapabilityCounts,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoricalArtifact {
+    path: String,
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoricalDiff {
+    case_id: String,
+    summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoricalErrorClass {
+    case_id: String,
+    error_class: ErrorClass,
+}
 
 fn report(value: i64, duration: u128) -> CompatibilityReport {
     CompatibilityReport {
@@ -114,24 +142,34 @@ fn baseline_candidate_requires_exact_explicit_case_reviews() {
 }
 
 #[test]
-fn published_full_report_has_only_reviewed_jq_target_divergences() {
+fn historical_coverage_summary_preserves_reviewed_jq_target_divergences() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/compatibility/reviews/coverage-v1.json");
-    let report: CompatibilityReport =
-        serde_json::from_slice(&fs::read(path).expect("published compatibility report"))
-            .expect("valid compatibility report");
-    let actual = report
-        .cases
+        .join("../../tests/compatibility/reviews/coverage-summary.toon");
+    let summary: HistoricalCoverageSummary =
+        tq_test_support::fixture_data::read(&path).expect("valid compatibility report");
+
+    assert_eq!(
+        summary.source_artifact.path,
+        "tests/compatibility/reviews/coverage-v1.toon"
+    );
+    assert_eq!(
+        summary.source_artifact.sha256,
+        "ec8a35b85bcc7e6709ac289a57b015045fbaea156278971e90f6f8c237050a18"
+    );
+    assert!(summary.historical_scope.contains("coverage-v1"));
+
+    assert_eq!(summary.case_ids.len(), 200, "historical case count changed");
+    let unique_case_ids = summary
+        .case_ids
         .iter()
-        .flat_map(|case| {
-            case.semantic_diffs
-                .iter()
-                .filter(|difference| {
-                    difference.left == ToolKind::Jq && difference.right == ToolKind::Tq
-                })
-                .map(|difference| (case.id.clone(), difference.summary.clone()))
-        })
-        .collect::<BTreeMap<_, _>>();
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        unique_case_ids.len(),
+        summary.case_ids.len(),
+        "historical case IDs must be complete and unique"
+    );
+
     let expected = BTreeMap::from([
         ("cli.sequence-framing".to_owned(), "raw stdout".to_owned()),
         (
@@ -155,46 +193,55 @@ fn published_full_report_has_only_reviewed_jq_target_divergences() {
             "result sequence, exit code, error class".to_owned(),
         ),
     ]);
+
+    assert_eq!(summary.jq_target_diffs.len(), expected.len());
+    let actual = summary
+        .jq_target_diffs
+        .iter()
+        .map(|difference| (difference.case_id.clone(), difference.summary.clone()))
+        .collect::<BTreeMap<_, _>>();
     assert_eq!(actual, expected, "unreviewed jq-target compatibility drift");
-    assert_eq!(report.capability_counts.untested, 0);
+
+    let expected_capability_counts = CapabilityCounts {
+        supported: 226,
+        partial: 5,
+        divergent: 10,
+        unsupported: 2,
+        deferred: 2,
+        untested: 0,
+    };
+    assert_eq!(summary.capability_counts, expected_capability_counts);
+    assert_eq!(summary.capability_counts.untested, 0);
 
     for (case_id, expected_class) in [
         (
             "regex.unsupported-lookaround",
-            tq_test_support::compatibility::ErrorClass::UnsupportedCapability,
+            ErrorClass::UnsupportedCapability,
         ),
-        (
-            "date.range-error",
-            tq_test_support::compatibility::ErrorClass::RuntimeRange,
-        ),
-        (
-            "environment.denied",
-            tq_test_support::compatibility::ErrorClass::RuntimePolicy,
-        ),
-        (
-            "platform.denied",
-            tq_test_support::compatibility::ErrorClass::RuntimePolicy,
-        ),
+        ("date.range-error", ErrorClass::RuntimeRange),
+        ("environment.denied", ErrorClass::RuntimePolicy),
+        ("platform.denied", ErrorClass::RuntimePolicy),
     ] {
-        let case = report
-            .cases
-            .iter()
-            .find(|case| case.id == case_id)
-            .unwrap_or_else(|| panic!("missing published case {case_id}"));
-        let tq_observations = case
-            .observations
-            .iter()
-            .filter(|observation| observation.tool == ToolKind::Tq)
-            .collect::<Vec<_>>();
         assert!(
-            !tq_observations.is_empty(),
-            "missing tq evidence for {case_id}"
+            unique_case_ids.contains(case_id),
+            "missing historical case ID {case_id}"
         );
+        let observation = summary
+            .tq_error_classes
+            .iter()
+            .find(|observation| observation.case_id == case_id)
+            .unwrap_or_else(|| panic!("missing tq evidence for {case_id}"));
         assert!(
-            tq_observations
-                .iter()
-                .all(|observation| observation.error_class == Some(expected_class)),
+            observation.error_class == expected_class,
             "wrong tq error class for {case_id}"
         );
     }
+
+    assert_eq!(summary.tq_error_classes.len(), 4);
+    let unique_error_case_ids = summary
+        .tq_error_classes
+        .iter()
+        .map(|observation| observation.case_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(unique_error_case_ids.len(), summary.tq_error_classes.len());
 }

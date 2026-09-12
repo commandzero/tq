@@ -4,6 +4,23 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      reference_jq_linux_url:
+        description: "Reviewed x86_64-linux jq artifact URL"
+        required: false
+        type: string
+      reference_jq_linux_sha256:
+        description: "SHA-256 for the reviewed x86_64-linux jq artifact"
+        required: false
+        type: string
+      reference_jq_macos_url:
+        description: "Reviewed aarch64-macos jq artifact URL"
+        required: false
+        type: string
+      reference_jq_macos_sha256:
+        description: "SHA-256 for the reviewed aarch64-macos jq artifact"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -15,11 +32,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          # Native Linux and macOS remain required release-host contracts. Each
+          # job fails closed until a target-specific reviewed jq pin is present.
+          - os: ubuntu-latest
+            reference_target: x86_64-linux
+          - os: macos-latest
+            reference_target: aarch64-macos
+          # Windows execution is deferred pending an authorized native
+          # runner. Keep its shell contracts in platform_shell.rs for later
+          # execution; do not represent an unverified host as complete here.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Record release host target
+        run: rustc -vV
       - name: Verify UTC boundaries and portable regex behavior
-        run: cargo test -p tq-core regex_date_platform_release_host_contract
+        run: cargo test --locked -p tq-core regex_date_platform_release_host_contract
       - name: Verify ambient policy and redaction
-        run: cargo test -p tq-cli ambient
+        run: cargo test --locked -p tq-cli ambient
+      - name: Verify native shell invocation contracts
+        run: cargo test --locked -p tq-cli --test platform_shell
+      - name: Require a provisioned reviewed jq reference
+        # A fresh runner needs both target-specific artifact URL/digest pairs
+        # supplied through workflow_dispatch. Release events intentionally
+        # fail closed until both reviewed artifacts are provisioned. The
+        # executable's runtime-library identity must match too; an Ironhide
+        # Linux pin does not imply Ubuntu's libc/runtime equivalence.
+        env:
+          TQ_REFERENCE_JQ_URL: ${{ matrix.reference_target == 'x86_64-linux' && inputs.reference_jq_linux_url || matrix.reference_target == 'aarch64-macos' && inputs.reference_jq_macos_url || '' }}
+          TQ_REFERENCE_JQ_SHA256: ${{ matrix.reference_target == 'x86_64-linux' && inputs.reference_jq_linux_sha256 || matrix.reference_target == 'aarch64-macos' && inputs.reference_jq_macos_sha256 || '' }}
+        shell: bash
+        run: ./scripts/reference-jq-provision.sh
+      - name: Run the pinned manual release gate
+        # The command intentionally fails closed when this host has no
+        # reviewed jq pin; a green platform job must carry matched evidence.
+        shell: bash
+        run: ./scripts/run-campaign.sh compatibility strict

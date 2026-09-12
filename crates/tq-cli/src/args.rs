@@ -19,6 +19,8 @@ pub enum Command {
     Version,
     /// Print stable build and capability information.
     BuildConfiguration,
+    /// Execute jq's line-oriented test file format through tq.
+    RunTests(Option<PathBuf>),
 }
 
 /// Query source selection.
@@ -61,6 +63,15 @@ pub enum PositionalArgumentKind {
     String,
     /// Decode each argv value as one JSON text.
     Json,
+}
+
+/// One positional argument and the parser selected when it was consumed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PositionalArgument {
+    /// Original argv value.
+    pub value: String,
+    /// String or JSON decoding selected for this value.
+    pub kind: PositionalArgumentKind,
 }
 
 /// JSON color selection.
@@ -216,6 +227,8 @@ pub struct RunOptions {
     pub output_format: OutputFormat,
     /// TOON framing.
     pub framing: ToonFraming,
+    /// Request sequence framing with `--seq`; JSON output opts into JSON sequences.
+    pub json_sequence: bool,
     /// Raw string output.
     pub raw_output: bool,
     /// Suppress raw-output separators.
@@ -262,10 +275,9 @@ pub struct RunOptions {
     pub toon_writer: WriterConfig,
     /// External variables in declaration order.
     pub arguments: Vec<ExternalArgument>,
-    /// Positional `$ARGS` parser, when selected.
-    pub positional_argument_kind: Option<PositionalArgumentKind>,
-    /// Ordered argv values exposed through `$ARGS.positional`.
-    pub positional_arguments: Vec<String>,
+    /// Ordered argv values exposed through `$ARGS.positional`, with their
+    /// parser selection retained per value.
+    pub positional_arguments: Vec<PositionalArgument>,
     /// Optional analysis report.
     pub explain: Option<ExplainFormat>,
     /// Optional trace entry cap.
@@ -442,7 +454,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: None,
         syntax: "--seq",
         value: false,
-        description: "read and write jq-compatible JSON Text Sequences",
+        description: "use sequence framing (TOON by default; JSON with -o json or -c)",
     },
     OptionSpec {
         short: None,
@@ -527,6 +539,12 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         syntax: "--build-configuration",
         value: false,
         description: "print stable build capabilities",
+    },
+    OptionSpec {
+        short: None,
+        syntax: "--run-tests [FILE]",
+        value: true,
+        description: "run a jq-compatible test file",
     },
     OptionSpec {
         short: Some('h'),
@@ -622,18 +640,18 @@ where
                 .map_err(|_| CliError::Usage("arguments must be valid UTF-8".to_owned()))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut tokens = expand_short_options(tokens)?.into_iter();
+    let mut tokens = tokens.into_iter();
     let mut inline_filter = None;
     let mut filter_file = None;
     let mut files = Vec::new();
     let mut module_paths = Vec::new();
     let mut input_format = InputFormat::Auto;
     let mut output_format = OutputFormat::Toon;
-    let mut input_explicit = false;
-    let mut output_explicit = false;
+    let mut output_format_explicit = false;
     let mut json_sequence = false;
     let mut explicit_toon_sequence = false;
-    let mut framing = ToonFraming::Sequence;
+    let mut framing = ToonFraming::Values;
+    let mut unframed_explicit = false;
     let mut raw_output = false;
     let mut join_output = false;
     let mut raw_output0 = false;
@@ -647,6 +665,9 @@ where
     let mut strict = true;
     let mut strict_conversion = false;
     let mut pretty_json = true;
+    // Keep selection intent separate from the style toggle so a later
+    // --pretty-output cannot erase a compact/non-JSON conflict.
+    let mut compact_requested = false;
     let mut pretty_explicit = false;
     let mut json_indent = JsonIndent::default();
     let mut indent_explicit = false;
@@ -670,11 +691,6 @@ where
     let mut positional_only = false;
 
     while let Some(token) = tokens.next() {
-        if positional_argument_kind.is_some() && (inline_filter.is_some() || filter_file.is_some())
-        {
-            positional_arguments.push(token);
-            continue;
-        }
         if positional_only {
             positional(
                 &mut inline_filter,
@@ -686,11 +702,47 @@ where
             );
             continue;
         }
+        let negative_argument = token.as_bytes().first() == Some(&b'-')
+            && token.as_bytes().get(1).is_some_and(u8::is_ascii_digit);
+        if negative_argument {
+            positional(
+                &mut inline_filter,
+                &mut files,
+                &mut positional_arguments,
+                positional_argument_kind,
+                token,
+                filter_file.is_some(),
+            );
+            continue;
+        }
+        if token.starts_with('-') && !token.starts_with("--") && token.len() > 2 {
+            tokens = expand_short_options(vec![token])?
+                .into_iter()
+                .chain(tokens)
+                .collect::<Vec<_>>()
+                .into_iter();
+            continue;
+        }
         match token.as_str() {
             "--" => positional_only = true,
             "-h" | "--help" => return Ok(Command::Help),
             "-V" | "--version" => return Ok(Command::Version),
             "--build-configuration" => return Ok(Command::BuildConfiguration),
+            "--run-tests" => {
+                let path = tokens
+                    .next()
+                    .filter(|value| value == "-" || !value.starts_with('-'))
+                    .map(PathBuf::from);
+                if let Some(path) = &path
+                    && path != std::path::Path::new("-")
+                    && !capability_policy.filesystem
+                {
+                    return Err(CliError::Incompatible(
+                        "filesystem access is disabled by capability policy".to_owned(),
+                    ));
+                }
+                return Ok(Command::RunTests(path));
+            }
             "compatibility" if inline_filter.is_none() && filter_file.is_none() => {
                 return Ok(Command::Compatibility);
             }
@@ -703,23 +755,27 @@ where
                 }
             }
             "-i" | "--input-format" => {
-                input_explicit = true;
                 input_format = parse_input(&token, next_value(&mut tokens, &token)?)?;
             }
             "-o" | "--output-format" => {
-                output_explicit = true;
                 let value = next_value(&mut tokens, &token)?;
+                output_format_explicit = true;
                 explicit_toon_sequence =
                     NativeFormat::from_name(&value) == Some(NativeFormat::ToonSequence);
                 output_format = parse_output(&token, value)?;
             }
-            "--seq" => json_sequence = true,
+            "--seq" => {
+                framing = ToonFraming::Sequence;
+                json_sequence = true;
+            }
             "--strict-conversion" => strict_conversion = true,
             "--toon-sequence-input" => {
-                input_explicit = true;
                 input_format = InputFormat::ToonSequence;
             }
-            "--unframed" => framing = ToonFraming::Unframed,
+            "--unframed" => {
+                framing = ToonFraming::Unframed;
+                unframed_explicit = true;
+            }
             "-r" | "--raw-output" => raw_output = true,
             "--raw-output0" => {
                 raw_output = true;
@@ -754,7 +810,13 @@ where
             "-x" | "--proxy-on-error" => proxy_on_error = true,
             "-e" | "--exit-status" => exit_status = true,
             "--non-strict" => strict = false,
-            "-c" | "--compact-output" => pretty_json = false,
+            "-c" | "--compact-output" => {
+                compact_requested = true;
+                if !output_format_explicit {
+                    output_format = OutputFormat::Json;
+                }
+                pretty_json = false;
+            }
             "--pretty-output" => {
                 pretty_json = true;
                 pretty_explicit = true;
@@ -837,7 +899,7 @@ where
             "-L" | "--library-path" => {
                 module_paths.push(PathBuf::from(next_value(&mut tokens, &token)?));
             }
-            "--argfile" | "--run-tests" => return Err(CliError::Unsupported(token)),
+            "--argfile" => return Err(CliError::Unsupported(token)),
             "--explain" => explain = Some(ExplainFormat::Human),
             "--explain-json" => explain = Some(ExplainFormat::Json),
             "--trace" => trace_limit = 256,
@@ -920,13 +982,23 @@ where
         (Some(_), Some(_)) => unreachable!("checked above"),
     };
     if json_sequence {
-        if input_explicit && input_format != InputFormat::JsonSequence
-            || output_explicit && output_format != OutputFormat::JsonSequence
-        {
-            return Err(CliError::Incompatible("--seq conflicts with explicit non-JSON-sequence formats; use -i toon-seq -o toon-seq for TOON sequences".to_owned()));
+        if !matches!(
+            input_format,
+            InputFormat::Auto | InputFormat::Json | InputFormat::JsonSequence
+        ) {
+            return Err(CliError::Incompatible(
+                "--seq requires JSON or JSON sequence input; CSV, TSV, YAML, JSON5, JSON Lines, TOON, and TOON sequences are incompatible".to_owned(),
+            ));
+        }
+        if unframed_explicit {
+            return Err(CliError::Incompatible(
+                "--seq requires sequence framing and cannot be --unframed".to_owned(),
+            ));
         }
         input_format = InputFormat::JsonSequence;
-        output_format = OutputFormat::JsonSequence;
+        if output_format == OutputFormat::Json {
+            output_format = OutputFormat::JsonSequence;
+        }
     }
     if raw_input && input_format != InputFormat::Auto {
         return Err(CliError::Incompatible(
@@ -937,6 +1009,9 @@ where
         return Err(CliError::Incompatible(
             "toon-seq output cannot be unframed".to_owned(),
         ));
+    }
+    if explicit_toon_sequence {
+        framing = ToonFraming::Sequence;
     }
     if stream
         && NativeFormat::from_input(input_format).is_some_and(|format| !format.descriptor().events)
@@ -1007,7 +1082,7 @@ where
             "TOON output options cannot be applied to JSON or JSON Lines output".to_owned(),
         ));
     }
-    if !json_controls && !pretty_json {
+    if compact_requested && !json_controls {
         return Err(CliError::Incompatible(
             "--compact-output applies only to JSON or JSON Lines output".to_owned(),
         ));
@@ -1048,7 +1123,7 @@ where
             "platform access is disabled by capability policy".to_owned(),
         ));
     }
-    if (raw_output || join_output) && framing == ToonFraming::Unframed {
+    if (raw_output || join_output) && unframed_explicit {
         return Err(CliError::Incompatible(
             "raw output has its own separators and cannot be --unframed".to_owned(),
         ));
@@ -1077,6 +1152,7 @@ where
         input_format,
         output_format,
         framing,
+        json_sequence,
         raw_output,
         join_output,
         raw_output0,
@@ -1100,7 +1176,6 @@ where
         allow_platform,
         toon_writer,
         arguments: external,
-        positional_argument_kind,
         positional_arguments,
         explain,
         trace_limit,
@@ -1156,15 +1231,15 @@ fn parse_limit<T: std::str::FromStr>(
 fn positional(
     filter: &mut Option<String>,
     files: &mut Vec<PathBuf>,
-    positional_arguments: &mut Vec<String>,
+    positional_arguments: &mut Vec<PositionalArgument>,
     positional_argument_kind: Option<PositionalArgumentKind>,
     token: String,
     has_filter_file: bool,
 ) {
     if filter.is_none() && !has_filter_file {
         *filter = Some(token);
-    } else if positional_argument_kind.is_some() {
-        positional_arguments.push(token);
+    } else if let Some(kind) = positional_argument_kind {
+        positional_arguments.push(PositionalArgument { value: token, kind });
     } else {
         files.push(PathBuf::from(token));
     }
@@ -1205,28 +1280,12 @@ fn parse_external(
     option: &str,
 ) -> Result<(), CliError> {
     let name = next_value(tokens, option)?;
-    if !valid_variable(&name) {
-        return Err(CliError::InvalidValue {
-            option: option.to_owned(),
-            value: name,
-        });
-    }
-    if !names.insert(name.clone()) {
-        return Err(CliError::Usage(format!(
-            "external variable '{name}' is declared more than once"
-        )));
-    }
     let value = next_value(tokens, option)?;
+    if !names.insert(name.clone()) {
+        return Ok(());
+    }
     arguments.push(ExternalArgument { name, value, kind });
     Ok(())
-}
-
-fn valid_variable(name: &str) -> bool {
-    let mut characters = name.chars();
-    characters
-        .next()
-        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
-        && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
 #[cfg(test)]
@@ -1277,8 +1336,14 @@ mod tests {
         };
         assert_eq!(run.input_format, InputFormat::Yaml);
         assert_eq!(run.output_format, OutputFormat::Json);
-        assert_eq!(run.framing, ToonFraming::Sequence);
+        assert_eq!(run.framing, ToonFraming::Values);
         assert!(run.raw_output && run.slurp && run.exit_status && run.proxy_on_error);
+
+        let Command::Run(run) = parse_args(["--seq", "."]).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.framing, ToonFraming::Sequence);
+        assert!(run.json_sequence);
     }
 
     #[test]
@@ -1354,13 +1419,25 @@ mod tests {
         assert!(parse_args(["--stream", "--input-format", "yaml", "."]).is_err());
         assert!(parse_args(["--stream", "--input-format", "json5", "."]).is_err());
         assert!(parse_args(["--proxy-on-error", "--stream-errors", "."]).is_err());
-        assert!(parse_args(["-c", "."]).is_err());
+        let Command::Run(run) = parse_args(["-c", "."]).unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.output_format, OutputFormat::Json);
+        assert!(!run.pretty_json);
     }
 
     #[test]
     fn help_version_and_compatibility_are_commands() {
         assert_eq!(parse_args(["--help"]).unwrap(), Command::Help);
         assert_eq!(parse_args(["--version"]).unwrap(), Command::Version);
+        assert_eq!(
+            parse_args(["--run-tests", "tests.jq"]).unwrap(),
+            Command::RunTests(Some("tests.jq".into()))
+        );
+        assert_eq!(
+            parse_args(["--run-tests"]).unwrap(),
+            Command::RunTests(None)
+        );
         assert_eq!(
             parse_args(["compatibility"]).unwrap(),
             Command::Compatibility
@@ -1384,6 +1461,7 @@ mod tests {
             "--jsonargs",
             "--unbuffered",
             "--proxy-on-error",
+            "--run-tests",
         ] {
             assert!(help.contains(option));
         }

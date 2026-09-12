@@ -30,7 +30,7 @@ fn json_sequence_output_frames_each_result_and_keeps_exact_numbers() {
     let selection = NativeFormat::JsonSequence
         .select_output(OutputOptions::default())
         .unwrap();
-    let mut sequence = NativeOutputSequence::new(selection);
+    let mut sequence = NativeOutputSequence::new(selection.clone());
     let mut bytes = Vec::new();
     sequence
         .write_result(
@@ -53,7 +53,7 @@ fn native_output_retains_yaml_separators_until_completion() {
     let selection = NativeFormat::Yaml
         .select_output(OutputOptions::default())
         .unwrap();
-    let mut sequence = NativeOutputSequence::new(selection);
+    let mut sequence = NativeOutputSequence::new(selection.clone());
     let mut bytes = Vec::new();
     sequence
         .write_result(&mut bytes, &Value::Bool(true))
@@ -73,7 +73,7 @@ fn native_output_unframed_validates_cardinality_before_publication() {
             ..OutputOptions::default()
         })
         .unwrap();
-    let mut sequence = NativeOutputSequence::new(selection);
+    let mut sequence = NativeOutputSequence::new(selection.clone());
     let mut bytes = Vec::new();
     sequence
         .write_result(&mut bytes, &Value::Bool(true))

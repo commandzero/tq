@@ -1,8 +1,8 @@
 # tq
 
-`tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, JSON5, and JSON Lines. It
-writes TOON Text Sequences by default and can stream JSON, JSON Lines, and TOON
-without loading the complete input.
+`tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, JSON5, JSON Lines, JSON
+Text Sequences, CSV, and TSV. It writes LF-terminated TOON values by default
+and can stream structured input without loading the complete input.
 
 `tq` supports common jq filters, including navigation, pipes, generators,
 conditionals, operators, variables, path updates, user filters, modules, and
@@ -13,24 +13,27 @@ supported syntax and known differences.
 
 ## Install and use
 
-Rust 1.87 or newer is required.
+Rust 1.95 or newer is required.
 
 ```console
 cargo install tq-cli
-tq '.features[] | {id, magnitude: .properties.mag}' feed.json
+tq -i json -o toon-seq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
 To build from a checkout instead, run `cargo build --release` and use
 `target/release/tq`.
 
 With no file argument, `tq` reads stdin. It processes files and `-` in argument
-order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.json5`, `.jsonl`, and
-`.ndjson` extensions select the parser. Other sources use bounded content
+order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.json5`, `.jsonl`,
+`.ndjson`, `.json-seq`, `.jsonseq`, `.csv`, and `.tsv` extensions select the
+parser. Other sources use bounded content
 detection. For ambiguous input, select a parser with
-`--input-format toon|yaml|json|json5|jsonl`. `ndjson` is an alias for `jsonl`.
+`--input-format toon|yaml|json|json5|jsonl|json-seq|toon-seq|csv|tsv`.
+`ndjson` is an alias for `jsonl`, and `jsonseq` is an alias for `json-seq`.
 JSON5 is document-at-a-time input and accepts the literal triple-double-quoted
 multiline strings used by kibana-sync. Files ending in `.json` remain strict
-JSON, so select `-i json5` when a JSON5 producer uses that extension.
+JSON, so select `-i json5` when a JSON5 producer uses that extension. CSV and
+TSV use their explicit selectors or matching file extensions.
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
@@ -51,23 +54,23 @@ For multiple sources, the fallback applies to each source separately. With
 slurp evaluates the set as one input. `--proxy-on-error` cannot be used with
 `--stream-errors`.
 
-By default, each structured result contains an ASCII RS byte, one canonical
-TOON document, and LF. This framing distinguishes zero, one, and many results.
-If a later result fails, earlier complete records remain valid. Use
-`--output-format json` for jq-style JSON or `--output-format jsonl` for one
-compact, LF-terminated JSON value per result. `-r` writes raw strings, `-j`
-joins raw output, and `--unframed` is available when the query must return
-exactly one TOON value.
+By default, `tq` writes zero or more canonical TOON values, each followed by LF.
+`--seq` selects JSON Text Sequence input. It writes TOON Text Sequence output by
+default, or JSON Text Sequence output when combined with `-c` or `-o json`.
+Use `-o toon-seq` to request TOON framing without changing input selection.
+`--unframed` requires exactly one standalone document. `-r` writes raw strings
+and `-j` joins raw output.
 
 ## Streaming and memory
 
 `--stream` emits jq-compatible `[path,value]` records and container-end
-`[path]` records from JSON, JSON Lines, or TOON decoder events. JSON Lines resets
-the root path for every physical record. YAML and JSON5 decode one document at a
-time. On large inputs, streaming avoids retaining the whole document:
+`[path]` records from JSON, JSON Lines, JSON Text Sequences, or TOON decoder
+events. JSON Lines and JSON Text Sequences reset the root path for every
+physical record. YAML and JSON5 decode one document at a time. On large inputs,
+streaming avoids retaining the whole document:
 
 ```console
-tq --stream --input-format json \
+tq --stream --input-format json -o json -c \
   'select(length == 2 and (.[0] | length) == 1)' buildings.geojson
 ```
 
@@ -140,7 +143,11 @@ See the [benchmark guide](benchmarks/README.md) for campaign details and the
 
 Parameterized `def` filters support lexical capture, filter and value
 parameters, generator cardinality, shadowing, and recursion on tq's bounded
-managed call stack. Modules load only from explicit roots:
+managed call stack. The process CLI resolves modules from confined default roots:
+the filter's directory or current directory, `JQ_LIBRARY_PATH`, `HOME/.jq`, and
+install-relative library roots. `-L` replaces those defaults with explicit
+confined roots; embedded callers retain their explicit filesystem and module
+policy:
 
 ```console
 tq -L ./jq-libs 'import "metrics" as m; m::normalize' input.json
@@ -156,29 +163,32 @@ reads.
 ## Regex, dates, and platform data
 
 The Unicode-aware `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`,
-and `gsub` built-ins use a bounded linear-time regex engine. UTC parsing,
-formatting, broken-down time, and epoch conversion support jq's date arrays for
-the documented range from year 0000 through 9999.
+and `gsub` built-ins use a safe Rust bounded-backtracking regex engine. Pattern,
+input, match, replacement, and VM-work limits bound resource use, but the engine
+does not promise linear-time matching. UTC parsing, formatting, broken-down time,
+and epoch conversion support jq's date arrays for the documented range from year
+0000 through 9999.
 
-Environment and ambient platform data are opt-in. `--allow-environment` enables
-both `env` and jq's `$ENV` startup snapshot. `$__loc__` is always available and
+The process CLI enables environment and platform data by default. Embedded
+callers retain deny-by-default controls and can admit each authority with
+`--allow-environment` or `--allow-platform`. `$__loc__` is always available and
 returns `{file, line}` for its location in the query source. Inline filters use
 `<top-level>`; filter files and modules retain their path identities.
-`--allow-platform` enables `now`, local timezone conversion, and `input_filename`.
 Decoder-owned `input_line_number` context is available without a capability flag.
 See [the compatibility policy](docs/jq-regex-date-platform.md) for engine
 differences, limits, redaction, and release-host classifications.
 
 ## Current boundaries
 
-`tq` supports lexical `label` and `break`, including early exit from a
-generator. Some less common jq capabilities remain unsupported; see the
-[compatibility guide](docs/compatibility.md) for the supported CLI switches
-and known differences.
+Labels and `break` are implemented with jq-compatible manual behavior. The
+[option inventory](docs/jq-1.8-cli-options.md) distinguishes supported options,
+native-output adaptations, and options removed upstream.
 
 The numeric model preserves accepted input literals as written. Arithmetic uses
 jq-compatible binary64 behavior when needed. Digit, exponent-expansion, and
 index limits return resource or range errors instead of silently losing data.
-These errors and TOON sequence framing are known differences from jq.
+TOON output and configured resource limits differ from jq's default contract.
+The [compatibility guide](docs/compatibility.md) separates tested matches,
+reviewed library disparities, and remaining implementation gaps.
 
 Licensed under MIT.

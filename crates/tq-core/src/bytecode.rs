@@ -1,16 +1,20 @@
 //! Immutable source-mapped bytecode, compiler, validation, and disassembly.
 
 use std::collections::VecDeque;
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use thiserror::Error;
 
 use crate::{
-    BuiltinRegistry, Diagnostic, DiagnosticClass, ModuleInfo, Span, Value,
+    BuiltinRegistry, Diagnostic, DiagnosticClass, ModuleInfo, ResolveOptions, Span, Value,
     ast::{
         Access, AssignmentOperator, BinaryOperator, CallTarget, Expr, ExprKind,
         InterpolationSegment, ObjectKey, ParameterKind, UnaryOperator,
     },
+    resolve::ModuleLoader,
 };
 
 /// Immutable validated tq bytecode.
@@ -21,6 +25,7 @@ pub struct Bytecode {
     strings: Arc<[Arc<str>]>,
     functions: Arc<[UserFunction]>,
     modules: Arc<[ModuleInfo]>,
+    dynamic_modules: Arc<Mutex<ModuleLoader>>,
     root: u32,
     managed_tree_execution: bool,
 }
@@ -188,21 +193,26 @@ pub(crate) enum Operation {
     },
     Bind {
         value: u32,
-        name: u32,
+        pattern: BindingPatternOperand,
+        body: u32,
+    },
+    BindAlternatives {
+        value: u32,
+        patterns: Vec<BindingPatternOperand>,
         body: u32,
     },
     Reduce {
         generator: u32,
-        name: u32,
+        pattern: BindingPatternOperand,
         initial: u32,
         update: u32,
     },
     Foreach {
         generator: u32,
-        name: u32,
+        pattern: BindingPatternOperand,
         initial: u32,
         update: u32,
-        extract: u32,
+        extract: Option<u32>,
     },
     Call {
         name: u32,
@@ -254,6 +264,13 @@ pub(crate) struct ObjectOperand {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) enum BindingPatternOperand {
+    Variable(u32),
+    Array(Vec<BindingPatternOperand>),
+    Object(Vec<(u32, BindingPatternOperand)>),
+}
+
+#[derive(Clone, Debug)]
 pub(crate) enum KeyOperand {
     Static(u32),
     Computed(u32),
@@ -296,6 +313,7 @@ impl Bytecode {
             strings: Arc::from([]),
             functions: Arc::from([]),
             modules: Arc::from([]),
+            dynamic_modules: Arc::new(Mutex::new(ModuleLoader::new(&ResolveOptions::default()))),
             managed_tree_execution: false,
         };
         bytecode.validate()?;
@@ -398,7 +416,11 @@ impl Bytecode {
         output
     }
 
-    pub(crate) fn compile(ast: &Expr, modules: &[ModuleInfo]) -> Result<Self, Box<Diagnostic>> {
+    pub(crate) fn compile(
+        ast: &Expr,
+        modules: &[ModuleInfo],
+        options: &ResolveOptions,
+    ) -> Result<Self, Box<Diagnostic>> {
         let mut compiler = Compiler::default();
         let root = compiler.expression(ast)?;
         let functions = compiler
@@ -421,6 +443,7 @@ impl Bytecode {
             strings: compiler.strings.into(),
             functions: functions.into(),
             modules: modules.to_vec().into(),
+            dynamic_modules: Arc::new(Mutex::new(ModuleLoader::new(options))),
             root,
             managed_tree_execution: false,
         };
@@ -452,6 +475,21 @@ impl Bytecode {
 
     pub(crate) fn modules(&self) -> &[ModuleInfo] {
         &self.modules
+    }
+
+    pub(crate) fn load_dynamic_module_metadata(
+        &self,
+        requested: &str,
+    ) -> Result<ModuleInfo, Box<Diagnostic>> {
+        let mut loader = self.dynamic_modules.lock().map_err(|_| {
+            Box::new(Diagnostic::new(
+                "TQ-MODULE-STATE-001",
+                DiagnosticClass::Runtime,
+                "dynamic module state lock is poisoned",
+            ))
+        })?;
+        let span = Span::new(crate::SourceId::new(0), 0, 0);
+        loader.load_metadata(requested, span)
     }
 
     pub(crate) const fn root(&self) -> u32 {
@@ -486,6 +524,7 @@ impl Bytecode {
             },
             functions: Arc::from([]),
             modules: Arc::from([]),
+            dynamic_modules: Arc::new(Mutex::new(ModuleLoader::new(&ResolveOptions::default()))),
             root: 0,
             managed_tree_execution: false,
         }
@@ -628,34 +667,53 @@ impl Compiler {
                     .collect::<Result<_, Box<Diagnostic>>>()?,
                 alternative: self.expression(alternative)?,
             },
-            ExprKind::Bind { value, name, body } => Operation::Bind {
+            ExprKind::Bind {
+                value,
+                pattern,
+                body,
+            } => Operation::Bind {
                 value: self.expression(value)?,
-                name: self.string(name),
+                pattern: self.pattern(pattern)?,
+                body: self.expression(body)?,
+            },
+            ExprKind::BindAlternatives {
+                value,
+                patterns,
+                body,
+            } => Operation::BindAlternatives {
+                value: self.expression(value)?,
+                patterns: patterns
+                    .iter()
+                    .map(|pattern| self.pattern(pattern))
+                    .collect::<Result<_, _>>()?,
                 body: self.expression(body)?,
             },
             ExprKind::Reduce {
                 generator,
-                name,
+                pattern,
                 initial,
                 update,
             } => Operation::Reduce {
                 generator: self.expression(generator)?,
-                name: self.string(name),
+                pattern: self.pattern(pattern)?,
                 initial: self.expression(initial)?,
                 update: self.expression(update)?,
             },
             ExprKind::Foreach {
                 generator,
-                name,
+                pattern,
                 initial,
                 update,
                 extract,
             } => Operation::Foreach {
                 generator: self.expression(generator)?,
-                name: self.string(name),
+                pattern: self.pattern(pattern)?,
                 initial: self.expression(initial)?,
                 update: self.expression(update)?,
-                extract: self.expression(extract)?,
+                extract: extract
+                    .as_deref()
+                    .map(|extract| self.expression(extract))
+                    .transpose()?,
             },
             ExprKind::Define { definition, body } => {
                 let symbol = definition.symbol.ok_or_else(|| {
@@ -778,6 +836,29 @@ impl Compiler {
             span: expr.span,
         });
         Ok(index)
+    }
+
+    fn pattern(
+        &mut self,
+        pattern: &crate::ast::BindingPattern,
+    ) -> Result<BindingPatternOperand, Box<Diagnostic>> {
+        Ok(match pattern {
+            crate::ast::BindingPattern::Variable(name) => {
+                BindingPatternOperand::Variable(self.string(name))
+            }
+            crate::ast::BindingPattern::Array(patterns) => BindingPatternOperand::Array(
+                patterns
+                    .iter()
+                    .map(|pattern| self.pattern(pattern))
+                    .collect::<Result<_, _>>()?,
+            ),
+            crate::ast::BindingPattern::Object(entries) => BindingPatternOperand::Object(
+                entries
+                    .iter()
+                    .map(|entry| Ok((self.string(&entry.key), self.pattern(&entry.pattern)?)))
+                    .collect::<Result<_, Box<Diagnostic>>>()?,
+            ),
+        })
     }
 
     fn constant(&mut self, value: Value) -> Result<u32, Box<Diagnostic>> {
@@ -910,46 +991,63 @@ fn validate_instruction(
             }
             target(*alternative)?;
         }
-        Operation::Bind { value, name, body } => {
+        Operation::Bind {
+            value,
+            pattern,
+            body,
+        } => {
             target(*value)?;
-            string(*name)?;
+            validate_pattern(bytecode, index, pattern)?;
+            target(*body)?;
+        }
+        Operation::BindAlternatives {
+            value,
+            patterns,
+            body,
+        } => {
+            target(*value)?;
+            for pattern in patterns {
+                validate_pattern(bytecode, index, pattern)?;
+            }
             target(*body)?;
         }
         Operation::Reduce {
             generator,
-            name,
+            pattern,
             initial,
             update,
         } => {
             target(*generator)?;
-            string(*name)?;
+            validate_pattern(bytecode, index, pattern)?;
             target(*initial)?;
             target(*update)?;
         }
         Operation::Foreach {
             generator,
-            name,
+            pattern,
             initial,
             update,
             extract,
         } => {
             target(*generator)?;
-            string(*name)?;
+            validate_pattern(bytecode, index, pattern)?;
             target(*initial)?;
             target(*update)?;
-            target(*extract)?;
+            if let Some(extract) = extract {
+                target(*extract)?;
+            }
         }
         Operation::Call { name, arguments } => {
             string(*name)?;
             let name_value = &bytecode.strings[*name as usize];
-            if let Some(builtin) = BuiltinRegistry.get(name_value) {
-                if !(builtin.minimum_arity..=builtin.maximum_arity).contains(&arguments.len()) {
-                    return Err(BytecodeError::CallArity {
-                        instruction: index,
-                        name: Arc::clone(name_value),
-                        arity: arguments.len(),
-                    });
-                }
+            if let Some(builtin) = BuiltinRegistry.get(name_value)
+                && !(builtin.minimum_arity..=builtin.maximum_arity).contains(&arguments.len())
+            {
+                return Err(BytecodeError::CallArity {
+                    instruction: index,
+                    name: Arc::clone(name_value),
+                    arity: arguments.len(),
+                });
             }
             for argument in arguments {
                 target(*argument)?;
@@ -1015,6 +1113,40 @@ fn validate_instruction(
         | Operation::Empty
         | Operation::RecursiveDescent
         | Operation::Break(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_pattern(
+    bytecode: &Bytecode,
+    instruction: usize,
+    pattern: &BindingPatternOperand,
+) -> Result<(), BytecodeError> {
+    match pattern {
+        BindingPatternOperand::Variable(name) => {
+            if *name as usize >= bytecode.strings.len() {
+                return Err(BytecodeError::String {
+                    instruction,
+                    string: *name,
+                });
+            }
+        }
+        BindingPatternOperand::Array(patterns) => {
+            for pattern in patterns {
+                validate_pattern(bytecode, instruction, pattern)?;
+            }
+        }
+        BindingPatternOperand::Object(entries) => {
+            for (key, pattern) in entries {
+                if *key as usize >= bytecode.strings.len() {
+                    return Err(BytecodeError::String {
+                        instruction,
+                        string: *key,
+                    });
+                }
+                validate_pattern(bytecode, instruction, pattern)?;
+            }
+        }
     }
     Ok(())
 }
@@ -1208,8 +1340,9 @@ impl fmt::Display for DisplayOperation<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
+    use crate::resolve::ModuleLoader;
     use crate::{ResolveOptions, Span, analyze, parse, resolve};
 
     use super::{Bytecode, BytecodeError, Instruction, Operation};
@@ -1297,6 +1430,7 @@ mod tests {
             strings: Arc::from([Arc::from("range")]),
             functions: Arc::from([]),
             modules: Arc::from([]),
+            dynamic_modules: Arc::new(Mutex::new(ModuleLoader::new(&ResolveOptions::default()))),
             root: 0,
             managed_tree_execution: false,
         };
