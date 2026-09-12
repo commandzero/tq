@@ -1,0 +1,170 @@
+schema_version: 2
+section: Invoking jq
+source: "https://jqlang.org/manual/#invoking-jq"
+manual_file: /Users/reno/Development/commandzero/tq-benchmarks/jq-manual/invoking-jq.md
+reviewed_at: 2026-09-08
+examples[48]{id,source_line,kind,query,input,invocation,disposition,reason,case_id,expected_output,input_hex}:
+  invoking.identity-filter,18,inline-filter,.,"{\"foo\":\"bar\"}",jq '.',new,"Added an exact identity-filter case; the source gives the filter but no concrete input, so the ledger uses a minimal JSON witness.",manual.invoking.identity,null,null
+  invoking.fence-shell-fragment,21,fenced-shell-snippet,.,"\"foo\"","jq followed by a separate \"foo\" line",new,Representative fixture added for the documented behavior.,manual.invoking.stdin-default-filter,null,null
+  invoking.shell-unix,32,inline-cli-snippet,".[\"foo\"]","{\"foo\":1}","jq '.[\"foo\"]'",new,Added the exact Unix-shell invocation after shell parsing.,manual.invoking.shell-unix,1,null
+  invoking.ascii-output,70,inline-input-example,.,"\"\\u03bc\"",jq -a '.',new,Added an exact input/output case for the source's escaped-mu example.,manual.invoking.ascii-escape,"\"\\u03bc\"\n",null
+  invoking.stream-scalar,96,inline-stream-example,.,"\"a\"",jq --stream '.',new,Added the exact scalar stream example.,manual.invoking.stream-scalar,null,null
+  invoking.stream-nested,96,inline-stream-example,.,"[[],\"a\",[\"b\"]]",jq --stream '.',new,"Added the exact nested stream input/query. The source lists three values, while jq 1.8.1 (and tq) emit two additional terminal-path events; the ledger preserves the source expectation and records the observed output.",manual.invoking.stream-nested,null,null
+  invoking.stream-errors,102,inline-stream-error-example,.,"[\"a\",n]",jq --stream-errors '.',new,"Added the exact invalid-input example; the reference jq build currently says 'Invalid numeric literal' while the source says 'Invalid literal', so the ledger preserves the source text and the case compares normalized values rather than diagnostic wording.",manual.invoking.stream-errors,null,null
+  invoking.arg-string,125,inline-cli-example,$foo,"null",jq --arg foo bar '$foo',new,Added the exact string-valued --arg example.,manual.invoking.arg-string,bar,null
+  invoking.arg-string-number,125,inline-cli-example,$foo,"null",jq --arg foo 123 '$foo',new,Added the exact numeric-looking --arg example to verify that the bound value remains a string.,manual.invoking.arg-string-number,"123",null
+  invoking.argjson,131,inline-cli-example,$foo,"null",jq --argjson foo 123 '$foo',new,Added the exact structured --argjson example.,manual.invoking.argjson,123,null
+  invoking.slurpfile,135,inline-cli-example,$foo,"null",jq --slurpfile foo bar '$foo',new,Representative fixture added for the documented behavior.,manual.invoking.slurpfile,null,null
+  invoking.rawfile,139,inline-cli-example,$foo,"null",jq --rawfile foo bar '$foo',new,Representative fixture added for the documented behavior.,manual.invoking.rawfile,null,null
+  Invoking jq.witness.manual.invoking.whitespace-stream,16,witness,.,"1 true [2]",null,covered,Executable witness for source passage invoking.input-stream-prose.,manual.invoking.whitespace-stream,null,null
+  Invoking jq.witness.manual.invoking.unquoted-filter,25,witness,foo,"",null,covered,Executable witness for source passage invoking.unquoted-foo.,manual.invoking.unquoted-filter,null,null
+  Invoking jq.witness.manual.invoking.user-function,36,witness,"def f: .foo; f","{\"foo\":42}",null,covered,Executable witness for source passage invoking.user-function-prose.,manual.invoking.user-function,null,null
+  Invoking jq.witness.manual.invoking.null-input,40,witness,"[1,2]","",null,covered,Executable witness for source passage invoking.null-input-option.,manual.invoking.null-input,null,null
+  Invoking jq.witness.manual.invoking.raw-input,44,witness,.,"one\ntwo\n",null,covered,Executable witness for source passage invoking.raw-input-option.,manual.invoking.raw-input,null,null
+  Invoking jq.witness.manual.invoking.slurp,48,witness,length,"1\n2\n",null,covered,Executable witness for source passage invoking.slurp-option.,manual.invoking.slurp,null,null
+  Invoking jq.witness.manual.invoking.compact-output,52,witness,.,"{\"a\":1,\"b\":[2]}",null,covered,Executable witness for source passage invoking.compact-output-option.,manual.invoking.compact-output,null,null
+  Invoking jq.witness.manual.invoking.raw-output,56,witness,.,"\"hello\"",null,covered,Executable witness for source passage invoking.raw-output-option.,manual.invoking.raw-output,null,null
+  Invoking jq.witness.manual.invoking.raw-output0,60,witness,"\"a\",\"b\"","",null,covered,Executable witness for source passage invoking.raw-output0-option.,manual.invoking.raw-output0,null,null
+  Invoking jq.witness.manual.invoking.join-output,64,witness,".[]","[\"a\",\"b\"]",null,covered,Executable witness for source passage invoking.join-output-option.,manual.invoking.join-output,null,null
+  Invoking jq.witness.manual.invoking.sort-keys,72,witness,.,"{\"z\":{\"b\":2,\"a\":1},\"a\":0}",null,covered,Executable witness for source passage invoking.sort-keys-option.,manual.invoking.sort-keys,null,null
+  Invoking jq.witness.manual.invoking.monochrome-output,76,witness,.,"{\"z\":1,\"a\":2}",null,covered,Executable witness for source passage invoking.color-option.,manual.invoking.monochrome-output,null,null
+  Invoking jq.witness.manual.invoking.color-output,76,witness,.,"{\"z\":1,\"a\":2}",null,covered,Executable witness for source passage invoking.color-option.,manual.invoking.color-output,null,null
+  Invoking jq.witness.manual.invoking.no-color-forced,78,witness,.,"{\"foo\":1}",null,covered,Executable witness for source passage invoking.no-color.,manual.invoking.no-color-forced,null,null
+  Invoking jq.witness.manual.invoking.jq-colors,80,witness,.,"{\"z\":1,\"a\":2}",null,covered,Executable witness for source passage invoking.jq-colors.,manual.invoking.jq-colors,null,null
+  Invoking jq.witness.manual.invoking.tab-output,82,witness,"{a:{b:1}}","",null,covered,Executable witness for source passage invoking.tab-option.,manual.invoking.tab-output,null,null
+  Invoking jq.witness.manual.invoking.indent-output,86,witness,"{a:{b:1}}","",null,covered,Executable witness for source passage invoking.indent-option.,manual.invoking.indent-output,null,null
+  Invoking jq.witness.manual.invoking.unbuffered,90,witness,.,"1\n2\n",null,covered,Executable witness for source passage invoking.unbuffered-option.,manual.invoking.unbuffered,null,null
+  Invoking jq.witness.manual.invoking.stream-reduce,98,witness,reduce inputs as $event (0; . + 1),"[1,2]",null,covered,Executable witness for source passage invoking.stream-reduce-foreach-prose.,manual.invoking.stream-reduce,null,null
+  Invoking jq.witness.manual.invoking.seq,111,witness,.,null,null,covered,Executable witness for source passage invoking.seq-option.,manual.invoking.seq,null,1e310a1e320a
+  Invoking jq.witness.manual.invoking.from-file,115,witness,.,"{\"foo\":42}",null,covered,Executable witness for source passage invoking.from-file-option.,manual.invoking.from-file,null,null
+  Invoking jq.witness.manual.invoking.library-path,119,witness,"include \"included\"; included_value","",null,covered,Executable witness for source passage invoking.library-path-option.,manual.invoking.library-path,null,null
+  Invoking jq.witness.manual.invoking.args-named,127,witness,"$ARGS.named[\"foo-bar\"]","null",null,covered,Executable witness for source passage invoking.args-named-prose.,manual.invoking.args-named,null,null
+  Invoking jq.witness.manual.invoking.args,141,witness,"$ARGS.positional[]","null",null,covered,Executable witness for source passage invoking.args-option.,manual.invoking.args,null,null
+  Invoking jq.witness.manual.invoking.jsonargs,145,witness,"$ARGS.positional[]","null",null,covered,Executable witness for source passage invoking.jsonargs-option.,manual.invoking.jsonargs,null,null
+  Invoking jq.witness.manual.invoking.exit-false,149,witness,.,"false",null,covered,Executable witness for source passage invoking.exit-status-option.,manual.invoking.exit-false,null,null
+  Invoking jq.witness.manual.invoking.exit-null,149,witness,.,"null",null,covered,Executable witness for source passage invoking.exit-status-option.,manual.invoking.exit-null,null,null
+  Invoking jq.witness.manual.invoking.exit-empty,149,witness,empty,"null",null,covered,Executable witness for source passage invoking.exit-status-option.,manual.invoking.exit-empty,null,null
+  Invoking jq.witness.manual.invoking.exit-true,149,witness,.,"true",null,covered,Executable witness for source passage invoking.exit-status-option.,manual.invoking.exit-true,null,null
+  Invoking jq.witness.manual.invoking.halt-error,153,witness,halt_error(7),"\"failure\"",null,covered,Executable witness for source passage invoking.halt-error-prose.,manual.invoking.halt-error,null,null
+  Invoking jq.witness.manual.invoking.binary-portable,155,witness,.,"\"line\\nnext\"",null,covered,Executable witness for source passage invoking.binary-option.,manual.invoking.binary-portable,null,null
+  Invoking jq.witness.manual.invoking.version,159,witness,"","",null,covered,Executable witness for source passage invoking.version-option.,manual.invoking.version,null,null
+  Invoking jq.witness.manual.invoking.build-configuration,163,witness,"","",null,covered,Executable witness for source passage invoking.build-configuration-option.,manual.invoking.build-configuration,null,null
+  Invoking jq.witness.manual.invoking.help,167,witness,"","",null,covered,Executable witness for source passage invoking.help-option.,manual.invoking.help,null,null
+  Invoking jq.witness.manual.invoking.argument-terminator,171,witness,.,"null",null,covered,Executable witness for source passage invoking.argument-terminator.,manual.invoking.argument-terminator,null,null
+  Invoking jq.witness.manual.invoking.run-tests,175,witness,"","# manual smoke test\n.\nnull\nnull\n\n",null,covered,Executable witness for source passage invoking.run-tests-option.,manual.invoking.run-tests,null,null
+coverage_summary:
+  total_entries: 44
+  new_example_entries: 35
+  case_records: 37
+  non_executable_entries: 22
+  gap_entries: 3
+  fenced_blocks[3]: 21,26,103
+  fenced_blocks_with_case_ids[2]: 26,103
+  fenced_blocks_non_executable[1]: 21
+harness_limitations[5]: The compatibility case schema has one primary fixture only; it cannot provide a separately named pre-query file for --slurpfile or --rawfile.,"The runner now supports adapter trailing_args for --args, --jsonargs, and --; those cases use explicit witnesses because the source descriptions do not provide literal trailing values.","The runner invokes tools directly rather than through Unix, PowerShell, or cmd.exe, so shell-specific quoting examples cannot be reproduced exactly.","The schema has no terminal, platform, or timing fields, so color/NO_COLOR, --binary, and --unbuffered examples are not exact executable cases; raw version/help/build cases are informative only.","The runner now supports omit_query for --help, --version, --build-configuration, and --run-tests; -f still requires a separate filter fixture, which this task does not own."
+coverage_notes[36]{id,source_line,kind,query,input,invocation,disposition,reason,evidence_case_id,expected_output}:
+  invoking.input-stream-prose,16,prose-semantics,.,"1 true [2]",null,new,Representative fixture added for the documented behavior.,manual.invoking.whitespace-stream,null
+  invoking.unquoted-foo,25,inline-cli-snippet,foo,null,jq foo,new,Added the exact unquoted filter invocation; it is expected to fail query compilation.,manual.invoking.unquoted-filter,null
+  invoking.foo-diagnostic,26,fenced-diagnostic,foo,null,jq foo,new,The same compile-error case exercises the fenced diagnostic; exact wording is not used as the cross-tool contract because jq and tq diagnostics differ.,manual.invoking.unquoted-filter,"foo is not\ndefined"
+  invoking.shell-powershell,33,inline-cli-snippet,".[\\\"foo\\\"]","{\"foo\":1}","jq '.[\\\"foo\\\"]' in PowerShell",adapted,Exercises the documented post-shell argv through the shared field-filter case. PowerShell/cmd tokenization is outside this direct-exec harness.,manual.invoking.shell-unix,null
+  invoking.shell-cmd,34,inline-cli-snippet,".[\\\"foo\\\"]","{\"foo\":1}","jq \".[\\\"foo\\\"]\" in cmd.exe",adapted,Exercises the documented post-shell argv through the shared field-filter case. PowerShell/cmd tokenization is outside this direct-exec harness.,manual.invoking.shell-unix,null
+  invoking.user-function-prose,36,prose-semantics,"def f: .foo; f","{\"foo\":42}",null,new,Representative fixture added for the documented behavior.,manual.invoking.user-function,null
+  invoking.null-input-option,40,option-description,null,null,jq --null-input/-n FILTER,new,"The source gives option semantics but no literal FILTER; the new case uses [1,2] as a synthesized executable witness.",manual.invoking.null-input,null
+  invoking.raw-input-option,44,option-description,null,null,jq --raw-input/-R FILTER,new,The source gives option semantics but no literal lines; the new case uses one/two as a synthesized executable witness.,manual.invoking.raw-input,null
+  invoking.slurp-option,48,option-description,null,null,jq --slurp/-s FILTER,new,The source gives option semantics but no literal sequence; the new case uses 1/2 and length as a synthesized executable witness.,manual.invoking.slurp,null
+  invoking.compact-output-option,52,option-description,null,null,jq --compact-output/-c FILTER,new,The source gives formatting semantics but no literal object; the new case uses a synthesized nested object and records raw bytes.,manual.invoking.compact-output,null
+  invoking.raw-output-option,56,option-description,null,null,jq --raw-output/-r FILTER,new,The source gives string-output semantics but no literal value; the new case uses hello as a synthesized executable witness.,manual.invoking.raw-output,null
+  invoking.raw-output0-option,60,option-description,null,null,jq --raw-output0 FILTER,new,The source gives NUL-framing semantics but no literal values; the new case uses a/b as a synthesized executable witness.,manual.invoking.raw-output0,null
+  invoking.join-output-option,64,option-description,null,null,jq --join-output/-j FILTER,new,The source gives separator semantics but no literal values; the new case uses a/b as a synthesized executable witness.,manual.invoking.join-output,null
+  invoking.sort-keys-option,72,option-description,null,null,jq --sort-keys/-S FILTER,new,The source gives key-order semantics but no literal object; the new case uses a synthesized nested object and records raw bytes.,manual.invoking.sort-keys,null
+  invoking.color-option,76,option-description,null,null,jq --color-output/-C or --monochrome-output/-M FILTER,new,The source gives both options but no literal object; new cases use a synthesized object. Raw output is informative because ANSI formatting is tool/environment dependent.,null,null
+  invoking.no-color,78,prose-environment-example,.,"{\"foo\":1}",NO_COLOR=1 jq FILTER,adapted,Tests forced color overriding NO_COLOR under redirected capture; terminal auto-detection requires a PTY.,manual.invoking.no-color-forced,null
+  invoking.jq-colors,80,prose-environment-example,.,"{\"z\":1,\"a\":2}",JQ_COLORS=... jq -C '.',new,The source names JQ_COLORS without a concrete value; the new case uses an explicit synthesized palette and records raw bytes as informative.,manual.invoking.jq-colors,null
+  invoking.tab-option,82,option-description,null,null,jq --tab FILTER,new,The source gives indentation semantics but no literal object; the new case uses a synthesized nested object and records raw bytes.,manual.invoking.tab-output,null
+  invoking.indent-option,86,option-description,null,null,jq --indent n FILTER,new,The source leaves n/filter symbolic; the new case instantiates n=4 with a synthesized nested object and records raw bytes.,manual.invoking.indent-output,null
+  invoking.unbuffered-option,90,option-description,null,null,jq --unbuffered FILTER,new,"The new case exercises the option with synthesized multiple inputs, but the harness can validate only final values, not flush timing.",manual.invoking.unbuffered,null
+  invoking.stream-reduce-foreach-prose,98,prose-capability,reduce inputs as $event (0; . + 1),"[1,2]",null,new,Representative fixture added for the documented behavior.,manual.invoking.stream-reduce,null
+  invoking.stream-errors-fence,103,fenced-stream-error-output,.,"[\"a\",n]",jq --stream-errors '.',new,The fenced output is exercised by the same exact stream-errors case; diagnostic wording remains a documented reference-vs-implementation difference.,manual.invoking.stream-errors,null
+  invoking.seq-option,111,option-description,null,null,jq --seq FILTER,new,The source gives framing semantics but no literal RS/LF fixture; the new case uses a synthesized two-record JSON sequence and records raw bytes.,manual.invoking.seq,null
+  invoking.from-file-option,115,option-description,.,"{\"foo\":42}",jq -f program-file,new,Representative fixture added for the documented behavior.,manual.invoking.from-file,null
+  invoking.library-path-option,119,option-description,null,null,jq -L directory FILTER,new,The source gives no concrete module/directory/filter; the new case uses the repository's explicit module fixture as a synthesized executable witness rather than claiming an exact source command.,manual.invoking.library-path,null
+  invoking.args-named-prose,127,prose-capability,"$ARGS.named[\"foo-bar\"]","null",null,new,Representative fixture added for the documented behavior.,manual.invoking.args-named,null
+  invoking.args-option,141,option-description,null,null,"jq --args '$ARGS.positional[]' ...",new,The source gives the positional-argument contract but no concrete values; the new case uses foo/bar as an explicit executable witness via trailing_args and is not claimed as a literal source invocation.,manual.invoking.args,null
+  invoking.jsonargs-option,145,option-description,null,null,"jq --jsonargs '$ARGS.positional[]' ...",new,"The source gives the positional-JSON contract but no concrete values; the new case uses 1 and {\"a\":2} as explicit executable witnesses via trailing_args and is not claimed as a literal source invocation.",manual.invoking.jsonargs,null
+  invoking.exit-status-option,149,option-description,null,null,jq --exit-status/-e FILTER,new,"The source gives four status rules but no literal FILTER/input pairs; new cases instantiate false, null, empty, and true as executable witnesses.",null,null
+  invoking.halt-error-prose,153,prose-capability,halt_error(7),"\"failure\"",null,new,Representative fixture added for the documented behavior.,manual.invoking.halt-error,null
+  invoking.binary-option,155,option-description,.,"\"line\\nnext\"",jq --binary/-b FILTER,adapted,Tests flag acceptance and output on this host; Windows CRLF translation requires a Windows runner.,manual.invoking.binary-portable,null
+  invoking.version-option,159,option-description,null,null,jq --version/-V,new,The new omit_query case executes the exact option; raw output is informative because the source gives no expected version string and tq/jq versions differ.,manual.invoking.version,null
+  invoking.build-configuration-option,163,option-description,null,null,jq --build-configuration,new,The new omit_query case executes the exact option; raw output is informative because the source explicitly says its structure may change.,manual.invoking.build-configuration,null
+  invoking.help-option,167,option-description,null,null,jq --help/-h,new,The new omit_query case executes the exact --help option; raw output is informative because help text is version/build dependent and the source supplies no expected text.,manual.invoking.help,null
+  invoking.argument-terminator,171,option-description,null,null,jq -- ...,new,The source supplies no trailing value; the new case executes -- before the filter as an explicit option-termination witness.,manual.invoking.argument-terminator,null
+  invoking.run-tests-option,175,option-description,null,jq --run-tests test-file grammar,"jq --run-tests [filename]",new,The new omit_query/stdin case executes the documented run-tests mode with a minimal concrete grammar witness; tq is deliberately marked supported so an unsupported-capability observation is exposed.,manual.invoking.run-tests,null
+coverage_evidence[6]{note_id,case_id}:
+  invoking.color-option,manual.invoking.monochrome-output
+  invoking.color-option,manual.invoking.color-output
+  invoking.exit-status-option,manual.invoking.exit-false
+  invoking.exit-status-option,manual.invoking.exit-null
+  invoking.exit-status-option,manual.invoking.exit-empty
+  invoking.exit-status-option,manual.invoking.exit-true
+source_values[7]:
+  - entry_id: invoking.stream-scalar
+    field: expected_output
+    value[2]:
+      - [0]:
+      - a
+  - entry_id: invoking.stream-nested
+    field: expected_output
+    value[3]:
+      - [2]:
+        - [1]: 0
+        - [0]:
+      - [2]:
+        - [1]: 1
+        - a
+      - [2]:
+        - [2]: 2,0
+        - b
+  - entry_id: invoking.stream-nested
+    field: observed_output
+    value[5]:
+      - [2]:
+        - [1]: 0
+        - [0]:
+      - [2]:
+        - [1]: 1
+        - a
+      - [2]:
+        - [2]: 2,0
+        - b
+      - [1]:
+        - [2]: 2,0
+      - [1]:
+        - [1]: 2
+  - entry_id: invoking.stream-errors
+    field: expected_output
+    value[2]:
+      - "Invalid literal at line 1,\n  column 7"
+      - [1]: 1
+  - entry_id: invoking.stream-errors
+    field: observed_output
+    value[2]:
+      - [2]:
+        - [1]: 0
+        - a
+      - [2]:
+        - "Invalid numeric literal at line 1, column 7"
+        - [1]: 1
+  - entry_id: invoking.stream-errors-fence
+    field: expected_output
+    value[2]:
+      - "Invalid literal at line 1,\n  column 7"
+      - [1]: 1
+  - entry_id: invoking.stream-errors-fence
+    field: observed_output
+    value[2]:
+      - [2]:
+        - [1]: 0
+        - a
+      - [2]:
+        - "Invalid numeric literal at line 1, column 7"
+        - [1]: 1

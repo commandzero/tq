@@ -1,0 +1,838 @@
+[9]:
+  - case_id: manual.audit.math.exp-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only x86_64 GNU/Linux exp(1), 1 binary64 ULP from pinned jq/glibc. Safe libm 0.2.16 is retained without FFI. The 92-input CLI probe observed at most 1 ULP for exp, not a global bound. Exponential results may differ in the last bit. Reconsider after implementation when dependencies, target, reference/runtime identities, or observations change."
+    evidence:
+      case_fingerprint: 47de0b88d21a990b49f7f0e2f4dbd97f553e3019fe1f2b70547efc01b1d9c4c5
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 2.718281828459045
+        stdout_hex: 322e3731383238313832383435393034350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 2.7182818284590455
+        stdout_hex: 322e373138323831383238343539303435350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 2.7182818284590455
+        stdout_hex: "322e37313832383138323834353930343535"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 2.718281828459045
+        stdout_hex: 322e3731383238313832383435393034350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 2.7182818284590455
+        stdout_hex: 322e373138323831383238343539303435350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.audit.math.integer-scale-boundary
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only this x86_64 GNU/Linux five-result ldexp/scalbln boundary witness. tq uses deterministic safe saturating exponent conversion and maps NaN to zero, instead of reproducing the C wrapper's out-of-range floating-to-integer conversion. This is not rounding: oversized and NaN exponents can produce finite maximum or 2 where this jq produces zero. Such scripts are not interchangeable. In-range finite exponents remain exact obligations. Reconsider after implementation if a portable defined contract or safe-library conversion justifies a change, and remeasure on changed targets/references."
+    evidence:
+      case_fingerprint: e7cc17634f85747b5a15fd17cff3304f171eb013a75d2c51f137dc407e32e8f3
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 0,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,0,0
+        stdout_hex: 5b0a2020302c0a2020312e37393736393331333438363233313537652b3330382c0a2020302c0a2020302c0a2020300a5d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,2,2
+        stdout_hex: 5b0a2020312e37393736393331333438363233313537652b3330382c0a2020312e37393736393331333438363233313537652b3330382c0a2020302c0a2020322c0a2020320a5d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,2,2
+        stdout_hex: 5b355d3a20312e37393736393331333438363233313537652b3330382c312e37393736393331333438363233313537652b3330382c302c322c32
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 0,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,0,0
+        stdout_hex: 5b302c312e37393736393331333438363233313537652b3330382c302c302c305d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,2,2
+        stdout_hex: 5b312e37393736393331333438363233313537652b3330382c312e37393736393331333438363233313537652b3330382c302c322c325d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.audit.math.tgamma-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only x86_64 GNU/Linux tgamma(0.5), 1 binary64 ULP from pinned jq/glibc. Safe libm 0.2.16 is retained without FFI. The 92-input CLI probe observed at most 2 ULP for tgamma, not a global bound or threshold. Gamma-function results may differ in the last bits. Reconsider after implementation when dependencies, target, reference/runtime identities, or observations change."
+    evidence:
+      case_fingerprint: 09e9b15fc57e248fc8c6056faebfb2ec1efe2464f3f1418a984ed0b4b7808ea2
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.772453850905516
+        stdout_hex: 312e3737323435333835303930353531360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: "312e37373234353338353039303535313539"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.772453850905516
+        stdout_hex: 312e3737323435333835303930353531360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.math.y0
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only x86_64 GNU/Linux y0(1), 1 binary64 ULP from pinned jq/glibc. Safe libm 0.2.16 is retained without FFI. The 92-input CLI probe includes 13 y0 inputs with at most 1 ULP observed, not a global bound. Bessel-function results may differ in the last bit. Reconsider after implementation when dependencies, target, reference/runtime identities, or observations change."
+    evidence:
+      case_fingerprint: a91bb76cd297827d6b2f93cb64f751f6338fe97735c30a2b0a46edad25d6bbf4
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: "302e3038383235363936343231353637363937"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.math.yn
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only x86_64 GNU/Linux yn(0;1), 1 binary64 ULP from pinned jq/glibc. Safe libm 0.2.16 is retained without FFI. The 92-input CLI probe includes 13 order-zero yn inputs with at most 1 ULP observed; no other order/input is approved. Bessel-function results may differ in the last bit. Reconsider after implementation when dependencies, target, reference/runtime identities, or observations change."
+    evidence:
+      case_fingerprint: 2ddcb025c3f91d689db8eac1926c65ded83782838e7c1877cdcb9a8ab52c0e6f
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: "302e3038383235363936343231353637363937"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.regex.flag-l
+    contract: result-sequence
+    difference_summary: "result sequence, exit code, error class"
+    rationale: "Primary review: accept only this x86_64 GNU/Linux longest-match witness as an explicit fancy-regex 0.19.1 restriction. tq rejects the l flag with the recorded diagnostic/status rather than returning an incorrect first-alternative match. Scripts requiring longest matching cannot substitute tq. Reconsider after implementation when a safe Rust library provides longest matching with captures and bounded work; no other regex behavior is exempt."
+    evidence:
+      case_fingerprint: 5c063226233dbf1942cdaf91e2e6eeb6431ff3bd3bf7ac0ff9e42aa14c08871c
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - offset: 0
+            length: 2
+            string: ab
+            captures[0]:
+        stdout_hex: 7b0a2020226f6666736574223a20302c0a2020226c656e677468223a20322c0a202022737472696e67223a20226162222c0a2020226361707475726573223a205b5d0a7d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[0]:
+        stdout_hex: ""
+        raw_stdout_hex: null
+        stderr_hex: 74713a2062797465636f6465206f7065726174696f6e206973206e6f742065786563757461626c6520696e2074686973206c616e677561676520776176653a20726567657820666c616720276c2720286c6f6e676573742d6d61746368206d6f6465290a
+        process_status: exited
+        exit_code: 2
+        error_class: cli-usage
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[0]:
+        stdout_hex: ""
+        raw_stdout_hex: null
+        stderr_hex: 74713a2062797465636f6465206f7065726174696f6e206973206e6f742065786563757461626c6520696e2074686973206c616e677561676520776176653a20726567657820666c616720276c2720286c6f6e676573742d6d61746368206d6f6465290a
+        process_status: exited
+        exit_code: 2
+        error_class: cli-usage
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - offset: 0
+            length: 2
+            string: ab
+            captures[0]:
+        stdout_hex: 7b226f6666736574223a302c226c656e677468223a322c22737472696e67223a226162222c226361707475726573223a5b5d7d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[0]:
+        stdout_hex: ""
+        raw_stdout_hex: null
+        stderr_hex: 74713a2062797465636f6465206f7065726174696f6e206973206e6f742065786563757461626c6520696e2074686973206c616e677561676520776176653a20726567657820666c616720276c2720286c6f6e676573742d6d61746368206d6f6465290a
+        process_status: exited
+        exit_code: 2
+        error_class: cli-usage
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,"result sequence, exit code, error class"
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,"result sequence, exit code, error class"
+  - case_id: manual.composition.arity.scalbln.2
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the called-definition wrapper around the same five ldexp/scalbln boundary expressions. Its jq/tq JSON, TOON, compact output, statuses, and diagnostics are identical to manual.audit.math.integer-scale-boundary in this final native campaign. This separately fingerprinted approval does not waive other composed calls. accept only this x86_64 GNU/Linux five-result ldexp/scalbln boundary witness. tq uses deterministic safe saturating exponent conversion and maps NaN to zero, instead of reproducing the C wrapper's out-of-range floating-to-integer conversion. This is not rounding: oversized and NaN exponents can produce finite maximum or 2 where this jq produces zero. Such scripts are not interchangeable. In-range finite exponents remain exact obligations. Reconsider after implementation if a portable defined contract or safe-library conversion justifies a change, and remeasure on changed targets/references."
+    evidence:
+      case_fingerprint: 9bc92e2efd9e43846a03e11885a699c21edba4e0a233413973626504559e7502
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 0,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,0,0
+        stdout_hex: 5b0a2020302c0a2020312e37393736393331333438363233313537652b3330382c0a2020302c0a2020302c0a2020300a5d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,2,2
+        stdout_hex: 5b0a2020312e37393736393331333438363233313537652b3330382c0a2020312e37393736393331333438363233313537652b3330382c0a2020302c0a2020322c0a2020320a5d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,2,2
+        stdout_hex: 5b355d3a20312e37393736393331333438363233313537652b3330382c312e37393736393331333438363233313537652b3330382c302c322c32
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 0,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,0,0
+        stdout_hex: 5b302c312e37393736393331333438363233313537652b3330382c302c302c305d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]:
+          - [5]: 179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,0,2,2
+        stdout_hex: 5b312e37393736393331333438363233313537652b3330382c312e37393736393331333438363233313537652b3330382c302c322c325d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.composition.arity.y0.0
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the called-definition y0(1) witness. Its jq/tq JSON, TOON, compact output, statuses, and diagnostics are identical to manual.math.y0 in this final native campaign. This separately fingerprinted approval does not waive other composed calls. accept only x86_64 GNU/Linux y0(1), 1 binary64 ULP from pinned jq/glibc. Safe libm 0.2.16 is retained without FFI. The 92-input CLI probe includes 13 y0 inputs with at most 1 ULP observed, not a global bound. Bessel-function results may differ in the last bit. Reconsider after implementation when dependencies, target, reference/runtime identities, or observations change."
+    evidence:
+      case_fingerprint: a7e7041eccb763936cac1b4743104950e37cc64c473ea68db8337f9f16d31e36
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: "302e3038383235363936343231353637363937"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.composition.arity.yn.2
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the called-definition yn(0;1) witness. Its jq/tq JSON, TOON, compact output, statuses, and diagnostics are identical to manual.math.yn in this final native campaign. This separately fingerprinted approval does not waive other composed calls. accept only x86_64 GNU/Linux yn(0;1), 1 binary64 ULP from pinned jq/glibc. Safe libm 0.2.16 is retained without FFI. The 92-input CLI probe includes 13 order-zero yn inputs with at most 1 ULP observed; no other order/input is approved. Bessel-function results may differ in the last bit. Reconsider after implementation when dependencies, target, reference/runtime identities, or observations change."
+    evidence:
+      case_fingerprint: 102506438ae1c42c30ed2177e050aeb01246c842db62a9728b1ea184c8f94d10
+      reference_identity:
+        tool: jq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/reference-build/jq/jq
+          bytes: 36200
+          sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+        build_features[1]: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
+        runtime_libraries[5]{path,bytes,sha256}:
+          /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
+          /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
+          /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
+          /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
+          /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+      target_identity:
+        tool: tq
+        path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /var/tmp/tq-linux-review-20260909-bind-final.05kHJF/source/target/release/tq
+          bytes: 19292008
+          sha256: fda6cb6843aedeac9d9777b48d23a44a3a283c86e5a5f5c0b7fb36d98b07b74f
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: "302e3038383235363936343231353637363937"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
