@@ -159,7 +159,9 @@ pub struct MeasurementProtocol {
     pub exit_poll_interval_micros: u64,
     /// Optional process-group RSS enforcement sampling interval.
     pub rss_poll_interval_micros: Option<u64>,
-    /// Host-validated timing accuracy, unavailable until calibrated.
+    /// Legacy wire field containing observed known-duration control excess;
+    /// the field name is retained for compatibility and does not claim timer
+    /// error or universal accuracy.
     pub validated_accuracy_micros: Option<u64>,
     /// Identity of the worker and collector that launched the target.
     #[serde(default)]
@@ -395,7 +397,7 @@ impl BenchmarkCampaignReport {
                     };
                     if !protocol.is_valid_for_comparison() {
                         return Err(format!(
-                            "{} {} {family} sample requires positive validated timing accuracy plus calibrated worker, lifetime-scope, and launch-isolation evidence",
+                            "{} {} {family} sample requires positive observed control excess plus calibrated worker, lifetime-scope, and launch-isolation evidence",
                             row.case_id, row.adapter_id
                         ));
                     }
@@ -630,6 +632,9 @@ fn report_comparability(
     if left.environment.machine_identity != right.environment.machine_identity {
         reasons.push("machine identity differs".to_owned());
     }
+    if left.environment.os != right.environment.os {
+        reasons.push("operating system differs".to_owned());
+    }
     if !corpus_identities_match(&left.corpus, &right.corpus) {
         reasons.push("corpus identity differs".to_owned());
     }
@@ -658,7 +663,7 @@ fn report_comparability(
         .iter()
         .any(|report| has_unvalidated_native_timing(report))
     {
-        reasons.push("native timing precision is unvalidated".to_owned());
+        reasons.push("native timing controls are unvalidated".to_owned());
     }
     if [left, right]
         .iter()
@@ -906,7 +911,7 @@ pub fn evaluate_regression(
             comparability.reasons.into_iter().partition(|reason| {
                 reason == "measurement protocol or RSS provenance differs"
                     || reason.contains("invalid instrumented evidence")
-                    || reason.contains("native timing precision is unvalidated")
+                    || reason.contains("native timing controls are unvalidated")
                     || reason.contains("unverified RSS provenance is present")
             });
         return RegressionGate {

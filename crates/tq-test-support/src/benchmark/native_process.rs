@@ -19,6 +19,36 @@ use wait4::{ResUse, Wait4 as _};
 pub(super) const EXIT_POLL: Duration = Duration::from_micros(100);
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Wait for a bounded polling interval without using macOS's relative
+/// `nanosleep` path, which asserted on `EINVAL` during a campaign run.
+///
+/// Poll callers use fixed, short durations that fit the monotonic clock. The
+/// deadline check also prevents a preexisting `unpark` token from shortening
+/// the requested interval.
+pub(super) fn poll_delay(delay: Duration) {
+    #[cfg(target_os = "macos")]
+    {
+        if delay.is_zero() {
+            return;
+        }
+        let deadline = Instant::now()
+            .checked_add(delay)
+            .expect("bounded polling delay fits monotonic clock");
+        loop {
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return;
+            };
+            if remaining.is_zero() {
+                return;
+            }
+            thread::park_timeout(remaining);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    thread::sleep(delay);
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ProcessGroupOwnership {
     /// This owner may signal and verify the target's dedicated process group.
@@ -214,7 +244,7 @@ impl NativeChild {
                         io::Error::new(io::ErrorKind::TimedOut, "child did not exit after SIGKILL")
                     }));
                 }
-                thread::sleep(EXIT_POLL);
+                poll_delay(EXIT_POLL);
             }
         }
         let cleanup_result = self.ensure_group_cleanup();
@@ -311,7 +341,7 @@ impl NativeChild {
                     }
                 }
             }
-            thread::sleep(EXIT_POLL);
+            poll_delay(EXIT_POLL);
         }
     }
 
@@ -451,6 +481,47 @@ mod tests {
             assert!(Instant::now() < deadline, "process {pid} remained alive");
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn poll_delay_reaches_deadline_after_preexisting_unpark() {
+        thread::current().unpark();
+        let delay = Duration::from_millis(20);
+        let started = Instant::now();
+
+        super::poll_delay(delay);
+
+        let elapsed = started.elapsed();
+        assert!(elapsed >= delay, "poll delay returned early: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "poll delay exceeded bound: {elapsed:?}"
+        );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn poll_delay_zero_returns_immediately() {
+        let started = Instant::now();
+        super::poll_delay(Duration::ZERO);
+        assert!(started.elapsed() < Duration::from_millis(100));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn poll_delay_completes_within_bounded_interval() {
+        let delay = Duration::from_millis(20);
+        let started = Instant::now();
+
+        super::poll_delay(delay);
+
+        let elapsed = started.elapsed();
+        assert!(elapsed >= delay, "poll delay returned early: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "poll delay exceeded bound: {elapsed:?}"
+        );
     }
 
     #[test]

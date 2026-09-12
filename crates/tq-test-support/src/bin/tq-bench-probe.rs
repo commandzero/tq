@@ -8,7 +8,7 @@ use std::{
     io::{self, Write as _},
     process::{Command, ExitCode, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use tq_test_support::benchmark::run_allocation_probe;
@@ -91,12 +91,8 @@ fn run_mode(mode: &str, arguments: &mut impl Iterator<Item = String>) -> Result<
             ensure_no_arguments(arguments)?;
             waited_allocation_child(bytes)
         }
-        "sleep" | "sleep-ms" | "duration" | "known-duration" | "descendant-child" => {
-            let millis = parse_millis(arguments.next())?;
-            ensure_no_arguments(arguments)?;
-            thread::sleep(Duration::from_millis(millis));
-            Ok(ExitCode::SUCCESS)
-        }
+        "sleep" | "sleep-ms" | "duration" | "known-duration" | "descendant-child"
+        | "busy-duration" => duration_probe(mode, arguments),
         "args" | "literal-args" | "literal" => write_literal_arguments(arguments),
         "stdin-echo" | "echo-stdin" | "stdin" | "echo" => echo_stdin(arguments),
         "exit" => {
@@ -379,6 +375,28 @@ fn parse_bytes(value: Option<String>, label: &str) -> Result<usize, String> {
     parse_number(value, label).and_then(|number| {
         usize::try_from(number).map_err(|_| format!("{label} does not fit in usize: {number}"))
     })
+}
+
+fn duration_probe(
+    mode: &str,
+    arguments: &mut impl Iterator<Item = String>,
+) -> Result<ExitCode, String> {
+    let millis = parse_millis(arguments.next())?;
+    ensure_no_arguments(arguments)?;
+    if mode != "busy-duration" {
+        thread::sleep(Duration::from_millis(millis));
+        return Ok(ExitCode::SUCCESS);
+    }
+    let started = Instant::now();
+    let deadline = started
+        .checked_add(Duration::from_millis(millis))
+        .ok_or_else(|| "busy duration deadline overflowed".to_owned())?;
+    while Instant::now() < deadline {
+        std::hint::spin_loop();
+    }
+    let elapsed_micros = started.elapsed().as_micros();
+    println!("tq-bench-probe busy-duration elapsed-micros={elapsed_micros}");
+    Ok(ExitCode::SUCCESS)
 }
 
 fn parse_count(value: Option<String>, label: &str) -> Result<usize, String> {

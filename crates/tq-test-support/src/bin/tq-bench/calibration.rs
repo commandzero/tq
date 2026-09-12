@@ -1,6 +1,11 @@
 //! Attach retained native control evidence without claiming clock-resolution accuracy.
 
-use std::{fmt::Write as _, fs, path::Path};
+use std::{
+    env,
+    fmt::Write as _,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
@@ -8,6 +13,8 @@ use tq_test_support::benchmark::{
     LaunchIsolationEvidence, MeasurementProtocol, WorkerIdentity, collect_environment,
     collector_source_sha256,
 };
+
+const WORKER_PROTOCOL: &str = "tq-bench-worker-protocol-v3";
 
 #[derive(Deserialize)]
 struct Summary {
@@ -18,6 +25,7 @@ struct Summary {
     allocation_delta_checks: Vec<AllocationDeltaCheck>,
     short_burst_check: ShortBurstCheck,
     worker_isolation: Option<WorkerIsolationEvidence>,
+    worker_control_measurement_protocol: Option<MeasurementProtocol>,
     validation_failures: Vec<String>,
     cases: Vec<Control>,
 }
@@ -103,19 +111,40 @@ impl TimingCalibration {
             return Err("timing calibration requires a release-built campaign driver".to_owned());
         }
         let bytes = fs::read(path).map_err(|error| format!("read timing calibration: {error}"))?;
-        Self::from_bytes(
+        let worker = current_worker_identity()?;
+        Self::from_bytes_with_worker(
             &bytes,
             &collect_environment("native-validation").machine_identity,
             &collector_source_sha256(),
+            Some(&worker),
         )
     }
 
+    #[cfg(test)]
     fn from_bytes(bytes: &[u8], machine: &str, collector: &str) -> Result<Vec<Self>, String> {
+        Self::from_bytes_with_worker(bytes, machine, collector, None)
+    }
+
+    fn from_bytes_with_worker(
+        bytes: &[u8],
+        machine: &str,
+        collector: &str,
+        expected_worker: Option<&WorkerIdentity>,
+    ) -> Result<Vec<Self>, String> {
         let summary: Summary = serde_json::from_slice(bytes)
             .map_err(|error| format!("invalid timing calibration summary: {error}"))?;
         std::iter::once(&summary.calibration_linkage)
             .chain(summary.sampler_calibration_linkage.as_ref())
-            .map(|linkage| Self::from_linkage(&summary, linkage, bytes, machine, collector))
+            .map(|linkage| {
+                Self::from_linkage(
+                    &summary,
+                    linkage,
+                    bytes,
+                    machine,
+                    collector,
+                    expected_worker,
+                )
+            })
             .collect()
     }
 
@@ -125,6 +154,7 @@ impl TimingCalibration {
         bytes: &[u8],
         machine: &str,
         collector: &str,
+        expected_worker: Option<&WorkerIdentity>,
     ) -> Result<Self, String> {
         if !summary.validation_failures.is_empty()
             || linkage.status != "verified"
@@ -141,7 +171,7 @@ impl TimingCalibration {
         if linkage.runner_build_profile != "release" {
             return Err("timing calibration must use the release collector".to_owned());
         }
-        let protocol = worker_calibration_protocol(summary, linkage, bytes)?;
+        let protocol = worker_calibration_protocol(summary, linkage, bytes, expected_worker)?;
         if !summary
             .noop_isolation
             .as_ref()
@@ -201,17 +231,21 @@ impl TimingCalibration {
             if name != "noop" {
                 observed_bound =
                     observed_bound.max(control.native_duration_error_bound_micros.ok_or_else(
-                        || format!("timing calibration {name} lacks a control bound"),
+                        || format!("timing calibration {name} lacks observed control excess"),
                     )?);
             }
         }
         if observed_bound == 0
             || linkage.conservative_observed_duration_error_bound_micros != Some(observed_bound)
         {
-            return Err("timing calibration bound does not match retained controls".to_owned());
+            return Err(
+                "timing calibration observed control excess does not match retained controls"
+                    .to_owned(),
+            );
         }
-        let observed_bound_micros = u64::try_from(observed_bound)
-            .map_err(|_| "timing calibration bound overflows report units".to_owned())?;
+        let observed_bound_micros = u64::try_from(observed_bound).map_err(|_| {
+            "timing calibration observed control excess overflows report units".to_owned()
+        })?;
         let summary_sha256 = summary_sha256(bytes);
         Ok(Self {
             protocol,
@@ -254,6 +288,7 @@ fn worker_calibration_protocol(
     summary: &Summary,
     linkage: &Linkage,
     bytes: &[u8],
+    expected_worker: Option<&WorkerIdentity>,
 ) -> Result<MeasurementProtocol, String> {
     let worker_isolation = summary
         .worker_isolation
@@ -269,7 +304,16 @@ fn worker_calibration_protocol(
         .isolation_evidence
         .as_ref()
         .ok_or_else(|| "timing calibration lacks launch-isolation evidence".to_owned())?;
-    if !worker_is_valid(worker, &linkage.collector_source_sha256) || !isolation_is_valid(isolation)
+    let worker_control_protocol = summary
+        .worker_control_measurement_protocol
+        .as_ref()
+        .ok_or_else(|| "timing calibration lacks worker control protocol".to_owned())?;
+    let primary_protocol = &summary.calibration_linkage.measurement_protocol;
+    if !worker_is_valid(worker, &linkage.collector_source_sha256)
+        || expected_worker.is_some_and(|expected| expected != worker)
+        || worker_control_protocol.worker.as_ref() != Some(worker)
+        || !same_raw_launch_contract(primary_protocol, worker_control_protocol)
+        || !isolation_is_valid(isolation)
     {
         return Err(
             "timing calibration has invalid worker identity or isolation evidence".to_owned(),
@@ -312,6 +356,59 @@ fn worker_calibration_protocol(
     // contains itself. Resolve it from the retained summary bytes here.
     evidence.summary_sha256 = summary_sha256(bytes);
     Ok(protocol)
+}
+
+/// Returns the exact worker identity that the campaign driver will launch.
+///
+/// Calibration is loaded before the first measured workload, so comparing the
+/// retained executable digest here prevents an old worker beside a newly built
+/// driver from authorizing native samples. Keep the lookup in lockstep with the
+/// worker's own launch lookup: an explicit `TQ_BENCH_WORKER` wins, followed by
+/// the normal target directory and its parent (for integration-test layouts).
+fn current_worker_identity() -> Result<WorkerIdentity, String> {
+    let path = if let Some(path) = env::var_os("TQ_BENCH_WORKER") {
+        let path = PathBuf::from(path);
+        if !path.is_file() {
+            return Err(format!("TQ_BENCH_WORKER is not a file: {}", path.display()));
+        }
+        path
+    } else {
+        let current = env::current_exe()
+            .map_err(|error| format!("locate campaign driver for worker identity: {error}"))?;
+        let directory = current
+            .parent()
+            .ok_or_else(|| "campaign driver has no parent directory".to_owned())?;
+        let direct = directory.join("tq-bench-worker");
+        if direct.is_file() {
+            direct
+        } else {
+            let target = directory
+                .parent()
+                .ok_or_else(|| "worker test executable has no target directory".to_owned())?;
+            let sibling = target.join("tq-bench-worker");
+            if sibling.is_file() {
+                sibling
+            } else {
+                return Err(
+                    "tq-bench-worker was not found beside the current target directory".to_owned(),
+                );
+            }
+        }
+    };
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("read worker executable {}: {error}", path.display()))?;
+    let executable_sha256 =
+        Sha256::digest(bytes)
+            .iter()
+            .fold(String::with_capacity(64), |mut hex, byte| {
+                write!(hex, "{byte:02x}").expect("write worker digest");
+                hex
+            });
+    Ok(WorkerIdentity {
+        executable_sha256,
+        launch_protocol: WORKER_PROTOCOL.to_owned(),
+        collector_source_sha256: collector_source_sha256(),
+    })
 }
 
 fn worker_is_valid(worker: &WorkerIdentity, collector_source: &str) -> bool {
@@ -427,6 +524,7 @@ fn rss_comparison_tolerance(native_rss: u64, independent_rss: u64, page_size: u6
 #[cfg(test)]
 mod tests {
     use super::TimingCalibration;
+    use tq_test_support::benchmark::WorkerIdentity;
 
     fn summary() -> serde_json::Value {
         serde_json::json!({
@@ -440,7 +538,7 @@ mod tests {
                     "validated_accuracy_micros": null,
                     "worker": {
                         "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "launch_protocol": "worker-v1",
+                        "launch_protocol": "tq-bench-worker-protocol-v3",
                         "collector_source_sha256": "collector"
                     },
                     "isolation_evidence": {
@@ -503,6 +601,17 @@ mod tests {
                 "independent_time_repetitions": 20,
                 "independent_time_verified": true
             },
+            "worker_control_measurement_protocol": {
+                "timing_method": "native", "input_delivery": "file", "rss_scope": "child",
+                "exit_poll_interval_micros": 100, "rss_poll_interval_micros": null,
+                "validated_accuracy_micros": null,
+                "worker": {
+                    "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "launch_protocol": "tq-bench-worker-protocol-v3",
+                    "collector_source_sha256": "collector"
+                },
+                "isolation_evidence": null
+            },
             "validation_failures": [],
             "cases": [
                 {"case": "noop", "repetitions": 20, "rss_comparisons_within_tolerance": 20, "cpu_comparisons_within_tolerance": 20},
@@ -516,6 +625,21 @@ mod tests {
     fn load(value: &serde_json::Value) -> Result<TimingCalibration, String> {
         TimingCalibration::from_bytes(&serde_json::to_vec(value).unwrap(), "host", "collector")
             .map(|mut calibrations| calibrations.remove(0))
+    }
+
+    fn load_with_worker(value: &serde_json::Value) -> Result<TimingCalibration, String> {
+        let worker = WorkerIdentity {
+            executable_sha256: "a".repeat(64),
+            launch_protocol: "tq-bench-worker-protocol-v3".to_owned(),
+            collector_source_sha256: "collector".to_owned(),
+        };
+        TimingCalibration::from_bytes_with_worker(
+            &serde_json::to_vec(value).unwrap(),
+            "host",
+            "collector",
+            Some(&worker),
+        )
+        .map(|mut calibrations| calibrations.remove(0))
     }
 
     #[test]
@@ -576,6 +700,17 @@ mod tests {
         value["calibration_linkage"]["conservative_observed_duration_error_bound_micros"] =
             1.into();
         assert!(load(&value).is_err());
+    }
+
+    #[test]
+    fn missing_control_excess_uses_observed_language() {
+        let mut value = summary();
+        value["cases"][1]["native_duration_error_bound_micros"] = serde_json::Value::Null;
+        let Err(error) = load(&value) else {
+            panic!("missing control excess was accepted");
+        };
+        assert!(error.contains("lacks observed control excess"));
+        assert!(!error.contains("error bound"));
     }
 
     #[test]
@@ -675,6 +810,34 @@ mod tests {
         value["calibration_linkage"]["measurement_protocol"]["worker"]["launch_protocol"] =
             "".into();
         assert!(load(&value).is_err());
+    }
+
+    #[test]
+    fn stale_worker_identity_cannot_authorize_calibration() {
+        let calibration = load_with_worker(&summary()).unwrap();
+        assert_eq!(calibration.observed_bound_micros, 3000);
+
+        let mut value = summary();
+        value["calibration_linkage"]["measurement_protocol"]["worker"]["executable_sha256"] =
+            "b".repeat(64).into();
+        assert!(load_with_worker(&value).is_err());
+
+        let mut value = summary();
+        value["calibration_linkage"]["measurement_protocol"]["worker"]["launch_protocol"] =
+            "tq-bench-worker-protocol-v1".into();
+        assert!(load_with_worker(&value).is_err());
+    }
+
+    #[test]
+    fn worker_control_protocol_must_match_calibration_worker() {
+        let mut value = summary();
+        value["worker_control_measurement_protocol"]["worker"]["executable_sha256"] =
+            "b".repeat(64).into();
+        assert!(load_with_worker(&value).is_err());
+
+        let mut value = summary();
+        value["worker_control_measurement_protocol"]["input_delivery"] = "pipe".into();
+        assert!(load_with_worker(&value).is_err());
     }
 
     #[test]

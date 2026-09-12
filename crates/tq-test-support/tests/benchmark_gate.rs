@@ -494,10 +494,21 @@ fn candidate_measurement_infrastructure_failure_aborts_before_gate_decision() {
         &measured,
         &reference(),
     );
-    assert!(matches!(
-        result,
-        Err(BenchmarkRunnerError::Measure(MeasureError::Io(_)))
-    ));
+    let Err(BenchmarkRunnerError::Measure(MeasureError::Collection {
+        source,
+        stdout_path,
+        stderr_path,
+        ..
+    })) = result
+    else {
+        panic!("missing working directory must abort as a collection failure");
+    };
+    assert!(matches!(source.as_ref(), MeasureError::Io(_)));
+    assert!(source.to_string().contains("isolated worker target failed"));
+    assert!(stdout_path.exists());
+    assert!(stderr_path.exists());
+    let _ = fs::remove_file(stdout_path);
+    let _ = fs::remove_file(stderr_path);
 }
 
 fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {

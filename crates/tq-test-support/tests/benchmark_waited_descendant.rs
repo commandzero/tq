@@ -44,7 +44,7 @@ mod native {
         ));
         assert_eq!(
             waited.measurement_protocol.rss_scope,
-            "wait4-child-including-waited-descendants-and-threads"
+            "wait4-child-lifetime-including-pre-exec-waited-descendants-and-threads"
         );
 
         let no_op_rss = no_op.peak_rss_bytes.expect("no-op RSS");

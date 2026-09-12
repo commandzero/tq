@@ -1,8 +1,9 @@
 //! Explicit native-accounting validation on macOS and Linux.
 //!
 //! This is an ignored, evidence-producing test rather than a campaign. It
-//! runs the same Rust probe through `measure_process` and through the host's
-//! `/usr/bin/time`, then keeps the native result, raw time output, and derived
+//! runs the same Rust probe through the worker-backed native collector and
+//! through the host's `/usr/bin/time` independent control, then keeps the native
+//! result, raw control output, and derived
 //! summaries under one run directory. The test is intentionally opt-in: it
 //! must never make an ordinary workspace test depend on native permissions or
 //! on the availability of BSD/GNU time.
@@ -15,8 +16,9 @@
 //!   --ignored --exact native_accounting_validation_writes_retained_evidence --nocapture
 //! ```
 //!
-//! The test selects BSD `time -l` on macOS and GNU `time -v` on Linux. Use an
-//! output directory on durable storage when retaining evidence for review.
+//! The test selects BSD `time -l` on macOS and GNU `time -v` on Linux only as
+//! independent validation controls. Use an output directory on durable storage
+//! when retaining evidence for review.
 //! `TQ_NATIVE_VALIDATION_REPETITIONS` may increase the default 20 samples, but
 //! values below 20 are rejected.
 
@@ -34,13 +36,13 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use tempfile::NamedTempFile;
 use tq_test_support::benchmark::{
-    BenchmarkInvocation, EnvironmentManifest, MeasuredOutcome, MeasuredStatus, MeasurementProtocol,
-    RssProvenance, collect_environment, collector_source_sha256, measure_process,
-    measure_process_uninstrumented, measure_process_worker,
+    BenchmarkInvocation, EnvironmentManifest, LaunchIsolationEvidence, MeasuredOutcome,
+    MeasuredStatus, MeasurementProtocol, RssProvenance, collect_environment,
+    collector_source_sha256, measure_process_uninstrumented, measure_process_worker,
 };
 
 const PROBE: &str = env!("CARGO_BIN_EXE_tq-bench-probe");
@@ -52,7 +54,11 @@ const ALLOCATION_DELTA_NUMERATOR: u64 = 3;
 const ALLOCATION_DELTA_DENOMINATOR: u64 = 4;
 const ALLOCATION_NOOP_NOISE_NUMERATOR: u64 = 1;
 const ALLOCATION_NOOP_NOISE_DENOMINATOR: u64 = 10;
-const TIME_CPU_TOLERANCE_MICROS: u128 = 10_000;
+const TIME_CPU_TOLERANCE_MICROS: u128 = 20_000;
+const TIME_CPU_SHORT_RUN_MICROS: u128 = 500_000;
+const TIGHT_FEEDBACK_MODE: &str = "busy-duration";
+const TIGHT_FEEDBACK_CHILD_BOUND_MICROS: u128 = 1_000;
+const CPU_TOLERANCE_POLICY: &str = "CPU policy v3: difference/native target wall duration <=10% green, >10% through 20% green with info, >20% below 50% yellow requiring approval, >=50% red blocking with automatic investigation. Below 500 ms, differences strictly below max(20 ms, 10% of runtime) are automatically green. Wrapper duration is excluded.";
 const TIMEOUT: Duration = Duration::from_secs(10);
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 const SAMPLER_RSS_LIMIT_BYTES: u64 = 128 * 1024 * 1024;
@@ -122,7 +128,17 @@ struct CpuComparison {
     time_micros: u128,
     absolute_difference_micros: u128,
     tolerance_micros: u128,
+    severity: CpuSeverity,
     within_tolerance: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum CpuSeverity {
+    Green,
+    GreenInfo,
+    YellowApproval,
+    RedInvestigation,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,6 +156,8 @@ struct Record {
     page_rounded_bytes: Option<u64>,
     expected_duration_micros: Option<u128>,
     rss_limit_bytes: Option<u64>,
+    child_elapsed_micros: Option<u128>,
+    native_child_delta_micros: Option<u128>,
     native: MeasuredOutcome,
     independent_time: TimeObservation,
     rss_comparison: Option<RssComparison>,
@@ -154,6 +172,10 @@ struct CaseSummary {
     page_rounded_bytes: Option<u64>,
     expected_duration_micros: Option<u128>,
     rss_limit_bytes: Option<u64>,
+    child_elapsed_median_micros: Option<u128>,
+    child_elapsed_mad_micros: Option<u128>,
+    child_elapsed_error_bound_micros: Option<u128>,
+    native_child_delta_median_micros: Option<u128>,
     native_wall_median_micros: u128,
     native_wall_mad_micros: u128,
     native_duration_error_bound_micros: Option<u128>,
@@ -216,7 +238,7 @@ struct CalibrationLinkage {
     status: &'static str,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WorkerAllocationControl {
     coordinator_allocation_bytes: u64,
     repetitions: usize,
@@ -228,7 +250,7 @@ struct WorkerAllocationControl {
     tolerance_bytes: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WorkerIsolationEvidence {
     collector_source_sha256: String,
     coordinator_controls: Vec<WorkerAllocationControl>,
@@ -348,11 +370,36 @@ struct Summary {
     allocation_delta_checks: Vec<AllocationDeltaCheck>,
     short_burst_check: ShortBurstCheck,
     sampler_distortion_checks: Vec<SamplerDistortion>,
+    tight_feedback: Option<TightFeedbackSummary>,
     worker_isolation: Option<WorkerIsolationEvidence>,
+    worker_control_evidence_directory: Option<String>,
+    worker_control_measurement_protocol: Option<MeasurementProtocol>,
     calibration_linkage: CalibrationLinkage,
     sampler_calibration_linkage: CalibrationLinkage,
     validation_failures: Vec<String>,
     protocol_notes: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct TightFeedbackSummary {
+    no_sampler_cases: Vec<String>,
+    sampler_cases: Vec<String>,
+    no_sampler_child_error_bound_micros: Option<u128>,
+    sampler_child_error_bound_micros: Option<u128>,
+    no_sampler_child_error_within_bound: Option<bool>,
+    sampler_child_error_within_bound: Option<bool>,
+    no_sampler_native_child_delta_median_micros: Option<u128>,
+    sampler_native_child_delta_median_micros: Option<u128>,
+}
+
+/// Minimal view of the separately retained worker-control summary. The main
+/// calibration run keeps its own records, while this evidence is produced by
+/// the same worker identity and collector sources in a dedicated control run.
+#[derive(Debug, Deserialize)]
+struct RetainedWorkerSummary {
+    worker_isolation: Option<WorkerIsolationEvidence>,
+    worker_measurement_protocol: Option<MeasurementProtocol>,
+    validation_failures: Vec<String>,
 }
 
 #[test]
@@ -490,6 +537,26 @@ fn run_validation() -> io::Result<PathBuf> {
                     ),
                 ));
             }
+            let child_elapsed_micros = if is_tight_feedback_case(&case) {
+                let parsed = parse_tight_feedback_elapsed(&native);
+                remove_capture_paths(&native);
+                match parsed {
+                    Ok(elapsed) => Some(elapsed),
+                    Err(error) => {
+                        return Err(fail_after_recording(
+                            &mut errors_file,
+                            &case,
+                            repetition,
+                            "tight-feedback-diagnostic",
+                            error.to_string(),
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+            let native_child_delta_micros =
+                child_elapsed_micros.map(|elapsed| native.wall_time_micros.abs_diff(elapsed));
             let native_rss = native.peak_rss_bytes.ok_or_else(|| {
                 fail_after_recording(
                     &mut errors_file,
@@ -604,8 +671,8 @@ fn run_validation() -> io::Result<PathBuf> {
             };
             let comparison = rss_comparison(native_rss, time_rss, page_size);
             let cpu_comparison = CpuComparisons {
-                user: cpu_comparison(native_user_cpu, time_user_cpu),
-                system: cpu_comparison(native_system_cpu, time_system_cpu),
+                user: cpu_comparison(native_user_cpu, time_user_cpu, native.wall_time_micros),
+                system: cpu_comparison(native_system_cpu, time_system_cpu, native.wall_time_micros),
             };
 
             let record = Record {
@@ -616,6 +683,8 @@ fn run_validation() -> io::Result<PathBuf> {
                 page_rounded_bytes: case.page_rounded_bytes,
                 expected_duration_micros: case.expected_duration_micros,
                 rss_limit_bytes: case.rss_limit_bytes,
+                child_elapsed_micros,
+                native_child_delta_micros,
                 native,
                 independent_time,
                 rss_comparison: Some(comparison),
@@ -642,16 +711,68 @@ fn run_validation() -> io::Result<PathBuf> {
     let allocation_delta_checks = allocation_delta_checks(&summaries, page_size);
     let short_burst_check = short_burst_check(&records);
     let sampler_distortion_checks = sampler_distortion_checks(&summaries);
-    // The worker-backed controls populate this block once the worker seam is
-    // enabled. Keeping it absent is intentional: direct-launch evidence must
-    // never be presented as worker-isolated calibration.
-    let worker_isolation = None;
+    // Run the worker-isolation controls as part of every retained calibration
+    // run. Their raw pairs remain in the dedicated child directory returned by
+    // the control test, while the validated summary is linked below.
+    let (
+        worker_isolation,
+        worker_control_failure,
+        worker_control_directory,
+        worker_control_measurement_protocol,
+    ) = match run_worker_isolation_validation() {
+        Ok(directory) => {
+            let summary_path = directory.join("summary.json");
+            match fs::read(&summary_path).and_then(|bytes| {
+                serde_json::from_slice::<RetainedWorkerSummary>(&bytes).map_err(io::Error::other)
+            }) {
+                Ok(retained) if retained.validation_failures.is_empty() => (
+                    retained.worker_isolation,
+                    None,
+                    Some(directory.display().to_string()),
+                    retained.worker_measurement_protocol,
+                ),
+                Ok(retained) => (
+                    retained.worker_isolation,
+                    Some(format!(
+                        "worker isolation controls failed: {}",
+                        retained.validation_failures.join("; ")
+                    )),
+                    Some(directory.display().to_string()),
+                    retained.worker_measurement_protocol,
+                ),
+                Err(error) => (
+                    None,
+                    Some(format!("read worker isolation summary: {error}")),
+                    Some(directory.display().to_string()),
+                    None,
+                ),
+            }
+        }
+        Err(error) => (None, Some(error.to_string()), None, None),
+    };
     let native_measurement_protocol = records
         .iter()
         .find(|record| record.rss_limit_bytes.is_none())
         .map(|record| record.native.measurement_protocol.clone());
     let mut validation_failures = rss_comparison_failures(&records);
     validation_failures.extend(cpu_comparison_failures(&records));
+    if !native_worker_protocols_match(&records) {
+        validation_failures
+            .push("worker identity or launch protocol changed between campaign records".to_owned());
+    }
+    if worker_control_measurement_protocol
+        .as_ref()
+        .zip(native_measurement_protocol.as_ref())
+        .is_none_or(|(control, campaign)| raw_protocol(control) != raw_protocol(campaign))
+    {
+        validation_failures.push(
+            "worker identity or collector source differed between campaign and isolation controls"
+                .to_owned(),
+        );
+    }
+    if let Some(error) = worker_control_failure {
+        validation_failures.push(error);
+    }
     if let Some(isolation) = &noop_isolation {
         if !isolation.within_tolerance {
             validation_failures.push(format!(
@@ -688,13 +809,24 @@ fn run_validation() -> io::Result<PathBuf> {
     let worker_isolation_verified = worker_isolation.as_ref().is_some_and(|evidence| {
         worker_isolation_passes(evidence, &metadata, repetitions, page_size)
     });
+    if !worker_isolation_verified {
+        validation_failures
+            .push("worker isolation evidence did not pass final calibration gates".to_owned());
+    }
     let calibration_verified = validation_failures.is_empty() && worker_isolation_verified;
-    let calibration_linkage =
-        make_calibration_linkage(&metadata, &records, &summaries, None, calibration_verified);
+    let calibration_linkage = make_calibration_linkage(
+        &metadata,
+        &records,
+        &summaries,
+        worker_isolation.as_ref(),
+        None,
+        calibration_verified,
+    );
     let sampler_calibration_linkage = make_calibration_linkage(
         &metadata,
         &records,
         &summaries,
+        worker_isolation.as_ref(),
         Some(SAMPLER_RSS_LIMIT_BYTES),
         calibration_verified,
     );
@@ -710,16 +842,23 @@ fn run_validation() -> io::Result<PathBuf> {
         allocation_delta_checks,
         short_burst_check,
         sampler_distortion_checks,
+        tight_feedback: tight_feedback_summary(&records),
         worker_isolation,
+        worker_control_evidence_directory: worker_control_directory,
+        worker_control_measurement_protocol,
         calibration_linkage,
         sampler_calibration_linkage,
         validation_failures: validation_failures.clone(),
         protocol_notes: vec![
+            CPU_TOLERANCE_POLICY,
             "Each record measures one fresh probe child through native wait4 and a separate fresh child through /usr/bin/time.",
             "Allocation probes touch one byte per 4096-byte chunk, so expected bytes are rounded to the host page size for interpretation.",
             "RSS comparison tolerance is max(4 pages, 25% of the larger value); it is a diagnostic gate, not a byte-equality claim.",
             "No-op median and MAD quantify spawn, polling, and exit-observation overhead; known-duration cases retain the unadjusted intervals.",
             "Known-duration error bound is the largest absolute native wall-time error across repetitions; excess includes spawn and exit-observation overhead.",
+            "Sleep known-duration controls include child startup, wake scheduling, and exit observation; they remain separate from tight feedback controls.",
+            "Tight feedback controls busy-wait to an absolute Instant deadline and emit their child-measured elapsed interval after the controlled interval; the diagnostic is parsed after measurement.",
+            "Tight feedback reports the absolute native-wall/child-elapsed difference as observed launch, output, and exit overhead; no estimated floor is subtracted from campaign samples.",
             "The parsed BSD/GNU elapsed time and separately measured wrapper interval are retained beside every native record.",
             "Records are independent children. The allocation-before/noop-after ordering checks that one child's accounting does not leak into another.",
             "No-op isolation compares the before/after medians with max(8 pages, 25% of the larger median).",
@@ -732,6 +871,7 @@ fn run_validation() -> io::Result<PathBuf> {
             "Sampler distortion is compared with the matching no-sampler median and MAD; within-MAD is an observed bound for these repetitions, not proof of zero overhead or a universal accuracy guarantee.",
             "Any RSS/CPU counter, no-op isolation, allocation-delta, or short-burst validation failure marks both calibration linkages unverified; retained evidence is diagnostic only.",
             "Worker calibration requires retained 0/32/128 MiB coordinator controls, residual-floor data, large prepared-stdin and high-to-low request controls, and independent time agreement; direct-launch records cannot satisfy this gate.",
+            "Worker isolation raw pairs and the linked control summary are retained in worker_control_evidence_directory; their worker executable and collector-source identities must match every calibrated sample.",
             "The calibration linkage is host/build/source specific. A loader must hash this summary artifact and include that digest in timing_method; the observed bound is not a universal timing-accuracy guarantee.",
         ],
     };
@@ -938,11 +1078,12 @@ fn run_worker_isolation_validation() -> io::Result<PathBuf> {
         worker_isolation,
         validation_failures: validation_failures.clone(),
         protocol_notes: vec![
+            CPU_TOLERANCE_POLICY,
             "Each native row is a fresh public measure_process_worker invocation; parent controls use the probe's coordinator-allocation mode.",
             "Each row retains a native worker outcome paired with an independent /usr/bin/time observation of the same target mode.",
             "RSS comparison uses max(25% of the larger median, four host pages); parent-isolation tolerance uses max(25% of the larger median, eight host pages).",
             "The high-to-low sequence requires a high allocation burst followed by a fresh low request whose RSS remains within the zero-control isolation bound.",
-            "The summary is diagnostic evidence only and does not switch the benchmark campaign to worker launch.",
+            "The control summary is linked into the final worker calibration only when every gate passes; an incomplete or failed control run remains diagnostic evidence.",
         ],
     };
     write_json(&run_directory.join("summary.json"), &summary)?;
@@ -1045,6 +1186,7 @@ fn run_worker_pair(request: &WorkerPairRequest<'_>) -> Result<WorkerPair, String
     let native_system_cpu = native
         .system_cpu_micros
         .ok_or("worker outcome did not report system CPU")?;
+    let target_wall_micros = native.wall_time_micros;
     Ok(WorkerPair {
         record: WorkerPairRecord {
             scenario: request.scenario.to_owned(),
@@ -1058,8 +1200,8 @@ fn run_worker_pair(request: &WorkerPairRequest<'_>) -> Result<WorkerPair, String
             independent_stdout_sha256: time_run.stdout_sha256,
             rss_comparison: rss_comparison(native_rss, time_rss, request.page_size),
             cpu_comparison: CpuComparisons {
-                user: cpu_comparison(native_user_cpu, time_user_cpu),
-                system: cpu_comparison(native_system_cpu, time_system_cpu),
+                user: cpu_comparison(native_user_cpu, time_user_cpu, target_wall_micros),
+                system: cpu_comparison(native_system_cpu, time_system_cpu, target_wall_micros),
             },
         },
         independent_time_output: time_output,
@@ -1082,7 +1224,7 @@ fn run_worker_direct(args: &[String], stdin: &[u8]) -> Result<MeasuredOutcome, S
         rss_limit: None,
         retain_output: false,
     };
-    measure_process_worker(&invocation).map_err(|error| error.to_string())
+    measure_process_uninstrumented(&invocation).map_err(|error| error.to_string())
 }
 
 fn run_worker_parent_probe(
@@ -1104,7 +1246,7 @@ fn run_worker_parent_probe(
         rss_limit: None,
         retain_output: true,
     };
-    let wrapper = measure_process_worker(&invocation).map_err(|error| error.to_string())?;
+    let wrapper = measure_process_uninstrumented(&invocation).map_err(|error| error.to_string())?;
     if wrapper.status != MeasuredStatus::Exited || wrapper.exit_code != Some(0) {
         return Err(format!(
             "worker parent probe failed: {:?} {:?}",
@@ -1127,6 +1269,32 @@ fn remove_capture_paths(outcome: &MeasuredOutcome) {
     {
         let _ = fs::remove_file(path);
     }
+}
+
+fn is_tight_feedback_case(case: &Case) -> bool {
+    is_tight_feedback_case_args(&case.args)
+}
+
+fn is_tight_feedback_case_args(args: &[String]) -> bool {
+    args.first().is_some_and(|mode| mode == TIGHT_FEEDBACK_MODE)
+}
+
+fn parse_tight_feedback_elapsed(outcome: &MeasuredOutcome) -> io::Result<u128> {
+    let stdout_path = outcome
+        .stdout_path
+        .as_ref()
+        .ok_or_else(|| io::Error::other("tight feedback output was not retained"))?;
+    parse_tight_feedback_elapsed_output(&fs::read_to_string(stdout_path)?)
+}
+
+fn parse_tight_feedback_elapsed_output(output: &str) -> io::Result<u128> {
+    let value = output
+        .trim()
+        .strip_prefix("tq-bench-probe busy-duration elapsed-micros=")
+        .ok_or_else(|| io::Error::other("tight feedback output had an invalid format"))?
+        .parse::<u128>()
+        .map_err(|error| io::Error::other(format!("tight feedback elapsed value: {error}")))?;
+    Ok(value)
 }
 
 fn validate_worker_outcome(outcome: &MeasuredOutcome) -> Result<(), String> {
@@ -1313,6 +1481,33 @@ fn worker_protocols_match(records: &[WorkerPairRecord]) -> bool {
     })
 }
 
+fn native_worker_protocols_match(records: &[Record]) -> bool {
+    let mut protocols = BTreeMap::new();
+    for record in records {
+        let protocol = &record.native.measurement_protocol;
+        if protocol.worker.is_none()
+            || protocol.rss_poll_interval_micros.is_some() != record.rss_limit_bytes.is_some()
+        {
+            return false;
+        }
+        let raw = raw_protocol(protocol);
+        if protocols
+            .insert(record.rss_limit_bytes, raw.clone())
+            .is_some_and(|previous| previous != raw)
+        {
+            return false;
+        }
+    }
+    !protocols.is_empty()
+}
+
+fn raw_protocol(protocol: &MeasurementProtocol) -> MeasurementProtocol {
+    let mut raw = protocol.clone();
+    raw.validated_accuracy_micros = None;
+    raw.isolation_evidence = None;
+    raw
+}
+
 fn worker_noop_tolerance(zero_rss: u64, control_rss: u64, page_size: u64) -> Option<u64> {
     zero_rss
         .max(control_rss)
@@ -1447,6 +1642,7 @@ fn short_burst_check(records: &[Record]) -> ShortBurstCheck {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn validation_cases(page_size: u64) -> io::Result<Vec<Case>> {
     let mut cases = vec![Case {
         name: "noop".to_owned(),
@@ -1511,6 +1707,16 @@ fn validation_cases(page_size: u64) -> io::Result<Vec<Case>> {
             rss_limit_bytes: None,
         });
     }
+    for millis in [20_u64, 100, 250] {
+        cases.push(Case {
+            name: format!("tight-feedback-{millis}ms"),
+            args: vec![TIGHT_FEEDBACK_MODE.to_owned(), millis.to_string()],
+            touched_bytes: None,
+            page_rounded_bytes: None,
+            expected_duration_micros: Some(u128::from(millis) * 1_000),
+            rss_limit_bytes: None,
+        });
+    }
 
     // Run a fresh no-op after every allocation family. Its summary is compared
     // with the first no-op family to expose cross-child accounting leakage.
@@ -1544,6 +1750,16 @@ fn validation_cases(page_size: u64) -> io::Result<Vec<Case>> {
             rss_limit_bytes: Some(SAMPLER_RSS_LIMIT_BYTES),
         });
     }
+    for millis in [20_u64, 100, 250] {
+        cases.push(Case {
+            name: format!("sampler-tight-feedback-{millis}ms"),
+            args: vec![TIGHT_FEEDBACK_MODE.to_owned(), millis.to_string()],
+            touched_bytes: None,
+            page_rounded_bytes: None,
+            expected_duration_micros: Some(u128::from(millis) * 1_000),
+            rss_limit_bytes: Some(SAMPLER_RSS_LIMIT_BYTES),
+        });
+    }
     Ok(cases)
 }
 
@@ -1569,11 +1785,11 @@ fn run_native(args: &[String], rss_limit_bytes: Option<u64>) -> io::Result<Measu
         timeout: TIMEOUT,
         output_limit: OUTPUT_LIMIT,
         rss_limit: rss_limit_bytes,
-        retain_output: false,
+        retain_output: args.first().is_some_and(|mode| mode == TIGHT_FEEDBACK_MODE),
         cancellation: None,
     };
     let outcome = match rss_limit_bytes {
-        Some(_) => measure_process(&invocation),
+        Some(_) => measure_process_worker(&invocation),
         None => measure_process_uninstrumented(&invocation),
     };
     outcome.map_err(|error| io::Error::other(error.to_string()))
@@ -1703,6 +1919,28 @@ fn summarize(records: &[Record], page_size: u64) -> Vec<CaseSummary> {
             );
             let native_rss_mad = median_absolute_deviation_u64(&native_rss);
             let native_median = median(&mut native_rss);
+            let expected_duration = selected[0].expected_duration_micros;
+            let mut child_elapsed = selected
+                .iter()
+                .filter_map(|record| record.child_elapsed_micros)
+                .collect::<Vec<_>>();
+            let child_elapsed_mad =
+                (!child_elapsed.is_empty()).then(|| median_absolute_deviation(&child_elapsed));
+            let child_elapsed_median =
+                (!child_elapsed.is_empty()).then(|| median(&mut child_elapsed));
+            let child_elapsed_error_bound = expected_duration.and_then(|expected| {
+                selected
+                    .iter()
+                    .filter_map(|record| record.child_elapsed_micros)
+                    .map(|elapsed| elapsed.abs_diff(expected))
+                    .max()
+            });
+            let mut native_child_delta = selected
+                .iter()
+                .filter_map(|record| record.native_child_delta_micros)
+                .collect::<Vec<_>>();
+            let native_child_delta_median =
+                (!native_child_delta.is_empty()).then(|| median(&mut native_child_delta));
             let mut native_user_cpu = selected
                 .iter()
                 .filter_map(|record| record.native.user_cpu_micros)
@@ -1719,7 +1957,6 @@ fn summarize(records: &[Record], page_size: u64) -> Vec<CaseSummary> {
                 .then(|| median_absolute_deviation(&native_system_cpu));
             let native_system_cpu_median =
                 (!native_system_cpu.is_empty()).then(|| median(&mut native_system_cpu));
-            let expected_duration = selected[0].expected_duration_micros;
             let duration_error_bound = expected_duration.map(|expected| {
                 selected
                     .iter()
@@ -1787,6 +2024,10 @@ fn summarize(records: &[Record], page_size: u64) -> Vec<CaseSummary> {
                 page_rounded_bytes: first.page_rounded_bytes,
                 expected_duration_micros: first.expected_duration_micros,
                 rss_limit_bytes: first.rss_limit_bytes,
+                child_elapsed_median_micros: child_elapsed_median,
+                child_elapsed_mad_micros: child_elapsed_mad,
+                child_elapsed_error_bound_micros: child_elapsed_error_bound,
+                native_child_delta_median_micros: native_child_delta_median,
                 native_wall_median_micros: wall_median,
                 native_wall_mad_micros: wall_mad,
                 native_duration_error_bound_micros: duration_error_bound,
@@ -1807,6 +2048,68 @@ fn summarize(records: &[Record], page_size: u64) -> Vec<CaseSummary> {
             })
         })
         .collect()
+}
+
+fn tight_feedback_summary(records: &[Record]) -> Option<TightFeedbackSummary> {
+    let no_sampler = records
+        .iter()
+        .filter(|record| {
+            is_tight_feedback_case_args(&record.args) && record.rss_limit_bytes.is_none()
+        })
+        .collect::<Vec<_>>();
+    let sampler = records
+        .iter()
+        .filter(|record| {
+            is_tight_feedback_case_args(&record.args) && record.rss_limit_bytes.is_some()
+        })
+        .collect::<Vec<_>>();
+    if no_sampler.is_empty() || sampler.is_empty() {
+        return None;
+    }
+    Some(TightFeedbackSummary {
+        no_sampler_cases: unique_case_names(&no_sampler),
+        sampler_cases: unique_case_names(&sampler),
+        no_sampler_child_error_bound_micros: tight_child_error_bound(&no_sampler),
+        sampler_child_error_bound_micros: tight_child_error_bound(&sampler),
+        no_sampler_child_error_within_bound: tight_child_error_within_bound(&no_sampler),
+        sampler_child_error_within_bound: tight_child_error_within_bound(&sampler),
+        no_sampler_native_child_delta_median_micros: tight_native_child_delta_median(&no_sampler),
+        sampler_native_child_delta_median_micros: tight_native_child_delta_median(&sampler),
+    })
+}
+
+fn tight_child_error_bound(records: &[&Record]) -> Option<u128> {
+    records
+        .iter()
+        .filter_map(|record| {
+            record
+                .expected_duration_micros
+                .zip(record.child_elapsed_micros)
+                .map(|(expected, elapsed)| elapsed.abs_diff(expected))
+        })
+        .max()
+}
+
+fn tight_child_error_within_bound(records: &[&Record]) -> Option<bool> {
+    tight_child_error_bound(records).map(|error| error <= TIGHT_FEEDBACK_CHILD_BOUND_MICROS)
+}
+
+fn tight_native_child_delta_median(records: &[&Record]) -> Option<u128> {
+    let mut deltas = records
+        .iter()
+        .filter_map(|record| record.native_child_delta_micros)
+        .collect::<Vec<_>>();
+    (!deltas.is_empty()).then(|| median(&mut deltas))
+}
+
+fn unique_case_names(records: &[&Record]) -> Vec<String> {
+    let mut names = Vec::new();
+    for record in records {
+        if !names.iter().any(|name| name == &record.case) {
+            names.push(record.case.clone());
+        }
+    }
+    names
 }
 
 fn noop_isolation(summaries: &[CaseSummary], page_size: u64) -> Option<NoopIsolation> {
@@ -1845,16 +2148,116 @@ fn rss_comparison(native_bytes: u64, time_bytes: u64, page_size: u64) -> RssComp
     }
 }
 
-fn cpu_comparison(native_micros: u128, time_micros: u128) -> CpuComparison {
+#[test]
+fn calibration_linkage_uses_the_loader_duration_case_allowlist() {
+    for name in [
+        "noop",
+        "known-duration-20ms",
+        "known-duration-100ms",
+        "known-duration-250ms",
+    ] {
+        assert!(is_calibration_duration_control(name, false));
+        assert!(is_calibration_duration_control(
+            &format!("sampler-{name}"),
+            true
+        ));
+    }
+    for name in [
+        "tight-feedback-20ms",
+        "tight-feedback-100ms",
+        "tight-feedback-250ms",
+        "burst-16m",
+        "noop-after",
+    ] {
+        assert!(!is_calibration_duration_control(name, false));
+        assert!(!is_calibration_duration_control(
+            &format!("sampler-{name}"),
+            true
+        ));
+    }
+}
+
+#[test]
+fn cpu_tolerance_uses_target_duration_and_inclusive_difference_bounds() {
+    use CpuSeverity::{Green, GreenInfo, RedInvestigation, YellowApproval};
+    for (duration, difference, severity) in [
+        (0, 0, Green),
+        (0, 19_999, Green),
+        (0, 20_000, RedInvestigation),
+        (30_000, 19_999, Green),
+        (30_000, 20_000, RedInvestigation),
+        (100_000, 20_000, GreenInfo),
+        (100_000, 20_001, YellowApproval),
+        (300_000, 30_000, Green),
+        (300_000, 30_001, GreenInfo),
+        (499_999, 49_999, Green),
+        (500_000, 50_000, Green),
+        (500_000, 50_001, GreenInfo),
+        (500_000, 100_000, GreenInfo),
+        (500_000, 100_001, YellowApproval),
+        (500_000, 249_999, YellowApproval),
+        (500_000, 250_000, RedInvestigation),
+        (1_000_000, 100_000, Green),
+        (u128::MAX, u128::MAX / 10, Green),
+        (u128::MAX, u128::MAX, RedInvestigation),
+    ] {
+        for (native, reference) in [(difference, 0), (0, difference)] {
+            let comparison = cpu_comparison(native, reference, duration);
+            assert_eq!(
+                comparison.severity, severity,
+                "duration={duration}, difference={difference}"
+            );
+            assert_eq!(
+                comparison.within_tolerance,
+                matches!(severity, Green | GreenInfo)
+            );
+        }
+    }
+}
+
+fn cpu_comparison(
+    native_micros: u128,
+    time_micros: u128,
+    target_wall_micros: u128,
+) -> CpuComparison {
     let absolute_difference_micros = native_micros.abs_diff(time_micros);
-    let relative_tolerance = native_micros.max(time_micros) / 4;
-    let tolerance_micros = TIME_CPU_TOLERANCE_MICROS.max(relative_tolerance);
+    let automatic_limit = if target_wall_micros < TIME_CPU_SHORT_RUN_MICROS {
+        TIME_CPU_TOLERANCE_MICROS.max(target_wall_micros / 10)
+    } else {
+        target_wall_micros / 10
+    };
+    let severity = if absolute_difference_micros <= target_wall_micros / 10
+        || (target_wall_micros < TIME_CPU_SHORT_RUN_MICROS
+            && absolute_difference_micros < automatic_limit)
+    {
+        CpuSeverity::Green
+    } else if absolute_difference_micros <= target_wall_micros / 5 {
+        CpuSeverity::GreenInfo
+    } else if absolute_difference_micros < target_wall_micros.div_ceil(2) {
+        CpuSeverity::YellowApproval
+    } else {
+        CpuSeverity::RedInvestigation
+    };
+    match severity {
+        CpuSeverity::Green => {}
+        CpuSeverity::GreenInfo => eprintln!(
+            "CPU info: difference {absolute_difference_micros} us over target duration {target_wall_micros} us; accepted"
+        ),
+        CpuSeverity::YellowApproval => eprintln!(
+            "CPU warning: difference {absolute_difference_micros} us over target duration {target_wall_micros} us; approval required"
+        ),
+        CpuSeverity::RedInvestigation => eprintln!(
+            "CPU blocked: difference {absolute_difference_micros} us over target duration {target_wall_micros} us; begin automatic investigation using native={native_micros} us, reference={time_micros} us and retained raw time output"
+        ),
+    }
+    let tolerance_micros = automatic_limit;
     CpuComparison {
         native_micros,
         time_micros,
         absolute_difference_micros,
         tolerance_micros,
-        within_tolerance: absolute_difference_micros <= tolerance_micros,
+        severity,
+        within_tolerance: matches!(severity, CpuSeverity::Green | CpuSeverity::GreenInfo),
     }
 }
 
@@ -1937,16 +2340,21 @@ fn make_calibration_linkage(
     metadata: &Metadata,
     records: &[Record],
     summaries: &[CaseSummary],
+    worker_isolation: Option<&WorkerIsolationEvidence>,
     rss_limit_bytes: Option<u64>,
     calibration_verified: bool,
 ) -> CalibrationLinkage {
-    let measurement_protocol = records
+    let mut measurement_protocol = records
         .iter()
         .find(|record| record.rss_limit_bytes == rss_limit_bytes)
         .map(|record| record.native.measurement_protocol.clone());
+    if let (Some(protocol), Some(evidence)) = (measurement_protocol.as_mut(), worker_isolation) {
+        protocol.isolation_evidence = launch_isolation_evidence(evidence);
+    }
     let conservative_bound = summaries
         .iter()
         .filter(|summary| summary.rss_limit_bytes == rss_limit_bytes)
+        .filter(|summary| is_calibration_duration_control(&summary.case, rss_limit_bytes.is_some()))
         .filter_map(|summary| summary.native_duration_error_bound_micros)
         .max();
     CalibrationLinkage {
@@ -1966,6 +2374,44 @@ fn make_calibration_linkage(
             "unverified-missing-no-sampler-duration-controls"
         },
     }
+}
+
+fn is_calibration_duration_control(name: &str, sampled: bool) -> bool {
+    let prefix = if sampled { "sampler-" } else { "" };
+    let Some(name) = name.strip_prefix(prefix) else {
+        return false;
+    };
+    matches!(
+        name,
+        "noop" | "known-duration-20ms" | "known-duration-100ms" | "known-duration-250ms"
+    )
+}
+
+fn launch_isolation_evidence(
+    evidence: &WorkerIsolationEvidence,
+) -> Option<LaunchIsolationEvidence> {
+    let zero = evidence
+        .coordinator_controls
+        .iter()
+        .find(|control| control.coordinator_allocation_bytes == 0)?;
+    let max_parent_delta = evidence
+        .coordinator_controls
+        .iter()
+        .map(|control| control.max_delta_from_zero_bytes)
+        .max()?;
+    let tolerance = evidence
+        .coordinator_controls
+        .iter()
+        .map(|control| control.tolerance_bytes)
+        .max()?;
+    Some(LaunchIsolationEvidence {
+        // The calibration loader replaces this with the digest of the final
+        // summary bytes, avoiding a self-referential digest in this artifact.
+        summary_sha256: "pending-summary-sha256".to_owned(),
+        control_peak_rss_bytes: zero.native_rss_median_bytes,
+        max_parent_delta_bytes: max_parent_delta,
+        tolerance_bytes: tolerance,
+    })
 }
 
 fn worker_isolation_passes(
@@ -2311,6 +2757,28 @@ fn exit_signal(status: ExitStatus) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parses_tight_feedback_child_elapsed_diagnostic() {
+        assert_eq!(
+            super::parse_tight_feedback_elapsed_output(
+                "tq-bench-probe busy-duration elapsed-micros=100123\n"
+            )
+            .unwrap(),
+            100_123
+        );
+    }
+
+    #[test]
+    fn rejects_tight_feedback_output_without_the_child_diagnostic() {
+        assert!(super::parse_tight_feedback_elapsed_output("\n").is_err());
+        assert!(
+            super::parse_tight_feedback_elapsed_output(
+                "tq-bench-probe busy-duration elapsed-micros=unknown"
+            )
+            .is_err()
+        );
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn parses_bsd_time_l_units() {
@@ -2334,5 +2802,47 @@ mod tests {
         let comparison = super::rss_comparison(10_000, 10_100, 4_096);
         assert_eq!(comparison.tolerance_bytes, 16_384);
         assert!(comparison.within_page_aware_tolerance);
+    }
+
+    #[test]
+    fn links_worker_isolation_to_zero_control_and_widest_tolerance() {
+        let evidence = super::WorkerIsolationEvidence {
+            collector_source_sha256: "collector".to_owned(),
+            coordinator_controls: vec![
+                super::WorkerAllocationControl {
+                    coordinator_allocation_bytes: 0,
+                    repetitions: 20,
+                    native_rss_median_bytes: 12_288,
+                    independent_time_rss_median_bytes: Some(12_288),
+                    rss_comparisons_within_tolerance: 20,
+                    cpu_comparisons_within_tolerance: 20,
+                    max_delta_from_zero_bytes: 0,
+                    tolerance_bytes: 32_768,
+                },
+                super::WorkerAllocationControl {
+                    coordinator_allocation_bytes: 32 * 1024 * 1024,
+                    repetitions: 20,
+                    native_rss_median_bytes: 13_312,
+                    independent_time_rss_median_bytes: Some(13_312),
+                    rss_comparisons_within_tolerance: 20,
+                    cpu_comparisons_within_tolerance: 20,
+                    max_delta_from_zero_bytes: 4_096,
+                    tolerance_bytes: 65_536,
+                },
+            ],
+            residual_floor_bytes: 12_288,
+            prepared_stdin_bytes: 32 * 1024 * 1024,
+            prepared_stdin_repetitions: 20,
+            prepared_stdin_verified: true,
+            high_low_request_repetitions: 20,
+            high_low_request_verified: true,
+            independent_time_repetitions: 120,
+            independent_time_verified: true,
+        };
+        let linked = super::launch_isolation_evidence(&evidence).unwrap();
+        assert_eq!(linked.summary_sha256, "pending-summary-sha256");
+        assert_eq!(linked.control_peak_rss_bytes, 12_288);
+        assert_eq!(linked.max_parent_delta_bytes, 4_096);
+        assert_eq!(linked.tolerance_bytes, 65_536);
     }
 }

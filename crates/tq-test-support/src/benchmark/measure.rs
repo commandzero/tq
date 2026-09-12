@@ -18,7 +18,7 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-use super::native_process::{EXIT_POLL, NativeChild};
+use super::native_process::{EXIT_POLL, NativeChild, poll_delay};
 use super::report::MeasurementProtocol;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use nix::unistd::Pid;
@@ -161,7 +161,8 @@ pub struct MeasuredOutcome {
     pub signal: Option<i32>,
     /// Total wall duration from spawn to exit observation.
     pub wall_time_micros: u128,
-    /// Time until the first stdout byte was observed, if observed while alive.
+    /// Time until the first stdout byte was observed, or completion when
+    /// non-empty output was first observable only after exit.
     pub first_result_micros: Option<u128>,
     /// User CPU time.
     pub user_cpu_micros: Option<u128>,
@@ -331,7 +332,7 @@ pub fn preflight_rss(cancellation: Option<Arc<AtomicBool>>) -> Result<RssPreflig
 /// nonzero, signal, timeout, output-limit, and RSS-limit outcomes remain
 /// successful measurements when their resource data is collected.
 pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutcome, MeasureError> {
-    measure_process_with_sampling(invocation, true)
+    measure_process_worker_with_sampling(invocation, true)
 }
 
 /// Measures one fresh process without starting the optional process-group RSS
@@ -349,7 +350,7 @@ pub fn measure_process(invocation: &BenchmarkInvocation) -> Result<MeasuredOutco
 pub fn measure_process_uninstrumented(
     invocation: &BenchmarkInvocation,
 ) -> Result<MeasuredOutcome, MeasureError> {
-    measure_process_with_sampling(invocation, false)
+    measure_process_worker_with_sampling(invocation, false)
 }
 
 /// Measures one invocation through the isolated Rust worker.
@@ -366,33 +367,23 @@ pub fn measure_process_uninstrumented(
 pub fn measure_process_worker(
     invocation: &BenchmarkInvocation,
 ) -> Result<MeasuredOutcome, MeasureError> {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    {
-        super::worker::measure_process(invocation)
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        let _ = invocation;
-        Err(MeasureError::Unsupported(
-            "isolated native worker is implemented only on macOS and Linux".to_owned(),
-        ))
-    }
+    measure_process_worker_with_sampling(invocation, true)
 }
 
-fn measure_process_with_sampling(
+fn measure_process_worker_with_sampling(
     invocation: &BenchmarkInvocation,
     sample_process_group: bool,
 ) -> Result<MeasuredOutcome, MeasureError> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        measure_process_native(invocation, sample_process_group)
+        super::worker::measure_process(invocation, sample_process_group)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = invocation;
         let _ = sample_process_group;
         Err(MeasureError::Unsupported(
-            "native wait4 accounting is implemented only on macOS and Linux".to_owned(),
+            "isolated native worker is implemented only on macOS and Linux".to_owned(),
         ))
     }
 }
@@ -412,14 +403,7 @@ pub(crate) fn prepare_capture_files(
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn measure_process_native(
-    invocation: &BenchmarkInvocation,
-    sample_process_group: bool,
-) -> Result<MeasuredOutcome, MeasureError> {
-    measure_with_hooks(invocation, sample_process_group, || {}, || {})
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(test)]
 #[allow(
     clippy::too_many_lines,
     reason = "keep owned child and capture cleanup in one lexical scope"
@@ -432,13 +416,14 @@ fn measure_with_hooks(
 ) -> Result<MeasuredOutcome, MeasureError> {
     let captures = prepare_capture_files(invocation)?;
     let paths = captures.paths();
-    let measured = measure_prepared(
+    let measured = measure_prepared_impl(
         invocation,
         sample_process_group,
         None,
         &paths,
         before_spawn,
         after_observation,
+        false,
     );
     match measured {
         Ok(mut outcome) => {
@@ -480,6 +465,31 @@ pub(crate) fn measure_prepared(
     paths: &PreparedCapturePaths,
     before_spawn: impl FnOnce(),
     after_observation: impl FnOnce(),
+) -> Result<MeasuredOutcome, MeasureError> {
+    measure_prepared_impl(
+        invocation,
+        sample_process_group,
+        shared_process_group,
+        paths,
+        before_spawn,
+        after_observation,
+        true,
+    )
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[allow(
+    clippy::too_many_lines,
+    reason = "keep prepared target lifecycle and diagnostic cleanup together"
+)]
+fn measure_prepared_impl(
+    invocation: &BenchmarkInvocation,
+    sample_process_group: bool,
+    shared_process_group: Option<Pid>,
+    paths: &PreparedCapturePaths,
+    before_spawn: impl FnOnce(),
+    after_observation: impl FnOnce(),
+    poll_output_metadata: bool,
 ) -> Result<MeasuredOutcome, MeasureError> {
     if invocation
         .cancellation
@@ -526,7 +536,13 @@ pub(crate) fn measure_prepared(
         let mut sampler = if sample_process_group {
             invocation
                 .rss_limit
-                .map(|_| spawn_rss_sampler(process_id))
+                // A worker target shares the worker's process group so the
+                // coordinator can kill both on loss. Keep that scope explicit
+                // for sampled enforcement; authoritative wait4 RSS remains
+                // exact-child-only.
+                .map(|_| spawn_rss_sampler(shared_process_group.map_or(process_id, |group| {
+                    u32::try_from(group.as_raw()).expect("worker process group fits u32")
+                })))
                 .transpose()?
         } else {
             None
@@ -573,7 +589,10 @@ pub(crate) fn measure_prepared(
                 break started.elapsed().as_micros();
             }
 
-            if first_result_micros.is_none() && fs::metadata(&paths.stdout)?.len() > 0 {
+            if poll_output_metadata
+                && first_result_micros.is_none()
+                && fs::metadata(&paths.stdout)?.len() > 0
+            {
                 first_result_micros = Some(started.elapsed().as_micros());
             }
 
@@ -597,7 +616,7 @@ pub(crate) fn measure_prepared(
                     break started.elapsed().as_micros();
                 }
             }
-            thread::sleep(EXIT_POLL);
+            poll_delay(EXIT_POLL);
         };
         diagnostic_wall = Some(observed_micros);
         after_observation();
@@ -619,6 +638,11 @@ pub(crate) fn measure_prepared(
         let process_group_rss_observed = process_group_peak_rss_bytes.is_some();
 
         let output_bytes = fs::metadata(&paths.stdout)?.len();
+        // A child may exit before the metadata poll observes its first byte.
+        // Completion is the only honest timestamp available in that race; an
+        // actually empty stdout remains untimestamped.
+        let first_result_micros =
+            first_result_micros.or_else(|| (output_bytes > 0).then_some(observed_micros));
         let signal = exit_signal(resources.status);
         let status = if output_bytes > invocation.output_limit {
             MeasuredStatus::OutputLimit
@@ -652,6 +676,7 @@ pub(crate) fn measure_prepared(
             rss_provenance: native_rss_provenance(),
             measurement_protocol: measurement_protocol(
                 sample_process_group && invocation.rss_limit.is_some(),
+                shared_process_group.is_some(),
             ),
             process_group_peak_rss_bytes,
             output_bytes,
@@ -770,7 +795,7 @@ fn terminate_until_observed(owner: &mut NativeChild) -> io::Result<()> {
                 "child did not exit after process-group termination",
             ));
         }
-        thread::sleep(EXIT_POLL);
+        poll_delay(EXIT_POLL);
     }
     Ok(())
 }
@@ -810,7 +835,7 @@ fn inspect_processes() -> io::Result<std::process::Output> {
                     "ps inspection timed out",
                 ));
             }
-            thread::sleep(Duration::from_millis(1));
+            poll_delay(Duration::from_millis(1));
         }
     })();
     let status = match waited {
@@ -878,23 +903,30 @@ fn parse_process_group_rss(
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn measurement_protocol(has_rss_sampler: bool) -> MeasurementProtocol {
+fn measurement_protocol(has_rss_sampler: bool, worker_process_group: bool) -> MeasurementProtocol {
     let rss_method = if has_rss_sampler {
-        format!(
-            "process-group RSS sampler every {} micros",
-            RSS_SAMPLE_INTERVAL.as_micros()
-        )
+        let scope = if worker_process_group {
+            "worker process-group RSS sampler"
+        } else {
+            "target process-group RSS sampler"
+        };
+        format!("{scope} every {} micros", RSS_SAMPLE_INTERVAL.as_micros())
     } else {
         "native wait4 RSS checked at exit; no in-flight RSS enforcement".to_owned()
     };
     MeasurementProtocol {
         timing_method: format!(
-            "{} direct spawn to waitid-WNOWAIT exit observation; first-byte file metadata poll {} micros; {rss_method}; wait4-0.2.0 valid-OS-counter assumption",
+            "{} direct spawn to waitid-WNOWAIT exit observation; first-byte file metadata poll {} micros; non-empty output first observable only at exit uses completion timestamp; {rss_method}; wait4-0.2.0 valid-OS-counter assumption",
             native_rss_provenance().label(),
             EXIT_POLL.as_micros()
         ),
         input_delivery: "prepared-seekable-stdin-file".to_owned(),
-        rss_scope: "wait4-child-including-waited-descendants-and-threads".to_owned(),
+        rss_scope: if worker_process_group && has_rss_sampler {
+            "wait4-child-lifetime-including-pre-exec-waited-descendants-and-threads; sampled worker process-group"
+                .to_owned()
+        } else {
+            "wait4-child-lifetime-including-pre-exec-waited-descendants-and-threads".to_owned()
+        },
         exit_poll_interval_micros: u64::try_from(EXIT_POLL.as_micros())
             .expect("fixed poll interval fits u64"),
         rss_poll_interval_micros: has_rss_sampler.then_some(
@@ -987,6 +1019,39 @@ mod tests {
             result.wall_time_micros
         );
         assert!(result.wall_time_micros >= 10_000);
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn nonempty_output_exit_fallback_uses_observed_completion() {
+        let invocation = super::BenchmarkInvocation {
+            cancellation: None,
+            executable: "/bin/echo".into(),
+            args: vec!["output".to_owned()],
+            stdin: Vec::new(),
+            current_dir: None,
+            timeout: super::Duration::from_secs(2),
+            output_limit: 1024,
+            rss_limit: None,
+            retain_output: true,
+        };
+        // The test-only seam suppresses the live metadata poll, forcing the
+        // real lifecycle through the exit-before-poll race deterministically.
+        let result = super::measure_with_hooks(&invocation, false, || {}, || {}).unwrap();
+        assert!(result.output_bytes > 0);
+        assert_eq!(result.first_result_micros, Some(result.wall_time_micros));
+        let stdout = result.stdout_path.as_ref().expect("retained stdout");
+        assert_eq!(std::fs::read(stdout).unwrap(), b"output\n");
+        std::fs::remove_file(stdout).unwrap();
+        std::fs::remove_file(result.stderr_path.as_ref().expect("retained stderr")).unwrap();
+
+        let empty = super::BenchmarkInvocation {
+            executable: "/usr/bin/true".into(),
+            retain_output: false,
+            ..invocation
+        };
+        let empty_result = super::measure_with_hooks(&empty, false, || {}, || {}).unwrap();
+        assert_eq!(empty_result.output_bytes, 0);
+        assert_eq!(empty_result.first_result_micros, None);
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]

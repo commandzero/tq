@@ -351,7 +351,7 @@ fn render_results(report: &BenchmarkCampaignReport, rows: &[&BenchmarkRow]) -> S
     );
     if rows.iter().any(|row| !row.instrumented_samples.is_empty()) {
         output.push_str(
-            "Primary measurements and instrumented RSS-limit repetitions are separate protocol families; instrumented samples are reported only in their own metrics and are never pooled with primary timing.\n\n",
+            "Separate RSS-limit enforcement samples remain in the raw report and are not included in these tables or pooled with primary measurements.\n\n",
         );
     }
     append_metric_tables(&mut output, report, rows);
@@ -375,7 +375,7 @@ fn append_metric_tables(
             append_placeholder_note(output, &rows, report);
         }
         table_header(output, &["Metric"], &columns);
-        for metric in metric_names(&rows) {
+        for metric in metric_names() {
             table_row(output, &[metric.to_owned()], &columns, |column| {
                 matching_row(&rows, column).map_or_else(
                     || missing_metric_cell(metric).to_owned(),
@@ -400,8 +400,8 @@ fn append_sampling_note(output: &mut String, rows: &[&BenchmarkRow]) {
     }
 }
 
-fn metric_names(rows: &[&BenchmarkRow]) -> Vec<&'static str> {
-    let mut metrics = vec![
+fn metric_names() -> Vec<&'static str> {
+    vec![
         "Wall time",
         "Wall time dispersion",
         "First output",
@@ -416,20 +416,7 @@ fn metric_names(rows: &[&BenchmarkRow]) -> Vec<&'static str> {
         "Details",
         "Samples (warmups)",
         "Comparison view",
-    ];
-    if rows.iter().any(|row| !row.instrumented_samples.is_empty()) {
-        let peak_position = metrics
-            .iter()
-            .position(|metric| *metric == "Peak RSS")
-            .map_or(metrics.len(), |position| position + 1);
-        metrics.insert(peak_position, "Instrumented peak RSS");
-        let samples_position = metrics
-            .iter()
-            .position(|metric| *metric == "Samples (warmups)")
-            .map_or(metrics.len(), |position| position + 1);
-        metrics.insert(samples_position, "Instrumented sample count");
-    }
-    metrics
+    ]
 }
 
 type AdapterColumn<'a> = (&'a str, super::InputFormat);
@@ -526,7 +513,9 @@ fn render_overview(report: &BenchmarkCampaignReport) -> String {
             .collect::<std::collections::BTreeSet<_>>()
             .len()
     );
-    output.push_str("RSS collector provenance (outside measurement tables): ");
+    output.push_str("Environment: ");
+    output.push_str(&environment_summary(report));
+    output.push_str("\n\nRSS collector provenance (outside measurement tables): ");
     output.push_str(&provenance_summary(&rows));
     output.push_str(".\nMeasurement method (outside measurement tables): ");
     output.push_str(&measurement_method_summary(&rows));
@@ -587,15 +576,7 @@ fn render_overview(report: &BenchmarkCampaignReport) -> String {
             workloads.entry(&row.case_id).or_default().push(row);
         }
         for (workload, rows) in workloads {
-            for metric in metric_names(&largest_rows).into_iter().filter(|metric| {
-                matches!(
-                    *metric,
-                    "Wall time"
-                        | "Peak RSS"
-                        | "Instrumented peak RSS"
-                        | "Instrumented sample count"
-                )
-            }) {
+            for metric in ["Wall time", "Peak RSS"] {
                 table_row(
                     &mut output,
                     &[
@@ -622,10 +603,25 @@ fn environment_summary(report: &BenchmarkCampaignReport) -> String {
     let cpus = environment
         .logical_cpus
         .map_or_else(|| "unknown".to_owned(), |count| count.to_string());
+    let model = environment
+        .cpu_model
+        .as_deref()
+        .unwrap_or("CPU model not recorded");
+    let memory = environment.memory_bytes.map_or_else(
+        || "RAM not recorded".to_owned(),
+        |bytes| {
+            let tenths = (u128::from(bytes) * 10 + 536_870_912) / 1_073_741_824;
+            format!("{}.{:01} GiB RAM", tenths / 10, tenths % 10)
+        },
+    );
     format!(
-        "`{}` / `{}`, {cpus} logical CPUs, compiler profile `{}`",
+        "`{}` / `{}`, {}, {cpus} logical CPUs, {memory}; kernel `{}`; compiler profile `{}`",
         escape_cell(&single_line(&environment.os)),
         escape_cell(&single_line(&environment.architecture)),
+        escape_cell(&single_line(model)),
+        escape_cell(&single_line(
+            environment.kernel.as_deref().unwrap_or("not recorded")
+        )),
         escape_cell(&single_line(&environment.compiler_profile)),
     )
 }
@@ -722,34 +718,6 @@ fn memory(row: &BenchmarkRow) -> String {
     )
 }
 
-#[allow(
-    clippy::cast_precision_loss,
-    reason = "memory is rendered as a human-readable MiB value"
-)]
-fn instrumented_peak_rss(row: &BenchmarkRow) -> String {
-    if row.outcome != BenchmarkOutcome::Timed || row.instrumented_samples.is_empty() {
-        return "-".to_owned();
-    }
-    let Some(first) = row.instrumented_samples.first() else {
-        return "-".to_owned();
-    };
-    if row.instrumented_samples.iter().any(|sample| {
-        sample
-            .process_group_peak_rss_bytes
-            .is_none_or(|bytes| bytes == 0)
-            || sample.rss_provenance.is_none()
-            || sample.rss_provenance != first.rss_provenance
-            || sample.measurement_protocol != first.measurement_protocol
-    }) {
-        return "-".to_owned();
-    }
-    row.instrumented_samples
-        .iter()
-        .filter_map(|sample| sample.process_group_peak_rss_bytes)
-        .max()
-        .map_or_else(|| "-".to_owned(), |bytes| format_mib(bytes as f64))
-}
-
 fn cpu_time(
     row: &BenchmarkRow,
     value: impl Fn(&RowSummary) -> Option<f64>,
@@ -773,7 +741,7 @@ fn throughput(row: &BenchmarkRow, value: impl Fn(&RowSummary) -> f64) -> String 
 fn output_bytes(row: &BenchmarkRow) -> String {
     timed_summary(row).map_or_else(
         || "-".to_owned(),
-        |summary| summary.output_bytes.to_string(),
+        |summary| format!("{}.0 B", summary.output_bytes),
     )
 }
 
@@ -824,23 +792,6 @@ fn sample_count(row: &BenchmarkRow) -> String {
     )
 }
 
-fn instrumented_sample_count(row: &BenchmarkRow) -> String {
-    if row.outcome != BenchmarkOutcome::Timed || row.instrumented_samples.is_empty() {
-        return "-".to_owned();
-    }
-    let Some(first) = row.instrumented_samples.first() else {
-        return "-".to_owned();
-    };
-    if row.instrumented_samples.iter().any(|sample| {
-        sample.rss_provenance.is_none()
-            || sample.rss_provenance != first.rss_provenance
-            || sample.measurement_protocol != first.measurement_protocol
-    }) {
-        return "-".to_owned();
-    }
-    row.instrumented_samples.len().to_string()
-}
-
 fn format_millis(micros: f64) -> String {
     if !micros.is_finite() || micros < 0.0 {
         "-".to_owned()
@@ -882,7 +833,6 @@ fn metric_cell(row: &BenchmarkRow, metric: &str) -> String {
             |sample| sample.system_cpu_micros.is_some(),
         ),
         "Peak RSS" => memory(row),
-        "Instrumented peak RSS" => instrumented_peak_rss(row),
         "Logical throughput" => throughput(row, |summary| summary.logical_records_per_second),
         "Physical throughput" => timed_summary(row).map_or_else(
             || "-".to_owned(),
@@ -902,7 +852,6 @@ fn metric_cell(row: &BenchmarkRow, metric: &str) -> String {
             })
             .to_owned(),
         "Samples (warmups)" => sample_count(row),
-        "Instrumented sample count" => instrumented_sample_count(row),
         "Comparison view" => view(row).to_owned(),
         _ => "-".to_owned(),
     }
@@ -926,7 +875,6 @@ fn is_measurement_metric(metric: &str) -> bool {
             | "User CPU"
             | "System CPU"
             | "Peak RSS"
-            | "Instrumented peak RSS"
             | "Logical throughput"
             | "Physical throughput"
             | "Output bytes"
@@ -939,7 +887,7 @@ fn table_has_measurement_placeholders(
 ) -> bool {
     columns.iter().any(|column| {
         matching_row(rows, column).is_none_or(|row| {
-            metric_names(rows)
+            metric_names()
                 .into_iter()
                 .filter(|metric| is_measurement_metric(metric))
                 .any(|metric| metric_cell(row, metric) == "-")
@@ -1031,34 +979,14 @@ fn measurement_method_summary(rows: &[&BenchmarkRow]) -> String {
                 historical_primary = true;
                 continue;
             };
-            let accuracy = protocol
-                .validated_accuracy_micros
-                .map_or_else(|| "unknown".to_owned(), |micros| format!("{micros} us"));
-            methods.insert(format!(
-                "timing `{}` (observed exit-control bound `{accuracy}`, requested exit observation interval `{}` us), input `{}`, RSS scope `{}`, {}",
-                escape_cell(&single_line(&protocol.timing_method)),
-                protocol.exit_poll_interval_micros,
-                escape_cell(&single_line(&protocol.input_delivery)),
-                escape_cell(&single_line(&protocol.rss_scope)),
-                protocol_identity_summary(protocol),
-            ));
+            methods.insert(concise_method_summary(protocol, false));
         }
         for sample in &row.instrumented_samples {
             let Some(protocol) = &sample.measurement_protocol else {
                 historical_instrumented = true;
                 continue;
             };
-            let accuracy = protocol
-                .validated_accuracy_micros
-                .map_or_else(|| "unknown".to_owned(), |micros| format!("{micros} us"));
-            methods.insert(format!(
-                "instrumented timing `{}` (observed exit-control bound `{accuracy}`, requested exit observation interval `{}` us), input `{}`, RSS scope `{}`, {}",
-                escape_cell(&single_line(&protocol.timing_method)),
-                protocol.exit_poll_interval_micros,
-                escape_cell(&single_line(&protocol.input_delivery)),
-                escape_cell(&single_line(&protocol.rss_scope)),
-                protocol_identity_summary(protocol),
-            ));
+            methods.insert(concise_method_summary(protocol, true));
         }
     }
     if historical_primary {
@@ -1074,31 +1002,73 @@ fn measurement_method_summary(rows: &[&BenchmarkRow]) -> String {
     }
 }
 
-fn protocol_identity_summary(protocol: &super::MeasurementProtocol) -> String {
-    let worker = protocol.worker.as_ref().map_or_else(
-        || "worker identity unavailable".to_owned(),
-        |worker| {
-            format!(
-                "worker executable SHA-256 `{}`, launch protocol `{}`, collector sources SHA-256 `{}`",
-                escape_cell(&single_line(&worker.executable_sha256)),
-                escape_cell(&single_line(&worker.launch_protocol)),
-                escape_cell(&single_line(&worker.collector_source_sha256)),
-            )
-        },
+fn concise_method_summary(protocol: &super::MeasurementProtocol, instrumented: bool) -> String {
+    if !is_tq_bench_native(protocol) {
+        let prefix = if instrumented {
+            "instrumented historical measurement"
+        } else {
+            "historical measurement"
+        };
+        return format!(
+            "{prefix}: timing method `{}`",
+            escape_cell(&single_line(&protocol.timing_method))
+        );
+    }
+    let scope = concise_rss_scope(&protocol.rss_scope);
+    let residual_floor = protocol.isolation_evidence.as_ref().map_or_else(
+        || "unavailable".to_owned(),
+        |evidence| format_mib_bytes(evidence.control_peak_rss_bytes),
     );
-    let isolation = protocol.isolation_evidence.as_ref().map_or_else(
-        || "launch-floor evidence unavailable".to_owned(),
-        |evidence| {
-            format!(
-                "launch-floor controls `{}` bytes (max parent delta `{}` bytes, tolerance `{}` bytes, summary SHA-256 `{}`)",
-                evidence.control_peak_rss_bytes,
-                evidence.max_parent_delta_bytes,
-                evidence.tolerance_bytes,
-                escape_cell(&single_line(&evidence.summary_sha256)),
-            )
-        },
-    );
-    format!("{worker}; {isolation}")
+    let observed_control_excess = protocol
+        .validated_accuracy_micros
+        .map_or_else(|| "unavailable".to_owned(), format_millis_u64);
+    let prefix = if instrumented {
+        "instrumented `tq-bench` native measurement"
+    } else {
+        "`tq-bench` native measurement"
+    };
+    let sampler = match (instrumented, protocol.rss_poll_interval_micros.is_some()) {
+        (true, true) => {
+            "; RSS-limit enforcement uses a separate worker process-group sampler and is not pooled with primary timing"
+        }
+        (true, false) => "; instrumented timing has no RSS sampler",
+        (false, true) => "; primary timing includes process-group RSS sampling",
+        (false, false) => "; primary timing is sampler-free",
+    };
+    format!(
+        "{prefix}: RSS scope `{scope}`; residual RSS floor `{residual_floor}` retained, not subtracted; observed control excess `{observed_control_excess}`{sampler}"
+    )
+}
+
+fn is_tq_bench_native(protocol: &super::MeasurementProtocol) -> bool {
+    let timing_method = protocol.timing_method.to_ascii_lowercase();
+    timing_method.contains("tq-bench") || timing_method.contains("wait4")
+}
+
+fn concise_rss_scope(scope: &str) -> String {
+    let normalized = single_line(scope).replace(['-', '_'], " ");
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        "unavailable".to_owned()
+    } else {
+        escape_cell(normalized).replace('`', "'")
+    }
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "display precision is intentionally limited to one decimal MiB"
+)]
+fn format_mib_bytes(bytes: u64) -> String {
+    format_mib(bytes as f64)
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "display precision is intentionally limited to one decimal millisecond"
+)]
+fn format_millis_u64(micros: u64) -> String {
+    format_millis(micros as f64)
 }
 
 fn outcome_name(outcome: &BenchmarkOutcome) -> &'static str {
@@ -1157,13 +1127,30 @@ mod tests {
     use super::super::{
         BenchmarkCampaignReport, BenchmarkFinalStatus, BenchmarkLimits, BenchmarkOutcome,
         BenchmarkRow, BenchmarkSample, Comparability, ComparisonFamily, ExecutionClass,
-        InputFormat, LaunchIsolationEvidence, RegressionGate, RssProvenance, WorkerIdentity,
-        summarize_samples,
+        InputFormat, LaunchIsolationEvidence, MeasurementProtocol, RegressionGate, RssProvenance,
+        WorkerIdentity, summarize_samples,
     };
     use super::{
         RESULTS_END_MARKER, RESULTS_START_MARKER, render_markdown_campaigns, render_markdown_pages,
         workload_filename,
     };
+
+    #[test]
+    fn environment_reports_specs_without_machine_identity() {
+        let mut campaign = report(vec![]);
+        campaign.environment.cpu_model = Some("AMD Ryzen 7 7700 8-Core Processor".to_owned());
+        campaign.environment.logical_cpus = Some(16);
+        campaign.environment.memory_bytes = Some(66_457_382_912);
+        campaign.environment.kernel = Some("Linux 7.2.0".to_owned());
+        campaign.environment.machine_identity = "private-host-name".to_owned();
+        let rendered = super::environment_summary(&campaign);
+        assert!(rendered.contains("AMD Ryzen 7 7700"));
+        assert!(rendered.contains("16 logical CPUs"));
+        assert!(rendered.contains("61.9 GiB RAM"));
+        assert!(rendered.contains("Linux 7.2.0"));
+        assert!(!rendered.contains("private-host-name"));
+        assert!(super::render_overview(&campaign).contains(&rendered));
+    }
 
     #[test]
     fn workload_filenames_are_stable_and_safe() {
@@ -1341,7 +1328,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("positive validated timing accuracy")
+                .contains("positive observed control excess")
         );
         assert_eq!(fs::read_to_string(&page).expect("authored page"), source);
 
@@ -1354,9 +1341,31 @@ mod tests {
         render_markdown_pages(directory.path(), &calibrated).expect("render calibrated report");
         let rendered = fs::read_to_string(&page).expect("rendered calibrated page");
         assert!(rendered.contains("Measurement method (outside measurement tables):"));
-        assert!(rendered.contains("native wait4"));
-        assert!(rendered.contains("worker executable SHA-256 `worker`"));
-        assert!(rendered.contains("launch-floor controls `1` bytes"));
+        assert!(rendered.contains("`tq-bench` native measurement"));
+        assert!(rendered.contains("RSS scope `specific child lifetime including pre exec"));
+        assert!(rendered.contains("residual RSS floor `0.0 MiB` retained, not subtracted"));
+        assert!(rendered.contains("observed control excess `1.0 ms`"));
+        assert!(!rendered.contains("calibrated timing bound"));
+        assert!(!rendered.contains("SHA-256"));
+        assert!(!rendered.contains("launch-floor controls"));
+    }
+
+    #[test]
+    fn concise_method_reflects_sampling_and_escapes_scope() {
+        let protocol = MeasurementProtocol {
+            timing_method: "native wait4".to_owned(),
+            input_delivery: "prepared stdin".to_owned(),
+            rss_scope: "scope|with`markdown".to_owned(),
+            exit_poll_interval_micros: 100,
+            rss_poll_interval_micros: Some(25_000),
+            validated_accuracy_micros: Some(1_000),
+            worker: None,
+            isolation_evidence: None,
+        };
+        let rendered = super::concise_method_summary(&protocol, false);
+        assert!(rendered.contains("scope\\|with'markdown"));
+        assert!(rendered.contains("primary timing includes process-group RSS sampling"));
+        assert!(!rendered.contains("primary timing is sampler-free"));
     }
 
     #[test]
@@ -1481,20 +1490,23 @@ mod tests {
         assert!(rendered.contains("| User CPU | 0.2 ms | 0.2 ms |"));
         assert!(rendered.contains("| System CPU | 0.0 ms | 0.0 ms |"));
         assert!(rendered.contains("| Peak RSS | - | 2.0 MiB |"));
-        assert!(rendered.contains("| Instrumented peak RSS | 4.0 MiB | 4.0 MiB |"));
-        assert!(rendered.contains("| Instrumented sample count | 1 | 1 |"));
+        assert!(!rendered.contains("| Instrumented"));
         assert!(rendered.contains("| Logical throughput | 810.4 records/s | 42.0 records/s |"));
         assert!(rendered.contains("| Physical throughput | 0.1 MiB/s | 42.0 MiB/s |"));
         assert!(rendered.contains("RSS collector provenance (outside measurement tables):"));
         assert!(rendered.contains("`bsd-time-l`"));
         assert!(rendered.contains("instrumented bsd-time-l"));
-        assert!(rendered.contains("instrumented timing `native wait4 instrumented`"));
+        assert!(rendered.contains("instrumented `tq-bench` native measurement"));
+        assert!(
+            rendered.contains("RSS-limit enforcement uses a separate worker process-group sampler")
+        );
+        assert!(rendered.contains("historical/unspecified"));
         assert!(
             !rendered
                 .lines()
                 .any(|line| line.starts_with("| Peak RSS |") && line.contains("bsd-time-l"))
         );
-        assert!(rendered.contains("| Output bytes | 42 | 42 |"));
+        assert!(rendered.contains("| Output bytes | 42.0 B | 42.0 B |"));
         assert!(
             rendered
                 .contains("| Samples (warmups) | 1 measured (1 warmup) | 1 measured (1 warmup) |")
@@ -1510,12 +1522,12 @@ mod tests {
         ]))
         .expect("overview corpus");
         let overview = super::render_overview(&overview_campaign);
-        assert!(overview.contains("Instrumented peak RSS"));
-        assert!(overview.contains("Instrumented sample count"));
+        assert!(!overview.contains("Instrumented peak RSS"));
+        assert!(!overview.contains("Instrumented sample count"));
     }
 
     #[test]
-    fn instrumented_metrics_use_placeholders_for_failed_or_invalid_rows() {
+    fn instrumented_metrics_are_omitted_for_failed_or_invalid_rows() {
         let mut failed = row("benchmark.blocking-sort", BenchmarkOutcome::Incorrect);
         failed.instrumented_samples = vec![failed.samples[0].clone()];
         let mut invalid = row("benchmark.blocking-sort", BenchmarkOutcome::Timed);
@@ -1527,8 +1539,7 @@ mod tests {
         let campaign = report(vec![failed, invalid]);
         let rendered = super::render_results(&campaign, &campaign.cases.iter().collect::<Vec<_>>());
 
-        assert!(rendered.contains("| Instrumented peak RSS | - | - |"));
-        assert!(rendered.contains("| Instrumented sample count | 1 | - |"));
+        assert!(!rendered.contains("| Instrumented"));
         assert!(rendered.contains("`-` denotes no valid comparable measurement, not zero."));
     }
 

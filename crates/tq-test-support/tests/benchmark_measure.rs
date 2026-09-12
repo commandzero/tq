@@ -48,6 +48,10 @@ fn output_limit_and_first_result_are_measured_without_reframing() {
     .expect("output measurement");
     assert_eq!(limited.status, MeasuredStatus::OutputLimit);
     assert!(limited.output_bytes > 1024);
+    assert!(
+        limited.first_result_micros.is_some(),
+        "non-empty diagnostic output must retain a first-result timestamp"
+    );
     assert!(limited.peak_rss_bytes.expect("output-limit RSS") > 0);
     let stdout_path = limited.stdout_path.as_deref().expect("saved stdout");
     assert!(stdout_path.exists());

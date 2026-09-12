@@ -347,6 +347,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     report
         .validate_authoritative_rss()
         .map_err(|error| format!("benchmark report RSS validation failed: {error}"))?;
+    // A report without linked native controls is useful diagnostic JSON, but
+    // it must not reach the stable Results renderer. Validate before writing
+    // either artifact so a failed publication cannot leave a misleading report
+    // beside the campaign output.
+    if options.markdown_dir.is_some() {
+        report
+            .validate_for_publication()
+            .map_err(|error| format!("benchmark report publication validation failed: {error}"))?;
+    }
     if cancellation.load(std::sync::atomic::Ordering::Acquire) {
         return Err("benchmark campaign cancelled; report not published".into());
     }
@@ -668,7 +677,16 @@ fn prepare_smoke_snapshot(
         &format!("{}.toon", snapshot.source_id),
     )?;
     let mut formats = BTreeMap::new();
-    formats.insert("json", (snapshot.file.clone(), snapshot.artifact.clone()));
+    // The command records the concrete temporary/source path it launches. Keep
+    // the artifact identity aligned with that path even for synthetic smoke
+    // fixtures whose seed metadata uses a cache-relative name.
+    formats.insert(
+        "json",
+        (
+            snapshot.file.clone(),
+            absolute_identity(&snapshot.file, snapshot.artifact.clone()),
+        ),
+    );
     formats.insert(
         "yaml",
         (yaml.clone(), absolute_identity(&yaml, generated.yaml)),
@@ -985,10 +1003,14 @@ fn write_report(
 #[cfg(test)]
 mod tests {
     use super::{
-        BenchmarkFinalStatus, DatasetTier, PreparedDataset, exit_code_for_status, family_matches,
+        BenchmarkFinalStatus, DatasetTier, PreparedDataset, SmokeSnapshot, exit_code_for_status,
+        family_matches, prepare_smoke_snapshot,
     };
     use std::collections::BTreeMap;
+    use std::fs;
+    use tempfile::tempdir;
     use tq_test_support::benchmark::DatasetFamily;
+    use tq_test_support::corpus::DocumentIdentity;
 
     #[test]
     fn missing_executables_are_not_unsupported_capability_rows() {
@@ -1025,5 +1047,33 @@ mod tests {
                 std::process::ExitCode::from(1)
             );
         }
+    }
+
+    #[test]
+    fn smoke_json_identity_records_the_launch_path() {
+        let directory = tempdir().expect("temporary smoke directory");
+        let json_path = directory.path().join("startup.json");
+        let json = br#"{"type":"FeatureCollection","features":[]}"#;
+        fs::write(&json_path, json).expect("write smoke fixture");
+        let snapshot = SmokeSnapshot {
+            source_id: "startup".to_owned(),
+            file: json_path.clone(),
+            artifact: tq_test_support::corpus::ArtifactIdentity {
+                path: "startup.json".to_owned(),
+                bytes: json.len() as u64,
+                sha256: String::new(),
+            },
+            document: DocumentIdentity {
+                root_type: "FeatureCollection".to_owned(),
+                logical_records: 0,
+            },
+        };
+
+        let prepared = prepare_smoke_snapshot(&snapshot, directory.path())
+            .expect("prepare smoke representations");
+        assert_eq!(
+            prepared.formats["json"].1.path,
+            json_path.display().to_string()
+        );
     }
 }

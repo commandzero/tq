@@ -98,6 +98,31 @@ fn non_comparable_machine_and_corpus_are_visibly_separated() {
 }
 
 #[test]
+fn different_operating_systems_are_not_regression_comparable() {
+    let left = campaign("machine-a", "digest-a", 100, 1024);
+    let mut right = left.clone();
+    right.environment.os = if left.environment.os == "linux" {
+        "macos".to_owned()
+    } else {
+        "linux".to_owned()
+    };
+    // Keep the host digest equal so this assertion covers the explicit OS
+    // boundary rather than relying on identity construction details.
+    right.environment.machine_identity = left.environment.machine_identity.clone();
+
+    let comparison = compare_reports(&left, &right);
+    assert!(!comparison.comparable);
+    assert!(
+        comparison
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("operating system")),
+        "reasons: {:?}",
+        comparison.reasons
+    );
+}
+
+#[test]
 fn different_campaign_profiles_are_not_regression_comparable() {
     let left = campaign("machine-a", "digest-a", 100, 1024);
     let mut right = left.clone();
@@ -406,7 +431,7 @@ fn uncalibrated_native_samples_are_not_comparison_evidence() {
         comparison
             .reasons
             .iter()
-            .any(|reason| reason.contains("timing precision is unvalidated")),
+            .any(|reason| reason.contains("timing controls are unvalidated")),
         "reasons: {:?}",
         comparison.reasons
     );
