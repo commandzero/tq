@@ -1,0 +1,2 @@
+format: json5
+source_text: "{\n  // Trimmed from the ESDiag Readme saved object.\n  attributes: {\n    title: \"ESDiag Readme\",\n    markdown: \"\"\"### About\n\nElastic Stack Diagnostics simplifies collecting and analyzing deployment health.\nUse the `Diagnostics List` to select a report.\"\"\",\n  },\n  id: \"esdiag-readme\",\n  type: \"dashboard\",\n}\n"

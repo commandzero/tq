@@ -1,0 +1,74 @@
+schema_version: 2
+section: colors
+source: jq-manual/colors.md
+examples[3]{id,source_line,kind,query,input,case_id,disposition,reason}:
+  colors.witness.manual.colors.custom-1-31,16,witness,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",manual.colors.custom-1-31,covered,Executable witness for source passage colors.custom-sequence.
+  colors.witness.manual.colors.default-palette,18,witness,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",manual.colors.default-palette,covered,Executable witness for source passage colors.slot-null.
+  colors.witness.manual.colors.ansi-values,18,witness,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",manual.colors.ansi-values,covered,Executable witness for source passage colors.slot-null.
+coverage_summary:
+  total_entries: 26
+  new_example_entries: 26
+  covered_entries: 0
+  non_executable_entries: 0
+  fenced_blocks[0]:
+  fenced_blocks_with_case_ids[0]:
+harness_limitations[3]: "-C is supplied to both jq and tq so color bytes are emitted through redirected stdin/stdout; this does not assert terminal auto-detection behavior.",The fixture uses one compact object containing all eight documented slots; raw-byte comparison verifies escape sequences while preserving the jq/tq JQ_COLORS mismatch.,"NO_COLOR is explicitly set to an empty string and JQ_COLORS is always supplied, avoiding inherited host color settings."
+coverage_notes[26]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  colors.custom-sequence,16,prose-environment-example,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The literal 1;31 component is repeated for all eight documented slots so the custom bright-red setting is observed for every JSON type and object key.,manual.colors.custom-1-31
+  colors.slot-null,18,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains a null value, exercising the first palette slot in each raw-byte case.",null
+  colors.slot-false,19,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains a false value, exercising the second palette slot in each raw-byte case.",null
+  colors.slot-true,20,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains a true value, exercising the third palette slot in each raw-byte case.",null
+  colors.slot-number,21,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains a number, exercising the fourth palette slot in each raw-byte case.",null
+  colors.slot-string,22,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains a string, exercising the fifth palette slot in each raw-byte case.",null
+  colors.slot-array,23,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains an array, exercising the sixth palette slot in each raw-byte case.",null
+  colors.slot-object,24,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The aggregate object contains a nested object, exercising the seventh palette slot in each raw-byte case.",null
+  colors.slot-object-key,25,prose-slot,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The aggregate object's seven string keys exercise the eighth palette slot in each raw-byte case.,null
+  colors.default-palette,27,prose-environment-example,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The exact palette from the manual is supplied explicitly, with NO_COLOR empty, so captured bytes do not depend on the host environment.",manual.colors.default-palette
+  colors.ansi-pair,29,prose-syntax,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,All three cases use colon-delimited entries whose style and color components are separated by a semicolon.,null
+  colors.style-bright,31,prose-style-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The custom case repeats style 1; the matrix also assigns style 1 to null and object values.,null
+  colors.style-dim,32,prose-style-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns style 2 to false and object keys.,manual.colors.ansi-values
+  colors.style-underscore,33,prose-style-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns style 4 to true.,manual.colors.ansi-values
+  colors.style-blink,34,prose-style-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns style 5 to numbers.,manual.colors.ansi-values
+  colors.style-reverse,35,prose-style-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns style 7 to strings.,manual.colors.ansi-values
+  colors.style-hidden,36,prose-style-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns style 8 to arrays.,manual.colors.ansi-values
+  colors.color-list,38,prose-syntax,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns one listed color code to each of the eight palette slots.,manual.colors.ansi-values
+  colors.color-black,40,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 30 to null.,manual.colors.ansi-values
+  colors.color-red,41,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,"The repeated custom case exercises 1;31 across every slot, and the ANSI matrix assigns color 31 to false.",null
+  colors.color-green,42,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 32 to true.,manual.colors.ansi-values
+  colors.color-yellow,43,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 33 to numbers.,manual.colors.ansi-values
+  colors.color-blue,44,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 34 to strings.,manual.colors.ansi-values
+  colors.color-magenta,45,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 35 to arrays.,manual.colors.ansi-values
+  colors.color-cyan,46,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 36 to objects.,manual.colors.ansi-values
+  colors.color-white,47,prose-color-value,.,"{\"null\":null,\"false\":false,\"true\":true,\"number\":1,\"string\":\"x\",\"array\":[],\"object\":{}}",new,The ANSI matrix assigns color 37 to object keys.,manual.colors.ansi-values
+coverage_evidence[31]{note_id,case_id}:
+  colors.slot-null,manual.colors.default-palette
+  colors.slot-null,manual.colors.custom-1-31
+  colors.slot-null,manual.colors.ansi-values
+  colors.slot-false,manual.colors.default-palette
+  colors.slot-false,manual.colors.custom-1-31
+  colors.slot-false,manual.colors.ansi-values
+  colors.slot-true,manual.colors.default-palette
+  colors.slot-true,manual.colors.custom-1-31
+  colors.slot-true,manual.colors.ansi-values
+  colors.slot-number,manual.colors.default-palette
+  colors.slot-number,manual.colors.custom-1-31
+  colors.slot-number,manual.colors.ansi-values
+  colors.slot-string,manual.colors.default-palette
+  colors.slot-string,manual.colors.custom-1-31
+  colors.slot-string,manual.colors.ansi-values
+  colors.slot-array,manual.colors.default-palette
+  colors.slot-array,manual.colors.custom-1-31
+  colors.slot-array,manual.colors.ansi-values
+  colors.slot-object,manual.colors.default-palette
+  colors.slot-object,manual.colors.custom-1-31
+  colors.slot-object,manual.colors.ansi-values
+  colors.slot-object-key,manual.colors.default-palette
+  colors.slot-object-key,manual.colors.custom-1-31
+  colors.slot-object-key,manual.colors.ansi-values
+  colors.ansi-pair,manual.colors.default-palette
+  colors.ansi-pair,manual.colors.custom-1-31
+  colors.ansi-pair,manual.colors.ansi-values
+  colors.style-bright,manual.colors.custom-1-31
+  colors.style-bright,manual.colors.ansi-values
+  colors.color-red,manual.colors.custom-1-31
+  colors.color-red,manual.colors.ansi-values

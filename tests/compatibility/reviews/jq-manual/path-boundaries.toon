@@ -1,0 +1,13 @@
+schema_version: 2
+scope: Supplemental path behavior witnesses; not an additional manual section.
+source: jq-manual/builtin-operators-and-functions.md
+coverage_notes[0]:
+examples[8]{id,source_line,kind,query,input,case_id,disposition,reason}:
+  "paths.filtered",493,"boundary","paths(.==2)","[1,2]","manual.audit.paths.filtered","new","Filtered paths retain only matching values."
+  "paths.filter-cardinality",493,"boundary","[paths(true,true)]","[1]","manual.audit.paths.filter-cardinality","new","Repeated successful filter results retain repeated paths."
+  "paths.duplicate-deletion",370,"boundary","[del(.[1],.[1]),delpaths([[1],[1]])]","[0,1,2,3]","manual.audit.paths.duplicate-deletion","new","Duplicate paths refer to the same original array element."
+  "paths.dynamic-index",292,"boundary","path(.a[.b])","{\"a\":[10,20],\"b\":1}","manual.audit.paths.dynamic-index","new","The index expression uses the original input."
+  "paths.negative-index",316,"boundary","del(.[-1])","[0,1,2]","manual.audit.paths.negative-index","new","Negative array indices select from the original array end."
+  "paths.filter-early-stop",493,"boundary","first(paths(if .==2 then error(\"later\") else true end))","[1,2]","manual.audit.paths.filter-early-stop","new","A finite consumer stops before a later filter error."
+  "paths.path-prior-error",292,"boundary","path(.[0],error(\"later\"))","[1,2]","manual.audit.paths.path-prior-error","new","A prior path remains observable before a later generator error."
+  "paths.deletion-prior-error",370,"boundary","delpaths([[0]],error(\"later\"))","[1,2]","manual.audit.paths.deletion-prior-error","new","A prior deleted root remains observable before a later generator error."

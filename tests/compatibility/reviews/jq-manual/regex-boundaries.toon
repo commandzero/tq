@@ -1,0 +1,8 @@
+schema_version: 2
+scope: supplemental regex boundary witnesses
+source: jq-manual/regular-expressions.md
+coverage_notes[0]:
+examples[3]{id,source_line,kind,query,input,case_id,disposition,reason}:
+  regex.scan-single-capture,151,boundary,"[scan(\"(.)\")]","\"ab\"",manual.audit.regex.scan-single-capture,new,"Covers jq scan's array shape for a pattern with exactly one capture group through the CLI and VM routes."
+  regex.empty-replacement,197,boundary,"[sub(\"a\"; empty), gsub(\"a\"; empty)]","\"a\"",manual.audit.regex.empty-replacement,new,"Covers jq's empty replacement stream behavior: both operations preserve the original input."
+  regex.gsub-three-arguments,209,boundary,"gsub(\"p\"; \"x\"; \"g\")","\"p\"",manual.audit.regex.gsub-three-arguments,new,"Covers the documented three-argument gsub overload with an explicit global flag."

@@ -1,0 +1,76 @@
+schema_version: 2
+section: modules
+source: "https://jqlang.org/manual/#modules"
+examples[21]{id,source_line,source_fence_line,kind,query,input,disposition,reason,case_id}:
+  modules.default-search-fence,31,31,fenced,"import \"home\" as h; h::value","null",new,Executable default-search lookup witness using a controlled HOME/.jq module; the source fence supplies the documented roots.,manual.modules.default-search-path
+  modules.witness.manual.modules.import,16,null,witness,"import \"basic\" as b; b::value","null",covered,Executable witness for source passage modules.system.,manual.modules.import
+  modules.witness.manual.modules.include,18,null,witness,"include \"included\"; included_value","null",covered,Executable witness for source passage modules.search-path-directives.,manual.modules.include
+  modules.witness.manual.modules.path-dot,20,null,witness,"import \"basic\" as b; b::value","null",covered,Executable witness for source passage modules.path-substitutions.,manual.modules.path-dot
+  modules.witness.manual.modules.path-tilde,20,null,witness,"import \"home\" as h; h::value","null",covered,Executable witness for source passage modules.path-substitutions.,manual.modules.path-tilde
+  modules.witness.manual.modules.path-origin,20,null,witness,"import \"foo\" as f; f::value","null",covered,Executable witness for source passage modules.path-substitutions.,manual.modules.path-origin
+  modules.witness.manual.modules.path-dot-including,26,null,witness,"import \"main\" as m; m::value","null",covered,Executable witness for source passage modules.path-dot-including.,manual.modules.path-dot-including
+  modules.witness.manual.modules.import-search,28,null,witness,"import \"meta/consumer\" as c; c::value","null",covered,Executable witness for source passage modules.import-search-path.,manual.modules.import-search
+  modules.witness.manual.modules.search-terminator,37,null,witness,"import \"consumer\" as c; c::value","null",covered,Executable witness for source passage modules.search-terminator.,manual.modules.search-terminator
+  modules.witness.manual.modules.relative-single,39,null,witness,"import \"foo/bar\" as f; f::value","null",covered,Executable witness for source passage modules.relative-dependency.,manual.modules.relative-single
+  modules.witness.manual.modules.relative-directory,39,null,witness,"import \"foo/bar\" as f; f::value","null",covered,Executable witness for source passage modules.relative-dependency.,manual.modules.relative-directory
+  modules.witness.manual.modules.repeated-component,41,null,witness,"import \"foo/foo\" as f; f::value","null",covered,Executable witness for source passage modules.repeated-components.,manual.modules.repeated-component
+  modules.witness.manual.modules.foo-single,43,null,witness,"import \"foo\" as f; f::value","null",covered,Executable witness for source passage modules.foo-search-example.,manual.modules.foo-single
+  modules.witness.manual.modules.foo-directory,43,null,witness,"import \"foo\" as f; f::value","null",covered,Executable witness for source passage modules.foo-search-example.,manual.modules.foo-directory
+  modules.witness.manual.modules.home-auto-source,45,null,witness,home_value,"null",covered,Executable witness for source passage modules.home-auto-source.,manual.modules.home-auto-source
+  modules.witness.manual.modules.import-metadata,51,null,witness,"import \"basic\" as b {\"homepage\":\"override\"}; b::value","null",covered,Executable witness for source passage modules.import-metadata.,manual.modules.import-metadata
+  modules.witness.manual.modules.include-metadata,59,null,witness,"import \"meta/include-consumer\" as c; c::value","null",covered,Executable witness for source passage modules.include-metadata.,manual.modules.include-metadata
+  modules.witness.manual.modules.import-json,61,null,witness,"import \"data\" as $data; $data::data","null",covered,Executable witness for source passage modules.import-json-signature.,manual.modules.import-json
+  modules.witness.manual.modules.modulemeta,69,null,witness,"import \"basic\" as b; \"basic\" | modulemeta","null",covered,Executable witness for source passage modules.module-signature.,manual.modules.modulemeta
+  modules.witness.manual.modules.metadata-constant,73,null,witness,"import \"basic\" as b {\"homepage\": .}; b::value","null",covered,Executable witness for source passage modules.module-constant.,manual.modules.metadata-constant
+  modules.witness.manual.modules.modulemeta-deps,77,null,witness,"import \"meta/consumer\" as c; \"meta/consumer\" | modulemeta","null",covered,Executable witness for source passage modules.modulemeta-shape.,manual.modules.modulemeta-deps
+coverage_summary:
+  total_entries: 34
+  new_example_entries: 26
+  covered_entries: 7
+  adapted_entries: 0
+  non_executable_entries: 0
+  fenced_blocks[1]: 31
+  fenced_blocks_with_case_ids[1]: 31
+harness_limitations[3]: "Module lookup is executed from the repository root; executable-origin paths use the corresponding target binary layout for each tool.",The child HOME override is confined to the owned fixture tree so user startup files cannot affect results.,The compatibility harness compares result sequences semantically; tq's default TOON Text Sequence output is intentionally left unmodified.
+coverage_notes[33]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  modules.system,16,prose-capability,"import \"basic\" as b; b::value","null",new,The prose introduces the module system; an imported fixture provides an executable witness.,manual.modules.import
+  modules.search-path-directives,18,prose-capability,"include \"included\"; included_value","null",new,The prose names import/include search-path directives; the include case exercises the directive with an explicit root.,manual.modules.include
+  modules.path-substitutions,20,prose-capability,"import \"basic\" as b; b::value","null",new,"Dedicated dot, HOME/tilde, and executable-origin cases exercise each documented substitution with controlled roots.",null
+  modules.path-tilde,22,prose-capability,"import \"home\" as h; h::value","null",new,jq and tq both receive a controlled HOME and the documented ~/.jq search root.,manual.modules.path-tilde
+  modules.path-origin,24,prose-capability,"import \"foo\" as f; f::value","null",new,jq and tq both resolve the fixture through $ORIGIN substitution; their binary layouts require distinct relative depths.,manual.modules.path-origin
+  modules.path-dot,26,prose-capability,"import \"basic\" as b; b::value","null",new,Both tools receive the documented ./ top-level root.,manual.modules.path-dot
+  modules.path-dot-including,26,prose-capability,"import \"main\" as m; m::value","null",new,"A module containing include \"./child\" verifies that dot resolves relative to the including file.",manual.modules.path-dot-including
+  modules.import-search-path,28,prose-capability,"import \"meta/consumer\" as c; c::value","null",new,"A consumer module imports its helper with constant search metadata, exercising the prefixed dependency path.",manual.modules.import-search
+  modules.default-search-description,30,prose-capability,"import \"home\" as h; h::value","null",new,The documented default search path is exercised through an actual HOME/.jq module lookup rather than a literal path-array expression.,manual.modules.default-search-path
+  modules.search-terminator,37,prose-capability,"import \"consumer\" as c; c::value","null",new,"Both tools receive the empty dependency search element and must stop before the later root.",manual.modules.search-terminator
+  modules.relative-dependency,39,prose-capability,"import \"foo/bar\" as f; f::value","null",new,Separate roots witness both foo/bar.jq and foo/bar/bar.jq resolution forms named by the prose.,null
+  modules.relative-single-file,39,prose-path-pattern,"import \"foo/bar\" as f; f::value","null",new,The single-file candidate is present in the owned fixture root.,manual.modules.relative-single
+  modules.relative-directory-file,39,prose-path-pattern,"import \"foo/bar\" as f; f::value","null",new,The directory-module candidate is present in a separate owned root with no competing single-file candidate.,manual.modules.relative-directory
+  modules.repeated-components,41,prose-validation,"import \"foo/foo\" as f; f::value","null",new,The repeated-component prohibition is executable as a compile-error witness; tq currently accepts it and records the compatibility difference.,manual.modules.repeated-component
+  modules.foo-search-example,43,prose-example,"import \"foo\" as f; f::value","null",new,Separate roots witness both foo.jq and foo/foo.jq forms from the documented -L$HOME/.jq example.,null
+  modules.home-auto-source,45,prose-capability,home_value,"null",new,Both tools use a child-only HOME; the startup file is auto-sourced under the CLI capability policy.,manual.modules.home-auto-source
+  modules.import-signature,47,prose-signature,"import \"basic\" as b; b::value","null",new,The concrete fixture instantiates the import RelativePathString as NAME signature.,manual.modules.import
+  modules.import-qualification,49,prose-capability,"import \"basic\" as b; b::value","null",covered,"The qualified b::value call directly exercises the documented namespace prefix.",manual.modules.import
+  modules.import-metadata,51,prose-capability,"import \"basic\" as b {\"homepage\":\"override\"}; b::value","null",new,A constant object metadata witness exercises the optional import metadata form.,manual.modules.import-metadata
+  modules.import-search-metadata,53,prose-capability,"import \"meta/consumer\" as c; c::value","null",covered,The consumer's import metadata contains a relative search path used to locate helper.jq.,manual.modules.import-search
+  modules.include-signature,55,prose-signature,"include \"included\"; included_value","null",new,The concrete fixture instantiates the include RelativePathString signature.,manual.modules.include
+  modules.include-namespace,57,prose-capability,"include \"included\"; included_value","null",covered,The unqualified included_value call directly verifies inclusion into the caller namespace.,manual.modules.include
+  modules.include-metadata,59,prose-capability,"import \"meta/include-consumer\" as c; c::value","null",new,The include fixture carries constant search metadata and resolves a helper from its parent directory.,manual.modules.include-metadata
+  modules.import-json-signature,61,prose-signature,"import \"data\" as $data; $data::data","null",new,The JSON-module import signature is instantiated with an owned data.json fixture.,manual.modules.import-json
+  modules.import-json-value,63,prose-capability,"import \"data\" as $data; $data::data","null",covered,"The $data::data reference directly exercises the documented data binding.",manual.modules.import-json
+  modules.import-json-metadata,65,prose-capability,"import \"data\" as $data {\"homepage\":\"data\"}; $data::data","null",covered,The JSON import case uses the exact data binding while jq parses optional metadata in the same directive form.,manual.modules.import-json
+  modules.import-json-search,67,prose-capability,"import \"data\" as $data; $data::data","null",covered,The data import remains rooted with an explicit search path and both tools expose the basename namespace.,manual.modules.import-json
+  modules.module-signature,69,prose-signature,"import \"basic\" as b; \"basic\" | modulemeta","null",new,The basic.jq fixture begins with module metadata and is observed through modulemeta.,manual.modules.modulemeta
+  modules.module-optional,71,prose-capability,"import \"basic\" as b; b::value","null",covered,The imported module operates correctly with its optional module directive.,manual.modules.import
+  modules.module-constant,73,prose-validation,"import \"basic\" as b {\"homepage\": .}; b::value","null",new,A non-constant metadata expression is an executable compile-error witness for the constant-expression requirement.,manual.modules.metadata-constant
+  modules.modulemeta-signature,75,prose-signature,"import \"basic\" as b; \"basic\" | modulemeta","null",new,The modulemeta filter is run after importing the named module.,manual.modules.modulemeta
+  modules.modulemeta-shape,77,prose-capability,"import \"meta/consumer\" as c; \"meta/consumer\" | modulemeta","null",new,The result exposes deps (including search metadata) and defs as documented.,manual.modules.modulemeta-deps
+  modules.modulemeta-program-use,79,prose-capability,"import \"basic\" as b; \"basic\" | modulemeta | {defs, deps}","null",covered,The case makes the metadata available to a subsequent jq program expression.,manual.modules.modulemeta
+coverage_evidence[7]{note_id,case_id}:
+  modules.path-substitutions,manual.modules.path-dot
+  modules.path-substitutions,manual.modules.path-tilde
+  modules.path-substitutions,manual.modules.path-origin
+  modules.relative-dependency,manual.modules.relative-single
+  modules.relative-dependency,manual.modules.relative-directory
+  modules.foo-search-example,manual.modules.foo-single
+  modules.foo-search-example,manual.modules.foo-directory

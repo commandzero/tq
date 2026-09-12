@@ -1,0 +1,1056 @@
+manual: jq 1.8
+source: "https://jqlang.org/manual/"
+sections[13]:
+  - section: advanced-features
+    sha256: 107bec2349a33643288de1d194fc56fbfd894f353a7beb544ae2ea2ba15d7245
+    table_examples[25]{line,text,query,input,expected_stdout}:
+      99,"| Command | jq '.bar as $x | .foo | . + $x' |\n| --- |\n| Input | {\"foo\":10, \"bar\":200} |\n| Output | 210 |\n| [Run](https://play.jqlang.org/?q=.bar%20as%20%24x%20%7C%20.foo%20%7C%20.%20%2B%20%24x&j=%7B%22foo%22%3A10%2C%20%22bar%22%3A200%7D) |  |",.bar as $x | .foo | . + $x,"{\"foo\":10, \"bar\":200}","210\n"
+      105,"| Command | jq '. as $i|[(.*2|. as $i| $i), $i]' |\n| --- |\n| Input | 5 |\n| Output | [10,5] |\n| [Run](https://play.jqlang.org/?q=.%20as%20%24i%7C%5B%28.%2A2%7C.%20as%20%24i%7C%20%24i%29%2C%20%24i%5D&j=5) |  |",". as $i|[(.*2|. as $i| $i), $i]","5","[10,5]\n"
+      111,"| Command | jq '. as [$a, $b, {c: $c}] | $a + $b + $c' |\n| --- |\n| Input | [2, 3, {\"c\": 4, \"d\": 5}] |\n| Output | 9 |\n| [Run](https://play.jqlang.org/?q=.%20as%20%5B%24a%2C%20%24b%2C%20%7Bc%3A%20%24c%7D%5D%20%7C%20%24a%20%2B%20%24b%20%2B%20%24c&j=%5B2%2C%203%2C%20%7B%22c%22%3A%204%2C%20%22d%22%3A%205%7D%5D) |  |",". as [$a, $b, {c: $c}] | $a + $b + $c","[2, 3, {\"c\": 4, \"d\": 5}]","9\n"
+      117,"| Command | jq '.[] as [$a, $b] | {a: $a, b: $b}' |\n| --- |\n| Input | [[0], [0, 1], [2, 1, 0]] |\n| Output | {\"a\":0,\"b\":null} |\n|  | {\"a\":0,\"b\":1} |\n|  | {\"a\":2,\"b\":1} |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20as%20%5B%24a%2C%20%24b%5D%20%7C%20%7Ba%3A%20%24a%2C%20b%3A%20%24b%7D&j=%5B%5B0%5D%2C%20%5B0%2C%201%5D%2C%20%5B2%2C%201%2C%200%5D%5D) |  |",".[] as [$a, $b] | {a: $a, b: $b}","[[0], [0, 1], [2, 1, 0]]","{\"a\":0,\"b\":null}\n{\"a\":0,\"b\":1}\n{\"a\":2,\"b\":1}\n"
+      160,"| Command | jq '.[] as {$a, $b, c: {$d, $e}} ?// {$a, $b, c: [{$d, $e}]} | {$a, $b, $d, $e}' |\n| --- |\n| Input | [{\"a\": 1, \"b\": 2, \"c\": {\"d\": 3, \"e\": 4}}, {\"a\": 1, \"b\": 2, \"c\": [{\"d\": 3, \"e\": 4}]}] |\n| Output | {\"a\":1,\"b\":2,\"d\":3,\"e\":4} |\n|  | {\"a\":1,\"b\":2,\"d\":3,\"e\":4} |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20as%20%7B%24a%2C%20%24b%2C%20c%3A%20%7B%24d%2C%20%24e%7D%7D%20%3F//%20%7B%24a%2C%20%24b%2C%20c%3A%20%5B%7B%24d%2C%20%24e%7D%5D%7D%20%7C%20%7B%24a%2C%20%24b%2C%20%24d%2C%20%24e%7D&j=%5B%7B%22a%22%3A%201%2C%20%22b%22%3A%202%2C%20%22c%22%3A%20%7B%22d%22%3A%203%2C%20%22e%22%3A%204%7D%7D%2C%20%7B%22a%22%3A%201%2C%20%22b%22%3A%202%2C%20%22c%22%3A%20%5B%7B%22d%22%3A%203%2C%20%22e%22%3A%204%7D%5D%7D%5D) |  |",".[] as {$a, $b, c: {$d, $e}} ?// {$a, $b, c: [{$d, $e}]} | {$a, $b, $d, $e}","[{\"a\": 1, \"b\": 2, \"c\": {\"d\": 3, \"e\": 4}}, {\"a\": 1, \"b\": 2, \"c\": [{\"d\": 3, \"e\": 4}]}]","{\"a\":1,\"b\":2,\"d\":3,\"e\":4}\n{\"a\":1,\"b\":2,\"d\":3,\"e\":4}\n"
+      167,"| Command | jq '.[] as {$a, $b, c: {$d}} ?// {$a, $b, c: [{$e}]} | {$a, $b, $d, $e}' |\n| --- |\n| Input | [{\"a\": 1, \"b\": 2, \"c\": {\"d\": 3, \"e\": 4}}, {\"a\": 1, \"b\": 2, \"c\": [{\"d\": 3, \"e\": 4}]}] |\n| Output | {\"a\":1,\"b\":2,\"d\":3,\"e\":null} |\n|  | {\"a\":1,\"b\":2,\"d\":null,\"e\":4} |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20as%20%7B%24a%2C%20%24b%2C%20c%3A%20%7B%24d%7D%7D%20%3F//%20%7B%24a%2C%20%24b%2C%20c%3A%20%5B%7B%24e%7D%5D%7D%20%7C%20%7B%24a%2C%20%24b%2C%20%24d%2C%20%24e%7D&j=%5B%7B%22a%22%3A%201%2C%20%22b%22%3A%202%2C%20%22c%22%3A%20%7B%22d%22%3A%203%2C%20%22e%22%3A%204%7D%7D%2C%20%7B%22a%22%3A%201%2C%20%22b%22%3A%202%2C%20%22c%22%3A%20%5B%7B%22d%22%3A%203%2C%20%22e%22%3A%204%7D%5D%7D%5D) |  |",".[] as {$a, $b, c: {$d}} ?// {$a, $b, c: [{$e}]} | {$a, $b, $d, $e}","[{\"a\": 1, \"b\": 2, \"c\": {\"d\": 3, \"e\": 4}}, {\"a\": 1, \"b\": 2, \"c\": [{\"d\": 3, \"e\": 4}]}]","{\"a\":1,\"b\":2,\"d\":3,\"e\":null}\n{\"a\":1,\"b\":2,\"d\":null,\"e\":4}\n"
+      174,"| Command | jq '.[] as [$a] ?// [$b] | if $a != null then error(\"err: \\($a)\") else {$a,$b} end' |\n| --- |\n| Input | [[3]] |\n| Output | {\"a\":null,\"b\":3} |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20as%20%5B%24a%5D%20%3F//%20%5B%24b%5D%20%7C%20if%20%24a%20%21%3D%20null%20then%20error%28%22err%3A%20%5C%28%24a%29%22%29%20else%20%7B%24a%2C%24b%7D%20end&j=%5B%5B3%5D%5D) |  |",".[] as [$a] ?// [$b] | if $a != null then error(\"err: \\($a)\") else {$a,$b} end","[[3]]","{\"a\":null,\"b\":3}\n"
+      219,"| Command | jq 'def addvalue(f): . + [f]; map(addvalue(.[0]))' |\n| --- |\n| Input | [[1,2],[10,20]] |\n| Output | [[1,2,1], [10,20,10]] |\n| [Run](https://play.jqlang.org/?q=def%20addvalue%28f%29%3A%20.%20%2B%20%5Bf%5D%3B%20map%28addvalue%28.%5B0%5D%29%29&j=%5B%5B1%2C2%5D%2C%5B10%2C20%5D%5D) |  |","def addvalue(f): . + [f]; map(addvalue(.[0]))","[[1,2],[10,20]]","[[1,2,1], [10,20,10]]\n"
+      225,"| Command | jq 'def addvalue(f): f as $x | map(. + $x); addvalue(.[0])' |\n| --- |\n| Input | [[1,2],[10,20]] |\n| Output | [[1,2,1,2], [10,20,1,2]] |\n| [Run](https://play.jqlang.org/?q=def%20addvalue%28f%29%3A%20f%20as%20%24x%20%7C%20map%28.%20%2B%20%24x%29%3B%20addvalue%28.%5B0%5D%29&j=%5B%5B1%2C2%5D%2C%5B10%2C20%5D%5D) |  |","def addvalue(f): f as $x | map(. + $x); addvalue(.[0])","[[1,2],[10,20]]","[[1,2,1,2], [10,20,1,2]]\n"
+      251,"| Command | jq 'isempty(empty)' |\n| --- |\n| Input | null |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=isempty%28empty%29&j=null) |  |",isempty(empty),"null","true\n"
+      257,"| Command | jq 'isempty(.[])' |\n| --- |\n| Input | [] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=isempty%28.%5B%5D%29&j=%5B%5D) |  |","isempty(.[])","[]","true\n"
+      263,"| Command | jq 'isempty(.[])' |\n| --- |\n| Input | [1,2,3] |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=isempty%28.%5B%5D%29&j=%5B1%2C2%2C3%5D) |  |","isempty(.[])","[1,2,3]","false\n"
+      273,"| Command | jq '[limit(3; .[])]' |\n| --- |\n| Input | [0,1,2,3,4,5,6,7,8,9] |\n| Output | [0,1,2] |\n| [Run](https://play.jqlang.org/?q=%5Blimit%283%3B%20.%5B%5D%29%5D&j=%5B0%2C1%2C2%2C3%2C4%2C5%2C6%2C7%2C8%2C9%5D) |  |","[limit(3; .[])]","[0,1,2,3,4,5,6,7,8,9]","[0,1,2]\n"
+      283,"| Command | jq '[skip(3; .[])]' |\n| --- |\n| Input | [0,1,2,3,4,5,6,7,8,9] |\n| Output | [3,4,5,6,7,8,9] |\n| [Run](https://play.jqlang.org/?q=%5Bskip%283%3B%20.%5B%5D%29%5D&j=%5B0%2C1%2C2%2C3%2C4%2C5%2C6%2C7%2C8%2C9%5D) |  |","[skip(3; .[])]","[0,1,2,3,4,5,6,7,8,9]","[3,4,5,6,7,8,9]\n"
+      295,"| Command | jq '[first(range(.)), last(range(.)), nth(5; range(.))]' |\n| --- |\n| Input | 10 |\n| Output | [0,9,5] |\n| [Run](https://play.jqlang.org/?q=%5Bfirst%28range%28.%29%29%2C%20last%28range%28.%29%29%2C%20nth%285%3B%20range%28.%29%29%5D&j=10) |  |","[first(range(.)), last(range(.)), nth(5; range(.))]","10","[0,9,5]\n"
+      301,"| Command | jq '[first(empty), last(empty), nth(5; empty)]' |\n| --- |\n| Input | null |\n| Output | [] |\n| [Run](https://play.jqlang.org/?q=%5Bfirst%28empty%29%2C%20last%28empty%29%2C%20nth%285%3B%20empty%29%5D&j=null) |  |","[first(empty), last(empty), nth(5; empty)]","null","[]\n"
+      313,"| Command | jq '[range(.)]|[first, last, nth(5)]' |\n| --- |\n| Input | 10 |\n| Output | [0,9,5] |\n| [Run](https://play.jqlang.org/?q=%5Brange%28.%29%5D%7C%5Bfirst%2C%20last%2C%20nth%285%29%5D&j=10) |  |","[range(.)]|[first, last, nth(5)]","10","[0,9,5]\n"
+      335,"| Command | jq 'reduce .[] as $item (0; . + $item)' |\n| --- |\n| Input | [1,2,3,4,5] |\n| Output | 15 |\n| [Run](https://play.jqlang.org/?q=reduce%20.%5B%5D%20as%20%24item%20%280%3B%20.%20%2B%20%24item%29&j=%5B1%2C2%2C3%2C4%2C5%5D) |  |","reduce .[] as $item (0; . + $item)","[1,2,3,4,5]","15\n"
+      341,"| Command | jq 'reduce .[] as [$i,$j] (0; . + $i * $j)' |\n| --- |\n| Input | [[1,2],[3,4],[5,6]] |\n| Output | 44 |\n| [Run](https://play.jqlang.org/?q=reduce%20.%5B%5D%20as%20%5B%24i%2C%24j%5D%20%280%3B%20.%20%2B%20%24i%20%2A%20%24j%29&j=%5B%5B1%2C2%5D%2C%5B3%2C4%5D%2C%5B5%2C6%5D%5D) |  |","reduce .[] as [$i,$j] (0; . + $i * $j)","[[1,2],[3,4],[5,6]]","44\n"
+      347,"| Command | jq 'reduce .[] as {$x,$y} (null; .x += $x | .y += [$y])' |\n| --- |\n| Input | [{\"x\":\"a\",\"y\":1},{\"x\":\"b\",\"y\":2},{\"x\":\"c\",\"y\":3}] |\n| Output | {\"x\":\"abc\",\"y\":[1,2,3]} |\n| [Run](https://play.jqlang.org/?q=reduce%20.%5B%5D%20as%20%7B%24x%2C%24y%7D%20%28null%3B%20.x%20%2B%3D%20%24x%20%7C%20.y%20%2B%3D%20%5B%24y%5D%29&j=%5B%7B%22x%22%3A%22a%22%2C%22y%22%3A1%7D%2C%7B%22x%22%3A%22b%22%2C%22y%22%3A2%7D%2C%7B%22x%22%3A%22c%22%2C%22y%22%3A3%7D%5D) |  |","reduce .[] as {$x,$y} (null; .x += $x | .y += [$y])","[{\"x\":\"a\",\"y\":1},{\"x\":\"b\",\"y\":2},{\"x\":\"c\",\"y\":3}]","{\"x\":\"abc\",\"y\":[1,2,3]}\n"
+      373,"| Command | jq 'foreach .[] as $item (0; . + $item)' |\n| --- |\n| Input | [1,2,3,4,5] |\n| Output | 1 |\n|  | 3 |\n|  | 6 |\n|  | 10 |\n|  | 15 |\n| [Run](https://play.jqlang.org/?q=foreach%20.%5B%5D%20as%20%24item%20%280%3B%20.%20%2B%20%24item%29&j=%5B1%2C2%2C3%2C4%2C5%5D) |  |","foreach .[] as $item (0; . + $item)","[1,2,3,4,5]","1\n3\n6\n10\n15\n"
+      383,"| Command | jq 'foreach .[] as $item (0; . + $item; [$item, . * 2])' |\n| --- |\n| Input | [1,2,3,4,5] |\n| Output | [1,2] |\n|  | [2,6] |\n|  | [3,12] |\n|  | [4,20] |\n|  | [5,30] |\n| [Run](https://play.jqlang.org/?q=foreach%20.%5B%5D%20as%20%24item%20%280%3B%20.%20%2B%20%24item%3B%20%5B%24item%2C%20.%20%2A%202%5D%29&j=%5B1%2C2%2C3%2C4%2C5%5D) |  |","foreach .[] as $item (0; . + $item; [$item, . * 2])","[1,2,3,4,5]","[1,2]\n[2,6]\n[3,12]\n[4,20]\n[5,30]\n"
+      393,"| Command | jq 'foreach .[] as $item (0; . + 1; {index: ., $item})' |\n| --- |\n| Input | [\"foo\", \"bar\", \"baz\"] |\n| Output | {\"index\":1,\"item\":\"foo\"} |\n|  | {\"index\":2,\"item\":\"bar\"} |\n|  | {\"index\":3,\"item\":\"baz\"} |\n| [Run](https://play.jqlang.org/?q=foreach%20.%5B%5D%20as%20%24item%20%280%3B%20.%20%2B%201%3B%20%7Bindex%3A%20.%2C%20%24item%7D%29&j=%5B%22foo%22%2C%20%22bar%22%2C%20%22baz%22%5D) |  |","foreach .[] as $item (0; . + 1; {index: ., $item})","[\"foo\", \"bar\", \"baz\"]","{\"index\":1,\"item\":\"foo\"}\n{\"index\":2,\"item\":\"bar\"}\n{\"index\":3,\"item\":\"baz\"}\n"
+      433,"| Command | jq 'def range(init; upto; by): def _range: if (by > 0 and . < upto) or (by < 0 and . > upto) then ., ((.+by)|_range) else empty end; if init == upto then empty elif by == 0 then init else init|_range end; range(0; 10; 3)' |\n| --- |\n| Input | null |\n| Output | 0 |\n|  | 3 |\n|  | 6 |\n|  | 9 |\n| [Run](https://play.jqlang.org/?q=def%20range%28init%3B%20upto%3B%20by%29%3A%20def%20_range%3A%20if%20%28by%20%3E%200%20and%20.%20%3C%20upto%29%20or%20%28by%20%3C%200%20and%20.%20%3E%20upto%29%20then%20.%2C%20%28%28.%2Bby%29%7C_range%29%20else%20empty%20end%3B%20if%20init%20%3D%3D%20upto%20then%20empty%20elif%20by%20%3D%3D%200%20then%20init%20else%20init%7C_range%20end%3B%20range%280%3B%2010%3B%203%29&j=null) |  |","def range(init; upto; by): def _range: if (by > 0 and . < upto) or (by < 0 and . > upto) then ., ((.+by)|_range) else empty end; if init == upto then empty elif by == 0 then init else init|_range end; range(0; 10; 3)","null","0\n3\n6\n9\n"
+      442,"| Command | jq 'def while(cond; update): def _while: if cond then ., (update | _while) else empty end; _while; [while(.<100; .*2)]' |\n| --- |\n| Input | 1 |\n| Output | [1,2,4,8,16,32,64] |\n| [Run](https://play.jqlang.org/?q=def%20while%28cond%3B%20update%29%3A%20def%20_while%3A%20if%20cond%20then%20.%2C%20%28update%20%7C%20_while%29%20else%20empty%20end%3B%20_while%3B%20%5Bwhile%28.%3C100%3B%20.%2A2%29%5D&j=1) |  |","def while(cond; update): def _while: if cond then ., (update | _while) else empty end; _while; [while(.<100; .*2)]","1","[1,2,4,8,16,32,64]\n"
+    fenced_examples[25]{line,text}:
+      38,"```\nlength as $array_length | add / $array_length\n```"
+      46,"```\n{\"posts\": [{\"title\": \"First post\", \"author\": \"anon\"},\n           {\"title\": \"A well-written article\", \"author\": \"person1\"}],\n \"realnames\": {\"anon\": \"Anonymous Coward\",\n               \"person1\": \"Person McPherson\"}}\n```"
+      55,"```\n{\"title\": \"First post\", \"author\": \"Anonymous Coward\"}\n{\"title\": \"A well-written article\", \"author\": \"Person McPherson\"}\n```"
+      62,"```\n.realnames as $names | .posts[] | {title, author: $names[.author]}\n```"
+      72,"```\n. as {realnames: $names, posts: [$first, $second]} | ...\n```"
+      77,"```\n. as\n[$first, $second]\n```"
+      85,"```\n.realnames as $names | (.posts[] | {title, author: $names[.author]})\n```"
+      91,"```\n(.realnames as $names | .posts[]) | {title, author: $names[.author]}\n```"
+      131,"```\n{\"resources\": [{\"id\": 1, \"kind\": \"widget\", \"events\": {\"action\": \"create\", \"user_id\": 1, \"ts\": 13}},\n               {\"id\": 2, \"kind\": \"widget\", \"events\": [{\"action\": \"create\", \"user_id\": 1, \"ts\": 14}, {\"action\": \"destroy\", \"user_id\": 1, \"ts\": 15}]}]}\n```"
+      138,"```\n.resources[] as {$id, $kind, events: {$user_id, $ts}} ?// {$id, $kind, events: [{$user_id, $ts}]} | {$user_id, $kind, $id, $ts}\n```"
+      144,"```\n.[] as [$id, $kind, $user_id, $ts] ?// {$id, $kind, $user_id, $ts} | ...\n```"
+      150,"```\n.resources[] as {$id, $kind, events: {$user_id, $ts}} ?// {$id, $kind, events: [{$first_user_id, $first_ts}]} | {$user_id, $first_user_id, $kind, $id, $ts, $first_ts}\n```"
+      156,"```\n[[3]] | .[] as [$a] ?// [$b] | if $a != null then error(\"err: \\($a)\") else {$a,$b} end\n```"
+      184,"```\ndef increment: . + 1;\n```"
+      190,"```\ndef map(f): [.[] | f];\n```"
+      196,"```\ndef foo(f): f|f;\n5|foo(.*2)\n```"
+      205,"```\ndef addvalue(f): f as $f | map(. + $f);\n```"
+      211,"```\ndef addvalue($f): ...;\n```"
+      236,"```\n... | .*3 as\n$times_three | [. + $times_three] | ...\n```"
+      241,"```\n... | (.*3 as\n$times_three | [. + $times_three]) | ...\n```"
+      323,"```\nreduce .[] as $item (0; . + $item)\n```"
+      329,"```\n0 | 1 as $item | . + $item |\n    2 as $item | . + $item |\n    3 as $item | . + $item\n```"
+      359,"```\nforeach .[] as $item (0; . + $item; [$item, . * 2])\n```"
+      365,"```\n0 | 1 as $item | . + $item | [$item, . * 2],\n    2 as $item | . + $item | [$item, . * 2],\n    3 as $item | . + $item | [$item, . * 2]\n```"
+      409,"```\ndef recurse(f): def r: ., (f | select(. != null) | r); r;\n\ndef while(cond; update):\n  def _while:\n    if cond then ., (update | _while) else empty end;\n  _while;\n\ndef repeat(exp):\n  def _repeat:\n    exp, _repeat;\n  _repeat;\n```"
+    source: "https://jqlang.org/manual/#advanced-features"
+    file: jq-manual/advanced-features.md
+  - section: assignment
+    sha256: 3d51dcf7a378f1f635b388192b8c7d175bee93f801fd9014086184a0037f8ff5
+    table_examples[6]{line,text,query,input,expected_stdout}:
+      54,"| Command | jq '(..|select(type==\"boolean\")) |= if . then 1 else 0 end' |\n| --- |\n| Input | [true,false,[5,true,[true,[false]],false]] |\n| Output | [1,0,[5,1,[1,[0]],0]] |\n| [Run](https://play.jqlang.org/?q=%28..%7Cselect%28type%3D%3D%22boolean%22%29%29%20%7C%3D%20if%20.%20then%201%20else%200%20end&j=%5Btrue%2Cfalse%2C%5B5%2Ctrue%2C%5Btrue%2C%5Bfalse%5D%5D%2Cfalse%5D%5D) |  |","(..|select(type==\"boolean\")) |= if . then 1 else 0 end","[true,false,[5,true,[true,[false]],false]]","[1,0,[5,1,[1,[0]],0]]\n"
+      64,"| Command | jq '.foo += 1' |\n| --- |\n| Input | {\"foo\": 42} |\n| Output | {\"foo\": 43} |\n| [Run](https://play.jqlang.org/?q=.foo%20%2B%3D%201&j=%7B%22foo%22%3A%2042%7D) |  |",.foo += 1,"{\"foo\": 42}","{\"foo\": 43}\n"
+      92,"| Command | jq '.a = .b' |\n| --- |\n| Input | {\"a\": {\"b\": 10}, \"b\": 20} |\n| Output | {\"a\":20,\"b\":20} |\n| [Run](https://play.jqlang.org/?q=.a%20%3D%20.b&j=%7B%22a%22%3A%20%7B%22b%22%3A%2010%7D%2C%20%22b%22%3A%2020%7D) |  |",.a = .b,"{\"a\": {\"b\": 10}, \"b\": 20}","{\"a\":20,\"b\":20}\n"
+      98,"| Command | jq '.a |= .b' |\n| --- |\n| Input | {\"a\": {\"b\": 10}, \"b\": 20} |\n| Output | {\"a\":10,\"b\":20} |\n| [Run](https://play.jqlang.org/?q=.a%20%7C%3D%20.b&j=%7B%22a%22%3A%20%7B%22b%22%3A%2010%7D%2C%20%22b%22%3A%2020%7D) |  |",.a |= .b,"{\"a\": {\"b\": 10}, \"b\": 20}","{\"a\":10,\"b\":20}\n"
+      104,"| Command | jq '(.a, .b) = range(3)' |\n| --- |\n| Input | null |\n| Output | {\"a\":0,\"b\":0} |\n|  | {\"a\":1,\"b\":1} |\n|  | {\"a\":2,\"b\":2} |\n| [Run](https://play.jqlang.org/?q=%28.a%2C%20.b%29%20%3D%20range%283%29&j=null) |  |","(.a, .b) = range(3)","null","{\"a\":0,\"b\":0}\n{\"a\":1,\"b\":1}\n{\"a\":2,\"b\":2}\n"
+      112,"| Command | jq '(.a, .b) |= range(3)' |\n| --- |\n| Input | null |\n| Output | {\"a\":0,\"b\":0} |\n| [Run](https://play.jqlang.org/?q=%28.a%2C%20.b%29%20%7C%3D%20range%283%29&j=null) |  |","(.a, .b) |= range(3)","null","{\"a\":0,\"b\":0}\n"
+    fenced_examples[8]{line,text}:
+      29,"```\n$var | .foo =\n1\n```"
+      44,"```\n$var |\n.foo |= . + 1\n```"
+      80,"```\n.a = .b\n```"
+      86,"```\n.a |= .b\n```"
+      122,"```\n.posts[0].title = \"JQ Manual\"\n```"
+      128,"```\n.posts[].comments |= . + [\"this is great\"]\n```"
+      138,"```\n.posts[] | select(.author == \"stedolan\")\n```"
+      144,"```\n(.posts[] | select(.author == \"stedolan\") | .comments) |=\n    . + [\"terrible.\"]\n```"
+    source: "https://jqlang.org/manual/#assignment"
+    file: jq-manual/assignment.md
+  - section: basic-filters
+    sha256: 517ad2e029370ee8392212fc02cf0ace3c97c4b028330bb6641181cef8c43dac
+    table_examples[30]{line,text,query,input,expected_stdout}:
+      42,"| Command | jq '.' |\n| --- |\n| Input | \"Hello, world!\" |\n| Output | \"Hello, world!\" |\n| [Run](https://play.jqlang.org/?q=.&j=%22Hello%2C%20world%21%22) |  |",.,"\"Hello, world!\"","\"Hello, world!\"\n"
+      48,"| Command | jq '.' |\n| --- |\n| Input | 0.12345678901234567890123456789 |\n| Output | 0.12345678901234567890123456789 |\n| [Run](https://play.jqlang.org/?q=.&j=0.12345678901234567890123456789) |  |",.,"0.12345678901234567890123456789","0.12345678901234567890123456789\n"
+      54,"| Command | jq '[., tojson] == if have_decnum then [12345678909876543212345,\"12345678909876543212345\"] else [12345678909876543000000,\"12345678909876543000000\"] end' |\n| --- |\n| Input | 12345678909876543212345 |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=%5B.%2C%20tojson%5D%20%3D%3D%20if%20have_decnum%20then%20%5B12345678909876543212345%2C%2212345678909876543212345%22%5D%20else%20%5B12345678909876543000000%2C%2212345678909876543000000%22%5D%20end&j=12345678909876543212345) |  |","[., tojson] == if have_decnum then [12345678909876543212345,\"12345678909876543212345\"] else [12345678909876543000000,\"12345678909876543000000\"] end","12345678909876543212345","true\n"
+      60,"| Command | jq '[1234567890987654321,-1234567890987654321 | tojson] == if have_decnum then [\"1234567890987654321\",\"-1234567890987654321\"] else [\"1234567890987654400\",\"-1234567890987654400\"] end' |\n| --- |\n| Input | null |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=%5B1234567890987654321%2C-1234567890987654321%20%7C%20tojson%5D%20%3D%3D%20if%20have_decnum%20then%20%5B%221234567890987654321%22%2C%22-1234567890987654321%22%5D%20else%20%5B%221234567890987654400%22%2C%22-1234567890987654400%22%5D%20end&j=null) |  |","[1234567890987654321,-1234567890987654321 | tojson] == if have_decnum then [\"1234567890987654321\",\"-1234567890987654321\"] else [\"1234567890987654400\",\"-1234567890987654400\"] end","null","true\n"
+      66,"| Command | jq '. < 0.12345678901234567890123456788' |\n| --- |\n| Input | 0.12345678901234567890123456789 |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=.%20%3C%200.12345678901234567890123456788&j=0.12345678901234567890123456789) |  |",. < 0.12345678901234567890123456788,"0.12345678901234567890123456789","false\n"
+      72,"| Command | jq 'map([., . == 1]) | tojson == if have_decnum then \"[[1,true],[1.000,true],[1.0,true],[1.00,true]]\" else \"[[1,true],[1,true],[1,true],[1,true]]\" end' |\n| --- |\n| Input | [1, 1.000, 1.0, 100e-2] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=map%28%5B.%2C%20.%20%3D%3D%201%5D%29%20%7C%20tojson%20%3D%3D%20if%20have_decnum%20then%20%22%5B%5B1%2Ctrue%5D%2C%5B1.000%2Ctrue%5D%2C%5B1.0%2Ctrue%5D%2C%5B1.00%2Ctrue%5D%5D%22%20else%20%22%5B%5B1%2Ctrue%5D%2C%5B1%2Ctrue%5D%2C%5B1%2Ctrue%5D%2C%5B1%2Ctrue%5D%5D%22%20end&j=%5B1%2C%201.000%2C%201.0%2C%20100e-2%5D) |  |","map([., . == 1]) | tojson == if have_decnum then \"[[1,true],[1.000,true],[1.0,true],[1.00,true]]\" else \"[[1,true],[1,true],[1,true],[1,true]]\" end","[1, 1.000, 1.0, 100e-2]","true\n"
+      78,"| Command | jq '. as $big | [$big, $big + 1] | map(. > 10000000000000000000000000000000) | . == if have_decnum then [true, false] else [false, false] end' |\n| --- |\n| Input | 10000000000000000000000000000001 |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=.%20as%20%24big%20%7C%20%5B%24big%2C%20%24big%20%2B%201%5D%20%7C%20map%28.%20%3E%2010000000000000000000000000000000%29%20%7C%20.%20%3D%3D%20if%20have_decnum%20then%20%5Btrue%2C%20false%5D%20else%20%5Bfalse%2C%20false%5D%20end&j=10000000000000000000000000000001) |  |",". as $big | [$big, $big + 1] | map(. > 10000000000000000000000000000000) | . == if have_decnum then [true, false] else [false, false] end","10000000000000000000000000000001","true\n"
+      96,"| Command | jq '.foo' |\n| --- |\n| Input | {\"foo\": 42, \"bar\": \"less interesting data\"} |\n| Output | 42 |\n| [Run](https://play.jqlang.org/?q=.foo&j=%7B%22foo%22%3A%2042%2C%20%22bar%22%3A%20%22less%20interesting%20data%22%7D) |  |",.foo,"{\"foo\": 42, \"bar\": \"less interesting data\"}","42\n"
+      102,"| Command | jq '.foo' |\n| --- |\n| Input | {\"notfoo\": true, \"alsonotfoo\": false} |\n| Output | null |\n| [Run](https://play.jqlang.org/?q=.foo&j=%7B%22notfoo%22%3A%20true%2C%20%22alsonotfoo%22%3A%20false%7D) |  |",.foo,"{\"notfoo\": true, \"alsonotfoo\": false}","null\n"
+      108,"| Command | jq '.[\"foo\"]' |\n| --- |\n| Input | {\"foo\": 42} |\n| Output | 42 |\n| [Run](https://play.jqlang.org/?q=.%5B%22foo%22%5D&j=%7B%22foo%22%3A%2042%7D) |  |",".[\"foo\"]","{\"foo\": 42}","42\n"
+      118,"| Command | jq '.foo?' |\n| --- |\n| Input | {\"foo\": 42, \"bar\": \"less interesting data\"} |\n| Output | 42 |\n| [Run](https://play.jqlang.org/?q=.foo%3F&j=%7B%22foo%22%3A%2042%2C%20%22bar%22%3A%20%22less%20interesting%20data%22%7D) |  |",.foo?,"{\"foo\": 42, \"bar\": \"less interesting data\"}","42\n"
+      124,"| Command | jq '.foo?' |\n| --- |\n| Input | {\"notfoo\": true, \"alsonotfoo\": false} |\n| Output | null |\n| [Run](https://play.jqlang.org/?q=.foo%3F&j=%7B%22notfoo%22%3A%20true%2C%20%22alsonotfoo%22%3A%20false%7D) |  |",.foo?,"{\"notfoo\": true, \"alsonotfoo\": false}","null\n"
+      130,"| Command | jq '.[\"foo\"]?' |\n| --- |\n| Input | {\"foo\": 42} |\n| Output | 42 |\n| [Run](https://play.jqlang.org/?q=.%5B%22foo%22%5D%3F&j=%7B%22foo%22%3A%2042%7D) |  |",".[\"foo\"]?","{\"foo\": 42}","42\n"
+      136,"| Command | jq '[.foo?]' |\n| --- |\n| Input | [1,2] |\n| Output | [] |\n| [Run](https://play.jqlang.org/?q=%5B.foo%3F%5D&j=%5B1%2C2%5D) |  |","[.foo?]","[1,2]","[]\n"
+      152,"| Command | jq '.[0]' |\n| --- |\n| Input | [{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}] |\n| Output | {\"name\":\"JSON\", \"good\":true} |\n| [Run](https://play.jqlang.org/?q=.%5B0%5D&j=%5B%7B%22name%22%3A%22JSON%22%2C%20%22good%22%3Atrue%7D%2C%20%7B%22name%22%3A%22XML%22%2C%20%22good%22%3Afalse%7D%5D) |  |",".[0]","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]","{\"name\":\"JSON\", \"good\":true}\n"
+      158,"| Command | jq '.[2]' |\n| --- |\n| Input | [{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}] |\n| Output | null |\n| [Run](https://play.jqlang.org/?q=.%5B2%5D&j=%5B%7B%22name%22%3A%22JSON%22%2C%20%22good%22%3Atrue%7D%2C%20%7B%22name%22%3A%22XML%22%2C%20%22good%22%3Afalse%7D%5D) |  |",".[2]","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]","null\n"
+      164,"| Command | jq '.[-2]' |\n| --- |\n| Input | [1,2,3] |\n| Output | 2 |\n| [Run](https://play.jqlang.org/?q=.%5B-2%5D&j=%5B1%2C2%2C3%5D) |  |",".[-2]","[1,2,3]","2\n"
+      174,"| Command | jq '.[2:4]' |\n| --- |\n| Input | [\"a\",\"b\",\"c\",\"d\",\"e\"] |\n| Output | [\"c\", \"d\"] |\n| [Run](https://play.jqlang.org/?q=.%5B2%3A4%5D&j=%5B%22a%22%2C%22b%22%2C%22c%22%2C%22d%22%2C%22e%22%5D) |  |",".[2:4]","[\"a\",\"b\",\"c\",\"d\",\"e\"]","[\"c\", \"d\"]\n"
+      180,"| Command | jq '.[2:4]' |\n| --- |\n| Input | \"abcdefghi\" |\n| Output | \"cd\" |\n| [Run](https://play.jqlang.org/?q=.%5B2%3A4%5D&j=%22abcdefghi%22) |  |",".[2:4]","\"abcdefghi\"","\"cd\"\n"
+      186,"| Command | jq '.[:3]' |\n| --- |\n| Input | [\"a\",\"b\",\"c\",\"d\",\"e\"] |\n| Output | [\"a\", \"b\", \"c\"] |\n| [Run](https://play.jqlang.org/?q=.%5B%3A3%5D&j=%5B%22a%22%2C%22b%22%2C%22c%22%2C%22d%22%2C%22e%22%5D) |  |",".[:3]","[\"a\",\"b\",\"c\",\"d\",\"e\"]","[\"a\", \"b\", \"c\"]\n"
+      192,"| Command | jq '.[-2:]' |\n| --- |\n| Input | [\"a\",\"b\",\"c\",\"d\",\"e\"] |\n| Output | [\"d\", \"e\"] |\n| [Run](https://play.jqlang.org/?q=.%5B-2%3A%5D&j=%5B%22a%22%2C%22b%22%2C%22c%22%2C%22d%22%2C%22e%22%5D) |  |",".[-2:]","[\"a\",\"b\",\"c\",\"d\",\"e\"]","[\"d\", \"e\"]\n"
+      206,"| Command | jq '.[]' |\n| --- |\n| Input | [{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}] |\n| Output | {\"name\":\"JSON\", \"good\":true} |\n|  | {\"name\":\"XML\", \"good\":false} |\n| [Run](https://play.jqlang.org/?q=.%5B%5D&j=%5B%7B%22name%22%3A%22JSON%22%2C%20%22good%22%3Atrue%7D%2C%20%7B%22name%22%3A%22XML%22%2C%20%22good%22%3Afalse%7D%5D) |  |",".[]","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]","{\"name\":\"JSON\", \"good\":true}\n{\"name\":\"XML\", \"good\":false}\n"
+      213,"| Command | jq '.[]' |\n| --- |\n| Input | [] |\n| Output | none |\n| [Run](https://play.jqlang.org/?q=.%5B%5D&j=%5B%5D) |  |",".[]","[]",""
+      219,"| Command | jq '.foo[]' |\n| --- |\n| Input | {\"foo\":[1,2,3]} |\n| Output | 1 |\n|  | 2 |\n|  | 3 |\n| [Run](https://play.jqlang.org/?q=.foo%5B%5D&j=%7B%22foo%22%3A%5B1%2C2%2C3%5D%7D) |  |",".foo[]","{\"foo\":[1,2,3]}","1\n2\n3\n"
+      227,"| Command | jq '.[]' |\n| --- |\n| Input | {\"a\": 1, \"b\": 1} |\n| Output | 1 |\n|  | 1 |\n| [Run](https://play.jqlang.org/?q=.%5B%5D&j=%7B%22a%22%3A%201%2C%20%22b%22%3A%201%7D) |  |",".[]","{\"a\": 1, \"b\": 1}","1\n1\n"
+      249,"| Command | jq '.foo, .bar' |\n| --- |\n| Input | {\"foo\": 42, \"bar\": \"something else\", \"baz\": true} |\n| Output | 42 |\n|  | \"something else\" |\n| [Run](https://play.jqlang.org/?q=.foo%2C%20.bar&j=%7B%22foo%22%3A%2042%2C%20%22bar%22%3A%20%22something%20else%22%2C%20%22baz%22%3A%20true%7D) |  |",".foo, .bar","{\"foo\": 42, \"bar\": \"something else\", \"baz\": true}","42\n\"something else\"\n"
+      256,"| Command | jq '.user, .projects[]' |\n| --- |\n| Input | {\"user\":\"stedolan\", \"projects\": [\"jq\", \"wikiflow\"]} |\n| Output | \"stedolan\" |\n|  | \"jq\" |\n|  | \"wikiflow\" |\n| [Run](https://play.jqlang.org/?q=.user%2C%20.projects%5B%5D&j=%7B%22user%22%3A%22stedolan%22%2C%20%22projects%22%3A%20%5B%22jq%22%2C%20%22wikiflow%22%5D%7D) |  |",".user, .projects[]","{\"user\":\"stedolan\", \"projects\": [\"jq\", \"wikiflow\"]}","\"stedolan\"\n\"jq\"\n\"wikiflow\"\n"
+      264,"| Command | jq '.[4,2]' |\n| --- |\n| Input | [\"a\",\"b\",\"c\",\"d\",\"e\"] |\n| Output | \"e\" |\n|  | \"c\" |\n| [Run](https://play.jqlang.org/?q=.%5B4%2C2%5D&j=%5B%22a%22%2C%22b%22%2C%22c%22%2C%22d%22%2C%22e%22%5D) |  |",".[4,2]","[\"a\",\"b\",\"c\",\"d\",\"e\"]","\"e\"\n\"c\"\n"
+      281,"| Command | jq '.[] | .name' |\n| --- |\n| Input | [{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}] |\n| Output | \"JSON\" |\n|  | \"XML\" |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20.name&j=%5B%7B%22name%22%3A%22JSON%22%2C%20%22good%22%3Atrue%7D%2C%20%7B%22name%22%3A%22XML%22%2C%20%22good%22%3Afalse%7D%5D) |  |",".[] | .name","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]","\"JSON\"\n\"XML\"\n"
+      292,"| Command | jq '(. + 2) * 5' |\n| --- |\n| Input | 1 |\n| Output | 15 |\n| [Run](https://play.jqlang.org/?q=%28.%20%2B%202%29%20%2A%205&j=1) |  |",(. + 2) * 5,"1","15\n"
+    fenced_examples[2]{line,text}:
+      24,"```\n1E1234567890 | .\n```"
+      241,"```\n.foo,\n.bar\n```"
+    source: "https://jqlang.org/manual/#basic-filters"
+    file: jq-manual/basic-filters.md
+  - section: builtin-operators-and-functions
+    sha256: 26a486341c8a9f4a9cbfa8fe9895f86c82c36a7cffd36f847a853a2e75898062
+    table_examples[146]:
+      - line: 36
+        text: "| Command | jq '.a + 1' |\n| --- |\n| Input | {\"a\": 7} |\n| Output | 8 |\n| [Run](https://play.jqlang.org/?q=.a%20%2B%201&j=%7B%22a%22%3A%207%7D) |  |"
+        query: .a + 1
+        input: "{\"a\": 7}"
+        expected_stdout: "8\n"
+      - line: 42
+        text: "| Command | jq '.a + .b' |\n| --- |\n| Input | {\"a\": [1,2], \"b\": [3,4]} |\n| Output | [1,2,3,4] |\n| [Run](https://play.jqlang.org/?q=.a%20%2B%20.b&j=%7B%22a%22%3A%20%5B1%2C2%5D%2C%20%22b%22%3A%20%5B3%2C4%5D%7D) |  |"
+        query: .a + .b
+        input: "{\"a\": [1,2], \"b\": [3,4]}"
+        expected_stdout: "[1,2,3,4]\n"
+      - line: 48
+        text: "| Command | jq '.a + null' |\n| --- |\n| Input | {\"a\": 1} |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=.a%20%2B%20null&j=%7B%22a%22%3A%201%7D) |  |"
+        query: .a + null
+        input: "{\"a\": 1}"
+        expected_stdout: "1\n"
+      - line: 54
+        text: "| Command | jq '.a + 1' |\n| --- |\n| Input | {} |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=.a%20%2B%201&j=%7B%7D) |  |"
+        query: .a + 1
+        input: "{}"
+        expected_stdout: "1\n"
+      - line: 60
+        text: "| Command | jq '{a: 1} + {b: 2} + {c: 3} + {a: 42}' |\n| --- |\n| Input | null |\n| Output | {\"a\": 42, \"b\": 2, \"c\": 3} |\n| [Run](https://play.jqlang.org/?q=%7Ba%3A%201%7D%20%2B%20%7Bb%3A%202%7D%20%2B%20%7Bc%3A%203%7D%20%2B%20%7Ba%3A%2042%7D&j=null) |  |"
+        query: "{a: 1} + {b: 2} + {c: 3} + {a: 42}"
+        input: "null"
+        expected_stdout: "{\"a\": 42, \"b\": 2, \"c\": 3}\n"
+      - line: 70
+        text: "| Command | jq '4 - .a' |\n| --- |\n| Input | {\"a\":3} |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=4%20-%20.a&j=%7B%22a%22%3A3%7D) |  |"
+        query: 4 - .a
+        input: "{\"a\":3}"
+        expected_stdout: "1\n"
+      - line: 76
+        text: "| Command | jq '. - [\"xml\", \"yaml\"]' |\n| --- |\n| Input | [\"xml\", \"yaml\", \"json\"] |\n| Output | [\"json\"] |\n| [Run](https://play.jqlang.org/?q=.%20-%20%5B%22xml%22%2C%20%22yaml%22%5D&j=%5B%22xml%22%2C%20%22yaml%22%2C%20%22json%22%5D) |  |"
+        query: ". - [\"xml\", \"yaml\"]"
+        input: "[\"xml\", \"yaml\", \"json\"]"
+        expected_stdout: "[\"json\"]\n"
+      - line: 92
+        text: "| Command | jq '10 / . * 3' |\n| --- |\n| Input | 5 |\n| Output | 6 |\n| [Run](https://play.jqlang.org/?q=10%20/%20.%20%2A%203&j=5) |  |"
+        query: 10 / . * 3
+        input: "5"
+        expected_stdout: "6\n"
+      - line: 98
+        text: "| Command | jq '. / \", \"' |\n| --- |\n| Input | \"a, b,c,d, e\" |\n| Output | [\"a\",\"b,c,d\",\"e\"] |\n| [Run](https://play.jqlang.org/?q=.%20/%20%22%2C%20%22&j=%22a%2C%20b%2Cc%2Cd%2C%20e%22) |  |"
+        query: ". / \", \""
+        input: "\"a, b,c,d, e\""
+        expected_stdout: "[\"a\",\"b,c,d\",\"e\"]\n"
+      - line: 104
+        text: "| Command | jq '{\"k\": {\"a\": 1, \"b\": 2}} * {\"k\": {\"a\": 0,\"c\": 3}}' |\n| --- |\n| Input | null |\n| Output | {\"k\": {\"a\": 0, \"b\": 2, \"c\": 3}} |\n| [Run](https://play.jqlang.org/?q=%7B%22k%22%3A%20%7B%22a%22%3A%201%2C%20%22b%22%3A%202%7D%7D%20%2A%20%7B%22k%22%3A%20%7B%22a%22%3A%200%2C%22c%22%3A%203%7D%7D&j=null) |  |"
+        query: "{\"k\": {\"a\": 1, \"b\": 2}} * {\"k\": {\"a\": 0,\"c\": 3}}"
+        input: "null"
+        expected_stdout: "{\"k\": {\"a\": 0, \"b\": 2, \"c\": 3}}\n"
+      - line: 110
+        text: "| Command | jq '.[] | (1 / .)?' |\n| --- |\n| Input | [1,0,-1] |\n| Output | 1 |\n|  | -1 |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20%281%20/%20.%29%3F&j=%5B1%2C0%2C-1%5D) |  |"
+        query: ".[] | (1 / .)?"
+        input: "[1,0,-1]"
+        expected_stdout: "1\n-1\n"
+      - line: 125
+        text: "| Command | jq 'map(abs)' |\n| --- |\n| Input | [-10, -1.1, -1e-1] |\n| Output | [10,1.1,1e-1] |\n| [Run](https://play.jqlang.org/?q=map%28abs%29&j=%5B-10%2C%20-1.1%2C%20-1e-1%5D) |  |"
+        query: map(abs)
+        input: "[-10, -1.1, -1e-1]"
+        expected_stdout: "[10,1.1,1e-1]\n"
+      - line: 147
+        text: "| Command | jq '.[] | length' |\n| --- |\n| Input | [[1,2], \"string\", {\"a\":2}, null, -5] |\n| Output | 2 |\n|  | 6 |\n|  | 1 |\n|  | 0 |\n|  | 5 |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20length&j=%5B%5B1%2C2%5D%2C%20%22string%22%2C%20%7B%22a%22%3A2%7D%2C%20null%2C%20-5%5D) |  |"
+        query: ".[] | length"
+        input: "[[1,2], \"string\", {\"a\":2}, null, -5]"
+        expected_stdout: "2\n6\n1\n0\n5\n"
+      - line: 161
+        text: "| Command | jq 'utf8bytelength' |\n| --- |\n| Input | \"\\u03bc\" |\n| Output | 2 |\n| [Run](https://play.jqlang.org/?q=utf8bytelength&j=%22%5Cu03bc%22) |  |"
+        query: utf8bytelength
+        input: "\"\\u03bc\""
+        expected_stdout: "2\n"
+      - line: 177
+        text: "| Command | jq 'keys' |\n| --- |\n| Input | {\"abc\": 1, \"abcd\": 2, \"Foo\": 3} |\n| Output | [\"Foo\", \"abc\", \"abcd\"] |\n| [Run](https://play.jqlang.org/?q=keys&j=%7B%22abc%22%3A%201%2C%20%22abcd%22%3A%202%2C%20%22Foo%22%3A%203%7D) |  |"
+        query: keys
+        input: "{\"abc\": 1, \"abcd\": 2, \"Foo\": 3}"
+        expected_stdout: "[\"Foo\", \"abc\", \"abcd\"]\n"
+      - line: 183
+        text: "| Command | jq 'keys' |\n| --- |\n| Input | [42,3,35] |\n| Output | [0,1,2] |\n| [Run](https://play.jqlang.org/?q=keys&j=%5B42%2C3%2C35%5D) |  |"
+        query: keys
+        input: "[42,3,35]"
+        expected_stdout: "[0,1,2]\n"
+      - line: 195
+        text: "| Command | jq 'map(has(\"foo\"))' |\n| --- |\n| Input | [{\"foo\": 42}, {}] |\n| Output | [true, false] |\n| [Run](https://play.jqlang.org/?q=map%28has%28%22foo%22%29%29&j=%5B%7B%22foo%22%3A%2042%7D%2C%20%7B%7D%5D) |  |"
+        query: "map(has(\"foo\"))"
+        input: "[{\"foo\": 42}, {}]"
+        expected_stdout: "[true, false]\n"
+      - line: 201
+        text: "| Command | jq 'map(has(2))' |\n| --- |\n| Input | [[0,1], [\"a\",\"b\",\"c\"]] |\n| Output | [false, true] |\n| [Run](https://play.jqlang.org/?q=map%28has%282%29%29&j=%5B%5B0%2C1%5D%2C%20%5B%22a%22%2C%22b%22%2C%22c%22%5D%5D) |  |"
+        query: map(has(2))
+        input: "[[0,1], [\"a\",\"b\",\"c\"]]"
+        expected_stdout: "[false, true]\n"
+      - line: 211
+        text: "| Command | jq '.[] | in({\"foo\": 42})' |\n| --- |\n| Input | [\"foo\", \"bar\"] |\n| Output | true |\n|  | false |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20in%28%7B%22foo%22%3A%2042%7D%29&j=%5B%22foo%22%2C%20%22bar%22%5D) |  |"
+        query: ".[] | in({\"foo\": 42})"
+        input: "[\"foo\", \"bar\"]"
+        expected_stdout: "true\nfalse\n"
+      - line: 218
+        text: "| Command | jq 'map(in([3,4]))' |\n| --- |\n| Input | [2, 0] |\n| Output | [false, true] |\n| [Run](https://play.jqlang.org/?q=map%28in%28%5B3%2C4%5D%29%29&j=%5B2%2C%200%5D) |  |"
+        query: "map(in([3,4]))"
+        input: "[2, 0]"
+        expected_stdout: "[false, true]\n"
+      - line: 252
+        text: "| Command | jq 'map(.+1)' |\n| --- |\n| Input | [1,2,3] |\n| Output | [2,3,4] |\n| [Run](https://play.jqlang.org/?q=map%28.%2B1%29&j=%5B1%2C2%2C3%5D) |  |"
+        query: map(.+1)
+        input: "[1,2,3]"
+        expected_stdout: "[2,3,4]\n"
+      - line: 258
+        text: "| Command | jq 'map_values(.+1)' |\n| --- |\n| Input | {\"a\": 1, \"b\": 2, \"c\": 3} |\n| Output | {\"a\": 2, \"b\": 3, \"c\": 4} |\n| [Run](https://play.jqlang.org/?q=map_values%28.%2B1%29&j=%7B%22a%22%3A%201%2C%20%22b%22%3A%202%2C%20%22c%22%3A%203%7D) |  |"
+        query: map_values(.+1)
+        input: "{\"a\": 1, \"b\": 2, \"c\": 3}"
+        expected_stdout: "{\"a\": 2, \"b\": 3, \"c\": 4}\n"
+      - line: 264
+        text: "| Command | jq 'map(., .)' |\n| --- |\n| Input | [1,2] |\n| Output | [1,1,2,2] |\n| [Run](https://play.jqlang.org/?q=map%28.%2C%20.%29&j=%5B1%2C2%5D) |  |"
+        query: "map(., .)"
+        input: "[1,2]"
+        expected_stdout: "[1,1,2,2]\n"
+      - line: 270
+        text: "| Command | jq 'map_values(. // empty)' |\n| --- |\n| Input | {\"a\": null, \"b\": true, \"c\": false} |\n| Output | {\"b\":true} |\n| [Run](https://play.jqlang.org/?q=map_values%28.%20//%20empty%29&j=%7B%22a%22%3A%20null%2C%20%22b%22%3A%20true%2C%20%22c%22%3A%20false%7D) |  |"
+        query: map_values(. // empty)
+        input: "{\"a\": null, \"b\": true, \"c\": false}"
+        expected_stdout: "{\"b\":true}\n"
+      - line: 280
+        text: "| Command | jq 'pick(.a, .b.c, .x)' |\n| --- |\n| Input | {\"a\": 1, \"b\": {\"c\": 2, \"d\": 3}, \"e\": 4} |\n| Output | {\"a\":1,\"b\":{\"c\":2},\"x\":null} |\n| [Run](https://play.jqlang.org/?q=pick%28.a%2C%20.b.c%2C%20.x%29&j=%7B%22a%22%3A%201%2C%20%22b%22%3A%20%7B%22c%22%3A%202%2C%20%22d%22%3A%203%7D%2C%20%22e%22%3A%204%7D) |  |"
+        query: "pick(.a, .b.c, .x)"
+        input: "{\"a\": 1, \"b\": {\"c\": 2, \"d\": 3}, \"e\": 4}"
+        expected_stdout: "{\"a\":1,\"b\":{\"c\":2},\"x\":null}\n"
+      - line: 286
+        text: "| Command | jq 'pick(.[2], .[0], .[0])' |\n| --- |\n| Input | [1,2,3,4] |\n| Output | [1,null,3] |\n| [Run](https://play.jqlang.org/?q=pick%28.%5B2%5D%2C%20.%5B0%5D%2C%20.%5B0%5D%29&j=%5B1%2C2%2C3%2C4%5D) |  |"
+        query: "pick(.[2], .[0], .[0])"
+        input: "[1,2,3,4]"
+        expected_stdout: "[1,null,3]\n"
+      - line: 304
+        text: "| Command | jq 'path(.a[0].b)' |\n| --- |\n| Input | null |\n| Output | [\"a\",0,\"b\"] |\n| [Run](https://play.jqlang.org/?q=path%28.a%5B0%5D.b%29&j=null) |  |"
+        query: "path(.a[0].b)"
+        input: "null"
+        expected_stdout: "[\"a\",0,\"b\"]\n"
+      - line: 310
+        text: "| Command | jq '[path(..)]' |\n| --- |\n| Input | {\"a\":[{\"b\":1}]} |\n| Output | [[],[\"a\"],[\"a\",0],[\"a\",0,\"b\"]] |\n| [Run](https://play.jqlang.org/?q=%5Bpath%28..%29%5D&j=%7B%22a%22%3A%5B%7B%22b%22%3A1%7D%5D%7D) |  |"
+        query: "[path(..)]"
+        input: "{\"a\":[{\"b\":1}]}"
+        expected_stdout: "[[],[\"a\"],[\"a\",0],[\"a\",0,\"b\"]]\n"
+      - line: 320
+        text: "| Command | jq 'del(.foo)' |\n| --- |\n| Input | {\"foo\": 42, \"bar\": 9001, \"baz\": 42} |\n| Output | {\"bar\": 9001, \"baz\": 42} |\n| [Run](https://play.jqlang.org/?q=del%28.foo%29&j=%7B%22foo%22%3A%2042%2C%20%22bar%22%3A%209001%2C%20%22baz%22%3A%2042%7D) |  |"
+        query: del(.foo)
+        input: "{\"foo\": 42, \"bar\": 9001, \"baz\": 42}"
+        expected_stdout: "{\"bar\": 9001, \"baz\": 42}\n"
+      - line: 326
+        text: "| Command | jq 'del(.[1, 2])' |\n| --- |\n| Input | [\"foo\", \"bar\", \"baz\"] |\n| Output | [\"foo\"] |\n| [Run](https://play.jqlang.org/?q=del%28.%5B1%2C%202%5D%29&j=%5B%22foo%22%2C%20%22bar%22%2C%20%22baz%22%5D) |  |"
+        query: "del(.[1, 2])"
+        input: "[\"foo\", \"bar\", \"baz\"]"
+        expected_stdout: "[\"foo\"]\n"
+      - line: 336
+        text: "| Command | jq 'getpath([\"a\",\"b\"])' |\n| --- |\n| Input | null |\n| Output | null |\n| [Run](https://play.jqlang.org/?q=getpath%28%5B%22a%22%2C%22b%22%5D%29&j=null) |  |"
+        query: "getpath([\"a\",\"b\"])"
+        input: "null"
+        expected_stdout: "null\n"
+      - line: 342
+        text: "| Command | jq '[getpath([\"a\",\"b\"], [\"a\",\"c\"])]' |\n| --- |\n| Input | {\"a\":{\"b\":0, \"c\":1}} |\n| Output | [0, 1] |\n| [Run](https://play.jqlang.org/?q=%5Bgetpath%28%5B%22a%22%2C%22b%22%5D%2C%20%5B%22a%22%2C%22c%22%5D%29%5D&j=%7B%22a%22%3A%7B%22b%22%3A0%2C%20%22c%22%3A1%7D%7D) |  |"
+        query: "[getpath([\"a\",\"b\"], [\"a\",\"c\"])]"
+        input: "{\"a\":{\"b\":0, \"c\":1}}"
+        expected_stdout: "[0, 1]\n"
+      - line: 352
+        text: "| Command | jq 'setpath([\"a\",\"b\"]; 1)' |\n| --- |\n| Input | null |\n| Output | {\"a\": {\"b\": 1}} |\n| [Run](https://play.jqlang.org/?q=setpath%28%5B%22a%22%2C%22b%22%5D%3B%201%29&j=null) |  |"
+        query: "setpath([\"a\",\"b\"]; 1)"
+        input: "null"
+        expected_stdout: "{\"a\": {\"b\": 1}}\n"
+      - line: 358
+        text: "| Command | jq 'setpath([\"a\",\"b\"]; 1)' |\n| --- |\n| Input | {\"a\":{\"b\":0}} |\n| Output | {\"a\": {\"b\": 1}} |\n| [Run](https://play.jqlang.org/?q=setpath%28%5B%22a%22%2C%22b%22%5D%3B%201%29&j=%7B%22a%22%3A%7B%22b%22%3A0%7D%7D) |  |"
+        query: "setpath([\"a\",\"b\"]; 1)"
+        input: "{\"a\":{\"b\":0}}"
+        expected_stdout: "{\"a\": {\"b\": 1}}\n"
+      - line: 364
+        text: "| Command | jq 'setpath([0,\"a\"]; 1)' |\n| --- |\n| Input | null |\n| Output | [{\"a\":1}] |\n| [Run](https://play.jqlang.org/?q=setpath%28%5B0%2C%22a%22%5D%3B%201%29&j=null) |  |"
+        query: "setpath([0,\"a\"]; 1)"
+        input: "null"
+        expected_stdout: "[{\"a\":1}]\n"
+      - line: 374
+        text: "| Command | jq 'delpaths([[\"a\",\"b\"]])' |\n| --- |\n| Input | {\"a\":{\"b\":1},\"x\":{\"y\":2}} |\n| Output | {\"a\":{},\"x\":{\"y\":2}} |\n| [Run](https://play.jqlang.org/?q=delpaths%28%5B%5B%22a%22%2C%22b%22%5D%5D%29&j=%7B%22a%22%3A%7B%22b%22%3A1%7D%2C%22x%22%3A%7B%22y%22%3A2%7D%7D) |  |"
+        query: "delpaths([[\"a\",\"b\"]])"
+        input: "{\"a\":{\"b\":1},\"x\":{\"y\":2}}"
+        expected_stdout: "{\"a\":{},\"x\":{\"y\":2}}\n"
+      - line: 386
+        text: "| Command | jq 'to_entries' |\n| --- |\n| Input | {\"a\": 1, \"b\": 2} |\n| Output | [{\"key\":\"a\", \"value\":1}, {\"key\":\"b\", \"value\":2}] |\n| [Run](https://play.jqlang.org/?q=to_entries&j=%7B%22a%22%3A%201%2C%20%22b%22%3A%202%7D) |  |"
+        query: to_entries
+        input: "{\"a\": 1, \"b\": 2}"
+        expected_stdout: "[{\"key\":\"a\", \"value\":1}, {\"key\":\"b\", \"value\":2}]\n"
+      - line: 392
+        text: "| Command | jq 'from_entries' |\n| --- |\n| Input | [{\"key\":\"a\", \"value\":1}, {\"key\":\"b\", \"value\":2}] |\n| Output | {\"a\": 1, \"b\": 2} |\n| [Run](https://play.jqlang.org/?q=from_entries&j=%5B%7B%22key%22%3A%22a%22%2C%20%22value%22%3A1%7D%2C%20%7B%22key%22%3A%22b%22%2C%20%22value%22%3A2%7D%5D) |  |"
+        query: from_entries
+        input: "[{\"key\":\"a\", \"value\":1}, {\"key\":\"b\", \"value\":2}]"
+        expected_stdout: "{\"a\": 1, \"b\": 2}\n"
+      - line: 398
+        text: "| Command | jq 'with_entries(.key |= \"KEY_\" + .)' |\n| --- |\n| Input | {\"a\": 1, \"b\": 2} |\n| Output | {\"KEY_a\": 1, \"KEY_b\": 2} |\n| [Run](https://play.jqlang.org/?q=with_entries%28.key%20%7C%3D%20%22KEY_%22%20%2B%20.%29&j=%7B%22a%22%3A%201%2C%20%22b%22%3A%202%7D) |  |"
+        query: "with_entries(.key |= \"KEY_\" + .)"
+        input: "{\"a\": 1, \"b\": 2}"
+        expected_stdout: "{\"KEY_a\": 1, \"KEY_b\": 2}\n"
+      - line: 410
+        text: "| Command | jq 'map(select(. >= 2))' |\n| --- |\n| Input | [1,5,3,0,7] |\n| Output | [5,3,7] |\n| [Run](https://play.jqlang.org/?q=map%28select%28.%20%3E%3D%202%29%29&j=%5B1%2C5%2C3%2C0%2C7%5D) |  |"
+        query: map(select(. >= 2))
+        input: "[1,5,3,0,7]"
+        expected_stdout: "[5,3,7]\n"
+      - line: 416
+        text: "| Command | jq '.[] | select(.id == \"second\")' |\n| --- |\n| Input | [{\"id\": \"first\", \"val\": 1}, {\"id\": \"second\", \"val\": 2}] |\n| Output | {\"id\": \"second\", \"val\": 2} |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20select%28.id%20%3D%3D%20%22second%22%29&j=%5B%7B%22id%22%3A%20%22first%22%2C%20%22val%22%3A%201%7D%2C%20%7B%22id%22%3A%20%22second%22%2C%20%22val%22%3A%202%7D%5D) |  |"
+        query: ".[] | select(.id == \"second\")"
+        input: "[{\"id\": \"first\", \"val\": 1}, {\"id\": \"second\", \"val\": 2}]"
+        expected_stdout: "{\"id\": \"second\", \"val\": 2}\n"
+      - line: 426
+        text: "| Command | jq '.[]|numbers' |\n| --- |\n| Input | [[],{},1,\"foo\",null,true,false] |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%7Cnumbers&j=%5B%5B%5D%2C%7B%7D%2C1%2C%22foo%22%2Cnull%2Ctrue%2Cfalse%5D) |  |"
+        query: ".[]|numbers"
+        input: "[[],{},1,\"foo\",null,true,false]"
+        expected_stdout: "1\n"
+      - line: 438
+        text: "| Command | jq '1, empty, 2' |\n| --- |\n| Input | null |\n| Output | 1 |\n|  | 2 |\n| [Run](https://play.jqlang.org/?q=1%2C%20empty%2C%202&j=null) |  |"
+        query: "1, empty, 2"
+        input: "null"
+        expected_stdout: "1\n2\n"
+      - line: 445
+        text: "| Command | jq '[1,2,empty,3]' |\n| --- |\n| Input | null |\n| Output | [1,2,3] |\n| [Run](https://play.jqlang.org/?q=%5B1%2C2%2Cempty%2C3%5D&j=null) |  |"
+        query: "[1,2,empty,3]"
+        input: "null"
+        expected_stdout: "[1,2,3]\n"
+      - line: 455
+        text: "| Command | jq 'try error catch .' |\n| --- |\n| Input | \"error message\" |\n| Output | \"error message\" |\n| [Run](https://play.jqlang.org/?q=try%20error%20catch%20.&j=%22error%20message%22) |  |"
+        query: try error catch .
+        input: "\"error message\""
+        expected_stdout: "\"error message\"\n"
+      - line: 461
+        text: "| Command | jq 'try error(\"invalid value: \\(.)\") catch .' |\n| --- |\n| Input | 42 |\n| Output | \"invalid value: 42\" |\n| [Run](https://play.jqlang.org/?q=try%20error%28%22invalid%20value%3A%20%5C%28.%29%22%29%20catch%20.&j=42) |  |"
+        query: "try error(\"invalid value: \\(.)\") catch ."
+        input: "42"
+        expected_stdout: "\"invalid value: 42\"\n"
+      - line: 483
+        text: "| Command | jq 'try error(\"\\($__loc__)\") catch .' |\n| --- |\n| Input | null |\n| Output | \"{\\\"file\\\":\\\"<top-level>\\\",\\\"line\\\":1}\" |\n| [Run](https://play.jqlang.org/?q=try%20error%28%22%5C%28%24__loc__%29%22%29%20catch%20.&j=null) |  |"
+        query: "try error(\"\\($__loc__)\") catch ."
+        input: "null"
+        expected_stdout: "\"{\\\"file\\\":\\\"<top-level>\\\",\\\"line\\\":1}\"\n"
+      - line: 495
+        text: "| Command | jq '[paths]' |\n| --- |\n| Input | [1,[[],{\"a\":2}]] |\n| Output | [[0],[1],[1,0],[1,1],[1,1,\"a\"]] |\n| [Run](https://play.jqlang.org/?q=%5Bpaths%5D&j=%5B1%2C%5B%5B%5D%2C%7B%22a%22%3A2%7D%5D%5D) |  |"
+        query: "[paths]"
+        input: "[1,[[],{\"a\":2}]]"
+        expected_stdout: "[[0],[1],[1,0],[1,1],[1,1,\"a\"]]\n"
+      - line: 501
+        text: "| Command | jq '[paths(type == \"number\")]' |\n| --- |\n| Input | [1,[[],{\"a\":2}]] |\n| Output | [[0],[1,1,\"a\"]] |\n| [Run](https://play.jqlang.org/?q=%5Bpaths%28type%20%3D%3D%20%22number%22%29%5D&j=%5B1%2C%5B%5B%5D%2C%7B%22a%22%3A2%7D%5D%5D) |  |"
+        query: "[paths(type == \"number\")]"
+        input: "[1,[[],{\"a\":2}]]"
+        expected_stdout: "[[0],[1,1,\"a\"]]\n"
+      - line: 515
+        text: "| Command | jq 'add' |\n| --- |\n| Input | [\"a\",\"b\",\"c\"] |\n| Output | \"abc\" |\n| [Run](https://play.jqlang.org/?q=add&j=%5B%22a%22%2C%22b%22%2C%22c%22%5D) |  |"
+        query: add
+        input: "[\"a\",\"b\",\"c\"]"
+        expected_stdout: "\"abc\"\n"
+      - line: 521
+        text: "| Command | jq 'add' |\n| --- |\n| Input | [1, 2, 3] |\n| Output | 6 |\n| [Run](https://play.jqlang.org/?q=add&j=%5B1%2C%202%2C%203%5D) |  |"
+        query: add
+        input: "[1, 2, 3]"
+        expected_stdout: "6\n"
+      - line: 527
+        text: "| Command | jq 'add' |\n| --- |\n| Input | [] |\n| Output | null |\n| [Run](https://play.jqlang.org/?q=add&j=%5B%5D) |  |"
+        query: add
+        input: "[]"
+        expected_stdout: "null\n"
+      - line: 533
+        text: "| Command | jq 'add(.[].a)' |\n| --- |\n| Input | [{\"a\":3}, {\"a\":5}, {\"b\":6}] |\n| Output | 8 |\n| [Run](https://play.jqlang.org/?q=add%28.%5B%5D.a%29&j=%5B%7B%22a%22%3A3%7D%2C%20%7B%22a%22%3A5%7D%2C%20%7B%22b%22%3A6%7D%5D) |  |"
+        query: "add(.[].a)"
+        input: "[{\"a\":3}, {\"a\":5}, {\"b\":6}]"
+        expected_stdout: "8\n"
+      - line: 549
+        text: "| Command | jq 'any' |\n| --- |\n| Input | [true, false] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=any&j=%5Btrue%2C%20false%5D) |  |"
+        query: any
+        input: "[true, false]"
+        expected_stdout: "true\n"
+      - line: 555
+        text: "| Command | jq 'any' |\n| --- |\n| Input | [false, false] |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=any&j=%5Bfalse%2C%20false%5D) |  |"
+        query: any
+        input: "[false, false]"
+        expected_stdout: "false\n"
+      - line: 561
+        text: "| Command | jq 'any' |\n| --- |\n| Input | [] |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=any&j=%5B%5D) |  |"
+        query: any
+        input: "[]"
+        expected_stdout: "false\n"
+      - line: 577
+        text: "| Command | jq 'all' |\n| --- |\n| Input | [true, false] |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=all&j=%5Btrue%2C%20false%5D) |  |"
+        query: all
+        input: "[true, false]"
+        expected_stdout: "false\n"
+      - line: 583
+        text: "| Command | jq 'all' |\n| --- |\n| Input | [true, true] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=all&j=%5Btrue%2C%20true%5D) |  |"
+        query: all
+        input: "[true, true]"
+        expected_stdout: "true\n"
+      - line: 589
+        text: "| Command | jq 'all' |\n| --- |\n| Input | [] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=all&j=%5B%5D) |  |"
+        query: all
+        input: "[]"
+        expected_stdout: "true\n"
+      - line: 601
+        text: "| Command | jq 'flatten' |\n| --- |\n| Input | [1, [2], [[3]]] |\n| Output | [1, 2, 3] |\n| [Run](https://play.jqlang.org/?q=flatten&j=%5B1%2C%20%5B2%5D%2C%20%5B%5B3%5D%5D%5D) |  |"
+        query: flatten
+        input: "[1, [2], [[3]]]"
+        expected_stdout: "[1, 2, 3]\n"
+      - line: 607
+        text: "| Command | jq 'flatten(1)' |\n| --- |\n| Input | [1, [2], [[3]]] |\n| Output | [1, 2, [3]] |\n| [Run](https://play.jqlang.org/?q=flatten%281%29&j=%5B1%2C%20%5B2%5D%2C%20%5B%5B3%5D%5D%5D) |  |"
+        query: flatten(1)
+        input: "[1, [2], [[3]]]"
+        expected_stdout: "[1, 2, [3]]\n"
+      - line: 613
+        text: "| Command | jq 'flatten' |\n| --- |\n| Input | [[]] |\n| Output | [] |\n| [Run](https://play.jqlang.org/?q=flatten&j=%5B%5B%5D%5D) |  |"
+        query: flatten
+        input: "[[]]"
+        expected_stdout: "[]\n"
+      - line: 619
+        text: "| Command | jq 'flatten' |\n| --- |\n| Input | [{\"foo\": \"bar\"}, [{\"foo\": \"baz\"}]] |\n| Output | [{\"foo\": \"bar\"}, {\"foo\": \"baz\"}] |\n| [Run](https://play.jqlang.org/?q=flatten&j=%5B%7B%22foo%22%3A%20%22bar%22%7D%2C%20%5B%7B%22foo%22%3A%20%22baz%22%7D%5D%5D) |  |"
+        query: flatten
+        input: "[{\"foo\": \"bar\"}, [{\"foo\": \"baz\"}]]"
+        expected_stdout: "[{\"foo\": \"bar\"}, {\"foo\": \"baz\"}]\n"
+      - line: 635
+        text: "| Command | jq 'range(2; 4)' |\n| --- |\n| Input | null |\n| Output | 2 |\n|  | 3 |\n| [Run](https://play.jqlang.org/?q=range%282%3B%204%29&j=null) |  |"
+        query: range(2; 4)
+        input: "null"
+        expected_stdout: "2\n3\n"
+      - line: 642
+        text: "| Command | jq '[range(2; 4)]' |\n| --- |\n| Input | null |\n| Output | [2,3] |\n| [Run](https://play.jqlang.org/?q=%5Brange%282%3B%204%29%5D&j=null) |  |"
+        query: "[range(2; 4)]"
+        input: "null"
+        expected_stdout: "[2,3]\n"
+      - line: 648
+        text: "| Command | jq '[range(4)]' |\n| --- |\n| Input | null |\n| Output | [0,1,2,3] |\n| [Run](https://play.jqlang.org/?q=%5Brange%284%29%5D&j=null) |  |"
+        query: "[range(4)]"
+        input: "null"
+        expected_stdout: "[0,1,2,3]\n"
+      - line: 654
+        text: "| Command | jq '[range(0; 10; 3)]' |\n| --- |\n| Input | null |\n| Output | [0,3,6,9] |\n| [Run](https://play.jqlang.org/?q=%5Brange%280%3B%2010%3B%203%29%5D&j=null) |  |"
+        query: "[range(0; 10; 3)]"
+        input: "null"
+        expected_stdout: "[0,3,6,9]\n"
+      - line: 660
+        text: "| Command | jq '[range(0; 10; -1)]' |\n| --- |\n| Input | null |\n| Output | [] |\n| [Run](https://play.jqlang.org/?q=%5Brange%280%3B%2010%3B%20-1%29%5D&j=null) |  |"
+        query: "[range(0; 10; -1)]"
+        input: "null"
+        expected_stdout: "[]\n"
+      - line: 666
+        text: "| Command | jq '[range(0; -5; -1)]' |\n| --- |\n| Input | null |\n| Output | [0,-1,-2,-3,-4] |\n| [Run](https://play.jqlang.org/?q=%5Brange%280%3B%20-5%3B%20-1%29%5D&j=null) |  |"
+        query: "[range(0; -5; -1)]"
+        input: "null"
+        expected_stdout: "[0,-1,-2,-3,-4]\n"
+      - line: 676
+        text: "| Command | jq 'floor' |\n| --- |\n| Input | 3.14159 |\n| Output | 3 |\n| [Run](https://play.jqlang.org/?q=floor&j=3.14159) |  |"
+        query: floor
+        input: "3.14159"
+        expected_stdout: "3\n"
+      - line: 686
+        text: "| Command | jq 'sqrt' |\n| --- |\n| Input | 9 |\n| Output | 3 |\n| [Run](https://play.jqlang.org/?q=sqrt&j=9) |  |"
+        query: sqrt
+        input: "9"
+        expected_stdout: "3\n"
+      - line: 696
+        text: "| Command | jq '.[] | tonumber' |\n| --- |\n| Input | [1, \"1\"] |\n| Output | 1 |\n|  | 1 |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20tonumber&j=%5B1%2C%20%221%22%5D) |  |"
+        query: ".[] | tonumber"
+        input: "[1, \"1\"]"
+        expected_stdout: "1\n1\n"
+      - line: 707
+        text: "| Command | jq '.[] | toboolean' |\n| --- |\n| Input | [\"true\", \"false\", true, false] |\n| Output | true |\n|  | false |\n|  | true |\n|  | false |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20toboolean&j=%5B%22true%22%2C%20%22false%22%2C%20true%2C%20false%5D) |  |"
+        query: ".[] | toboolean"
+        input: "[\"true\", \"false\", true, false]"
+        expected_stdout: "true\nfalse\ntrue\nfalse\n"
+      - line: 720
+        text: "| Command | jq '.[] | tostring' |\n| --- |\n| Input | [1, \"1\", [1]] |\n| Output | \"1\" |\n|  | \"1\" |\n|  | \"[1]\" |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20tostring&j=%5B1%2C%20%221%22%2C%20%5B1%5D%5D) |  |"
+        query: ".[] | tostring"
+        input: "[1, \"1\", [1]]"
+        expected_stdout: "\"1\"\n\"1\"\n\"[1]\"\n"
+      - line: 732
+        text: "| Command | jq 'map(type)' |\n| --- |\n| Input | [0, false, [], {}, null, \"hello\"] |\n| Output | [\"number\", \"boolean\", \"array\", \"object\", \"null\", \"string\"] |\n| [Run](https://play.jqlang.org/?q=map%28type%29&j=%5B0%2C%20false%2C%20%5B%5D%2C%20%7B%7D%2C%20null%2C%20%22hello%22%5D) |  |"
+        query: map(type)
+        input: "[0, false, [], {}, null, \"hello\"]"
+        expected_stdout: "[\"number\", \"boolean\", \"array\", \"object\", \"null\", \"string\"]\n"
+      - line: 746
+        text: "| Command | jq '.[] | (infinite * .) < 0' |\n| --- |\n| Input | [-1, 1] |\n| Output | true |\n|  | false |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20%28infinite%20%2A%20.%29%20%3C%200&j=%5B-1%2C%201%5D) |  |"
+        query: ".[] | (infinite * .) < 0"
+        input: "[-1, 1]"
+        expected_stdout: "true\nfalse\n"
+      - line: 753
+        text: "| Command | jq 'infinite, nan | type' |\n| --- |\n| Input | null |\n| Output | \"number\" |\n|  | \"number\" |\n| [Run](https://play.jqlang.org/?q=infinite%2C%20nan%20%7C%20type&j=null) |  |"
+        query: "infinite, nan | type"
+        input: "null"
+        expected_stdout: "\"number\"\n\"number\"\n"
+      - line: 776
+        text: "| Command | jq 'sort' |\n| --- |\n| Input | [8,3,null,6] |\n| Output | [null,3,6,8] |\n| [Run](https://play.jqlang.org/?q=sort&j=%5B8%2C3%2Cnull%2C6%5D) |  |"
+        query: sort
+        input: "[8,3,null,6]"
+        expected_stdout: "[null,3,6,8]\n"
+      - line: 782
+        text: "| Command | jq 'sort_by(.foo)' |\n| --- |\n| Input | [{\"foo\":4, \"bar\":10}, {\"foo\":3, \"bar\":10}, {\"foo\":2, \"bar\":1}] |\n| Output | [{\"foo\":2, \"bar\":1}, {\"foo\":3, \"bar\":10}, {\"foo\":4, \"bar\":10}] |\n| [Run](https://play.jqlang.org/?q=sort_by%28.foo%29&j=%5B%7B%22foo%22%3A4%2C%20%22bar%22%3A10%7D%2C%20%7B%22foo%22%3A3%2C%20%22bar%22%3A10%7D%2C%20%7B%22foo%22%3A2%2C%20%22bar%22%3A1%7D%5D) |  |"
+        query: sort_by(.foo)
+        input: "[{\"foo\":4, \"bar\":10}, {\"foo\":3, \"bar\":10}, {\"foo\":2, \"bar\":1}]"
+        expected_stdout: "[{\"foo\":2, \"bar\":1}, {\"foo\":3, \"bar\":10}, {\"foo\":4, \"bar\":10}]\n"
+      - line: 788
+        text: "| Command | jq 'sort_by(.foo, .bar)' |\n| --- |\n| Input | [{\"foo\":4, \"bar\":10}, {\"foo\":3, \"bar\":20}, {\"foo\":2, \"bar\":1}, {\"foo\":3, \"bar\":10}] |\n| Output | [{\"foo\":2, \"bar\":1}, {\"foo\":3, \"bar\":10}, {\"foo\":3, \"bar\":20}, {\"foo\":4, \"bar\":10}] |\n| [Run](https://play.jqlang.org/?q=sort_by%28.foo%2C%20.bar%29&j=%5B%7B%22foo%22%3A4%2C%20%22bar%22%3A10%7D%2C%20%7B%22foo%22%3A3%2C%20%22bar%22%3A20%7D%2C%20%7B%22foo%22%3A2%2C%20%22bar%22%3A1%7D%2C%20%7B%22foo%22%3A3%2C%20%22bar%22%3A10%7D%5D) |  |"
+        query: "sort_by(.foo, .bar)"
+        input: "[{\"foo\":4, \"bar\":10}, {\"foo\":3, \"bar\":20}, {\"foo\":2, \"bar\":1}, {\"foo\":3, \"bar\":10}]"
+        expected_stdout: "[{\"foo\":2, \"bar\":1}, {\"foo\":3, \"bar\":10}, {\"foo\":3, \"bar\":20}, {\"foo\":4, \"bar\":10}]\n"
+      - line: 800
+        text: "| Command | jq 'group_by(.foo)' |\n| --- |\n| Input | [{\"foo\":1, \"bar\":10}, {\"foo\":3, \"bar\":100}, {\"foo\":1, \"bar\":1}] |\n| Output | [[{\"foo\":1, \"bar\":10}, {\"foo\":1, \"bar\":1}], [{\"foo\":3, \"bar\":100}]] |\n| [Run](https://play.jqlang.org/?q=group_by%28.foo%29&j=%5B%7B%22foo%22%3A1%2C%20%22bar%22%3A10%7D%2C%20%7B%22foo%22%3A3%2C%20%22bar%22%3A100%7D%2C%20%7B%22foo%22%3A1%2C%20%22bar%22%3A1%7D%5D) |  |"
+        query: group_by(.foo)
+        input: "[{\"foo\":1, \"bar\":10}, {\"foo\":3, \"bar\":100}, {\"foo\":1, \"bar\":1}]"
+        expected_stdout: "[[{\"foo\":1, \"bar\":10}, {\"foo\":1, \"bar\":1}], [{\"foo\":3, \"bar\":100}]]\n"
+      - line: 812
+        text: "| Command | jq 'min' |\n| --- |\n| Input | [5,4,2,7] |\n| Output | 2 |\n| [Run](https://play.jqlang.org/?q=min&j=%5B5%2C4%2C2%2C7%5D) |  |"
+        query: min
+        input: "[5,4,2,7]"
+        expected_stdout: "2\n"
+      - line: 818
+        text: "| Command | jq 'max_by(.foo)' |\n| --- |\n| Input | [{\"foo\":1, \"bar\":14}, {\"foo\":2, \"bar\":3}] |\n| Output | {\"foo\":2, \"bar\":3} |\n| [Run](https://play.jqlang.org/?q=max_by%28.foo%29&j=%5B%7B%22foo%22%3A1%2C%20%22bar%22%3A14%7D%2C%20%7B%22foo%22%3A2%2C%20%22bar%22%3A3%7D%5D) |  |"
+        query: max_by(.foo)
+        input: "[{\"foo\":1, \"bar\":14}, {\"foo\":2, \"bar\":3}]"
+        expected_stdout: "{\"foo\":2, \"bar\":3}\n"
+      - line: 830
+        text: "| Command | jq 'unique' |\n| --- |\n| Input | [1,2,5,3,5,3,1,3] |\n| Output | [1,2,3,5] |\n| [Run](https://play.jqlang.org/?q=unique&j=%5B1%2C2%2C5%2C3%2C5%2C3%2C1%2C3%5D) |  |"
+        query: unique
+        input: "[1,2,5,3,5,3,1,3]"
+        expected_stdout: "[1,2,3,5]\n"
+      - line: 836
+        text: "| Command | jq 'unique_by(.foo)' |\n| --- |\n| Input | [{\"foo\": 1, \"bar\": 2}, {\"foo\": 1, \"bar\": 3}, {\"foo\": 4, \"bar\": 5}] |\n| Output | [{\"foo\": 1, \"bar\": 2}, {\"foo\": 4, \"bar\": 5}] |\n| [Run](https://play.jqlang.org/?q=unique_by%28.foo%29&j=%5B%7B%22foo%22%3A%201%2C%20%22bar%22%3A%202%7D%2C%20%7B%22foo%22%3A%201%2C%20%22bar%22%3A%203%7D%2C%20%7B%22foo%22%3A%204%2C%20%22bar%22%3A%205%7D%5D) |  |"
+        query: unique_by(.foo)
+        input: "[{\"foo\": 1, \"bar\": 2}, {\"foo\": 1, \"bar\": 3}, {\"foo\": 4, \"bar\": 5}]"
+        expected_stdout: "[{\"foo\": 1, \"bar\": 2}, {\"foo\": 4, \"bar\": 5}]\n"
+      - line: 842
+        text: "| Command | jq 'unique_by(length)' |\n| --- |\n| Input | [\"chunky\", \"bacon\", \"kitten\", \"cicada\", \"asparagus\"] |\n| Output | [\"bacon\", \"chunky\", \"asparagus\"] |\n| [Run](https://play.jqlang.org/?q=unique_by%28length%29&j=%5B%22chunky%22%2C%20%22bacon%22%2C%20%22kitten%22%2C%20%22cicada%22%2C%20%22asparagus%22%5D) |  |"
+        query: unique_by(length)
+        input: "[\"chunky\", \"bacon\", \"kitten\", \"cicada\", \"asparagus\"]"
+        expected_stdout: "[\"bacon\", \"chunky\", \"asparagus\"]\n"
+      - line: 852
+        text: "| Command | jq 'reverse' |\n| --- |\n| Input | [1,2,3,4] |\n| Output | [4,3,2,1] |\n| [Run](https://play.jqlang.org/?q=reverse&j=%5B1%2C2%2C3%2C4%5D) |  |"
+        query: reverse
+        input: "[1,2,3,4]"
+        expected_stdout: "[4,3,2,1]\n"
+      - line: 862
+        text: "| Command | jq 'contains(\"bar\")' |\n| --- |\n| Input | \"foobar\" |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=contains%28%22bar%22%29&j=%22foobar%22) |  |"
+        query: "contains(\"bar\")"
+        input: "\"foobar\""
+        expected_stdout: "true\n"
+      - line: 868
+        text: "| Command | jq 'contains([\"baz\", \"bar\"])' |\n| --- |\n| Input | [\"foobar\", \"foobaz\", \"blarp\"] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=contains%28%5B%22baz%22%2C%20%22bar%22%5D%29&j=%5B%22foobar%22%2C%20%22foobaz%22%2C%20%22blarp%22%5D) |  |"
+        query: "contains([\"baz\", \"bar\"])"
+        input: "[\"foobar\", \"foobaz\", \"blarp\"]"
+        expected_stdout: "true\n"
+      - line: 874
+        text: "| Command | jq 'contains([\"bazzzzz\", \"bar\"])' |\n| --- |\n| Input | [\"foobar\", \"foobaz\", \"blarp\"] |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=contains%28%5B%22bazzzzz%22%2C%20%22bar%22%5D%29&j=%5B%22foobar%22%2C%20%22foobaz%22%2C%20%22blarp%22%5D) |  |"
+        query: "contains([\"bazzzzz\", \"bar\"])"
+        input: "[\"foobar\", \"foobaz\", \"blarp\"]"
+        expected_stdout: "false\n"
+      - line: 880
+        text: "| Command | jq 'contains({foo: 12, bar: [{barp: 12}]})' |\n| --- |\n| Input | {\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]} |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=contains%28%7Bfoo%3A%2012%2C%20bar%3A%20%5B%7Bbarp%3A%2012%7D%5D%7D%29&j=%7B%22foo%22%3A%2012%2C%20%22bar%22%3A%5B1%2C2%2C%7B%22barp%22%3A12%2C%20%22blip%22%3A13%7D%5D%7D) |  |"
+        query: "contains({foo: 12, bar: [{barp: 12}]})"
+        input: "{\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]}"
+        expected_stdout: "true\n"
+      - line: 886
+        text: "| Command | jq 'contains({foo: 12, bar: [{barp: 15}]})' |\n| --- |\n| Input | {\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]} |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=contains%28%7Bfoo%3A%2012%2C%20bar%3A%20%5B%7Bbarp%3A%2015%7D%5D%7D%29&j=%7B%22foo%22%3A%2012%2C%20%22bar%22%3A%5B1%2C2%2C%7B%22barp%22%3A12%2C%20%22blip%22%3A13%7D%5D%7D) |  |"
+        query: "contains({foo: 12, bar: [{barp: 15}]})"
+        input: "{\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]}"
+        expected_stdout: "false\n"
+      - line: 896
+        text: "| Command | jq 'indices(\", \")' |\n| --- |\n| Input | \"a,b, cd, efg, hijk\" |\n| Output | [3,7,12] |\n| [Run](https://play.jqlang.org/?q=indices%28%22%2C%20%22%29&j=%22a%2Cb%2C%20cd%2C%20efg%2C%20hijk%22) |  |"
+        query: "indices(\", \")"
+        input: "\"a,b, cd, efg, hijk\""
+        expected_stdout: "[3,7,12]\n"
+      - line: 902
+        text: "| Command | jq 'indices(1)' |\n| --- |\n| Input | [0,1,2,1,3,1,4] |\n| Output | [1,3,5] |\n| [Run](https://play.jqlang.org/?q=indices%281%29&j=%5B0%2C1%2C2%2C1%2C3%2C1%2C4%5D) |  |"
+        query: indices(1)
+        input: "[0,1,2,1,3,1,4]"
+        expected_stdout: "[1,3,5]\n"
+      - line: 908
+        text: "| Command | jq 'indices([1,2])' |\n| --- |\n| Input | [0,1,2,3,1,4,2,5,1,2,6,7] |\n| Output | [1,8] |\n| [Run](https://play.jqlang.org/?q=indices%28%5B1%2C2%5D%29&j=%5B0%2C1%2C2%2C3%2C1%2C4%2C2%2C5%2C1%2C2%2C6%2C7%5D) |  |"
+        query: "indices([1,2])"
+        input: "[0,1,2,3,1,4,2,5,1,2,6,7]"
+        expected_stdout: "[1,8]\n"
+      - line: 918
+        text: "| Command | jq 'index(\", \")' |\n| --- |\n| Input | \"a,b, cd, efg, hijk\" |\n| Output | 3 |\n| [Run](https://play.jqlang.org/?q=index%28%22%2C%20%22%29&j=%22a%2Cb%2C%20cd%2C%20efg%2C%20hijk%22) |  |"
+        query: "index(\", \")"
+        input: "\"a,b, cd, efg, hijk\""
+        expected_stdout: "3\n"
+      - line: 924
+        text: "| Command | jq 'index(1)' |\n| --- |\n| Input | [0,1,2,1,3,1,4] |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=index%281%29&j=%5B0%2C1%2C2%2C1%2C3%2C1%2C4%5D) |  |"
+        query: index(1)
+        input: "[0,1,2,1,3,1,4]"
+        expected_stdout: "1\n"
+      - line: 930
+        text: "| Command | jq 'index([1,2])' |\n| --- |\n| Input | [0,1,2,3,1,4,2,5,1,2,6,7] |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=index%28%5B1%2C2%5D%29&j=%5B0%2C1%2C2%2C3%2C1%2C4%2C2%2C5%2C1%2C2%2C6%2C7%5D) |  |"
+        query: "index([1,2])"
+        input: "[0,1,2,3,1,4,2,5,1,2,6,7]"
+        expected_stdout: "1\n"
+      - line: 936
+        text: "| Command | jq 'rindex(\", \")' |\n| --- |\n| Input | \"a,b, cd, efg, hijk\" |\n| Output | 12 |\n| [Run](https://play.jqlang.org/?q=rindex%28%22%2C%20%22%29&j=%22a%2Cb%2C%20cd%2C%20efg%2C%20hijk%22) |  |"
+        query: "rindex(\", \")"
+        input: "\"a,b, cd, efg, hijk\""
+        expected_stdout: "12\n"
+      - line: 942
+        text: "| Command | jq 'rindex(1)' |\n| --- |\n| Input | [0,1,2,1,3,1,4] |\n| Output | 5 |\n| [Run](https://play.jqlang.org/?q=rindex%281%29&j=%5B0%2C1%2C2%2C1%2C3%2C1%2C4%5D) |  |"
+        query: rindex(1)
+        input: "[0,1,2,1,3,1,4]"
+        expected_stdout: "5\n"
+      - line: 948
+        text: "| Command | jq 'rindex([1,2])' |\n| --- |\n| Input | [0,1,2,3,1,4,2,5,1,2,6,7] |\n| Output | 8 |\n| [Run](https://play.jqlang.org/?q=rindex%28%5B1%2C2%5D%29&j=%5B0%2C1%2C2%2C3%2C1%2C4%2C2%2C5%2C1%2C2%2C6%2C7%5D) |  |"
+        query: "rindex([1,2])"
+        input: "[0,1,2,3,1,4,2,5,1,2,6,7]"
+        expected_stdout: "8\n"
+      - line: 958
+        text: "| Command | jq 'inside(\"foobar\")' |\n| --- |\n| Input | \"bar\" |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=inside%28%22foobar%22%29&j=%22bar%22) |  |"
+        query: "inside(\"foobar\")"
+        input: "\"bar\""
+        expected_stdout: "true\n"
+      - line: 964
+        text: "| Command | jq 'inside([\"foobar\", \"foobaz\", \"blarp\"])' |\n| --- |\n| Input | [\"baz\", \"bar\"] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=inside%28%5B%22foobar%22%2C%20%22foobaz%22%2C%20%22blarp%22%5D%29&j=%5B%22baz%22%2C%20%22bar%22%5D) |  |"
+        query: "inside([\"foobar\", \"foobaz\", \"blarp\"])"
+        input: "[\"baz\", \"bar\"]"
+        expected_stdout: "true\n"
+      - line: 970
+        text: "| Command | jq 'inside([\"foobar\", \"foobaz\", \"blarp\"])' |\n| --- |\n| Input | [\"bazzzzz\", \"bar\"] |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=inside%28%5B%22foobar%22%2C%20%22foobaz%22%2C%20%22blarp%22%5D%29&j=%5B%22bazzzzz%22%2C%20%22bar%22%5D) |  |"
+        query: "inside([\"foobar\", \"foobaz\", \"blarp\"])"
+        input: "[\"bazzzzz\", \"bar\"]"
+        expected_stdout: "false\n"
+      - line: 976
+        text: "| Command | jq 'inside({\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]})' |\n| --- |\n| Input | {\"foo\": 12, \"bar\": [{\"barp\": 12}]} |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=inside%28%7B%22foo%22%3A%2012%2C%20%22bar%22%3A%5B1%2C2%2C%7B%22barp%22%3A12%2C%20%22blip%22%3A13%7D%5D%7D%29&j=%7B%22foo%22%3A%2012%2C%20%22bar%22%3A%20%5B%7B%22barp%22%3A%2012%7D%5D%7D) |  |"
+        query: "inside({\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]})"
+        input: "{\"foo\": 12, \"bar\": [{\"barp\": 12}]}"
+        expected_stdout: "true\n"
+      - line: 982
+        text: "| Command | jq 'inside({\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]})' |\n| --- |\n| Input | {\"foo\": 12, \"bar\": [{\"barp\": 15}]} |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=inside%28%7B%22foo%22%3A%2012%2C%20%22bar%22%3A%5B1%2C2%2C%7B%22barp%22%3A12%2C%20%22blip%22%3A13%7D%5D%7D%29&j=%7B%22foo%22%3A%2012%2C%20%22bar%22%3A%20%5B%7B%22barp%22%3A%2015%7D%5D%7D) |  |"
+        query: "inside({\"foo\": 12, \"bar\":[1,2,{\"barp\":12, \"blip\":13}]})"
+        input: "{\"foo\": 12, \"bar\": [{\"barp\": 15}]}"
+        expected_stdout: "false\n"
+      - line: 992
+        text: "| Command | jq '[.[]|startswith(\"foo\")]' |\n| --- |\n| Input | [\"fo\", \"foo\", \"barfoo\", \"foobar\", \"barfoob\"] |\n| Output | [false, true, false, true, false] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Cstartswith%28%22foo%22%29%5D&j=%5B%22fo%22%2C%20%22foo%22%2C%20%22barfoo%22%2C%20%22foobar%22%2C%20%22barfoob%22%5D) |  |"
+        query: "[.[]|startswith(\"foo\")]"
+        input: "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"barfoob\"]"
+        expected_stdout: "[false, true, false, true, false]\n"
+      - line: 1002
+        text: "| Command | jq '[.[]|endswith(\"foo\")]' |\n| --- |\n| Input | [\"foobar\", \"barfoo\"] |\n| Output | [false, true] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Cendswith%28%22foo%22%29%5D&j=%5B%22foobar%22%2C%20%22barfoo%22%5D) |  |"
+        query: "[.[]|endswith(\"foo\")]"
+        input: "[\"foobar\", \"barfoo\"]"
+        expected_stdout: "[false, true]\n"
+      - line: 1012
+        text: "| Command | jq 'combinations' |\n| --- |\n| Input | [[1,2], [3, 4]] |\n| Output | [1, 3] |\n|  | [1, 4] |\n|  | [2, 3] |\n|  | [2, 4] |\n| [Run](https://play.jqlang.org/?q=combinations&j=%5B%5B1%2C2%5D%2C%20%5B3%2C%204%5D%5D) |  |"
+        query: combinations
+        input: "[[1,2], [3, 4]]"
+        expected_stdout: "[1, 3]\n[1, 4]\n[2, 3]\n[2, 4]\n"
+      - line: 1021
+        text: "| Command | jq 'combinations(2)' |\n| --- |\n| Input | [0, 1] |\n| Output | [0, 0] |\n|  | [0, 1] |\n|  | [1, 0] |\n|  | [1, 1] |\n| [Run](https://play.jqlang.org/?q=combinations%282%29&j=%5B0%2C%201%5D) |  |"
+        query: combinations(2)
+        input: "[0, 1]"
+        expected_stdout: "[0, 0]\n[0, 1]\n[1, 0]\n[1, 1]\n"
+      - line: 1034
+        text: "| Command | jq '[.[]|ltrimstr(\"foo\")]' |\n| --- |\n| Input | [\"fo\", \"foo\", \"barfoo\", \"foobar\", \"afoo\"] |\n| Output | [\"fo\",\"\",\"barfoo\",\"bar\",\"afoo\"] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Cltrimstr%28%22foo%22%29%5D&j=%5B%22fo%22%2C%20%22foo%22%2C%20%22barfoo%22%2C%20%22foobar%22%2C%20%22afoo%22%5D) |  |"
+        query: "[.[]|ltrimstr(\"foo\")]"
+        input: "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"afoo\"]"
+        expected_stdout: "[\"fo\",\"\",\"barfoo\",\"bar\",\"afoo\"]\n"
+      - line: 1044
+        text: "| Command | jq '[.[]|rtrimstr(\"foo\")]' |\n| --- |\n| Input | [\"fo\", \"foo\", \"barfoo\", \"foobar\", \"foob\"] |\n| Output | [\"fo\",\"\",\"bar\",\"foobar\",\"foob\"] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Crtrimstr%28%22foo%22%29%5D&j=%5B%22fo%22%2C%20%22foo%22%2C%20%22barfoo%22%2C%20%22foobar%22%2C%20%22foob%22%5D) |  |"
+        query: "[.[]|rtrimstr(\"foo\")]"
+        input: "[\"fo\", \"foo\", \"barfoo\", \"foobar\", \"foob\"]"
+        expected_stdout: "[\"fo\",\"\",\"bar\",\"foobar\",\"foob\"]\n"
+      - line: 1054
+        text: "| Command | jq '[.[]|trimstr(\"foo\")]' |\n| --- |\n| Input | [\"fo\", \"foo\", \"barfoo\", \"foobarfoo\", \"foob\"] |\n| Output | [\"fo\",\"\",\"bar\",\"bar\",\"b\"] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Ctrimstr%28%22foo%22%29%5D&j=%5B%22fo%22%2C%20%22foo%22%2C%20%22barfoo%22%2C%20%22foobarfoo%22%2C%20%22foob%22%5D) |  |"
+        query: "[.[]|trimstr(\"foo\")]"
+        input: "[\"fo\", \"foo\", \"barfoo\", \"foobarfoo\", \"foob\"]"
+        expected_stdout: "[\"fo\",\"\",\"bar\",\"bar\",\"b\"]\n"
+      - line: 1070
+        text: "| Command | jq 'trim, ltrim, rtrim' |\n| --- |\n| Input | \" abc \" |\n| Output | \"abc\" |\n|  | \"abc \" |\n|  | \" abc\" |\n| [Run](https://play.jqlang.org/?q=trim%2C%20ltrim%2C%20rtrim&j=%22%20abc%20%22) |  |"
+        query: "trim, ltrim, rtrim"
+        input: "\" abc \""
+        expected_stdout: "\"abc\"\n\"abc \"\n\" abc\"\n"
+      - line: 1082
+        text: "| Command | jq 'explode' |\n| --- |\n| Input | \"foobar\" |\n| Output | [102,111,111,98,97,114] |\n| [Run](https://play.jqlang.org/?q=explode&j=%22foobar%22) |  |"
+        query: explode
+        input: "\"foobar\""
+        expected_stdout: "[102,111,111,98,97,114]\n"
+      - line: 1092
+        text: "| Command | jq 'implode' |\n| --- |\n| Input | [65, 66, 67] |\n| Output | \"ABC\" |\n| [Run](https://play.jqlang.org/?q=implode&j=%5B65%2C%2066%2C%2067%5D) |  |"
+        query: implode
+        input: "[65, 66, 67]"
+        expected_stdout: "\"ABC\"\n"
+      - line: 1104
+        text: "| Command | jq 'split(\", \")' |\n| --- |\n| Input | \"a, b,c,d, e, \" |\n| Output | [\"a\",\"b,c,d\",\"e\",\"\"] |\n| [Run](https://play.jqlang.org/?q=split%28%22%2C%20%22%29&j=%22a%2C%20b%2Cc%2Cd%2C%20e%2C%20%22) |  |"
+        query: "split(\", \")"
+        input: "\"a, b,c,d, e, \""
+        expected_stdout: "[\"a\",\"b,c,d\",\"e\",\"\"]\n"
+      - line: 1116
+        text: "| Command | jq 'join(\", \")' |\n| --- |\n| Input | [\"a\",\"b,c,d\",\"e\"] |\n| Output | \"a, b,c,d, e\" |\n| [Run](https://play.jqlang.org/?q=join%28%22%2C%20%22%29&j=%5B%22a%22%2C%22b%2Cc%2Cd%22%2C%22e%22%5D) |  |"
+        query: "join(\", \")"
+        input: "[\"a\",\"b,c,d\",\"e\"]"
+        expected_stdout: "\"a, b,c,d, e\"\n"
+      - line: 1122
+        text: "| Command | jq 'join(\" \")' |\n| --- |\n| Input | [\"a\",1,2.3,true,null,false] |\n| Output | \"a 1 2.3 true false\" |\n| [Run](https://play.jqlang.org/?q=join%28%22%20%22%29&j=%5B%22a%22%2C1%2C2.3%2Ctrue%2Cnull%2Cfalse%5D) |  |"
+        query: "join(\" \")"
+        input: "[\"a\",1,2.3,true,null,false]"
+        expected_stdout: "\"a 1 2.3 true false\"\n"
+        reference_stdout: "\"a 1 2.3 true  false\"\n"
+        reference_note: The imported table shows one space before false. jq 1.8.1 emits two because null contributes an empty joined field. Verified locally; published text remains in text and expected_stdout.
+      - line: 1128
+        text: "| Command | jq 'join(\", \")' |\n| --- |\n| Input | {\"a\":1,\"b\":2} |\n| Output | \"1, 2\" |\n| [Run](https://play.jqlang.org/?q=join%28%22%2C%20%22%29&j=%7B%22a%22%3A1%2C%22b%22%3A2%7D) |  |"
+        query: "join(\", \")"
+        input: "{\"a\":1,\"b\":2}"
+        expected_stdout: "\"1, 2\"\n"
+      - line: 1138
+        text: "| Command | jq 'ascii_upcase' |\n| --- |\n| Input | \"useful but not for é\" |\n| Output | \"USEFUL BUT NOT FOR é\" |\n| [Run](https://play.jqlang.org/?q=ascii_upcase&j=%22useful%20but%20not%20for%20%C3%A9%22) |  |"
+        query: ascii_upcase
+        input: "\"useful but not for é\""
+        expected_stdout: "\"USEFUL BUT NOT FOR é\"\n"
+      - line: 1150
+        text: "| Command | jq '[while(.<100; .*2)]' |\n| --- |\n| Input | 1 |\n| Output | [1,2,4,8,16,32,64] |\n| [Run](https://play.jqlang.org/?q=%5Bwhile%28.%3C100%3B%20.%2A2%29%5D&j=1) |  |"
+        query: "[while(.<100; .*2)]"
+        input: "1"
+        expected_stdout: "[1,2,4,8,16,32,64]\n"
+      - line: 1162
+        text: "| Command | jq '[repeat(.*2, error)?]' |\n| --- |\n| Input | 1 |\n| Output | [2] |\n| [Run](https://play.jqlang.org/?q=%5Brepeat%28.%2A2%2C%20error%29%3F%5D&j=1) |  |"
+        query: "[repeat(.*2, error)?]"
+        input: "1"
+        expected_stdout: "[2]\n"
+      - line: 1174
+        text: "| Command | jq '[.,1]|until(.[0] < 1; [.[0] - 1, .[1] * .[0]])|.[1]' |\n| --- |\n| Input | 4 |\n| Output | 24 |\n| [Run](https://play.jqlang.org/?q=%5B.%2C1%5D%7Cuntil%28.%5B0%5D%20%3C%201%3B%20%5B.%5B0%5D%20-%201%2C%20.%5B1%5D%20%2A%20.%5B0%5D%5D%29%7C.%5B1%5D&j=4) |  |"
+        query: "[.,1]|until(.[0] < 1; [.[0] - 1, .[1] * .[0]])|.[1]"
+        input: "4"
+        expected_stdout: "24\n"
+      - line: 1208
+        text: "| Command | jq 'recurse(.foo[])' |\n| --- |\n| Input | {\"foo\":[{\"foo\": []}, {\"foo\":[{\"foo\":[]}]}]} |\n| Output | {\"foo\":[{\"foo\":[]},{\"foo\":[{\"foo\":[]}]}]} |\n|  | {\"foo\":[]} |\n|  | {\"foo\":[{\"foo\":[]}]} |\n|  | {\"foo\":[]} |\n| [Run](https://play.jqlang.org/?q=recurse%28.foo%5B%5D%29&j=%7B%22foo%22%3A%5B%7B%22foo%22%3A%20%5B%5D%7D%2C%20%7B%22foo%22%3A%5B%7B%22foo%22%3A%5B%5D%7D%5D%7D%5D%7D) |  |"
+        query: "recurse(.foo[])"
+        input: "{\"foo\":[{\"foo\": []}, {\"foo\":[{\"foo\":[]}]}]}"
+        expected_stdout: "{\"foo\":[{\"foo\":[]},{\"foo\":[{\"foo\":[]}]}]}\n{\"foo\":[]}\n{\"foo\":[{\"foo\":[]}]}\n{\"foo\":[]}\n"
+      - line: 1217
+        text: "| Command | jq 'recurse' |\n| --- |\n| Input | {\"a\":0,\"b\":[1]} |\n| Output | {\"a\":0,\"b\":[1]} |\n|  | 0 |\n|  | [1] |\n|  | 1 |\n| [Run](https://play.jqlang.org/?q=recurse&j=%7B%22a%22%3A0%2C%22b%22%3A%5B1%5D%7D) |  |"
+        query: recurse
+        input: "{\"a\":0,\"b\":[1]}"
+        expected_stdout: "{\"a\":0,\"b\":[1]}\n0\n[1]\n1\n"
+      - line: 1226
+        text: "| Command | jq 'recurse(. * .; . < 20)' |\n| --- |\n| Input | 2 |\n| Output | 2 |\n|  | 4 |\n|  | 16 |\n| [Run](https://play.jqlang.org/?q=recurse%28.%20%2A%20.%3B%20.%20%3C%2020%29&j=2) |  |"
+        query: recurse(. * .; . < 20)
+        input: "2"
+        expected_stdout: "2\n4\n16\n"
+      - line: 1238
+        text: "| Command | jq 'walk(if type == \"array\" then sort else . end)' |\n| --- |\n| Input | [[4, 1, 7], [8, 5, 2], [3, 6, 9]] |\n| Output | [[1,4,7],[2,5,8],[3,6,9]] |\n| [Run](https://play.jqlang.org/?q=walk%28if%20type%20%3D%3D%20%22array%22%20then%20sort%20else%20.%20end%29&j=%5B%5B4%2C%201%2C%207%5D%2C%20%5B8%2C%205%2C%202%5D%2C%20%5B3%2C%206%2C%209%5D%5D) |  |"
+        query: "walk(if type == \"array\" then sort else . end)"
+        input: "[[4, 1, 7], [8, 5, 2], [3, 6, 9]]"
+        expected_stdout: "[[1,4,7],[2,5,8],[3,6,9]]\n"
+      - line: 1244
+        text: "| Command | jq 'walk( if type == \"object\" then with_entries( .key |= sub( \"^_+\"; \"\") ) else . end )' |\n| --- |\n| Input | [ { \"_a\": { \"__b\": 2 } } ] |\n| Output | [{\"a\":{\"b\":2}}] |\n| [Run](https://play.jqlang.org/?q=walk%28%20if%20type%20%3D%3D%20%22object%22%20then%20with_entries%28%20.key%20%7C%3D%20sub%28%20%22%5E_%2B%22%3B%20%22%22%29%20%29%20else%20.%20end%20%29&j=%5B%20%7B%20%22_a%22%3A%20%7B%20%22__b%22%3A%202%20%7D%20%7D%20%5D) |  |"
+        query: "walk( if type == \"object\" then with_entries( .key |= sub( \"^_+\"; \"\") ) else . end )"
+        input: "[ { \"_a\": { \"__b\": 2 } } ]"
+        expected_stdout: "[{\"a\":{\"b\":2}}]\n"
+      - line: 1272
+        text: "| Command | jq '$ENV.PAGER' |\n| --- |\n| Input | null |\n| Output | \"less\" |\n| [Run](https://play.jqlang.org/?q=%24ENV.PAGER&j=null) |  |"
+        query: $ENV.PAGER
+        input: "null"
+        expected_stdout: "\"less\"\n"
+      - line: 1278
+        text: "| Command | jq 'env.PAGER' |\n| --- |\n| Input | null |\n| Output | \"less\" |\n| [Run](https://play.jqlang.org/?q=env.PAGER&j=null) |  |"
+        query: env.PAGER
+        input: "null"
+        expected_stdout: "\"less\"\n"
+      - line: 1288
+        text: "| Command | jq 'transpose' |\n| --- |\n| Input | [[1], [2,3]] |\n| Output | [[1,2],[null,3]] |\n| [Run](https://play.jqlang.org/?q=transpose&j=%5B%5B1%5D%2C%20%5B2%2C3%5D%5D) |  |"
+        query: transpose
+        input: "[[1], [2,3]]"
+        expected_stdout: "[[1,2],[null,3]]\n"
+      - line: 1298
+        text: "| Command | jq 'bsearch(0)' |\n| --- |\n| Input | [0,1] |\n| Output | 0 |\n| [Run](https://play.jqlang.org/?q=bsearch%280%29&j=%5B0%2C1%5D) |  |"
+        query: bsearch(0)
+        input: "[0,1]"
+        expected_stdout: "0\n"
+      - line: 1304
+        text: "| Command | jq 'bsearch(0)' |\n| --- |\n| Input | [1,2,3] |\n| Output | -1 |\n| [Run](https://play.jqlang.org/?q=bsearch%280%29&j=%5B1%2C2%2C3%5D) |  |"
+        query: bsearch(0)
+        input: "[1,2,3]"
+        expected_stdout: "-1\n"
+      - line: 1310
+        text: "| Command | jq 'bsearch(4) as $ix | if $ix < 0 then .[-(1+$ix)] = 4 else . end' |\n| --- |\n| Input | [1,2,3] |\n| Output | [1,2,3,4] |\n| [Run](https://play.jqlang.org/?q=bsearch%284%29%20as%20%24ix%20%7C%20if%20%24ix%20%3C%200%20then%20.%5B-%281%2B%24ix%29%5D%20%3D%204%20else%20.%20end&j=%5B1%2C2%2C3%5D) |  |"
+        query: "bsearch(4) as $ix | if $ix < 0 then .[-(1+$ix)] = 4 else . end"
+        input: "[1,2,3]"
+        expected_stdout: "[1,2,3,4]\n"
+      - line: 1320
+        text: "| Command | jq '\"The input was \\(.), which is one less than \\(.+1)\"' |\n| --- |\n| Input | 42 |\n| Output | \"The input was 42, which is one less than 43\" |\n| [Run](https://play.jqlang.org/?q=%22The%20input%20was%20%5C%28.%29%2C%20which%20is%20one%20less%20than%20%5C%28.%2B1%29%22&j=42) |  |"
+        query: "\"The input was \\(.), which is one less than \\(.+1)\""
+        input: "42"
+        expected_stdout: "\"The input was 42, which is one less than 43\"\n"
+      - line: 1330
+        text: "| Command | jq '[.[]|tostring]' |\n| --- |\n| Input | [1, \"foo\", [\"foo\"]] |\n| Output | [\"1\",\"foo\",\"[\\\"foo\\\"]\"] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Ctostring%5D&j=%5B1%2C%20%22foo%22%2C%20%5B%22foo%22%5D%5D) |  |"
+        query: "[.[]|tostring]"
+        input: "[1, \"foo\", [\"foo\"]]"
+        expected_stdout: "[\"1\",\"foo\",\"[\\\"foo\\\"]\"]\n"
+      - line: 1336
+        text: "| Command | jq '[.[]|tojson]' |\n| --- |\n| Input | [1, \"foo\", [\"foo\"]] |\n| Output | [\"1\",\"\\\"foo\\\"\",\"[\\\"foo\\\"]\"] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Ctojson%5D&j=%5B1%2C%20%22foo%22%2C%20%5B%22foo%22%5D%5D) |  |"
+        query: "[.[]|tojson]"
+        input: "[1, \"foo\", [\"foo\"]]"
+        expected_stdout: "[\"1\",\"\\\"foo\\\"\",\"[\\\"foo\\\"]\"]\n"
+      - line: 1342
+        text: "| Command | jq '[.[]|tojson|fromjson]' |\n| --- |\n| Input | [1, \"foo\", [\"foo\"]] |\n| Output | [1,\"foo\",[\"foo\"]] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Ctojson%7Cfromjson%5D&j=%5B1%2C%20%22foo%22%2C%20%5B%22foo%22%5D%5D) |  |"
+        query: "[.[]|tojson|fromjson]"
+        input: "[1, \"foo\", [\"foo\"]]"
+        expected_stdout: "[1,\"foo\",[\"foo\"]]\n"
+      - line: 1406
+        text: "| Command | jq '@html' |\n| --- |\n| Input | \"This works if x < y\" |\n| Output | \"This works if x &lt; y\" |\n| [Run](https://play.jqlang.org/?q=%40html&j=%22This%20works%20if%20x%20%3C%20y%22) |  |"
+        query: @html
+        input: "\"This works if x < y\""
+        expected_stdout: "\"This works if x &lt; y\"\n"
+      - line: 1412
+        text: "| Command | jq '@sh \"echo \\(.)\"' |\n| --- |\n| Input | \"O'Hara's Ale\" |\n| Output | \"echo 'O'\\\\''Hara'\\\\''s Ale'\" |\n| [Run](https://play.jqlang.org/?q=%40sh%20%22echo%20%5C%28.%29%22&j=%22O%27Hara%27s%20Ale%22) |  |"
+        query: "@sh \"echo \\(.)\""
+        input: "\"O'Hara's Ale\""
+        expected_stdout: "\"echo 'O'\\\\''Hara'\\\\''s Ale'\"\n"
+      - line: 1418
+        text: "| Command | jq '@base64' |\n| --- |\n| Input | \"This is a message\" |\n| Output | \"VGhpcyBpcyBhIG1lc3NhZ2U=\" |\n| [Run](https://play.jqlang.org/?q=%40base64&j=%22This%20is%20a%20message%22) |  |"
+        query: @base64
+        input: "\"This is a message\""
+        expected_stdout: "\"VGhpcyBpcyBhIG1lc3NhZ2U=\"\n"
+      - line: 1424
+        text: "| Command | jq '@base64d' |\n| --- |\n| Input | \"VGhpcyBpcyBhIG1lc3NhZ2U=\" |\n| Output | \"This is a message\" |\n| [Run](https://play.jqlang.org/?q=%40base64d&j=%22VGhpcyBpcyBhIG1lc3NhZ2U%3D%22) |  |"
+        query: @base64d
+        input: "\"VGhpcyBpcyBhIG1lc3NhZ2U=\""
+        expected_stdout: "\"This is a message\"\n"
+      - line: 1458
+        text: "| Command | jq 'fromdate' |\n| --- |\n| Input | \"2015-03-05T23:51:47Z\" |\n| Output | 1425599507 |\n| [Run](https://play.jqlang.org/?q=fromdate&j=%222015-03-05T23%3A51%3A47Z%22) |  |"
+        query: fromdate
+        input: "\"2015-03-05T23:51:47Z\""
+        expected_stdout: "1425599507\n"
+      - line: 1464
+        text: "| Command | jq 'strptime(\"%Y-%m-%dT%H:%M:%SZ\")' |\n| --- |\n| Input | \"2015-03-05T23:51:47Z\" |\n| Output | [2015,2,5,23,51,47,4,63] |\n| [Run](https://play.jqlang.org/?q=strptime%28%22%25Y-%25m-%25dT%25H%3A%25M%3A%25SZ%22%29&j=%222015-03-05T23%3A51%3A47Z%22) |  |"
+        query: "strptime(\"%Y-%m-%dT%H:%M:%SZ\")"
+        input: "\"2015-03-05T23:51:47Z\""
+        expected_stdout: "[2015,2,5,23,51,47,4,63]\n"
+      - line: 1470
+        text: "| Command | jq 'strptime(\"%Y-%m-%dT%H:%M:%SZ\")|mktime' |\n| --- |\n| Input | \"2015-03-05T23:51:47Z\" |\n| Output | 1425599507 |\n| [Run](https://play.jqlang.org/?q=strptime%28%22%25Y-%25m-%25dT%25H%3A%25M%3A%25SZ%22%29%7Cmktime&j=%222015-03-05T23%3A51%3A47Z%22) |  |"
+        query: "strptime(\"%Y-%m-%dT%H:%M:%SZ\")|mktime"
+        input: "\"2015-03-05T23:51:47Z\""
+        expected_stdout: "1425599507\n"
+    fenced_examples[5]{line,text}:
+      238,"```\nmap(.+1)          #=>  [2]\nmap(., .)         #=>  [1,1]\nmap(empty)        #=>  []\n\nmap_values(.+1)   #=>  [2]\nmap_values(., .)  #=>  [1]\nmap_values(empty) #=>  []\n```"
+      1184,"```\n{\"name\": \"/\", \"children\": [\n  {\"name\": \"/bin\", \"children\": [\n    {\"name\": \"/bin/ls\", \"children\": []},\n    {\"name\": \"/bin/sh\", \"children\": []}]},\n  {\"name\": \"/home\", \"children\": [\n    {\"name\": \"/home/stephen\", \"children\": [\n      {\"name\": \"/home/stephen/jq\", \"children\": []}]}]}]}\n```"
+      1196,"```\nrecurse(.children[]) | .name\n```"
+      1394,"```\n@uri \"https://www.google.com/search?q=\\(.search)\"\n```"
+      1400,"```\n\"https://www.google.com/search?q=what%20is%20jq%3F\"\n```"
+    source: "https://jqlang.org/manual/#builtin-operators-and-functions"
+    file: jq-manual/builtin-operators-and-functions.md
+  - section: colors
+    sha256: d2c1bdf127157c524e8665a3f87ae7cea988cb1c95bd37670a6fd761468d55a4
+    table_examples[0]:
+    fenced_examples[0]:
+    source: "https://jqlang.org/manual/#colors"
+    file: jq-manual/colors.md
+  - section: conditionals-and-comparisons
+    sha256: 206912f34f3e044c0d2d387ec12aad4cabe4b626908ec982d8780886cebecbde
+    table_examples[19]{line,text,query,input,expected_stdout}:
+      22,"| Command | jq '. == false' |\n| --- |\n| Input | null |\n| Output | false |\n| [Run](https://play.jqlang.org/?q=.%20%3D%3D%20false&j=null) |  |",. == false,"null","false\n"
+      28,"| Command | jq '. == {\"b\": {\"d\": (4 + 1e-20), \"c\": 3}, \"a\":1}' |\n| --- |\n| Input | {\"a\":1, \"b\": {\"c\": 3, \"d\": 4}} |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=.%20%3D%3D%20%7B%22b%22%3A%20%7B%22d%22%3A%20%284%20%2B%201e-20%29%2C%20%22c%22%3A%203%7D%2C%20%22a%22%3A1%7D&j=%7B%22a%22%3A1%2C%20%22b%22%3A%20%7B%22c%22%3A%203%2C%20%22d%22%3A%204%7D%7D) |  |",". == {\"b\": {\"d\": (4 + 1e-20), \"c\": 3}, \"a\":1}","{\"a\":1, \"b\": {\"c\": 3, \"d\": 4}}","true\n"
+      34,"| Command | jq '.[] == 1' |\n| --- |\n| Input | [1, 1.0, \"1\", \"banana\"] |\n| Output | true |\n|  | true |\n|  | false |\n|  | false |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%3D%3D%201&j=%5B1%2C%201.0%2C%20%221%22%2C%20%22banana%22%5D) |  |",".[] == 1","[1, 1.0, \"1\", \"banana\"]","true\ntrue\nfalse\nfalse\n"
+      55,"| Command | jq 'if . == 0 then \"zero\" elif . == 1 then \"one\" else \"many\" end' |\n| --- |\n| Input | 2 |\n| Output | \"many\" |\n| [Run](https://play.jqlang.org/?q=if%20.%20%3D%3D%200%20then%0A%20%20%22zero%22%0Aelif%20.%20%3D%3D%201%20then%0A%20%20%22one%22%0Aelse%0A%20%20%22many%22%0Aend&j=2) |  |","if . == 0 then\n  \"zero\"\nelif . == 1 then\n  \"one\"\nelse\n  \"many\"\nend","2","\"many\"\n"
+      67,"| Command | jq '. < 5' |\n| --- |\n| Input | 2 |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=.%20%3C%205&j=2) |  |",. < 5,"2","true\n"
+      88,"| Command | jq '42 and \"a string\"' |\n| --- |\n| Input | null |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=42%20and%20%22a%20string%22&j=null) |  |","42 and \"a string\"","null","true\n"
+      94,"| Command | jq '(true, false) or false' |\n| --- |\n| Input | null |\n| Output | true |\n|  | false |\n| [Run](https://play.jqlang.org/?q=%28true%2C%20false%29%20or%20false&j=null) |  |","(true, false) or false","null","true\nfalse\n"
+      101,"| Command | jq '(true, true) and (true, false)' |\n| --- |\n| Input | null |\n| Output | true |\n|  | false |\n|  | true |\n|  | false |\n| [Run](https://play.jqlang.org/?q=%28true%2C%20true%29%20and%20%28true%2C%20false%29&j=null) |  |","(true, true) and (true, false)","null","true\nfalse\ntrue\nfalse\n"
+      110,"| Command | jq '[true, false | not]' |\n| --- |\n| Input | null |\n| Output | [false, true] |\n| [Run](https://play.jqlang.org/?q=%5Btrue%2C%20false%20%7C%20not%5D&j=null) |  |","[true, false | not]","null","[false, true]\n"
+      136,"| Command | jq 'empty // 42' |\n| --- |\n| Input | null |\n| Output | 42 |\n| [Run](https://play.jqlang.org/?q=empty%20//%2042&j=null) |  |",empty // 42,"null","42\n"
+      142,"| Command | jq '.foo // 42' |\n| --- |\n| Input | {\"foo\": 19} |\n| Output | 19 |\n| [Run](https://play.jqlang.org/?q=.foo%20//%2042&j=%7B%22foo%22%3A%2019%7D) |  |",.foo // 42,"{\"foo\": 19}","19\n"
+      148,"| Command | jq '.foo // 42' |\n| --- |\n| Input | {} |\n| Output | 42 |\n| [Run](https://play.jqlang.org/?q=.foo%20//%2042&j=%7B%7D) |  |",.foo // 42,"{}","42\n"
+      154,"| Command | jq '(false, null, 1) // 42' |\n| --- |\n| Input | null |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=%28false%2C%20null%2C%201%29%20//%2042&j=null) |  |","(false, null, 1) // 42","null","1\n"
+      160,"| Command | jq '(false, null, 1) | . // 42' |\n| --- |\n| Input | null |\n| Output | 42 |\n|  | 42 |\n|  | 1 |\n| [Run](https://play.jqlang.org/?q=%28false%2C%20null%2C%201%29%20%7C%20.%20//%2042&j=null) |  |","(false, null, 1) | . // 42","null","42\n42\n1\n"
+      174,"| Command | jq 'try .a catch \". is not an object\"' |\n| --- |\n| Input | true |\n| Output | \". is not an object\" |\n| [Run](https://play.jqlang.org/?q=try%20.a%20catch%20%22.%20is%20not%20an%20object%22&j=true) |  |","try .a catch \". is not an object\"","true","\". is not an object\"\n"
+      180,"| Command | jq '[.[]|try .a]' |\n| --- |\n| Input | [{}, true, {\"a\":1}] |\n| Output | [null, 1] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%7Ctry%20.a%5D&j=%5B%7B%7D%2C%20true%2C%20%7B%22a%22%3A1%7D%5D) |  |","[.[]|try .a]","[{}, true, {\"a\":1}]","[null, 1]\n"
+      186,"| Command | jq 'try error(\"some exception\") catch .' |\n| --- |\n| Input | true |\n| Output | \"some exception\" |\n| [Run](https://play.jqlang.org/?q=try%20error%28%22some%20exception%22%29%20catch%20.&j=true) |  |","try error(\"some exception\") catch .","true","\"some exception\"\n"
+      233,"| Command | jq '[.[] | .a?]' |\n| --- |\n| Input | [{}, true, {\"a\":1}] |\n| Output | [null, 1] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%20%7C%20.a%3F%5D&j=%5B%7B%7D%2C%20true%2C%20%7B%22a%22%3A1%7D%5D) |  |","[.[] | .a?]","[{}, true, {\"a\":1}]","[null, 1]\n"
+      239,"| Command | jq '[.[] | tonumber?]' |\n| --- |\n| Input | [\"1\", \"invalid\", \"3\", 4] |\n| Output | [1, 3, 4] |\n| [Run](https://play.jqlang.org/?q=%5B.%5B%5D%20%7C%20tonumber%3F%5D&j=%5B%221%22%2C%20%22invalid%22%2C%20%223%22%2C%204%5D) |  |","[.[] | tonumber?]","[\"1\", \"invalid\", \"3\", 4]","[1, 3, 4]\n"
+    fenced_examples[7]{line,text}:
+      80,"```\n.foo and .bar |\nnot\n```"
+      121,"```\na\n// b\n```"
+      130,"```\nfalse,\n(1 // 2)\n```"
+      198,"```\n# Repeat an expression until it raises \"break\" as an\n# error, then stop repeating without re-raising the error.\n# But if the error caught is not \"break\" then re-raise it.\ntry repeat(exp) catch if .==\"break\" then empty else error\n```"
+      207,"```\nlabel $out | ... break $out ...\n```"
+      217,"```\nlabel $out | reduce .[] as $item (null; if .==false then break $out else ... end)\n```"
+      223,"```\nbreak $out\n```"
+    source: "https://jqlang.org/manual/#conditionals-and-comparisons"
+    file: jq-manual/conditionals-and-comparisons.md
+  - section: invoking-jq
+    sha256: aacf49926e1f7faf75af7ad04e3b8a59fbdb749334a177ab61b80ee4b584cf6c
+    table_examples[0]:
+    fenced_examples[3]{line,text}:
+      21,"```\njq\n\"foo\"\n```"
+      26,"```\nfoo is not\ndefined\n```"
+      103,"```\n[\"Invalid literal at line 1,\n  column 7\",[1]]\n```"
+    source: "https://jqlang.org/manual/#invoking-jq"
+    file: jq-manual/invoking-jq.md
+  - section: io
+    sha256: 2bdb6e3fe15b3ba43b7a0d0975c21b9768bef3cfc76dce92f2103913678f825d
+    table_examples[0]:
+    fenced_examples[5]{line,text}:
+      28,"```\necho 1 2 3 4 | jq '[., input]' # [1,2] [3,4]\n```"
+      38,"```\necho 1 2 3 | jq -n 'reduce inputs as $i (0; . + $i)' # 6\n```"
+      48,"```\n[\"DEBUG:\",<input-value>]\n```"
+      58,"```\n1 as $x | 2 | debug(\"Entering function foo with $x == \\($x)\", .) | (.+1)\n```"
+      64,"```\n[\"DEBUG:\",\"Entering function foo with $x == 1\"]\n[\"DEBUG:\",2]\n```"
+    source: "https://jqlang.org/manual/#io"
+    file: jq-manual/io.md
+  - section: math
+    sha256: 464f5c236684eff7d49fdc096894e317f09572dfb44b7d1bd7767b626f35c944
+    table_examples[0]:
+    fenced_examples[0]:
+    source: "https://jqlang.org/manual/#math"
+    file: jq-manual/math.md
+  - section: modules
+    sha256: 3273eb593431e8aff934ba65667e72df369711b2115e1ec1bbfafd105bd3ddca
+    table_examples[0]:
+    fenced_examples[1]{line,text}:
+      31,"```\n[\"~/.jq\", \"$ORIGIN/../lib/jq\",\n\"$ORIGIN/../lib\"]\n```"
+    source: "https://jqlang.org/manual/#modules"
+    file: jq-manual/modules.md
+  - section: regular-expressions
+    sha256: b9c11824495256507fbed545a96a65c29f6e3da6b6463fcf6deb6c9f78c1d203
+    table_examples[17]:
+      - line: 66
+        text: "| Command | jq 'test(\"foo\")' |\n| --- |\n| Input | \"foo\" |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=test%28%22foo%22%29&j=%22foo%22) |  |"
+        query: "test(\"foo\")"
+        input: "\"foo\""
+        expected_stdout: "true\n"
+      - line: 72
+        text: "| Command | jq '.[] | test(\"a b c # spaces are ignored\"; \"ix\")' |\n| --- |\n| Input | [\"xabcd\", \"ABC\"] |\n| Output | true |\n|  | true |\n| [Run](https://play.jqlang.org/?q=.%5B%5D%20%7C%20test%28%22a%20b%20c%20%23%20spaces%20are%20ignored%22%3B%20%22ix%22%29&j=%5B%22xabcd%22%2C%20%22ABC%22%5D) |  |"
+        query: ".[] | test(\"a b c # spaces are ignored\"; \"ix\")"
+        input: "[\"xabcd\", \"ABC\"]"
+        expected_stdout: "true\ntrue\n"
+      - line: 97
+        text: "| Command | jq 'match(\"(abc)+\"; \"g\")' |\n| --- |\n| Input | \"abc abc\" |\n| Output | {\"offset\": 0, \"length\": 3, \"string\": \"abc\", \"captures\": [{\"offset\": 0, \"length\": 3, \"string\": \"abc\", \"name\": null}]} |\n|  | {\"offset\": 4, \"length\": 3, \"string\": \"abc\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"abc\", \"name\": null}]} |\n| [Run](https://play.jqlang.org/?q=match%28%22%28abc%29%2B%22%3B%20%22g%22%29&j=%22abc%20abc%22) |  |"
+        query: "match(\"(abc)+\"; \"g\")"
+        input: "\"abc abc\""
+        expected_stdout: "{\"offset\": 0, \"length\": 3, \"string\": \"abc\", \"captures\": [{\"offset\": 0, \"length\": 3, \"string\": \"abc\", \"name\": null}]}\n{\"offset\": 4, \"length\": 3, \"string\": \"abc\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"abc\", \"name\": null}]}\n"
+      - line: 104
+        text: "| Command | jq 'match(\"foo\")' |\n| --- |\n| Input | \"foo bar foo\" |\n| Output | {\"offset\": 0, \"length\": 3, \"string\": \"foo\", \"captures\": []} |\n| [Run](https://play.jqlang.org/?q=match%28%22foo%22%29&j=%22foo%20bar%20foo%22) |  |"
+        query: "match(\"foo\")"
+        input: "\"foo bar foo\""
+        expected_stdout: "{\"offset\": 0, \"length\": 3, \"string\": \"foo\", \"captures\": []}\n"
+      - line: 110
+        text: "| Command | jq 'match([\"foo\", \"ig\"])' |\n| --- |\n| Input | \"foo bar FOO\" |\n| Output | {\"offset\": 0, \"length\": 3, \"string\": \"foo\", \"captures\": []} |\n|  | {\"offset\": 8, \"length\": 3, \"string\": \"FOO\", \"captures\": []} |\n| [Run](https://play.jqlang.org/?q=match%28%5B%22foo%22%2C%20%22ig%22%5D%29&j=%22foo%20bar%20FOO%22) |  |"
+        query: "match([\"foo\", \"ig\"])"
+        input: "\"foo bar FOO\""
+        expected_stdout: "{\"offset\": 0, \"length\": 3, \"string\": \"foo\", \"captures\": []}\n{\"offset\": 8, \"length\": 3, \"string\": \"FOO\", \"captures\": []}\n"
+      - line: 117
+        text: "| Command | jq 'match(\"foo (?<bar123>bar)? foo\"; \"ig\")' |\n| --- |\n| Input | \"foo bar foo foo foo\" |\n| Output | {\"offset\": 0, \"length\": 11, \"string\": \"foo bar foo\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"bar\", \"name\": \"bar123\"}]} |\n|  | {\"offset\": 12, \"length\": 8, \"string\": \"foo foo\", \"captures\": [{\"offset\": -1, \"length\": 0, \"string\": null, \"name\": \"bar123\"}]} |\n| [Run](https://play.jqlang.org/?q=match%28%22foo%20%28%3F%3Cbar123%3Ebar%29%3F%20foo%22%3B%20%22ig%22%29&j=%22foo%20bar%20foo%20foo%20%20foo%22) |  |"
+        query: "match(\"foo (?<bar123>bar)? foo\"; \"ig\")"
+        input: "\"foo bar foo foo  foo\""
+        expected_stdout: "{\"offset\": 0, \"length\": 11, \"string\": \"foo bar foo\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"bar\", \"name\": \"bar123\"}]}\n{\"offset\": 12, \"length\": 8, \"string\": \"foo foo\", \"captures\": [{\"offset\": -1, \"length\": 0, \"string\": null, \"name\": \"bar123\"}]}\n"
+        reference_stdout: "{\"offset\": 0, \"length\": 11, \"string\": \"foo bar foo\", \"captures\": [{\"offset\": 4, \"length\": 3, \"string\": \"bar\", \"name\": \"bar123\"}]}\n{\"offset\": 12, \"length\": 8, \"string\": \"foo  foo\", \"captures\": [{\"offset\": -1, \"length\": 0, \"string\": null, \"name\": \"bar123\"}]}\n"
+        reference_note: The imported table collapses the two spaces in the second matched string. Its length is 8 and jq 1.8.1 retains both spaces. Verified locally; published text remains in text and expected_stdout.
+      - line: 124
+        text: "| Command | jq '[ match(\".\"; \"g\")] | length' |\n| --- |\n| Input | \"abc\" |\n| Output | 3 |\n| [Run](https://play.jqlang.org/?q=%5B%20match%28%22.%22%3B%20%22g%22%29%5D%20%7C%20length&j=%22abc%22) |  |"
+        query: "[ match(\".\"; \"g\")] | length"
+        input: "\"abc\""
+        expected_stdout: "3\n"
+      - line: 134
+        text: "| Command | jq 'capture(\"(?<a>[a-z]+)-(?<n>[0-9]+)\")' |\n| --- |\n| Input | \"xyzzy-14\" |\n| Output | { \"a\": \"xyzzy\", \"n\": \"14\" } |\n| [Run](https://play.jqlang.org/?q=capture%28%22%28%3F%3Ca%3E%5Ba-z%5D%2B%29-%28%3F%3Cn%3E%5B0-9%5D%2B%29%22%29&j=%22xyzzy-14%22) |  |"
+        query: "capture(\"(?<a>[a-z]+)-(?<n>[0-9]+)\")"
+        input: "\"xyzzy-14\""
+        expected_stdout: "{ \"a\": \"xyzzy\", \"n\": \"14\" }\n"
+      - line: 144
+        text: "| Command | jq 'scan(\"c\")' |\n| --- |\n| Input | \"abcdefabc\" |\n| Output | \"c\" |\n|  | \"c\" |\n| [Run](https://play.jqlang.org/?q=scan%28%22c%22%29&j=%22abcdefabc%22) |  |"
+        query: "scan(\"c\")"
+        input: "\"abcdefabc\""
+        expected_stdout: "\"c\"\n\"c\"\n"
+      - line: 151
+        text: "| Command | jq 'scan(\"(a+)(b+)\")' |\n| --- |\n| Input | \"abaabbaaabbb\" |\n| Output | [\"a\",\"b\"] |\n|  | [\"aa\",\"bb\"] |\n|  | [\"aaa\",\"bbb\"] |\n| [Run](https://play.jqlang.org/?q=scan%28%22%28a%2B%29%28b%2B%29%22%29&j=%22abaabbaaabbb%22) |  |"
+        query: "scan(\"(a+)(b+)\")"
+        input: "\"abaabbaaabbb\""
+        expected_stdout: "[\"a\",\"b\"]\n[\"aa\",\"bb\"]\n[\"aaa\",\"bbb\"]\n"
+      - line: 165
+        text: "| Command | jq 'split(\", *\"; null)' |\n| --- |\n| Input | \"ab,cd, ef\" |\n| Output | [\"ab\",\"cd\",\"ef\"] |\n| [Run](https://play.jqlang.org/?q=split%28%22%2C%20%2A%22%3B%20null%29&j=%22ab%2Ccd%2C%20ef%22) |  |"
+        query: "split(\", *\"; null)"
+        input: "\"ab,cd, ef\""
+        expected_stdout: "[\"ab\",\"cd\",\"ef\"]\n"
+      - line: 175
+        text: "| Command | jq 'splits(\", *\")' |\n| --- |\n| Input | \"ab,cd, ef, gh\" |\n| Output | \"ab\" |\n|  | \"cd\" |\n|  | \"ef\" |\n|  | \"gh\" |\n| [Run](https://play.jqlang.org/?q=splits%28%22%2C%20%2A%22%29&j=%22ab%2Ccd%2C%20%20%20ef%2C%20gh%22) |  |"
+        query: "splits(\", *\")"
+        input: "\"ab,cd,   ef, gh\""
+        expected_stdout: "\"ab\"\n\"cd\"\n\"ef\"\n\"gh\"\n"
+      - line: 184
+        text: "| Command | jq 'splits(\",? *\"; \"n\")' |\n| --- |\n| Input | \"ab,cd ef, gh\" |\n| Output | \"ab\" |\n|  | \"cd\" |\n|  | \"ef\" |\n|  | \"gh\" |\n| [Run](https://play.jqlang.org/?q=splits%28%22%2C%3F%20%2A%22%3B%20%22n%22%29&j=%22ab%2Ccd%20ef%2C%20%20gh%22) |  |"
+        query: "splits(\",? *\"; \"n\")"
+        input: "\"ab,cd ef,  gh\""
+        expected_stdout: "\"ab\"\n\"cd\"\n\"ef\"\n\"gh\"\n"
+      - line: 197
+        text: "| Command | jq 'sub(\"[^a-z]*(?<x>[a-z]+)\"; \"Z\\(.x)\"; \"g\")' |\n| --- |\n| Input | \"123abc456def\" |\n| Output | \"ZabcZdef\" |\n| [Run](https://play.jqlang.org/?q=sub%28%22%5B%5Ea-z%5D%2A%28%3F%3Cx%3E%5Ba-z%5D%2B%29%22%3B%20%22Z%5C%28.x%29%22%3B%20%22g%22%29&j=%22123abc456def%22) |  |"
+        query: "sub(\"[^a-z]*(?<x>[a-z]+)\"; \"Z\\(.x)\"; \"g\")"
+        input: "\"123abc456def\""
+        expected_stdout: "\"ZabcZdef\"\n"
+      - line: 203
+        text: "| Command | jq '[sub(\"(?<a>.)\"; \"\\(.a|ascii_upcase)\", \"\\(.a|ascii_downcase)\")]' |\n| --- |\n| Input | \"aB\" |\n| Output | [\"AB\",\"aB\"] |\n| [Run](https://play.jqlang.org/?q=%5Bsub%28%22%28%3F%3Ca%3E.%29%22%3B%20%22%5C%28.a%7Cascii_upcase%29%22%2C%20%22%5C%28.a%7Cascii_downcase%29%22%29%5D&j=%22aB%22) |  |"
+        query: "[sub(\"(?<a>.)\"; \"\\(.a|ascii_upcase)\", \"\\(.a|ascii_downcase)\")]"
+        input: "\"aB\""
+        expected_stdout: "[\"AB\",\"aB\"]\n"
+      - line: 213
+        text: "| Command | jq 'gsub(\"(?<x>.)[^a]*\"; \"+\\(.x)-\")' |\n| --- |\n| Input | \"Abcabc\" |\n| Output | \"+A-+a-\" |\n| [Run](https://play.jqlang.org/?q=gsub%28%22%28%3F%3Cx%3E.%29%5B%5Ea%5D%2A%22%3B%20%22%2B%5C%28.x%29-%22%29&j=%22Abcabc%22) |  |"
+        query: "gsub(\"(?<x>.)[^a]*\"; \"+\\(.x)-\")"
+        input: "\"Abcabc\""
+        expected_stdout: "\"+A-+a-\"\n"
+      - line: 219
+        text: "| Command | jq '[gsub(\"p\"; \"a\", \"b\")]' |\n| --- |\n| Input | \"p\" |\n| Output | [\"a\",\"b\"] |\n| [Run](https://play.jqlang.org/?q=%5Bgsub%28%22p%22%3B%20%22a%22%2C%20%22b%22%29%5D&j=%22p%22) |  |"
+        query: "[gsub(\"p\"; \"a\", \"b\")]"
+        input: "\"p\""
+        expected_stdout: "[\"a\",\"b\"]\n"
+    fenced_examples[3]{line,text}:
+      22,"```\nSTRING | FILTER(REGEX)\nSTRING | FILTER(REGEX; FLAGS)\nSTRING | FILTER([REGEX])\nSTRING | FILTER([REGEX, FLAGS])\n```"
+      50,"```\njq -n '\"a b\" | test(\"a\\\\sb\"; \"x\")'\n```"
+      56,"```\njq -n '(\"test\", \"TEst\", \"teST\", \"TEST\") | test(\"(?i)te(?-i)st\")'\n```"
+    source: "https://jqlang.org/manual/#regular-expressions"
+    file: jq-manual/regular-expressions.md
+  - section: streaming
+    sha256: 9d787c4760ffcd6e1c65ab106f49e459082c55a67ab9a4b3edbad65b972f6f18
+    table_examples[3]{line,text,query,input,expected_stdout}:
+      30,"| Command | jq 'truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]])' |\n| --- |\n| Input | 1 |\n| Output | [[0],\"b\"] |\n|  | [[0]] |\n| [Run](https://play.jqlang.org/?q=truncate_stream%28%5B%5B0%5D%2C%22a%22%5D%2C%5B%5B1%2C0%5D%2C%22b%22%5D%2C%5B%5B1%2C0%5D%5D%2C%5B%5B1%5D%5D%29&j=1) |  |","truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]])","1","[[0],\"b\"]\n[[0]]\n"
+      41,"| Command | jq 'fromstream(1|truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]]))' |\n| --- |\n| Input | null |\n| Output | [\"b\"] |\n| [Run](https://play.jqlang.org/?q=fromstream%281%7Ctruncate_stream%28%5B%5B0%5D%2C%22a%22%5D%2C%5B%5B1%2C0%5D%2C%22b%22%5D%2C%5B%5B1%2C0%5D%5D%2C%5B%5B1%5D%5D%29%29&j=null) |  |","fromstream(1|truncate_stream([[0],\"a\"],[[1,0],\"b\"],[[1,0]],[[1]]))","null","[\"b\"]\n"
+      51,"| Command | jq '. as $dot|fromstream($dot|tostream)|.==$dot' |\n| --- |\n| Input | [0,[1,{\"a\":1},{\"b\":2}]] |\n| Output | true |\n| [Run](https://play.jqlang.org/?q=.%20as%20%24dot%7Cfromstream%28%24dot%7Ctostream%29%7C.%3D%3D%24dot&j=%5B0%2C%5B1%2C%7B%22a%22%3A1%7D%2C%7B%22b%22%3A2%7D%5D%5D) |  |",. as $dot|fromstream($dot|tostream)|.==$dot,"[0,[1,{\"a\":1},{\"b\":2}]]","true\n"
+    fenced_examples[0]:
+    source: "https://jqlang.org/manual/#streaming"
+    file: jq-manual/streaming.md
+  - section: types-and-values
+    sha256: e53e4cd46a5ee1bd2961187c397fb10ad97b15bda8b2a7bae323f76725758536
+    table_examples[5]{line,text,query,input,expected_stdout}:
+      32,"| Command | jq '[.user, .projects[]]' |\n| --- |\n| Input | {\"user\":\"stedolan\", \"projects\": [\"jq\", \"wikiflow\"]} |\n| Output | [\"stedolan\", \"jq\", \"wikiflow\"] |\n| [Run](https://play.jqlang.org/?q=%5B.user%2C%20.projects%5B%5D%5D&j=%7B%22user%22%3A%22stedolan%22%2C%20%22projects%22%3A%20%5B%22jq%22%2C%20%22wikiflow%22%5D%7D) |  |","[.user, .projects[]]","{\"user\":\"stedolan\", \"projects\": [\"jq\", \"wikiflow\"]}","[\"stedolan\", \"jq\", \"wikiflow\"]\n"
+      38,"| Command | jq '[ .[] | . * 2]' |\n| --- |\n| Input | [1, 2, 3] |\n| Output | [2, 4, 6] |\n| [Run](https://play.jqlang.org/?q=%5B%20.%5B%5D%20%7C%20.%20%2A%202%5D&j=%5B1%2C%202%2C%203%5D) |  |","[ .[] | . * 2]","[1, 2, 3]","[2, 4, 6]\n"
+      107,"| Command | jq '{user, title: .titles[]}' |\n| --- |\n| Input | {\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]} |\n| Output | {\"user\":\"stedolan\", \"title\": \"JQ Primer\"} |\n|  | {\"user\":\"stedolan\", \"title\": \"More JQ\"} |\n| [Run](https://play.jqlang.org/?q=%7Buser%2C%20title%3A%20.titles%5B%5D%7D&j=%7B%22user%22%3A%22stedolan%22%2C%22titles%22%3A%5B%22JQ%20Primer%22%2C%20%22More%20JQ%22%5D%7D) |  |","{user, title: .titles[]}","{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}","{\"user\":\"stedolan\", \"title\": \"JQ Primer\"}\n{\"user\":\"stedolan\", \"title\": \"More JQ\"}\n"
+      114,"| Command | jq '{(.user): .titles}' |\n| --- |\n| Input | {\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]} |\n| Output | {\"stedolan\": [\"JQ Primer\", \"More JQ\"]} |\n| [Run](https://play.jqlang.org/?q=%7B%28.user%29%3A%20.titles%7D&j=%7B%22user%22%3A%22stedolan%22%2C%22titles%22%3A%5B%22JQ%20Primer%22%2C%20%22More%20JQ%22%5D%7D) |  |","{(.user): .titles}","{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}","{\"stedolan\": [\"JQ Primer\", \"More JQ\"]}\n"
+      126,"| Command | jq '.. | .a?' |\n| --- |\n| Input | [[{\"a\":1}]] |\n| Output | 1 |\n| [Run](https://play.jqlang.org/?q=..%20%7C%20.a%3F&j=%5B%5B%7B%22a%22%3A1%7D%5D%5D) |  |",.. | .a?,"[[{\"a\":1}]]","1\n"
+    fenced_examples[9]{line,text}:
+      52,"```\n{foo: .bar}\n```"
+      58,"```\n{user: .user, title: .title}\n```"
+      66,"```\n{\"user\":\"stedolan\",\"titles\":[\"JQ Primer\", \"More JQ\"]}\n```"
+      72,"```\n{user, title: .titles[]}\n```"
+      78,"```\n{\"user\":\"stedolan\", \"title\": \"JQ Primer\"}\n{\"user\":\"stedolan\", \"title\": \"More JQ\"}\n```"
+      85,"```\n{(.user): .titles}\n```"
+      91,"```\n{\"stedolan\": [\"JQ Primer\", \"More JQ\"]}\n```"
+      97,"```\n\"f o o\" as $foo | \"b a r\" as $bar | {$foo, $bar:$foo}\n```"
+      103,"```\n{\"foo\":\"f o o\",\"b a r\":\"f o o\"}\n```"
+    source: "https://jqlang.org/manual/#types-and-values"
+    file: jq-manual/types-and-values.md
