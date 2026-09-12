@@ -1,0 +1,1123 @@
+schema_version: 1
+kind: manual-user-function-composition-inventory
+source_refs[5]{source,lines,claim}:
+  jq-manual/advanced-features.md,180-399,"definitions, user calls, filter parameters, value parameters, bindings, folds, and generators"
+  jq-manual/builtin-operators-and-functions.md,276-760,"constructors, paths, callbacks, navigation, and control builtins"
+  jq-manual/math.md,16-28,math builtin families
+  jq-manual/regular-expressions.md,22-219,regex builtin families and overloads
+  jq-manual/io.md,22-77,effects and ordered input builtins
+operation_variants[41]:
+  - name: LoadInput
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: LoadConstant
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Duplicate
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Pop
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Jump
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Branch
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Fork
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Backtrack
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Return
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Raise
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Catch
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: EndCatch
+    admission: kernel-only
+    family: kernel-control
+    rationale: VM control-flow/storage operation is not a user-filter composition witness.
+  - name: Identity
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.identity
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.identity
+  - name: Literal
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.literal
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.literal
+  - name: Variable
+    admission: managed
+    family: bindings
+    evidence_case: manual.composition.operation.variable
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.variable
+  - name: Empty
+    admission: managed
+    family: errors
+    evidence_case: manual.composition.operation.empty
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.empty
+  - name: RecursiveDescent
+    admission: managed
+    family: navigation
+    evidence_case: manual.composition.operation.recursivedescent
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.recursivedescent
+  - name: Label
+    admission: managed
+    family: bindings
+    evidence_case: manual.composition.operation.label
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.label
+  - name: Break
+    admission: managed
+    family: bindings
+    evidence_case: manual.composition.operation.break
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.break
+  - name: Interpolation
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.interpolation
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.interpolation
+  - name: AccessField
+    admission: managed
+    family: navigation
+    evidence_case: manual.composition.operation.accessfield
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.accessfield
+  - name: AccessIndex
+    admission: managed
+    family: navigation
+    evidence_case: manual.composition.operation.accessindex
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.accessindex
+  - name: Slice
+    admission: managed
+    family: navigation
+    evidence_case: manual.composition.operation.slice
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.slice
+  - name: Iterate
+    admission: managed
+    family: navigation
+    evidence_case: manual.composition.operation.iterate
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.iterate
+  - name: Optional
+    admission: managed
+    family: navigation
+    evidence_case: manual.composition.operation.optional
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.optional
+  - name: Pipe
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.pipe
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.pipe
+  - name: Comma
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.comma
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.comma
+  - name: Array
+    admission: managed
+    family: constructors
+    evidence_case: manual.composition.operation.array
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.array
+  - name: Object
+    admission: managed
+    family: constructors
+    evidence_case: manual.composition.operation.object
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.object
+  - name: Unary
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.unary
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.unary
+  - name: Binary
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.binary
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.binary
+  - name: Conditional
+    admission: managed
+    family: scalar-control
+    evidence_case: manual.composition.operation.conditional
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.conditional
+  - name: Bind
+    admission: managed
+    family: bindings
+    evidence_case: manual.composition.operation.bind
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.bind
+  - name: BindAlternatives
+    admission: managed
+    family: bindings
+    evidence_case: manual.composition.operation.bindalternatives
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.bindalternatives
+  - name: Reduce
+    admission: limited
+    family: folds
+    evidence_case: manual.composition.operation.reduce
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.reduce
+  - name: Foreach
+    admission: limited
+    family: folds
+    evidence_case: manual.composition.operation.foreach
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.foreach
+  - name: Call
+    admission: limited
+    family: callbacks
+    evidence_case: manual.composition.operation.call
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.call
+  - name: UserCall
+    admission: managed
+    family: callbacks
+    evidence_case: manual.composition.operation.usercall
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.usercall
+  - name: ParameterCall
+    admission: managed
+    family: callbacks
+    evidence_case: manual.composition.operation.parametercall
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.parametercall
+  - name: TryCatch
+    admission: managed
+    family: errors
+    evidence_case: manual.composition.operation.trycatch
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.trycatch
+  - name: Assignment
+    admission: limited
+    family: paths
+    evidence_case: manual.composition.operation.assignment
+    rationale: The definition-body witness exercises this operation family under managed user-filter admission.
+    operation_witness: manual.composition.operation.assignment
+contexts[48]{family,context,case_id,operation,source,source_line,operation_fragment}:
+  constructors,def-body,manual.composition.inventory.constructors.def,Object,jq-manual/builtin-operators-and-functions.md,276,"{head:"
+  constructors,around-user-call,manual.composition.inventory.constructors.around,Object,jq-manual/builtin-operators-and-functions.md,276,"{head:"
+  constructors,filter-parameter,manual.composition.inventory.constructors.filter,Array,jq-manual/builtin-operators-and-functions.md,276,"[g |"
+  constructors,value-parameter,manual.composition.inventory.constructors.value,Object,jq-manual/builtin-operators-and-functions.md,276,"{value:"
+  navigation,def-body,manual.composition.inventory.navigation.def,AccessField,jq-manual/builtin-operators-and-functions.md,131,.name
+  navigation,around-user-call,manual.composition.inventory.navigation.around,AccessIndex,jq-manual/builtin-operators-and-functions.md,131,"[0].name"
+  navigation,filter-parameter,manual.composition.inventory.navigation.filter,Iterate,jq-manual/builtin-operators-and-functions.md,131,".items[]"
+  navigation,value-parameter,manual.composition.inventory.navigation.value,AccessField,jq-manual/builtin-operators-and-functions.md,131,$x.name
+  scalar-control,def-body,manual.composition.inventory.scalar-control.def,Conditional,jq-manual/builtin-operators-and-functions.md,703,if (.
+  scalar-control,around-user-call,manual.composition.inventory.scalar-control.around,Pipe,jq-manual/builtin-operators-and-functions.md,703,f | if
+  scalar-control,filter-parameter,manual.composition.inventory.scalar-control.filter,Conditional,jq-manual/builtin-operators-and-functions.md,703,if (g
+  scalar-control,value-parameter,manual.composition.inventory.scalar-control.value,Binary,jq-manual/builtin-operators-and-functions.md,703,$x * 2
+  bindings,def-body,manual.composition.inventory.bindings.def,BindAlternatives,jq-manual/advanced-features.md,180,?//
+  bindings,around-user-call,manual.composition.inventory.bindings.around,Bind,jq-manual/advanced-features.md,180,. as $x
+  bindings,filter-parameter,manual.composition.inventory.bindings.filter,Variable,jq-manual/advanced-features.md,180,$v
+  bindings,value-parameter,manual.composition.inventory.bindings.value,Variable,jq-manual/advanced-features.md,180,"[$x, $x]"
+  folds,def-body,manual.composition.inventory.folds.def,Reduce,jq-manual/advanced-features.md,319,"reduce .[]"
+  folds,around-user-call,manual.composition.inventory.folds.around,Foreach,jq-manual/advanced-features.md,319,"foreach .[]"
+  folds,filter-parameter,manual.composition.inventory.folds.filter,Reduce,jq-manual/advanced-features.md,319,reduce g
+  folds,value-parameter,manual.composition.inventory.folds.value,Foreach,jq-manual/advanced-features.md,319,"foreach $x[]"
+  paths,def-body,manual.composition.inventory.paths.def,Assignment,jq-manual/builtin-operators-and-functions.md,276,|=
+  paths,around-user-call,manual.composition.inventory.paths.around,Assignment,jq-manual/builtin-operators-and-functions.md,276,|=
+  paths,filter-parameter,manual.composition.inventory.paths.filter,Assignment,jq-manual/builtin-operators-and-functions.md,276,|=
+  paths,value-parameter,manual.composition.inventory.paths.value,Assignment,jq-manual/builtin-operators-and-functions.md,276," = $x"
+  callbacks,def-body,manual.composition.inventory.callbacks.def,Call,jq-manual/builtin-operators-and-functions.md,760,map(. + 1)
+  callbacks,around-user-call,manual.composition.inventory.callbacks.around,Call,jq-manual/builtin-operators-and-functions.md,760,map(. + 1)
+  callbacks,filter-parameter,manual.composition.inventory.callbacks.filter,ParameterCall,jq-manual/builtin-operators-and-functions.md,760,map(g)
+  callbacks,value-parameter,manual.composition.inventory.callbacks.value,Call,jq-manual/builtin-operators-and-functions.md,760,map(. + $x)
+  generators,def-body,manual.composition.inventory.generators.def,Call,jq-manual/advanced-features.md,247,range(0; 3)
+  generators,around-user-call,manual.composition.inventory.generators.around,Call,jq-manual/advanced-features.md,247,range(0; 3)
+  generators,filter-parameter,manual.composition.inventory.generators.filter,Call,jq-manual/advanced-features.md,247,limit(2; g)
+  generators,value-parameter,manual.composition.inventory.generators.value,Call,jq-manual/advanced-features.md,247,range(0; $x)
+  math,def-body,manual.composition.inventory.math.def,Call,jq-manual/math.md,22,sin + cos
+  math,around-user-call,manual.composition.inventory.math.around,Call,jq-manual/math.md,22,sin
+  math,filter-parameter,manual.composition.inventory.math.filter,Call,jq-manual/math.md,22,"[g, g]"
+  math,value-parameter,manual.composition.inventory.math.value,Call,jq-manual/math.md,22,$x * 2
+  regex,def-body,manual.composition.inventory.regex.def,Call,jq-manual/regular-expressions.md,62,"test(\"a\")"
+  regex,around-user-call,manual.composition.inventory.regex.around,Call,jq-manual/regular-expressions.md,62,"test(\"a\")"
+  regex,filter-parameter,manual.composition.inventory.regex.filter,Call,jq-manual/regular-expressions.md,62,"gsub(\"a\"; g)"
+  regex,value-parameter,manual.composition.inventory.regex.value,Call,jq-manual/regular-expressions.md,62,test($x)
+  effects,def-body,manual.composition.inventory.effects.def,Call,jq-manual/io.md,42,debug
+  effects,around-user-call,manual.composition.inventory.effects.around,Call,jq-manual/io.md,42,debug
+  effects,filter-parameter,manual.composition.inventory.effects.filter,Call,jq-manual/io.md,42,debug
+  effects,value-parameter,manual.composition.inventory.effects.value,Call,jq-manual/io.md,42,debug
+  errors,def-body,manual.composition.inventory.errors.def,TryCatch,jq-manual/builtin-operators-and-functions.md,451,try error
+  errors,around-user-call,manual.composition.inventory.errors.around,TryCatch,jq-manual/builtin-operators-and-functions.md,451,try error
+  errors,filter-parameter,manual.composition.inventory.errors.filter,TryCatch,jq-manual/builtin-operators-and-functions.md,451,try g
+  errors,value-parameter,manual.composition.inventory.errors.value,TryCatch,jq-manual/builtin-operators-and-functions.md,451,try error
+arity_groups[12]:
+  - family: constructors
+    admission: composition-deferred
+    case_id: manual.composition.inventory.constructors.def
+    names[12]: IN,INDEX,JOIN,arrays,combinations,explode,flatten,from_entries,implode,join,to_entries,transpose
+    signatures[17]{signature,admission,rationale,case_id}:
+      arrays/0,managed-allowlist,Current managed_operation_supported admits arrays/0 through its name/arity allowlist.,manual.composition.arity.arrays.0
+      combinations/0,composition-deferred,Current managed_operation_supported does not admit combinations/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.combinations.0
+      combinations/1,composition-deferred,Current managed_operation_supported does not admit combinations/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.combinations.1
+      explode/0,composition-deferred,Current managed_operation_supported does not admit explode/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.explode.0
+      flatten/0,composition-deferred,Current managed_operation_supported does not admit flatten/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.flatten.0
+      flatten/1,composition-deferred,Current managed_operation_supported does not admit flatten/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.flatten.1
+      from_entries/0,managed-allowlist,Current managed_operation_supported admits from_entries/0 through its name/arity allowlist.,manual.composition.arity.from-entries.0
+      implode/0,composition-deferred,Current managed_operation_supported does not admit implode/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.implode.0
+      IN/1,composition-deferred,Current managed_operation_supported does not admit IN/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.upper-in.1
+      IN/2,composition-deferred,Current managed_operation_supported does not admit IN/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.upper-in.2
+      INDEX/2,composition-deferred,Current managed_operation_supported does not admit INDEX/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.upper-index.2
+      join/1,composition-deferred,Current managed_operation_supported does not admit join/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.join.1
+      JOIN/2,composition-deferred,Current managed_operation_supported does not admit JOIN/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.upper-join.2
+      JOIN/3,composition-deferred,Current managed_operation_supported does not admit JOIN/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.upper-join.3
+      JOIN/4,composition-deferred,Current managed_operation_supported does not admit JOIN/4 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.upper-join.4
+      to_entries/0,managed-allowlist,Current managed_operation_supported admits to_entries/0 through its name/arity allowlist.,manual.composition.arity.to-entries.0
+      transpose/0,composition-deferred,Current managed_operation_supported does not admit transpose/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.transpose.0
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: navigation
+    admission: composition-deferred
+    case_id: manual.composition.inventory.navigation.def
+    names[32]: bsearch,contains,has,in,index,indices,inside,isempty,iterables,keys,keys_unsorted,length,max,min,normals,nulls,numbers,objects,reverse,rindex,scalars,sort,strings,type,unique,values,booleans,finites,isfinite,isinfinite,isnan,isnormal
+    signatures[32]{signature,admission,rationale,case_id}:
+      booleans/0,managed-allowlist,Current managed_operation_supported admits booleans/0 through its name/arity allowlist.,manual.composition.arity.booleans.0
+      bsearch/1,composition-deferred,Current managed_operation_supported does not admit bsearch/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.bsearch.1
+      contains/1,composition-deferred,Current managed_operation_supported does not admit contains/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.contains.1
+      finites/0,composition-deferred,Current managed_operation_supported does not admit finites/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.finites.0
+      has/1,managed-allowlist,Current managed_operation_supported admits has/1 through its name/arity allowlist.,manual.composition.arity.has.1
+      in/1,managed-allowlist,Current managed_operation_supported admits in/1 through its name/arity allowlist.,manual.composition.arity.in.1
+      index/1,composition-deferred,Current managed_operation_supported does not admit index/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.index.1
+      indices/1,composition-deferred,Current managed_operation_supported does not admit indices/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.indices.1
+      inside/1,composition-deferred,Current managed_operation_supported does not admit inside/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.inside.1
+      isempty/1,managed-allowlist,Current managed_operation_supported admits isempty/1 through its name/arity allowlist.,manual.composition.arity.isempty.1
+      isfinite/0,composition-deferred,Current managed_operation_supported does not admit isfinite/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.isfinite.0
+      isinfinite/0,composition-deferred,Current managed_operation_supported does not admit isinfinite/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.isinfinite.0
+      isnan/0,composition-deferred,Current managed_operation_supported does not admit isnan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.isnan.0
+      isnormal/0,composition-deferred,Current managed_operation_supported does not admit isnormal/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.isnormal.0
+      iterables/0,managed-allowlist,Current managed_operation_supported admits iterables/0 through its name/arity allowlist.,manual.composition.arity.iterables.0
+      keys_unsorted/0,managed-allowlist,Current managed_operation_supported admits keys_unsorted/0 through its name/arity allowlist.,manual.composition.arity.keys-unsorted.0
+      keys/0,managed-allowlist,Current managed_operation_supported admits keys/0 through its name/arity allowlist.,manual.composition.arity.keys.0
+      length/0,managed-allowlist,Current managed_operation_supported admits length/0 through its name/arity allowlist.,manual.composition.arity.length.0
+      max/0,managed-allowlist,Current managed_operation_supported admits max/0 through its name/arity allowlist.,manual.composition.arity.max.0
+      min/0,managed-allowlist,Current managed_operation_supported admits min/0 through its name/arity allowlist.,manual.composition.arity.min.0
+      normals/0,composition-deferred,Current managed_operation_supported does not admit normals/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.normals.0
+      nulls/0,managed-allowlist,Current managed_operation_supported admits nulls/0 through its name/arity allowlist.,manual.composition.arity.nulls.0
+      numbers/0,managed-allowlist,Current managed_operation_supported admits numbers/0 through its name/arity allowlist.,manual.composition.arity.numbers.0
+      objects/0,managed-allowlist,Current managed_operation_supported admits objects/0 through its name/arity allowlist.,manual.composition.arity.objects.0
+      reverse/0,managed-allowlist,Current managed_operation_supported admits reverse/0 through its name/arity allowlist.,manual.composition.arity.reverse.0
+      rindex/1,composition-deferred,Current managed_operation_supported does not admit rindex/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.rindex.1
+      scalars/0,managed-allowlist,Current managed_operation_supported admits scalars/0 through its name/arity allowlist.,manual.composition.arity.scalars.0
+      sort/0,managed-allowlist,Current managed_operation_supported admits sort/0 through its name/arity allowlist.,manual.composition.arity.sort.0
+      strings/0,managed-allowlist,Current managed_operation_supported admits strings/0 through its name/arity allowlist.,manual.composition.arity.strings.0
+      type/0,managed-allowlist,Current managed_operation_supported admits type/0 through its name/arity allowlist.,manual.composition.arity.type.0
+      unique/0,managed-allowlist,Current managed_operation_supported admits unique/0 through its name/arity allowlist.,manual.composition.arity.unique.0
+      values/0,managed-allowlist,Current managed_operation_supported admits values/0 through its name/arity allowlist.,manual.composition.arity.values.0
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: scalar-control
+    admission: composition-deferred
+    case_id: manual.composition.inventory.scalar-control.def
+    names[17]: ascii_downcase,ascii_upcase,endswith,ltrim,ltrimstr,not,rtrim,rtrimstr,startswith,toboolean,tojson,tonumber,tostring,trim,trimstr,utf8bytelength,fromjson
+    signatures[17]{signature,admission,rationale,case_id}:
+      ascii_downcase/0,composition-deferred,Current managed_operation_supported does not admit ascii_downcase/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.ascii-downcase.0
+      ascii_upcase/0,composition-deferred,Current managed_operation_supported does not admit ascii_upcase/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.ascii-upcase.0
+      endswith/1,composition-deferred,Current managed_operation_supported does not admit endswith/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.endswith.1
+      fromjson/0,composition-deferred,Current managed_operation_supported does not admit fromjson/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fromjson.0
+      ltrim/0,composition-deferred,Current managed_operation_supported does not admit ltrim/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.ltrim.0
+      ltrimstr/1,composition-deferred,Current managed_operation_supported does not admit ltrimstr/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.ltrimstr.1
+      not/0,composition-deferred,Current managed_operation_supported does not admit not/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.not.0
+      rtrim/0,composition-deferred,Current managed_operation_supported does not admit rtrim/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.rtrim.0
+      rtrimstr/1,composition-deferred,Current managed_operation_supported does not admit rtrimstr/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.rtrimstr.1
+      startswith/1,composition-deferred,Current managed_operation_supported does not admit startswith/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.startswith.1
+      toboolean/0,composition-deferred,Current managed_operation_supported does not admit toboolean/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.toboolean.0
+      tojson/0,composition-deferred,Current managed_operation_supported does not admit tojson/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.tojson.0
+      tonumber/0,managed-allowlist,Current managed_operation_supported admits tonumber/0 through its name/arity allowlist.,manual.composition.arity.tonumber.0
+      tostring/0,managed-allowlist,Current managed_operation_supported admits tostring/0 through its name/arity allowlist.,manual.composition.arity.tostring.0
+      trim/0,composition-deferred,Current managed_operation_supported does not admit trim/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.trim.0
+      trimstr/1,composition-deferred,Current managed_operation_supported does not admit trimstr/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.trimstr.1
+      utf8bytelength/0,managed-allowlist,Current managed_operation_supported admits utf8bytelength/0 through its name/arity allowlist.,manual.composition.arity.utf8bytelength.0
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: bindings
+    admission: composition-deferred
+    case_id: manual.composition.inventory.bindings.def
+    names[3]: builtins,have_decnum,have_literal_numbers
+    signatures[3]{signature,admission,rationale,case_id}:
+      builtins/0,managed-allowlist,The called definition invokes builtins and subtracts the full 220 documented name/arity signatures; an empty result proves documented availability without enumerating jq-private entries.,manual.composition.arity.builtins.0
+      have_decnum/0,composition-deferred,Current managed_operation_supported does not admit have_decnum/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.have-decnum.0
+      have_literal_numbers/0,composition-deferred,Current managed_operation_supported does not admit have_literal_numbers/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.have-literal-numbers.0
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: folds
+    admission: composition-deferred
+    case_id: manual.composition.inventory.folds.def
+    names[5]: add,first,last,nth,skip
+    signatures[9]{signature,admission,rationale,case_id}:
+      add/0,managed-allowlist,Current managed_operation_supported admits add/0 through its name/arity allowlist.,manual.composition.arity.add.0
+      add/1,managed-allowlist,Current managed_operation_supported admits add/1 through its name/arity allowlist.,manual.composition.arity.add.1
+      first/0,managed-allowlist,Current managed_operation_supported admits first/0 through its name/arity allowlist.,manual.composition.arity.first.0
+      first/1,managed-allowlist,Current managed_operation_supported admits first/1 through its name/arity allowlist.,manual.composition.arity.first.1
+      last/0,managed-allowlist,Current managed_operation_supported admits last/0 through its name/arity allowlist.,manual.composition.arity.last.0
+      last/1,managed-allowlist,Current managed_operation_supported admits last/1 through its name/arity allowlist.,manual.composition.arity.last.1
+      nth/1,composition-deferred,Current managed_operation_supported does not admit nth/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.nth.1
+      nth/2,composition-deferred,Current managed_operation_supported does not admit nth/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.nth.2
+      skip/2,composition-deferred,Current managed_operation_supported does not admit skip/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.skip.2
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: paths
+    admission: composition-deferred
+    case_id: manual.composition.inventory.paths.def
+    names[7]: del,delpaths,getpath,path,paths,pick,setpath
+    signatures[8]{signature,admission,rationale,case_id}:
+      del/1,composition-deferred,Current managed_operation_supported does not admit del/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.del.1
+      delpaths/1,composition-deferred,Current managed_operation_supported does not admit delpaths/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.delpaths.1
+      getpath/1,composition-deferred,Current managed_operation_supported does not admit getpath/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.getpath.1
+      path/1,composition-deferred,Current managed_operation_supported does not admit path/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.path.1
+      paths/0,composition-deferred,Current managed_operation_supported does not admit paths/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.paths.0
+      paths/1,composition-deferred,Current managed_operation_supported does not admit paths/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.paths.1
+      pick/1,composition-deferred,Current managed_operation_supported does not admit pick/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.pick.1
+      setpath/2,composition-deferred,Current managed_operation_supported does not admit setpath/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.setpath.2
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: callbacks
+    admission: composition-deferred
+    case_id: manual.composition.inventory.callbacks.def
+    names[12]: all,any,group_by,map,map_values,max_by,min_by,select,sort_by,unique_by,walk,with_entries
+    signatures[16]{signature,admission,rationale,case_id}:
+      all/0,composition-deferred,Current managed_operation_supported does not admit all/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.all.0
+      all/1,composition-deferred,Current managed_operation_supported does not admit all/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.all.1
+      all/2,composition-deferred,Current managed_operation_supported does not admit all/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.all.2
+      any/0,composition-deferred,Current managed_operation_supported does not admit any/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.any.0
+      any/1,composition-deferred,Current managed_operation_supported does not admit any/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.any.1
+      any/2,composition-deferred,Current managed_operation_supported does not admit any/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.any.2
+      group_by/1,composition-deferred,Current managed_operation_supported does not admit group_by/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.group-by.1
+      map_values/1,managed-allowlist,Current managed_operation_supported admits map_values/1 through its name/arity allowlist.,manual.composition.arity.map-values.1
+      map/1,managed-allowlist,Current managed_operation_supported admits map/1 through its name/arity allowlist.,manual.composition.arity.map.1
+      max_by/1,composition-deferred,Current managed_operation_supported does not admit max_by/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.max-by.1
+      min_by/1,composition-deferred,Current managed_operation_supported does not admit min_by/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.min-by.1
+      select/1,managed-allowlist,Current managed_operation_supported admits select/1 through its name/arity allowlist.,manual.composition.arity.select.1
+      sort_by/1,managed-allowlist,Current managed_operation_supported admits sort_by/1 through its name/arity allowlist.,manual.composition.arity.sort-by.1
+      unique_by/1,managed-allowlist,Current managed_operation_supported admits unique_by/1 through its name/arity allowlist.,manual.composition.arity.unique-by.1
+      walk/1,managed-allowlist,Current managed_operation_supported admits walk/1 through its name/arity allowlist.,manual.composition.arity.walk.1
+      with_entries/1,composition-deferred,Current managed_operation_supported does not admit with_entries/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.with-entries.1
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: generators
+    admission: composition-deferred
+    case_id: manual.composition.inventory.generators.def
+    names[10]: empty,fromstream,limit,range,recurse,repeat,tostream,truncate_stream,until,while
+    signatures[14]{signature,admission,rationale,case_id}:
+      empty/0,managed-allowlist,Current managed_operation_supported admits empty/0 through its name/arity allowlist.,manual.composition.arity.empty.0
+      fromstream/1,composition-deferred,Current managed_operation_supported does not admit fromstream/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fromstream.1
+      limit/2,managed-allowlist,Current managed_operation_supported admits limit/2 through its name/arity allowlist.,manual.composition.arity.limit.2
+      range/1,composition-deferred,Current managed_operation_supported does not admit range/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.range.1
+      range/2,composition-deferred,Current managed_operation_supported does not admit range/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.range.2
+      range/3,composition-deferred,Current managed_operation_supported does not admit range/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.range.3
+      recurse/0,managed-allowlist,Current managed_operation_supported admits recurse/0 through its name/arity allowlist.,manual.composition.arity.recurse.0
+      recurse/1,managed-allowlist,Current managed_operation_supported admits recurse/1 through its name/arity allowlist.,manual.composition.arity.recurse.1
+      recurse/2,managed-allowlist,Current managed_operation_supported admits recurse/2 through its name/arity allowlist.,manual.composition.arity.recurse.2
+      repeat/1,managed-allowlist,Current managed_operation_supported admits repeat/1 through its name/arity allowlist.,manual.composition.arity.repeat.1
+      tostream/0,composition-deferred,Current managed_operation_supported does not admit tostream/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.tostream.0
+      truncate_stream/1,composition-deferred,Current managed_operation_supported does not admit truncate_stream/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.truncate-stream.1
+      until/2,managed-allowlist,Current managed_operation_supported admits until/2 through its name/arity allowlist.,manual.composition.arity.until.2
+      while/2,managed-allowlist,Current managed_operation_supported admits while/2 through its name/arity allowlist.,manual.composition.arity.while.2
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: math
+    admission: composition-deferred
+    case_id: manual.composition.inventory.math.def
+    names[63]: abs,acos,acosh,asin,asinh,atan,atan2,atanh,cbrt,ceil,copysign,cos,cosh,drem,erf,erfc,exp,exp10,exp2,expm1,fabs,fdim,fma,fmax,fmin,fmod,floor,frexp,gamma,hypot,j0,j1,jn,ldexp,lgamma,log,log10,log1p,log2,logb,modf,nan,nearbyint,nextafter,nexttoward,pow,remainder,rint,round,scalb,scalbln,significand,sin,sinh,sqrt,tan,tanh,tgamma,trunc,y0,y1,yn,infinite
+    signatures[63]{signature,admission,rationale,case_id}:
+      abs/0,composition-deferred,Current managed_operation_supported does not admit abs/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.abs.0
+      acos/0,composition-deferred,Current managed_operation_supported does not admit acos/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.acos.0
+      acosh/0,composition-deferred,Current managed_operation_supported does not admit acosh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.acosh.0
+      asin/0,composition-deferred,Current managed_operation_supported does not admit asin/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.asin.0
+      asinh/0,composition-deferred,Current managed_operation_supported does not admit asinh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.asinh.0
+      atan/0,composition-deferred,Current managed_operation_supported does not admit atan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.atan.0
+      atan2/2,composition-deferred,Current managed_operation_supported does not admit atan2/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.atan2.2
+      atanh/0,composition-deferred,Current managed_operation_supported does not admit atanh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.atanh.0
+      cbrt/0,composition-deferred,Current managed_operation_supported does not admit cbrt/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.cbrt.0
+      ceil/0,composition-deferred,Current managed_operation_supported does not admit ceil/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.ceil.0
+      copysign/2,composition-deferred,Current managed_operation_supported does not admit copysign/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.copysign.2
+      cos/0,composition-deferred,Current managed_operation_supported does not admit cos/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.cos.0
+      cosh/0,composition-deferred,Current managed_operation_supported does not admit cosh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.cosh.0
+      drem/2,composition-deferred,Current managed_operation_supported does not admit drem/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.drem.2
+      erf/0,composition-deferred,Current managed_operation_supported does not admit erf/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.erf.0
+      erfc/0,composition-deferred,Current managed_operation_supported does not admit erfc/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.erfc.0
+      exp/0,composition-deferred,Current managed_operation_supported does not admit exp/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.exp.0
+      exp10/0,composition-deferred,Current managed_operation_supported does not admit exp10/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.exp10.0
+      exp2/0,composition-deferred,Current managed_operation_supported does not admit exp2/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.exp2.0
+      expm1/0,composition-deferred,Current managed_operation_supported does not admit expm1/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.expm1.0
+      fabs/0,composition-deferred,Current managed_operation_supported does not admit fabs/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fabs.0
+      fdim/2,composition-deferred,Current managed_operation_supported does not admit fdim/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fdim.2
+      floor/0,composition-deferred,Current managed_operation_supported does not admit floor/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.floor.0
+      fma/3,composition-deferred,Current managed_operation_supported does not admit fma/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fma.3
+      fmax/2,composition-deferred,Current managed_operation_supported does not admit fmax/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fmax.2
+      fmin/2,composition-deferred,Current managed_operation_supported does not admit fmin/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fmin.2
+      fmod/2,composition-deferred,Current managed_operation_supported does not admit fmod/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fmod.2
+      frexp/0,composition-deferred,Current managed_operation_supported does not admit frexp/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.frexp.0
+      gamma/0,composition-deferred,Current managed_operation_supported does not admit gamma/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.gamma.0
+      hypot/2,composition-deferred,Current managed_operation_supported does not admit hypot/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.hypot.2
+      infinite/0,composition-deferred,Current managed_operation_supported does not admit infinite/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.infinite.0
+      j0/0,composition-deferred,Current managed_operation_supported does not admit j0/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.j0.0
+      j1/0,composition-deferred,Current managed_operation_supported does not admit j1/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.j1.0
+      jn/2,composition-deferred,Current managed_operation_supported does not admit jn/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.jn.2
+      ldexp/2,composition-deferred,Current managed_operation_supported does not admit ldexp/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.ldexp.2
+      lgamma/0,composition-deferred,Current managed_operation_supported does not admit lgamma/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.lgamma.0
+      log/0,composition-deferred,Current managed_operation_supported does not admit log/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.log.0
+      log10/0,composition-deferred,Current managed_operation_supported does not admit log10/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.log10.0
+      log1p/0,composition-deferred,Current managed_operation_supported does not admit log1p/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.log1p.0
+      log2/0,composition-deferred,Current managed_operation_supported does not admit log2/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.log2.0
+      logb/0,composition-deferred,Current managed_operation_supported does not admit logb/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.logb.0
+      modf/0,composition-deferred,Current managed_operation_supported does not admit modf/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.modf.0
+      nan/0,composition-deferred,Current managed_operation_supported does not admit nan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.nan.0
+      nearbyint/0,composition-deferred,Current managed_operation_supported does not admit nearbyint/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.nearbyint.0
+      nextafter/2,composition-deferred,Current managed_operation_supported does not admit nextafter/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.nextafter.2
+      nexttoward/2,composition-deferred,Current managed_operation_supported does not admit nexttoward/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.nexttoward.2
+      pow/2,composition-deferred,Current managed_operation_supported does not admit pow/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.pow.2
+      remainder/2,composition-deferred,Current managed_operation_supported does not admit remainder/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.remainder.2
+      rint/0,composition-deferred,Current managed_operation_supported does not admit rint/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.rint.0
+      round/0,composition-deferred,Current managed_operation_supported does not admit round/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.round.0
+      scalb/2,composition-deferred,Current managed_operation_supported does not admit scalb/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.scalb.2
+      scalbln/2,composition-deferred,Current managed_operation_supported does not admit scalbln/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.scalbln.2
+      significand/0,composition-deferred,Current managed_operation_supported does not admit significand/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.significand.0
+      sin/0,composition-deferred,Current managed_operation_supported does not admit sin/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.sin.0
+      sinh/0,composition-deferred,Current managed_operation_supported does not admit sinh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.sinh.0
+      sqrt/0,composition-deferred,Current managed_operation_supported does not admit sqrt/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.sqrt.0
+      tan/0,composition-deferred,Current managed_operation_supported does not admit tan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.tan.0
+      tanh/0,composition-deferred,Current managed_operation_supported does not admit tanh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.tanh.0
+      tgamma/0,composition-deferred,Current managed_operation_supported does not admit tgamma/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.tgamma.0
+      trunc/0,composition-deferred,Current managed_operation_supported does not admit trunc/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.trunc.0
+      y0/0,composition-deferred,Current managed_operation_supported does not admit y0/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.y0.0
+      y1/0,composition-deferred,Current managed_operation_supported does not admit y1/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.y1.0
+      yn/2,composition-deferred,Current managed_operation_supported does not admit yn/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.yn.2
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: regex
+    admission: composition-deferred
+    case_id: manual.composition.inventory.regex.def
+    names[8]: capture,gsub,match,scan,split,splits,sub,test
+    signatures[16]{signature,admission,rationale,case_id}:
+      capture/1,composition-deferred,Current managed_operation_supported does not admit capture/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.capture.1
+      capture/2,composition-deferred,Current managed_operation_supported does not admit capture/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.capture.2
+      gsub/2,composition-deferred,Current managed_operation_supported does not admit gsub/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.gsub.2
+      gsub/3,composition-deferred,Current managed_operation_supported does not admit gsub/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.gsub.3
+      match/1,composition-deferred,Current managed_operation_supported does not admit match/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.match.1
+      match/2,composition-deferred,Current managed_operation_supported does not admit match/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.match.2
+      scan/1,composition-deferred,Current managed_operation_supported does not admit scan/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.scan.1
+      scan/2,composition-deferred,Current managed_operation_supported does not admit scan/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.scan.2
+      split/1,composition-deferred,Current managed_operation_supported does not admit split/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.split.1
+      split/2,composition-deferred,Current managed_operation_supported does not admit split/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.split.2
+      splits/1,composition-deferred,Current managed_operation_supported does not admit splits/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.splits.1
+      splits/2,composition-deferred,Current managed_operation_supported does not admit splits/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.splits.2
+      sub/2,composition-deferred,Current managed_operation_supported does not admit sub/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.sub.2
+      sub/3,composition-deferred,Current managed_operation_supported does not admit sub/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.sub.3
+      test/1,composition-deferred,Current managed_operation_supported does not admit test/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.test.1
+      test/2,composition-deferred,Current managed_operation_supported does not admit test/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.test.2
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: effects
+    admission: composition-deferred
+    case_id: manual.composition.inventory.effects.def
+    names[21]: debug,env,fromdate,fromdateiso8601,gmtime,halt,halt_error,input,input_filename,input_line_number,inputs,localtime,mktime,modulemeta,now,stderr,strflocaltime,strftime,strptime,todate,todateiso8601
+    signatures[23]{signature,admission,rationale,case_id}:
+      debug/0,composition-deferred,Current managed_operation_supported does not admit debug/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.debug.0
+      debug/1,composition-deferred,Current managed_operation_supported does not admit debug/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.debug.1
+      env/0,composition-deferred,Current managed_operation_supported does not admit env/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.env.0
+      fromdate/0,composition-deferred,Current managed_operation_supported does not admit fromdate/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fromdate.0
+      fromdateiso8601/0,composition-deferred,Current managed_operation_supported does not admit fromdateiso8601/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.fromdateiso8601.0
+      gmtime/0,composition-deferred,Current managed_operation_supported does not admit gmtime/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.gmtime.0
+      halt_error/0,composition-deferred,Current managed_operation_supported does not admit halt_error/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.halt-error.0
+      halt_error/1,composition-deferred,Current managed_operation_supported does not admit halt_error/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.halt-error.1
+      halt/0,composition-deferred,Current managed_operation_supported does not admit halt/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.halt.0
+      input_filename/0,composition-deferred,Current managed_operation_supported does not admit input_filename/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.input-filename.0
+      input_line_number/0,composition-deferred,Current managed_operation_supported does not admit input_line_number/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.input-line-number.0
+      input/0,composition-deferred,Current managed_operation_supported does not admit input/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.input.0
+      inputs/0,composition-deferred,Current managed_operation_supported does not admit inputs/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.inputs.0
+      localtime/0,composition-deferred,Current managed_operation_supported does not admit localtime/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.localtime.0
+      mktime/0,composition-deferred,Current managed_operation_supported does not admit mktime/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.mktime.0
+      modulemeta/0,managed-allowlist,Current managed_operation_supported admits modulemeta/0 through its name/arity allowlist.,manual.composition.arity.modulemeta.0
+      now/0,composition-deferred,Current managed_operation_supported does not admit now/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.now.0
+      stderr/0,composition-deferred,Current managed_operation_supported does not admit stderr/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.stderr.0
+      strflocaltime/1,composition-deferred,Current managed_operation_supported does not admit strflocaltime/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.strflocaltime.1
+      strftime/1,composition-deferred,Current managed_operation_supported does not admit strftime/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.strftime.1
+      strptime/1,composition-deferred,Current managed_operation_supported does not admit strptime/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.strptime.1
+      todate/0,composition-deferred,Current managed_operation_supported does not admit todate/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.todate.0
+      todateiso8601/0,composition-deferred,Current managed_operation_supported does not admit todateiso8601/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.,manual.composition.arity.todateiso8601.0
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+  - family: errors
+    admission: composition-deferred
+    case_id: manual.composition.inventory.errors.def
+    names[1]: error
+    signatures[2]{signature,admission,rationale,case_id}:
+      error/0,managed-allowlist,Current managed_operation_supported admits error/0 through its name/arity allowlist.,manual.composition.arity.error.0
+      error/1,managed-allowlist,Current managed_operation_supported admits error/1 through its name/arity allowlist.,manual.composition.arity.error.1
+    rationale: Each documented signature in this family has an explicit witness and a per-signature admission reason below.
+coverage_evidence[297]{case_id,source,source_line,claim}:
+  manual.composition.inventory.constructors.def,jq-manual/builtin-operators-and-functions.md,276,constructors admits the def-body composition context.
+  manual.composition.inventory.constructors.around,jq-manual/builtin-operators-and-functions.md,276,constructors admits the around-user-call composition context.
+  manual.composition.inventory.constructors.filter,jq-manual/builtin-operators-and-functions.md,276,constructors admits the filter-parameter composition context.
+  manual.composition.inventory.constructors.value,jq-manual/builtin-operators-and-functions.md,276,constructors admits the value-parameter composition context.
+  manual.composition.inventory.navigation.def,jq-manual/builtin-operators-and-functions.md,131,navigation admits the def-body composition context.
+  manual.composition.inventory.navigation.around,jq-manual/builtin-operators-and-functions.md,131,navigation admits the around-user-call composition context.
+  manual.composition.inventory.navigation.filter,jq-manual/builtin-operators-and-functions.md,131,navigation admits the filter-parameter composition context.
+  manual.composition.inventory.navigation.value,jq-manual/builtin-operators-and-functions.md,131,navigation admits the value-parameter composition context.
+  manual.composition.inventory.scalar-control.def,jq-manual/builtin-operators-and-functions.md,703,scalar-control admits the def-body composition context.
+  manual.composition.inventory.scalar-control.around,jq-manual/builtin-operators-and-functions.md,703,scalar-control admits the around-user-call composition context.
+  manual.composition.inventory.scalar-control.filter,jq-manual/builtin-operators-and-functions.md,703,scalar-control admits the filter-parameter composition context.
+  manual.composition.inventory.scalar-control.value,jq-manual/builtin-operators-and-functions.md,703,scalar-control admits the value-parameter composition context.
+  manual.composition.inventory.bindings.def,jq-manual/advanced-features.md,180,bindings admits the def-body composition context.
+  manual.composition.inventory.bindings.around,jq-manual/advanced-features.md,180,bindings admits the around-user-call composition context.
+  manual.composition.inventory.bindings.filter,jq-manual/advanced-features.md,180,bindings admits the filter-parameter composition context.
+  manual.composition.inventory.bindings.value,jq-manual/advanced-features.md,180,bindings admits the value-parameter composition context.
+  manual.composition.inventory.folds.def,jq-manual/advanced-features.md,319,folds admits the def-body composition context.
+  manual.composition.inventory.folds.around,jq-manual/advanced-features.md,319,folds admits the around-user-call composition context.
+  manual.composition.inventory.folds.filter,jq-manual/advanced-features.md,319,folds admits the filter-parameter composition context.
+  manual.composition.inventory.folds.value,jq-manual/advanced-features.md,319,folds admits the value-parameter composition context.
+  manual.composition.inventory.paths.def,jq-manual/builtin-operators-and-functions.md,276,paths admits the def-body composition context.
+  manual.composition.inventory.paths.around,jq-manual/builtin-operators-and-functions.md,276,paths admits the around-user-call composition context.
+  manual.composition.inventory.paths.filter,jq-manual/builtin-operators-and-functions.md,276,paths admits the filter-parameter composition context.
+  manual.composition.inventory.paths.value,jq-manual/builtin-operators-and-functions.md,276,paths admits the value-parameter composition context.
+  manual.composition.inventory.callbacks.def,jq-manual/builtin-operators-and-functions.md,760,callbacks admits the def-body composition context.
+  manual.composition.inventory.callbacks.around,jq-manual/builtin-operators-and-functions.md,760,callbacks admits the around-user-call composition context.
+  manual.composition.inventory.callbacks.filter,jq-manual/builtin-operators-and-functions.md,760,callbacks admits the filter-parameter composition context.
+  manual.composition.inventory.callbacks.value,jq-manual/builtin-operators-and-functions.md,760,callbacks admits the value-parameter composition context.
+  manual.composition.inventory.generators.def,jq-manual/advanced-features.md,247,generators admits the def-body composition context.
+  manual.composition.inventory.generators.around,jq-manual/advanced-features.md,247,generators admits the around-user-call composition context.
+  manual.composition.inventory.generators.filter,jq-manual/advanced-features.md,247,generators admits the filter-parameter composition context.
+  manual.composition.inventory.generators.value,jq-manual/advanced-features.md,247,generators admits the value-parameter composition context.
+  manual.composition.inventory.math.def,jq-manual/math.md,22,math admits the def-body composition context.
+  manual.composition.inventory.math.around,jq-manual/math.md,22,math admits the around-user-call composition context.
+  manual.composition.inventory.math.filter,jq-manual/math.md,22,math admits the filter-parameter composition context.
+  manual.composition.inventory.math.value,jq-manual/math.md,22,math admits the value-parameter composition context.
+  manual.composition.inventory.regex.def,jq-manual/regular-expressions.md,62,regex admits the def-body composition context.
+  manual.composition.inventory.regex.around,jq-manual/regular-expressions.md,62,regex admits the around-user-call composition context.
+  manual.composition.inventory.regex.filter,jq-manual/regular-expressions.md,62,regex admits the filter-parameter composition context.
+  manual.composition.inventory.regex.value,jq-manual/regular-expressions.md,62,regex admits the value-parameter composition context.
+  manual.composition.inventory.effects.def,jq-manual/io.md,42,effects admits the def-body composition context.
+  manual.composition.inventory.effects.around,jq-manual/io.md,42,effects admits the around-user-call composition context.
+  manual.composition.inventory.effects.filter,jq-manual/io.md,42,effects admits the filter-parameter composition context.
+  manual.composition.inventory.effects.value,jq-manual/io.md,42,effects admits the value-parameter composition context.
+  manual.composition.inventory.errors.def,jq-manual/builtin-operators-and-functions.md,451,errors admits the def-body composition context.
+  manual.composition.inventory.errors.around,jq-manual/builtin-operators-and-functions.md,451,errors admits the around-user-call composition context.
+  manual.composition.inventory.errors.filter,jq-manual/builtin-operators-and-functions.md,451,errors admits the filter-parameter composition context.
+  manual.composition.inventory.errors.value,jq-manual/builtin-operators-and-functions.md,451,errors admits the value-parameter composition context.
+  manual.composition.arity.abs.0,manual-bof-table-012,117,abs/0 has an executable definition-body composition witness.
+  manual.composition.arity.acos.0,manual.math.acos,22,acos/0 has an executable definition-body composition witness.
+  manual.composition.arity.acosh.0,manual.math.acosh,22,acosh/0 has an executable definition-body composition witness.
+  manual.composition.arity.add.0,manual-bof-table-050,507,add/0 has an executable definition-body composition witness.
+  manual.composition.arity.add.1,manual-bof-table-053,507,add/1 has an executable definition-body composition witness.
+  manual.composition.arity.all.0,manual-bof-table-057,567,all/0 has an executable definition-body composition witness.
+  manual.composition.arity.all.1,"crates/tq-core/tests/collection_compat.rs::any_and_all_support_all_forms_and_short_circuit",567,all/1 has an executable definition-body composition witness.
+  manual.composition.arity.all.2,builtin.all,567,all/2 has an executable definition-body composition witness.
+  manual.composition.arity.any.0,manual-bof-table-054,539,any/0 has an executable definition-body composition witness.
+  manual.composition.arity.any.1,"crates/tq-core/tests/collection_compat.rs::any_and_all_support_all_forms_and_short_circuit",539,any/1 has an executable definition-body composition witness.
+  manual.composition.arity.any.2,builtin.any,539,any/2 has an executable definition-body composition witness.
+  manual.composition.arity.arrays.0,builtin.arrays,422,arrays/0 has an executable definition-body composition witness.
+  manual.composition.arity.ascii-downcase.0,builtin.ascii-downcase,1134,ascii_downcase/0 has an executable definition-body composition witness.
+  manual.composition.arity.ascii-upcase.0,manual-bof-table-121,1134,ascii_upcase/0 has an executable definition-body composition witness.
+  manual.composition.arity.asin.0,manual.math.asin,22,asin/0 has an executable definition-body composition witness.
+  manual.composition.arity.asinh.0,manual.math.asinh,22,asinh/0 has an executable definition-body composition witness.
+  manual.composition.arity.atan.0,manual.math.atan,22,atan/0 has an executable definition-body composition witness.
+  manual.composition.arity.atan2.2,manual.math.atan2,24,atan2/2 has an executable definition-body composition witness.
+  manual.composition.arity.atanh.0,manual.math.atanh,22,atanh/0 has an executable definition-body composition witness.
+  manual.composition.arity.booleans.0,builtin.booleans,422,booleans/0 has an executable definition-body composition witness.
+  manual.composition.arity.bsearch.1,manual-bof-table-135,1294,bsearch/1 has an executable definition-body composition witness.
+  manual.composition.arity.builtins.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",1504,builtins/0 has a called-definition witness that asserts the full documented 220-signature availability set without requiring jq-private enumeration.
+  manual.composition.arity.capture.1,manual.regex.table-008,130,capture/1 has an executable definition-body composition witness.
+  manual.composition.arity.capture.2,"crates/tq-core/tests/regex_compat.rs::regex_two_argument_capture_and_scan_follow_jq_overloads",130,capture/2 has an executable definition-body composition witness.
+  manual.composition.arity.cbrt.0,manual.math.cbrt,22,cbrt/0 has an executable definition-body composition witness.
+  manual.composition.arity.ceil.0,manual.math.ceil,22,ceil/0 has an executable definition-body composition witness.
+  manual.composition.arity.combinations.0,manual-bof-table-109,1008,combinations/0 has an executable definition-body composition witness.
+  manual.composition.arity.combinations.1,manual-bof-table-110,1008,combinations/1 has an executable definition-body composition witness.
+  manual.composition.arity.contains.1,manual-bof-table-088,858,contains/1 has an executable definition-body composition witness.
+  manual.composition.arity.copysign.2,manual.math.copysign,24,copysign/2 has an executable definition-body composition witness.
+  manual.composition.arity.cos.0,manual.math.cos,22,cos/0 has an executable definition-body composition witness.
+  manual.composition.arity.cosh.0,manual.math.cosh,22,cosh/0 has an executable definition-body composition witness.
+  manual.composition.arity.debug.0,manual.io.debug,42,debug/0 has an executable definition-body composition witness.
+  manual.composition.arity.debug.1,manual.io.debug-msgs,42,debug/1 has an executable definition-body composition witness.
+  manual.composition.arity.del.1,manual-bof-table-029,316,del/1 has an executable definition-body composition witness.
+  manual.composition.arity.delpaths.1,manual-bof-table-036,370,delpaths/1 has an executable definition-body composition witness.
+  manual.composition.arity.drem.2,manual.math.drem,24,drem/2 has an executable definition-body composition witness.
+  manual.composition.arity.empty.0,builtin.empty,432,empty/0 has an executable definition-body composition witness.
+  manual.composition.arity.endswith.1,manual-bof-table-108,998,endswith/1 has an executable definition-body composition witness.
+  manual.composition.arity.env.0,manual-bof-table-131,1264,env/0 has an executable definition-body composition witness.
+  manual.composition.arity.erf.0,manual.math.erf,22,erf/0 has an executable definition-body composition witness.
+  manual.composition.arity.erfc.0,manual.math.erfc,22,erfc/0 has an executable definition-body composition witness.
+  manual.composition.arity.error.0,manual-bof-table-045,451,error/0 has an executable definition-body composition witness.
+  manual.composition.arity.error.1,builtin.error,451,error/1 has an executable definition-body composition witness.
+  manual.composition.arity.exp.0,manual.math.exp,22,exp/0 has an executable definition-body composition witness.
+  manual.composition.arity.exp10.0,manual.math.exp10,22,exp10/0 has an executable definition-body composition witness.
+  manual.composition.arity.exp2.0,manual.math.exp2,22,exp2/0 has an executable definition-body composition witness.
+  manual.composition.arity.explode.0,builtin.explode,1078,explode/0 has an executable definition-body composition witness.
+  manual.composition.arity.expm1.0,manual.math.expm1,22,expm1/0 has an executable definition-body composition witness.
+  manual.composition.arity.fabs.0,manual.math.fabs,22,fabs/0 has an executable definition-body composition witness.
+  manual.composition.arity.fdim.2,manual.math.fdim,24,fdim/2 has an executable definition-body composition witness.
+  manual.composition.arity.finites.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",422,finites/0 has an executable definition-body composition witness.
+  manual.composition.arity.first.0,manual.advanced.table-017,307,first/0 has an executable definition-body composition witness.
+  manual.composition.arity.first.1,manual.advanced.table-015,289,first/1 has an executable definition-body composition witness.
+  manual.composition.arity.flatten.0,manual-bof-table-060,595,flatten/0 has an executable definition-body composition witness.
+  manual.composition.arity.flatten.1,manual-bof-table-061,595,flatten/1 has an executable definition-body composition witness.
+  manual.composition.arity.floor.0,manual.math.floor,672,floor/0 has an executable definition-body composition witness.
+  manual.composition.arity.fma.3,manual.math.fma,26,fma/3 has an executable definition-body composition witness.
+  manual.composition.arity.fmax.2,manual.math.fmax,24,fmax/2 has an executable definition-body composition witness.
+  manual.composition.arity.fmin.2,manual.math.fmin,24,fmin/2 has an executable definition-body composition witness.
+  manual.composition.arity.fmod.2,manual.math.fmod,24,fmod/2 has an executable definition-body composition witness.
+  manual.composition.arity.frexp.0,manual.math.frexp-actual-arity,24,frexp/0 has an executable definition-body composition witness.
+  manual.composition.arity.from-entries.0,manual-bof-table-038,380,from_entries/0 has an executable definition-body composition witness.
+  manual.composition.arity.fromdate.0,manual-bof-table-144,1436,fromdate/0 has an executable definition-body composition witness.
+  manual.composition.arity.fromdateiso8601.0,"crates/tq-core/tests/date_compat.rs::fromdateiso8601_parses_a_utc_string",1434,fromdateiso8601/0 has an executable definition-body composition witness.
+  manual.composition.arity.fromjson.0,builtin.fromjson,1328,fromjson/0 has an executable definition-body composition witness.
+  manual.composition.arity.fromstream.1,manual.streaming.fromstream-truncate,37,fromstream/1 has an executable definition-body composition witness.
+  manual.composition.arity.gamma.0,manual.math.gamma,22,gamma/0 has an executable definition-body composition witness.
+  manual.composition.arity.getpath.1,builtin.getpath,332,getpath/1 has an executable definition-body composition witness.
+  manual.composition.arity.gmtime.0,date.utc-roundtrip,1442,gmtime/0 has an executable definition-body composition witness.
+  manual.composition.arity.group-by.1,builtin.group-by,794,group_by/1 has an executable definition-body composition witness.
+  manual.composition.arity.gsub.2,manual.regex.table-016,209,gsub/2 has an executable definition-body composition witness.
+  manual.composition.arity.gsub.3,manual.audit.regex.gsub-three-arguments,209,gsub/3 has an executable definition-body composition witness.
+  manual.composition.arity.halt-error.0,"crates/tq-cli/tests/effects.rs::halt_error_without_an_argument_terminates_with_the_input_payload",471,halt_error/0 has an executable definition-body composition witness.
+  manual.composition.arity.halt-error.1,manual.invoking.halt-error,471,halt_error/1 has an executable definition-body composition witness.
+  manual.composition.arity.halt.0,"crates/tq-cli/tests/effects.rs::halt_is_not_catchable_and_does_not_evaluate_later_branches",467,halt/0 has an executable definition-body composition witness.
+  manual.composition.arity.has.1,builtin.has,189,has/1 has an executable definition-body composition witness.
+  manual.composition.arity.have-decnum.0,"crates/tq-core/tests/math_compat.rs::decimal_capability_reports_the_runtime_number_model",1254,have_decnum/0 has an executable definition-body composition witness.
+  manual.composition.arity.have-literal-numbers.0,"crates/tq-core/tests/math_compat.rs::decimal_capability_reports_the_runtime_number_model",1250,have_literal_numbers/0 has an executable definition-body composition witness.
+  manual.composition.arity.hypot.2,manual.math.hypot,24,hypot/2 has an executable definition-body composition witness.
+  manual.composition.arity.implode.0,builtin.implode,1088,implode/0 has an executable definition-body composition witness.
+  manual.composition.arity.in.1,builtin.in,207,in/1 has an executable definition-body composition witness.
+  manual.composition.arity.upper-in.1,manual-bof-synth-sql-in1,1496,IN/1 has an executable definition-body composition witness.
+  manual.composition.arity.upper-in.2,manual-bof-synth-sql-in2,1496,IN/2 has an executable definition-body composition witness.
+  manual.composition.arity.index.1,manual-bof-table-096,914,index/1 has an executable definition-body composition witness.
+  manual.composition.arity.upper-index.2,manual-bof-synth-sql-index,1480,INDEX/2 has an executable definition-body composition witness.
+  manual.composition.arity.indices.1,manual-bof-table-093,892,indices/1 has an executable definition-body composition witness.
+  manual.composition.arity.infinite.0,manual-bof-table-077,738,infinite/0 has an executable definition-body composition witness.
+  manual.composition.arity.input-filename.0,manual.io.input-filename,73,input_filename/0 has an executable definition-body composition witness.
+  manual.composition.arity.input-line-number.0,manual.io.input-line-number,77,input_line_number/0 has an executable definition-body composition witness.
+  manual.composition.arity.input.0,manual.io.input,22,input/0 has an executable definition-body composition witness.
+  manual.composition.arity.inputs.0,manual.io.inputs,32,inputs/0 has an executable definition-body composition witness.
+  manual.composition.arity.inside.1,manual-bof-table-102,954,inside/1 has an executable definition-body composition witness.
+  manual.composition.arity.isempty.1,manual.advanced.table-010,247,isempty/1 has an executable definition-body composition witness.
+  manual.composition.arity.isfinite.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isfinite/0 has an executable definition-body composition witness.
+  manual.composition.arity.isinfinite.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isinfinite/0 has an executable definition-body composition witness.
+  manual.composition.arity.isnan.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isnan/0 has an executable definition-body composition witness.
+  manual.composition.arity.isnormal.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isnormal/0 has an executable definition-body composition witness.
+  manual.composition.arity.iterables.0,builtin.iterables,422,iterables/0 has an executable definition-body composition witness.
+  manual.composition.arity.j0.0,manual.math.j0,22,j0/0 has an executable definition-body composition witness.
+  manual.composition.arity.j1.0,manual.math.j1,22,j1/0 has an executable definition-body composition witness.
+  manual.composition.arity.jn.2,manual.math.jn,24,jn/2 has an executable definition-body composition witness.
+  manual.composition.arity.join.1,manual-bof-table-118,1110,join/1 has an executable definition-body composition witness.
+  manual.composition.arity.upper-join.2,manual-bof-synth-sql-join2,1484,JOIN/2 has an executable definition-body composition witness.
+  manual.composition.arity.upper-join.3,manual-bof-synth-sql-join3,1484,JOIN/3 has an executable definition-body composition witness.
+  manual.composition.arity.upper-join.4,manual-bof-synth-sql-join4,1484,JOIN/4 has an executable definition-body composition witness.
+  manual.composition.arity.keys-unsorted.0,builtin.keys-unsorted,167,keys_unsorted/0 has an executable definition-body composition witness.
+  manual.composition.arity.keys.0,builtin.keys,167,keys/0 has an executable definition-body composition witness.
+  manual.composition.arity.last.0,manual.advanced.table-017,307,last/0 has an executable definition-body composition witness.
+  manual.composition.arity.last.1,manual.advanced.table-015,289,last/1 has an executable definition-body composition witness.
+  manual.composition.arity.ldexp.2,manual.math.ldexp,24,ldexp/2 has an executable definition-body composition witness.
+  manual.composition.arity.length.0,builtin.length,131,length/0 has an executable definition-body composition witness.
+  manual.composition.arity.lgamma.0,manual.math.lgamma,22,lgamma/0 has an executable definition-body composition witness.
+  manual.composition.arity.limit.2,builtin.limit,269,limit/2 has an executable definition-body composition witness.
+  manual.composition.arity.localtime.0,"crates/tq-core/tests/date_compat.rs::localtime_is_denied_without_the_platform_capability",1442,localtime/0 has an executable definition-body composition witness.
+  manual.composition.arity.log.0,manual.math.log,22,log/0 has an executable definition-body composition witness.
+  manual.composition.arity.log10.0,manual.math.log10,22,log10/0 has an executable definition-body composition witness.
+  manual.composition.arity.log1p.0,manual.math.log1p,22,log1p/0 has an executable definition-body composition witness.
+  manual.composition.arity.log2.0,manual.math.log2,22,log2/0 has an executable definition-body composition witness.
+  manual.composition.arity.logb.0,manual.math.logb,22,logb/0 has an executable definition-body composition witness.
+  manual.composition.arity.ltrim.0,manual-bof-table-114,1060,ltrim/0 has an executable definition-body composition witness.
+  manual.composition.arity.ltrimstr.1,builtin.ltrimstr,1030,ltrimstr/1 has an executable definition-body composition witness.
+  manual.composition.arity.map-values.1,builtin.map-values,224,map_values/1 has an executable definition-body composition witness.
+  manual.composition.arity.map.1,builtin.map,224,map/1 has an executable definition-body composition witness.
+  manual.composition.arity.match.1,manual.regex.table-004,79,match/1 has an executable definition-body composition witness.
+  manual.composition.arity.match.2,manual.regex.table-003,79,match/2 has an executable definition-body composition witness.
+  manual.composition.arity.max-by.1,builtin.max-by,806,max_by/1 has an executable definition-body composition witness.
+  manual.composition.arity.max.0,builtin.max,806,max/0 has an executable definition-body composition witness.
+  manual.composition.arity.min-by.1,builtin.min-by,806,min_by/1 has an executable definition-body composition witness.
+  manual.composition.arity.min.0,builtin.min,806,min/0 has an executable definition-body composition witness.
+  manual.composition.arity.mktime.0,date.utc-roundtrip,1442,mktime/0 has an executable definition-body composition witness.
+  manual.composition.arity.modf.0,manual.math.modf-actual-arity,24,modf/0 has an executable definition-body composition witness.
+  manual.composition.arity.modulemeta.0,manual.modules.modulemeta,75,modulemeta/0 has an executable definition-body composition witness.
+  manual.composition.arity.nan.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,nan/0 has an executable definition-body composition witness.
+  manual.composition.arity.nearbyint.0,manual.math.nearbyint,22,nearbyint/0 has an executable definition-body composition witness.
+  manual.composition.arity.nextafter.2,manual.math.nextafter,24,nextafter/2 has an executable definition-body composition witness.
+  manual.composition.arity.nexttoward.2,manual.math.nexttoward,24,nexttoward/2 has an executable definition-body composition witness.
+  manual.composition.arity.normals.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",422,normals/0 has an executable definition-body composition witness.
+  manual.composition.arity.not.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",73,not/0 has an executable definition-body composition witness.
+  manual.composition.arity.now.0,platform.now-type,1440,now/0 has an executable definition-body composition witness.
+  manual.composition.arity.nth.1,manual.advanced.table-017,307,nth/1 has an executable definition-body composition witness.
+  manual.composition.arity.nth.2,manual.advanced.table-015,289,nth/2 has an executable definition-body composition witness.
+  manual.composition.arity.nulls.0,builtin.nulls,422,nulls/0 has an executable definition-body composition witness.
+  manual.composition.arity.numbers.0,builtin.numbers,422,numbers/0 has an executable definition-body composition witness.
+  manual.composition.arity.objects.0,builtin.objects,422,objects/0 has an executable definition-body composition witness.
+  manual.composition.arity.path.1,builtin.path,292,path/1 has an executable definition-body composition witness.
+  manual.composition.arity.paths.0,manual-bof-table-048,489,paths/0 has an executable definition-body composition witness.
+  manual.composition.arity.paths.1,manual-bof-table-049,489,paths/1 has an executable definition-body composition witness.
+  manual.composition.arity.pick.1,manual-bof-table-025,276,pick/1 has an executable definition-body composition witness.
+  manual.composition.arity.pow.2,manual.math.pow,24,pow/2 has an executable definition-body composition witness.
+  manual.composition.arity.range.1,manual-bof-table-066,625,range/1 has an executable definition-body composition witness.
+  manual.composition.arity.range.2,manual-bof-table-064,625,range/2 has an executable definition-body composition witness.
+  manual.composition.arity.range.3,manual-bof-table-067,625,range/3 has an executable definition-body composition witness.
+  manual.composition.arity.recurse.0,manual-bof-table-126,1180,recurse/0 has an executable definition-body composition witness.
+  manual.composition.arity.recurse.1,manual-bof-table-125,1180,recurse/1 has an executable definition-body composition witness.
+  manual.composition.arity.recurse.2,manual-bof-table-127,1180,recurse/2 has an executable definition-body composition witness.
+  manual.composition.arity.remainder.2,manual.math.remainder,24,remainder/2 has an executable definition-body composition witness.
+  manual.composition.arity.repeat.1,manual-bof-table-123,1156,repeat/1 has an executable definition-body composition witness.
+  manual.composition.arity.reverse.0,builtin.reverse,848,reverse/0 has an executable definition-body composition witness.
+  manual.composition.arity.rindex.1,manual-bof-table-099,914,rindex/1 has an executable definition-body composition witness.
+  manual.composition.arity.rint.0,manual.math.rint,22,rint/0 has an executable definition-body composition witness.
+  manual.composition.arity.round.0,manual.math.round,22,round/0 has an executable definition-body composition witness.
+  manual.composition.arity.rtrim.0,manual-bof-table-114,1060,rtrim/0 has an executable definition-body composition witness.
+  manual.composition.arity.rtrimstr.1,manual-bof-table-112,1040,rtrimstr/1 has an executable definition-body composition witness.
+  manual.composition.arity.scalars.0,builtin.scalars,422,scalars/0 has an executable definition-body composition witness.
+  manual.composition.arity.scalb.2,manual.audit.math.scalb-infinite-boundary,24,scalb/2 has an executable definition-body composition witness.
+  manual.composition.arity.scalbln.2,manual.audit.math.integer-scale-boundary,24,scalbln/2 has an executable definition-body composition witness.
+  manual.composition.arity.scan.1,manual.regex.table-009,140,scan/1 has an executable definition-body composition witness.
+  manual.composition.arity.scan.2,"crates/tq-core/tests/regex_compat.rs::regex_two_argument_capture_and_scan_follow_jq_overloads",140,scan/2 has an executable definition-body composition witness.
+  manual.composition.arity.select.1,builtin.select,404,select/1 has an executable definition-body composition witness.
+  manual.composition.arity.setpath.2,builtin.setpath,348,setpath/2 has an executable definition-body composition witness.
+  manual.composition.arity.significand.0,manual.math.significand,22,significand/0 has an executable definition-body composition witness.
+  manual.composition.arity.sin.0,manual.math.sin,22,sin/0 has an executable definition-body composition witness.
+  manual.composition.arity.sinh.0,manual.math.sinh,22,sinh/0 has an executable definition-body composition witness.
+  manual.composition.arity.skip.2,manual.advanced.table-014,279,skip/2 has an executable definition-body composition witness.
+  manual.composition.arity.sort-by.1,builtin.sort-by,760,sort_by/1 has an executable definition-body composition witness.
+  manual.composition.arity.sort.0,builtin.sort,760,sort/0 has an executable definition-body composition witness.
+  manual.composition.arity.split.1,manual-bof-table-117,1098,split/1 has an executable definition-body composition witness.
+  manual.composition.arity.split.2,manual.regex.table-011,159,split/2 has an executable definition-body composition witness.
+  manual.composition.arity.splits.1,manual.regex.table-012,171,splits/1 has an executable definition-body composition witness.
+  manual.composition.arity.splits.2,manual.regex.table-013,171,splits/2 has an executable definition-body composition witness.
+  manual.composition.arity.sqrt.0,manual.math.sqrt,682,sqrt/0 has an executable definition-body composition witness.
+  manual.composition.arity.startswith.1,manual-bof-table-107,988,startswith/1 has an executable definition-body composition witness.
+  manual.composition.arity.stderr.0,manual.io.stderr,69,stderr/0 has an executable definition-body composition witness.
+  manual.composition.arity.strflocaltime.1,platform.localtime-year,1442,strflocaltime/1 has an executable definition-body composition witness.
+  manual.composition.arity.strftime.1,date.strftime,1442,strftime/1 has an executable definition-body composition witness.
+  manual.composition.arity.strings.0,builtin.strings,422,strings/0 has an executable definition-body composition witness.
+  manual.composition.arity.strptime.1,date.strptime,1442,strptime/1 has an executable definition-body composition witness.
+  manual.composition.arity.sub.2,manual.regex.table-015,193,sub/2 has an executable definition-body composition witness.
+  manual.composition.arity.sub.3,manual.regex.table-014,193,sub/3 has an executable definition-body composition witness.
+  manual.composition.arity.tan.0,manual.math.tan,22,tan/0 has an executable definition-body composition witness.
+  manual.composition.arity.tanh.0,manual.math.tanh,22,tanh/0 has an executable definition-body composition witness.
+  manual.composition.arity.test.1,manual.regex.table-001,62,test/1 has an executable definition-body composition witness.
+  manual.composition.arity.test.2,manual.regex.table-002,62,test/2 has an executable definition-body composition witness.
+  manual.composition.arity.tgamma.0,manual.math.tgamma,22,tgamma/0 has an executable definition-body composition witness.
+  manual.composition.arity.to-entries.0,builtin.to-entries,380,to_entries/0 has an executable definition-body composition witness.
+  manual.composition.arity.toboolean.0,manual-bof-table-073,703,toboolean/0 has an executable definition-body composition witness.
+  manual.composition.arity.todate.0,"crates/tq-core/tests/date_compat.rs::todate_formats_epoch_seconds_as_a_utc_string",1438,todate/0 has an executable definition-body composition witness.
+  manual.composition.arity.todateiso8601.0,date.utc-roundtrip,1434,todateiso8601/0 has an executable definition-body composition witness.
+  manual.composition.arity.tojson.0,builtin.tojson,1328,tojson/0 has an executable definition-body composition witness.
+  manual.composition.arity.tonumber.0,builtin.tonumber,692,tonumber/0 has an executable definition-body composition witness.
+  manual.composition.arity.tostream.0,builtin.tostream,47,tostream/0 has an executable definition-body composition witness.
+  manual.composition.arity.tostring.0,builtin.tostring,716,tostring/0 has an executable definition-body composition witness.
+  manual.composition.arity.transpose.0,manual-bof-table-132,1284,transpose/0 has an executable definition-body composition witness.
+  manual.composition.arity.trim.0,manual-bof-table-114,1060,trim/0 has an executable definition-body composition witness.
+  manual.composition.arity.trimstr.1,manual-bof-table-113,1050,trimstr/1 has an executable definition-body composition witness.
+  manual.composition.arity.trunc.0,manual.math.trunc,22,trunc/0 has an executable definition-body composition witness.
+  manual.composition.arity.truncate-stream.1,manual.streaming.truncate-stream,26,truncate_stream/1 has an executable definition-body composition witness.
+  manual.composition.arity.type.0,builtin.type,728,type/0 has an executable definition-body composition witness.
+  manual.composition.arity.unique-by.1,builtin.unique-by-generator,824,unique_by/1 has an executable definition-body composition witness.
+  manual.composition.arity.unique.0,builtin.unique,824,unique/0 has an executable definition-body composition witness.
+  manual.composition.arity.until.2,manual-bof-table-124,1168,until/2 has an executable definition-body composition witness.
+  manual.composition.arity.utf8bytelength.0,builtin.utf8bytelength,157,utf8bytelength/0 has an executable definition-body composition witness.
+  manual.composition.arity.values.0,builtin.values,422,values/0 has an executable definition-body composition witness.
+  manual.composition.arity.walk.1,manual-bof-table-128,1234,walk/1 has an executable definition-body composition witness.
+  manual.composition.arity.while.2,manual-bof-table-122,1144,while/2 has an executable definition-body composition witness.
+  manual.composition.arity.with-entries.1,builtin.with-entries,380,with_entries/1 has an executable definition-body composition witness.
+  manual.composition.arity.y0.0,manual.math.y0,22,y0/0 has an executable definition-body composition witness.
+  manual.composition.arity.y1.0,manual.math.y1,22,y1/0 has an executable definition-body composition witness.
+  manual.composition.arity.yn.2,manual.math.yn,24,yn/2 has an executable definition-body composition witness.
+  manual.composition.operation.identity,crates/tq-core/src/bytecode.rs,129,Identity is executable in a definition-body operation witness.
+  manual.composition.operation.literal,crates/tq-core/src/bytecode.rs,129,Literal is executable in a definition-body operation witness.
+  manual.composition.operation.variable,crates/tq-core/src/bytecode.rs,129,Variable is executable in a definition-body operation witness.
+  manual.composition.operation.empty,crates/tq-core/src/bytecode.rs,129,Empty is executable in a definition-body operation witness.
+  manual.composition.operation.recursivedescent,crates/tq-core/src/bytecode.rs,129,RecursiveDescent is executable in a definition-body operation witness.
+  manual.composition.operation.label,crates/tq-core/src/bytecode.rs,129,Label is executable in a definition-body operation witness.
+  manual.composition.operation.break,crates/tq-core/src/bytecode.rs,129,Break is executable in a definition-body operation witness.
+  manual.composition.operation.interpolation,crates/tq-core/src/bytecode.rs,129,Interpolation is executable in a definition-body operation witness.
+  manual.composition.operation.accessfield,crates/tq-core/src/bytecode.rs,129,AccessField is executable in a definition-body operation witness.
+  manual.composition.operation.accessindex,crates/tq-core/src/bytecode.rs,129,AccessIndex is executable in a definition-body operation witness.
+  manual.composition.operation.slice,crates/tq-core/src/bytecode.rs,129,Slice is executable in a definition-body operation witness.
+  manual.composition.operation.iterate,crates/tq-core/src/bytecode.rs,129,Iterate is executable in a definition-body operation witness.
+  manual.composition.operation.optional,crates/tq-core/src/bytecode.rs,129,Optional is executable in a definition-body operation witness.
+  manual.composition.operation.pipe,crates/tq-core/src/bytecode.rs,129,Pipe is executable in a definition-body operation witness.
+  manual.composition.operation.comma,crates/tq-core/src/bytecode.rs,129,Comma is executable in a definition-body operation witness.
+  manual.composition.operation.array,crates/tq-core/src/bytecode.rs,129,Array is executable in a definition-body operation witness.
+  manual.composition.operation.object,crates/tq-core/src/bytecode.rs,129,Object is executable in a definition-body operation witness.
+  manual.composition.operation.unary,crates/tq-core/src/bytecode.rs,129,Unary is executable in a definition-body operation witness.
+  manual.composition.operation.binary,crates/tq-core/src/bytecode.rs,129,Binary is executable in a definition-body operation witness.
+  manual.composition.operation.conditional,crates/tq-core/src/bytecode.rs,129,Conditional is executable in a definition-body operation witness.
+  manual.composition.operation.bind,crates/tq-core/src/bytecode.rs,129,Bind is executable in a definition-body operation witness.
+  manual.composition.operation.bindalternatives,crates/tq-core/src/bytecode.rs,129,BindAlternatives is executable in a definition-body operation witness.
+  manual.composition.operation.reduce,crates/tq-core/src/bytecode.rs,129,Reduce is executable in a definition-body operation witness.
+  manual.composition.operation.foreach,crates/tq-core/src/bytecode.rs,129,Foreach is executable in a definition-body operation witness.
+  manual.composition.operation.call,crates/tq-core/src/bytecode.rs,129,Call is executable in a definition-body operation witness.
+  manual.composition.operation.usercall,crates/tq-core/src/bytecode.rs,129,UserCall is executable in a definition-body operation witness.
+  manual.composition.operation.parametercall,crates/tq-core/src/bytecode.rs,129,ParameterCall is executable in a definition-body operation witness.
+  manual.composition.operation.trycatch,crates/tq-core/src/bytecode.rs,129,TryCatch is executable in a definition-body operation witness.
+  manual.composition.operation.assignment,crates/tq-core/src/bytecode.rs,129,Assignment is executable in a definition-body operation witness.
+arity_witnesses[220]{signature,case_id,original_evidence_ref,source_line,witness,admission,reason}:
+  abs/0,manual.composition.arity.abs.0,manual-bof-table-012,117,abs,composition-deferred,Current managed_operation_supported does not admit abs/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  acos/0,manual.composition.arity.acos.0,manual.math.acos,22,acos,composition-deferred,Current managed_operation_supported does not admit acos/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  acosh/0,manual.composition.arity.acosh.0,manual.math.acosh,22,acosh,composition-deferred,Current managed_operation_supported does not admit acosh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  add/0,manual.composition.arity.add.0,manual-bof-table-050,507,add,managed-allowlist,Current managed_operation_supported admits add/0 through its name/arity allowlist.
+  add/1,manual.composition.arity.add.1,manual-bof-table-053,507,add,managed-allowlist,Current managed_operation_supported admits add/1 through its name/arity allowlist.
+  all/0,manual.composition.arity.all.0,manual-bof-table-057,567,all,composition-deferred,Current managed_operation_supported does not admit all/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  all/1,manual.composition.arity.all.1,"crates/tq-core/tests/collection_compat.rs::any_and_all_support_all_forms_and_short_circuit",567,all(. > 0),composition-deferred,Current managed_operation_supported does not admit all/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  all/2,manual.composition.arity.all.2,builtin.all,567,all,composition-deferred,Current managed_operation_supported does not admit all/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  any/0,manual.composition.arity.any.0,manual-bof-table-054,539,any,composition-deferred,Current managed_operation_supported does not admit any/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  any/1,manual.composition.arity.any.1,"crates/tq-core/tests/collection_compat.rs::any_and_all_support_all_forms_and_short_circuit",539,any(. > 1),composition-deferred,Current managed_operation_supported does not admit any/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  any/2,manual.composition.arity.any.2,builtin.any,539,any,composition-deferred,Current managed_operation_supported does not admit any/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  arrays/0,manual.composition.arity.arrays.0,builtin.arrays,422,arrays,managed-allowlist,Current managed_operation_supported admits arrays/0 through its name/arity allowlist.
+  ascii_downcase/0,manual.composition.arity.ascii-downcase.0,builtin.ascii-downcase,1134,ascii_downcase,composition-deferred,Current managed_operation_supported does not admit ascii_downcase/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  ascii_upcase/0,manual.composition.arity.ascii-upcase.0,manual-bof-table-121,1134,ascii_upcase,composition-deferred,Current managed_operation_supported does not admit ascii_upcase/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  asin/0,manual.composition.arity.asin.0,manual.math.asin,22,asin,composition-deferred,Current managed_operation_supported does not admit asin/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  asinh/0,manual.composition.arity.asinh.0,manual.math.asinh,22,asinh,composition-deferred,Current managed_operation_supported does not admit asinh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  atan/0,manual.composition.arity.atan.0,manual.math.atan,22,atan,composition-deferred,Current managed_operation_supported does not admit atan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  atan2/2,manual.composition.arity.atan2.2,manual.math.atan2,24,atan2,composition-deferred,Current managed_operation_supported does not admit atan2/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  atanh/0,manual.composition.arity.atanh.0,manual.math.atanh,22,atanh,composition-deferred,Current managed_operation_supported does not admit atanh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  booleans/0,manual.composition.arity.booleans.0,builtin.booleans,422,booleans,managed-allowlist,Current managed_operation_supported admits booleans/0 through its name/arity allowlist.
+  bsearch/1,manual.composition.arity.bsearch.1,manual-bof-table-135,1294,bsearch,composition-deferred,Current managed_operation_supported does not admit bsearch/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  builtins/0,manual.composition.arity.builtins.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",1504,builtins,managed-allowlist,The called definition subtracts all 220 documented signatures from builtins; empty output verifies availability while avoiding jq-private names and order.
+  capture/1,manual.composition.arity.capture.1,manual.regex.table-008,130,capture,composition-deferred,Current managed_operation_supported does not admit capture/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  capture/2,manual.composition.arity.capture.2,"crates/tq-core/tests/regex_compat.rs::regex_two_argument_capture_and_scan_follow_jq_overloads",130,"capture(\"(?<x>foo)\"; \"i\")",composition-deferred,Current managed_operation_supported does not admit capture/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  cbrt/0,manual.composition.arity.cbrt.0,manual.math.cbrt,22,cbrt,composition-deferred,Current managed_operation_supported does not admit cbrt/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  ceil/0,manual.composition.arity.ceil.0,manual.math.ceil,22,ceil,composition-deferred,Current managed_operation_supported does not admit ceil/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  combinations/0,manual.composition.arity.combinations.0,manual-bof-table-109,1008,combinations,composition-deferred,Current managed_operation_supported does not admit combinations/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  combinations/1,manual.composition.arity.combinations.1,manual-bof-table-110,1008,combinations,composition-deferred,Current managed_operation_supported does not admit combinations/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  contains/1,manual.composition.arity.contains.1,manual-bof-table-088,858,contains,composition-deferred,Current managed_operation_supported does not admit contains/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  copysign/2,manual.composition.arity.copysign.2,manual.math.copysign,24,copysign,composition-deferred,Current managed_operation_supported does not admit copysign/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  cos/0,manual.composition.arity.cos.0,manual.math.cos,22,cos,composition-deferred,Current managed_operation_supported does not admit cos/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  cosh/0,manual.composition.arity.cosh.0,manual.math.cosh,22,cosh,composition-deferred,Current managed_operation_supported does not admit cosh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  debug/0,manual.composition.arity.debug.0,manual.io.debug,42,debug,composition-deferred,Current managed_operation_supported does not admit debug/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  debug/1,manual.composition.arity.debug.1,manual.io.debug-msgs,42,debug,composition-deferred,Current managed_operation_supported does not admit debug/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  del/1,manual.composition.arity.del.1,manual-bof-table-029,316,del,composition-deferred,Current managed_operation_supported does not admit del/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  delpaths/1,manual.composition.arity.delpaths.1,manual-bof-table-036,370,delpaths,composition-deferred,Current managed_operation_supported does not admit delpaths/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  drem/2,manual.composition.arity.drem.2,manual.math.drem,24,drem,composition-deferred,Current managed_operation_supported does not admit drem/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  empty/0,manual.composition.arity.empty.0,builtin.empty,432,empty,managed-allowlist,Current managed_operation_supported admits empty/0 through its name/arity allowlist.
+  endswith/1,manual.composition.arity.endswith.1,manual-bof-table-108,998,endswith,composition-deferred,Current managed_operation_supported does not admit endswith/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  env/0,manual.composition.arity.env.0,manual-bof-table-131,1264,env,composition-deferred,Current managed_operation_supported does not admit env/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  erf/0,manual.composition.arity.erf.0,manual.math.erf,22,erf,composition-deferred,Current managed_operation_supported does not admit erf/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  erfc/0,manual.composition.arity.erfc.0,manual.math.erfc,22,erfc,composition-deferred,Current managed_operation_supported does not admit erfc/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  error/0,manual.composition.arity.error.0,manual-bof-table-045,451,error,managed-allowlist,Current managed_operation_supported admits error/0 through its name/arity allowlist.
+  error/1,manual.composition.arity.error.1,builtin.error,451,error,managed-allowlist,Current managed_operation_supported admits error/1 through its name/arity allowlist.
+  exp/0,manual.composition.arity.exp.0,manual.math.exp,22,exp,composition-deferred,Current managed_operation_supported does not admit exp/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  exp10/0,manual.composition.arity.exp10.0,manual.math.exp10,22,exp10,composition-deferred,Current managed_operation_supported does not admit exp10/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  exp2/0,manual.composition.arity.exp2.0,manual.math.exp2,22,exp2,composition-deferred,Current managed_operation_supported does not admit exp2/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  explode/0,manual.composition.arity.explode.0,builtin.explode,1078,explode,composition-deferred,Current managed_operation_supported does not admit explode/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  expm1/0,manual.composition.arity.expm1.0,manual.math.expm1,22,expm1,composition-deferred,Current managed_operation_supported does not admit expm1/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fabs/0,manual.composition.arity.fabs.0,manual.math.fabs,22,fabs,composition-deferred,Current managed_operation_supported does not admit fabs/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fdim/2,manual.composition.arity.fdim.2,manual.math.fdim,24,fdim,composition-deferred,Current managed_operation_supported does not admit fdim/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  finites/0,manual.composition.arity.finites.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",422,"[finites]",composition-deferred,Current managed_operation_supported does not admit finites/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  first/0,manual.composition.arity.first.0,manual.advanced.table-017,307,first,managed-allowlist,Current managed_operation_supported admits first/0 through its name/arity allowlist.
+  first/1,manual.composition.arity.first.1,manual.advanced.table-015,289,first,managed-allowlist,Current managed_operation_supported admits first/1 through its name/arity allowlist.
+  flatten/0,manual.composition.arity.flatten.0,manual-bof-table-060,595,flatten,composition-deferred,Current managed_operation_supported does not admit flatten/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  flatten/1,manual.composition.arity.flatten.1,manual-bof-table-061,595,flatten,composition-deferred,Current managed_operation_supported does not admit flatten/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  floor/0,manual.composition.arity.floor.0,manual.math.floor,672,floor,composition-deferred,Current managed_operation_supported does not admit floor/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fma/3,manual.composition.arity.fma.3,manual.math.fma,26,fma,composition-deferred,Current managed_operation_supported does not admit fma/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fmax/2,manual.composition.arity.fmax.2,manual.math.fmax,24,fmax,composition-deferred,Current managed_operation_supported does not admit fmax/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fmin/2,manual.composition.arity.fmin.2,manual.math.fmin,24,fmin,composition-deferred,Current managed_operation_supported does not admit fmin/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fmod/2,manual.composition.arity.fmod.2,manual.math.fmod,24,fmod,composition-deferred,Current managed_operation_supported does not admit fmod/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  frexp/0,manual.composition.arity.frexp.0,manual.math.frexp-actual-arity,24,frexp,composition-deferred,Current managed_operation_supported does not admit frexp/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  from_entries/0,manual.composition.arity.from-entries.0,manual-bof-table-038,380,from_entries,managed-allowlist,Current managed_operation_supported admits from_entries/0 through its name/arity allowlist.
+  fromdate/0,manual.composition.arity.fromdate.0,manual-bof-table-144,1436,fromdate,composition-deferred,Current managed_operation_supported does not admit fromdate/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fromdateiso8601/0,manual.composition.arity.fromdateiso8601.0,"crates/tq-core/tests/date_compat.rs::fromdateiso8601_parses_a_utc_string",1434,fromdateiso8601,composition-deferred,Current managed_operation_supported does not admit fromdateiso8601/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fromjson/0,manual.composition.arity.fromjson.0,builtin.fromjson,1328,fromjson,composition-deferred,Current managed_operation_supported does not admit fromjson/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  fromstream/1,manual.composition.arity.fromstream.1,manual.streaming.fromstream-truncate,37,fromstream,composition-deferred,Current managed_operation_supported does not admit fromstream/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  gamma/0,manual.composition.arity.gamma.0,manual.math.gamma,22,gamma,composition-deferred,Current managed_operation_supported does not admit gamma/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  getpath/1,manual.composition.arity.getpath.1,builtin.getpath,332,getpath,composition-deferred,Current managed_operation_supported does not admit getpath/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  gmtime/0,manual.composition.arity.gmtime.0,date.utc-roundtrip,1442,gmtime,composition-deferred,Current managed_operation_supported does not admit gmtime/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  group_by/1,manual.composition.arity.group-by.1,builtin.group-by,794,group_by,composition-deferred,Current managed_operation_supported does not admit group_by/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  gsub/2,manual.composition.arity.gsub.2,manual.regex.table-016,209,gsub,composition-deferred,Current managed_operation_supported does not admit gsub/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  gsub/3,manual.composition.arity.gsub.3,manual.audit.regex.gsub-three-arguments,209,gsub,composition-deferred,Current managed_operation_supported does not admit gsub/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  halt_error/0,manual.composition.arity.halt-error.0,"crates/tq-cli/tests/effects.rs::halt_error_without_an_argument_terminates_with_the_input_payload",471,halt_error,composition-deferred,Current managed_operation_supported does not admit halt_error/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  halt_error/1,manual.composition.arity.halt-error.1,manual.invoking.halt-error,471,halt_error,composition-deferred,Current managed_operation_supported does not admit halt_error/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  halt/0,manual.composition.arity.halt.0,"crates/tq-cli/tests/effects.rs::halt_is_not_catchable_and_does_not_evaluate_later_branches",467,try halt catch,composition-deferred,Current managed_operation_supported does not admit halt/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  has/1,manual.composition.arity.has.1,builtin.has,189,has,managed-allowlist,Current managed_operation_supported admits has/1 through its name/arity allowlist.
+  have_decnum/0,manual.composition.arity.have-decnum.0,"crates/tq-core/tests/math_compat.rs::decimal_capability_reports_the_runtime_number_model",1254,have_decnum,composition-deferred,Current managed_operation_supported does not admit have_decnum/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  have_literal_numbers/0,manual.composition.arity.have-literal-numbers.0,"crates/tq-core/tests/math_compat.rs::decimal_capability_reports_the_runtime_number_model",1250,have_literal_numbers,composition-deferred,Current managed_operation_supported does not admit have_literal_numbers/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  hypot/2,manual.composition.arity.hypot.2,manual.math.hypot,24,hypot,composition-deferred,Current managed_operation_supported does not admit hypot/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  implode/0,manual.composition.arity.implode.0,builtin.implode,1088,implode,composition-deferred,Current managed_operation_supported does not admit implode/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  in/1,manual.composition.arity.in.1,builtin.in,207,in,managed-allowlist,Current managed_operation_supported admits in/1 through its name/arity allowlist.
+  IN/1,manual.composition.arity.upper-in.1,manual-bof-synth-sql-in1,1496,IN,composition-deferred,Current managed_operation_supported does not admit IN/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  IN/2,manual.composition.arity.upper-in.2,manual-bof-synth-sql-in2,1496,IN,composition-deferred,Current managed_operation_supported does not admit IN/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  index/1,manual.composition.arity.index.1,manual-bof-table-096,914,index,composition-deferred,Current managed_operation_supported does not admit index/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  INDEX/2,manual.composition.arity.upper-index.2,manual-bof-synth-sql-index,1480,INDEX,composition-deferred,Current managed_operation_supported does not admit INDEX/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  indices/1,manual.composition.arity.indices.1,manual-bof-table-093,892,indices,composition-deferred,Current managed_operation_supported does not admit indices/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  infinite/0,manual.composition.arity.infinite.0,manual-bof-table-077,738,infinite,composition-deferred,Current managed_operation_supported does not admit infinite/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  input_filename/0,manual.composition.arity.input-filename.0,manual.io.input-filename,73,input_filename,composition-deferred,Current managed_operation_supported does not admit input_filename/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  input_line_number/0,manual.composition.arity.input-line-number.0,manual.io.input-line-number,77,input_line_number,composition-deferred,Current managed_operation_supported does not admit input_line_number/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  input/0,manual.composition.arity.input.0,manual.io.input,22,input,composition-deferred,Current managed_operation_supported does not admit input/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  inputs/0,manual.composition.arity.inputs.0,manual.io.inputs,32,inputs,composition-deferred,Current managed_operation_supported does not admit inputs/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  inside/1,manual.composition.arity.inside.1,manual-bof-table-102,954,inside,composition-deferred,Current managed_operation_supported does not admit inside/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  isempty/1,manual.composition.arity.isempty.1,manual.advanced.table-010,247,isempty,managed-allowlist,Current managed_operation_supported admits isempty/1 through its name/arity allowlist.
+  isfinite/0,manual.composition.arity.isfinite.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isfinite,composition-deferred,Current managed_operation_supported does not admit isfinite/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  isinfinite/0,manual.composition.arity.isinfinite.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isinfinite,composition-deferred,Current managed_operation_supported does not admit isinfinite/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  isnan/0,manual.composition.arity.isnan.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isnan,composition-deferred,Current managed_operation_supported does not admit isnan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  isnormal/0,manual.composition.arity.isnormal.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,isnormal,composition-deferred,Current managed_operation_supported does not admit isnormal/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  iterables/0,manual.composition.arity.iterables.0,builtin.iterables,422,iterables,managed-allowlist,Current managed_operation_supported admits iterables/0 through its name/arity allowlist.
+  j0/0,manual.composition.arity.j0.0,manual.math.j0,22,j0,composition-deferred,Current managed_operation_supported does not admit j0/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  j1/0,manual.composition.arity.j1.0,manual.math.j1,22,j1,composition-deferred,Current managed_operation_supported does not admit j1/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  jn/2,manual.composition.arity.jn.2,manual.math.jn,24,jn,composition-deferred,Current managed_operation_supported does not admit jn/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  join/1,manual.composition.arity.join.1,manual-bof-table-118,1110,join,composition-deferred,Current managed_operation_supported does not admit join/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  JOIN/2,manual.composition.arity.upper-join.2,manual-bof-synth-sql-join2,1484,JOIN,composition-deferred,Current managed_operation_supported does not admit JOIN/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  JOIN/3,manual.composition.arity.upper-join.3,manual-bof-synth-sql-join3,1484,JOIN,composition-deferred,Current managed_operation_supported does not admit JOIN/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  JOIN/4,manual.composition.arity.upper-join.4,manual-bof-synth-sql-join4,1484,JOIN,composition-deferred,Current managed_operation_supported does not admit JOIN/4 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  keys_unsorted/0,manual.composition.arity.keys-unsorted.0,builtin.keys-unsorted,167,keys_unsorted,managed-allowlist,Current managed_operation_supported admits keys_unsorted/0 through its name/arity allowlist.
+  keys/0,manual.composition.arity.keys.0,builtin.keys,167,keys,managed-allowlist,Current managed_operation_supported admits keys/0 through its name/arity allowlist.
+  last/0,manual.composition.arity.last.0,manual.advanced.table-017,307,last,managed-allowlist,Current managed_operation_supported admits last/0 through its name/arity allowlist.
+  last/1,manual.composition.arity.last.1,manual.advanced.table-015,289,last,managed-allowlist,Current managed_operation_supported admits last/1 through its name/arity allowlist.
+  ldexp/2,manual.composition.arity.ldexp.2,manual.math.ldexp,24,ldexp,composition-deferred,Current managed_operation_supported does not admit ldexp/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  length/0,manual.composition.arity.length.0,builtin.length,131,length,managed-allowlist,Current managed_operation_supported admits length/0 through its name/arity allowlist.
+  lgamma/0,manual.composition.arity.lgamma.0,manual.math.lgamma,22,lgamma,composition-deferred,Current managed_operation_supported does not admit lgamma/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  limit/2,manual.composition.arity.limit.2,builtin.limit,269,limit,managed-allowlist,Current managed_operation_supported admits limit/2 through its name/arity allowlist.
+  localtime/0,manual.composition.arity.localtime.0,"crates/tq-core/tests/date_compat.rs::localtime_is_denied_without_the_platform_capability",1442,localtime,composition-deferred,Current managed_operation_supported does not admit localtime/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  log/0,manual.composition.arity.log.0,manual.math.log,22,log,composition-deferred,Current managed_operation_supported does not admit log/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  log10/0,manual.composition.arity.log10.0,manual.math.log10,22,log10,composition-deferred,Current managed_operation_supported does not admit log10/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  log1p/0,manual.composition.arity.log1p.0,manual.math.log1p,22,log1p,composition-deferred,Current managed_operation_supported does not admit log1p/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  log2/0,manual.composition.arity.log2.0,manual.math.log2,22,log2,composition-deferred,Current managed_operation_supported does not admit log2/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  logb/0,manual.composition.arity.logb.0,manual.math.logb,22,logb,composition-deferred,Current managed_operation_supported does not admit logb/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  ltrim/0,manual.composition.arity.ltrim.0,manual-bof-table-114,1060,ltrim,composition-deferred,Current managed_operation_supported does not admit ltrim/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  ltrimstr/1,manual.composition.arity.ltrimstr.1,builtin.ltrimstr,1030,ltrimstr,composition-deferred,Current managed_operation_supported does not admit ltrimstr/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  map_values/1,manual.composition.arity.map-values.1,builtin.map-values,224,map_values,managed-allowlist,Current managed_operation_supported admits map_values/1 through its name/arity allowlist.
+  map/1,manual.composition.arity.map.1,builtin.map,224,map,managed-allowlist,Current managed_operation_supported admits map/1 through its name/arity allowlist.
+  match/1,manual.composition.arity.match.1,manual.regex.table-004,79,match,composition-deferred,Current managed_operation_supported does not admit match/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  match/2,manual.composition.arity.match.2,manual.regex.table-003,79,match,composition-deferred,Current managed_operation_supported does not admit match/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  max_by/1,manual.composition.arity.max-by.1,builtin.max-by,806,max_by,composition-deferred,Current managed_operation_supported does not admit max_by/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  max/0,manual.composition.arity.max.0,builtin.max,806,max,managed-allowlist,Current managed_operation_supported admits max/0 through its name/arity allowlist.
+  min_by/1,manual.composition.arity.min-by.1,builtin.min-by,806,min_by,composition-deferred,Current managed_operation_supported does not admit min_by/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  min/0,manual.composition.arity.min.0,builtin.min,806,min,managed-allowlist,Current managed_operation_supported admits min/0 through its name/arity allowlist.
+  mktime/0,manual.composition.arity.mktime.0,date.utc-roundtrip,1442,mktime,composition-deferred,Current managed_operation_supported does not admit mktime/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  modf/0,manual.composition.arity.modf.0,manual.math.modf-actual-arity,24,modf,composition-deferred,Current managed_operation_supported does not admit modf/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  modulemeta/0,manual.composition.arity.modulemeta.0,manual.modules.modulemeta,75,modulemeta,managed-allowlist,Current managed_operation_supported admits modulemeta/0 through its name/arity allowlist.
+  nan/0,manual.composition.arity.nan.0,"crates/tq-core/tests/math_compat.rs::unary_tuple_and_nonfinite_math_are_executable_through_the_vm",738,nan,composition-deferred,Current managed_operation_supported does not admit nan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  nearbyint/0,manual.composition.arity.nearbyint.0,manual.math.nearbyint,22,nearbyint,composition-deferred,Current managed_operation_supported does not admit nearbyint/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  nextafter/2,manual.composition.arity.nextafter.2,manual.math.nextafter,24,nextafter,composition-deferred,Current managed_operation_supported does not admit nextafter/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  nexttoward/2,manual.composition.arity.nexttoward.2,manual.math.nexttoward,24,nexttoward,composition-deferred,Current managed_operation_supported does not admit nexttoward/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  normals/0,manual.composition.arity.normals.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",422,"[normals]",composition-deferred,Current managed_operation_supported does not admit normals/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  not/0,manual.composition.arity.not.0,"crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract",73,not,composition-deferred,Current managed_operation_supported does not admit not/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  now/0,manual.composition.arity.now.0,platform.now-type,1440,now,composition-deferred,Current managed_operation_supported does not admit now/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  nth/1,manual.composition.arity.nth.1,manual.advanced.table-017,307,nth,composition-deferred,Current managed_operation_supported does not admit nth/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  nth/2,manual.composition.arity.nth.2,manual.advanced.table-015,289,nth,composition-deferred,Current managed_operation_supported does not admit nth/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  nulls/0,manual.composition.arity.nulls.0,builtin.nulls,422,nulls,managed-allowlist,Current managed_operation_supported admits nulls/0 through its name/arity allowlist.
+  numbers/0,manual.composition.arity.numbers.0,builtin.numbers,422,numbers,managed-allowlist,Current managed_operation_supported admits numbers/0 through its name/arity allowlist.
+  objects/0,manual.composition.arity.objects.0,builtin.objects,422,objects,managed-allowlist,Current managed_operation_supported admits objects/0 through its name/arity allowlist.
+  path/1,manual.composition.arity.path.1,builtin.path,292,path,composition-deferred,Current managed_operation_supported does not admit path/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  paths/0,manual.composition.arity.paths.0,manual-bof-table-048,489,paths,composition-deferred,Current managed_operation_supported does not admit paths/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  paths/1,manual.composition.arity.paths.1,manual-bof-table-049,489,paths,composition-deferred,Current managed_operation_supported does not admit paths/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  pick/1,manual.composition.arity.pick.1,manual-bof-table-025,276,pick,composition-deferred,Current managed_operation_supported does not admit pick/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  pow/2,manual.composition.arity.pow.2,manual.math.pow,24,pow,composition-deferred,Current managed_operation_supported does not admit pow/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  range/1,manual.composition.arity.range.1,manual-bof-table-066,625,range,composition-deferred,Current managed_operation_supported does not admit range/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  range/2,manual.composition.arity.range.2,manual-bof-table-064,625,range,composition-deferred,Current managed_operation_supported does not admit range/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  range/3,manual.composition.arity.range.3,manual-bof-table-067,625,range,composition-deferred,Current managed_operation_supported does not admit range/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  recurse/0,manual.composition.arity.recurse.0,manual-bof-table-126,1180,recurse,managed-allowlist,Current managed_operation_supported admits recurse/0 through its name/arity allowlist.
+  recurse/1,manual.composition.arity.recurse.1,manual-bof-table-125,1180,recurse,managed-allowlist,Current managed_operation_supported admits recurse/1 through its name/arity allowlist.
+  recurse/2,manual.composition.arity.recurse.2,manual-bof-table-127,1180,recurse,managed-allowlist,Current managed_operation_supported admits recurse/2 through its name/arity allowlist.
+  remainder/2,manual.composition.arity.remainder.2,manual.math.remainder,24,remainder,composition-deferred,Current managed_operation_supported does not admit remainder/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  repeat/1,manual.composition.arity.repeat.1,manual-bof-table-123,1156,repeat,managed-allowlist,Current managed_operation_supported admits repeat/1 through its name/arity allowlist.
+  reverse/0,manual.composition.arity.reverse.0,builtin.reverse,848,reverse,managed-allowlist,Current managed_operation_supported admits reverse/0 through its name/arity allowlist.
+  rindex/1,manual.composition.arity.rindex.1,manual-bof-table-099,914,rindex,composition-deferred,Current managed_operation_supported does not admit rindex/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  rint/0,manual.composition.arity.rint.0,manual.math.rint,22,rint,composition-deferred,Current managed_operation_supported does not admit rint/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  round/0,manual.composition.arity.round.0,manual.math.round,22,round,composition-deferred,Current managed_operation_supported does not admit round/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  rtrim/0,manual.composition.arity.rtrim.0,manual-bof-table-114,1060,rtrim,composition-deferred,Current managed_operation_supported does not admit rtrim/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  rtrimstr/1,manual.composition.arity.rtrimstr.1,manual-bof-table-112,1040,rtrimstr,composition-deferred,Current managed_operation_supported does not admit rtrimstr/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  scalars/0,manual.composition.arity.scalars.0,builtin.scalars,422,scalars,managed-allowlist,Current managed_operation_supported admits scalars/0 through its name/arity allowlist.
+  scalb/2,manual.composition.arity.scalb.2,manual.audit.math.scalb-infinite-boundary,24,scalb,composition-deferred,Current managed_operation_supported does not admit scalb/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  scalbln/2,manual.composition.arity.scalbln.2,manual.audit.math.integer-scale-boundary,24,scalbln,composition-deferred,Current managed_operation_supported does not admit scalbln/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  scan/1,manual.composition.arity.scan.1,manual.regex.table-009,140,scan,composition-deferred,Current managed_operation_supported does not admit scan/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  scan/2,manual.composition.arity.scan.2,"crates/tq-core/tests/regex_compat.rs::regex_two_argument_capture_and_scan_follow_jq_overloads",140,"scan(\"a\"; \"g\")",composition-deferred,Current managed_operation_supported does not admit scan/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  select/1,manual.composition.arity.select.1,builtin.select,404,select,managed-allowlist,Current managed_operation_supported admits select/1 through its name/arity allowlist.
+  setpath/2,manual.composition.arity.setpath.2,builtin.setpath,348,setpath,composition-deferred,Current managed_operation_supported does not admit setpath/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  significand/0,manual.composition.arity.significand.0,manual.math.significand,22,significand,composition-deferred,Current managed_operation_supported does not admit significand/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  sin/0,manual.composition.arity.sin.0,manual.math.sin,22,sin,composition-deferred,Current managed_operation_supported does not admit sin/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  sinh/0,manual.composition.arity.sinh.0,manual.math.sinh,22,sinh,composition-deferred,Current managed_operation_supported does not admit sinh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  skip/2,manual.composition.arity.skip.2,manual.advanced.table-014,279,skip,composition-deferred,Current managed_operation_supported does not admit skip/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  sort_by/1,manual.composition.arity.sort-by.1,builtin.sort-by,760,sort_by,managed-allowlist,Current managed_operation_supported admits sort_by/1 through its name/arity allowlist.
+  sort/0,manual.composition.arity.sort.0,builtin.sort,760,sort,managed-allowlist,Current managed_operation_supported admits sort/0 through its name/arity allowlist.
+  split/1,manual.composition.arity.split.1,manual-bof-table-117,1098,split,composition-deferred,Current managed_operation_supported does not admit split/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  split/2,manual.composition.arity.split.2,manual.regex.table-011,159,split,composition-deferred,Current managed_operation_supported does not admit split/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  splits/1,manual.composition.arity.splits.1,manual.regex.table-012,171,splits,composition-deferred,Current managed_operation_supported does not admit splits/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  splits/2,manual.composition.arity.splits.2,manual.regex.table-013,171,splits,composition-deferred,Current managed_operation_supported does not admit splits/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  sqrt/0,manual.composition.arity.sqrt.0,manual.math.sqrt,682,sqrt,composition-deferred,Current managed_operation_supported does not admit sqrt/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  startswith/1,manual.composition.arity.startswith.1,manual-bof-table-107,988,startswith,composition-deferred,Current managed_operation_supported does not admit startswith/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  stderr/0,manual.composition.arity.stderr.0,manual.io.stderr,69,stderr,composition-deferred,Current managed_operation_supported does not admit stderr/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  strflocaltime/1,manual.composition.arity.strflocaltime.1,platform.localtime-year,1442,strflocaltime,composition-deferred,Current managed_operation_supported does not admit strflocaltime/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  strftime/1,manual.composition.arity.strftime.1,date.strftime,1442,strftime,composition-deferred,Current managed_operation_supported does not admit strftime/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  strings/0,manual.composition.arity.strings.0,builtin.strings,422,strings,managed-allowlist,Current managed_operation_supported admits strings/0 through its name/arity allowlist.
+  strptime/1,manual.composition.arity.strptime.1,date.strptime,1442,strptime,composition-deferred,Current managed_operation_supported does not admit strptime/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  sub/2,manual.composition.arity.sub.2,manual.regex.table-015,193,sub,composition-deferred,Current managed_operation_supported does not admit sub/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  sub/3,manual.composition.arity.sub.3,manual.regex.table-014,193,sub,composition-deferred,Current managed_operation_supported does not admit sub/3 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  tan/0,manual.composition.arity.tan.0,manual.math.tan,22,tan,composition-deferred,Current managed_operation_supported does not admit tan/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  tanh/0,manual.composition.arity.tanh.0,manual.math.tanh,22,tanh,composition-deferred,Current managed_operation_supported does not admit tanh/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  test/1,manual.composition.arity.test.1,manual.regex.table-001,62,test,composition-deferred,Current managed_operation_supported does not admit test/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  test/2,manual.composition.arity.test.2,manual.regex.table-002,62,test,composition-deferred,Current managed_operation_supported does not admit test/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  tgamma/0,manual.composition.arity.tgamma.0,manual.math.tgamma,22,tgamma,composition-deferred,Current managed_operation_supported does not admit tgamma/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  to_entries/0,manual.composition.arity.to-entries.0,builtin.to-entries,380,to_entries,managed-allowlist,Current managed_operation_supported admits to_entries/0 through its name/arity allowlist.
+  toboolean/0,manual.composition.arity.toboolean.0,manual-bof-table-073,703,toboolean,composition-deferred,Current managed_operation_supported does not admit toboolean/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  todate/0,manual.composition.arity.todate.0,"crates/tq-core/tests/date_compat.rs::todate_formats_epoch_seconds_as_a_utc_string",1438,todate,composition-deferred,Current managed_operation_supported does not admit todate/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  todateiso8601/0,manual.composition.arity.todateiso8601.0,date.utc-roundtrip,1434,todateiso8601,composition-deferred,Current managed_operation_supported does not admit todateiso8601/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  tojson/0,manual.composition.arity.tojson.0,builtin.tojson,1328,tojson,composition-deferred,Current managed_operation_supported does not admit tojson/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  tonumber/0,manual.composition.arity.tonumber.0,builtin.tonumber,692,tonumber,managed-allowlist,Current managed_operation_supported admits tonumber/0 through its name/arity allowlist.
+  tostream/0,manual.composition.arity.tostream.0,builtin.tostream,47,tostream,composition-deferred,Current managed_operation_supported does not admit tostream/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  tostring/0,manual.composition.arity.tostring.0,builtin.tostring,716,tostring,managed-allowlist,Current managed_operation_supported admits tostring/0 through its name/arity allowlist.
+  transpose/0,manual.composition.arity.transpose.0,manual-bof-table-132,1284,transpose,composition-deferred,Current managed_operation_supported does not admit transpose/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  trim/0,manual.composition.arity.trim.0,manual-bof-table-114,1060,trim,composition-deferred,Current managed_operation_supported does not admit trim/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  trimstr/1,manual.composition.arity.trimstr.1,manual-bof-table-113,1050,trimstr,composition-deferred,Current managed_operation_supported does not admit trimstr/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  trunc/0,manual.composition.arity.trunc.0,manual.math.trunc,22,trunc,composition-deferred,Current managed_operation_supported does not admit trunc/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  truncate_stream/1,manual.composition.arity.truncate-stream.1,manual.streaming.truncate-stream,26,truncate_stream,composition-deferred,Current managed_operation_supported does not admit truncate_stream/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  type/0,manual.composition.arity.type.0,builtin.type,728,type,managed-allowlist,Current managed_operation_supported admits type/0 through its name/arity allowlist.
+  unique_by/1,manual.composition.arity.unique-by.1,builtin.unique-by-generator,824,unique_by,managed-allowlist,Current managed_operation_supported admits unique_by/1 through its name/arity allowlist.
+  unique/0,manual.composition.arity.unique.0,builtin.unique,824,unique,managed-allowlist,Current managed_operation_supported admits unique/0 through its name/arity allowlist.
+  until/2,manual.composition.arity.until.2,manual-bof-table-124,1168,until,managed-allowlist,Current managed_operation_supported admits until/2 through its name/arity allowlist.
+  utf8bytelength/0,manual.composition.arity.utf8bytelength.0,builtin.utf8bytelength,157,utf8bytelength,managed-allowlist,Current managed_operation_supported admits utf8bytelength/0 through its name/arity allowlist.
+  values/0,manual.composition.arity.values.0,builtin.values,422,values,managed-allowlist,Current managed_operation_supported admits values/0 through its name/arity allowlist.
+  walk/1,manual.composition.arity.walk.1,manual-bof-table-128,1234,walk,managed-allowlist,Current managed_operation_supported admits walk/1 through its name/arity allowlist.
+  while/2,manual.composition.arity.while.2,manual-bof-table-122,1144,while,managed-allowlist,Current managed_operation_supported admits while/2 through its name/arity allowlist.
+  with_entries/1,manual.composition.arity.with-entries.1,builtin.with-entries,380,with_entries,composition-deferred,Current managed_operation_supported does not admit with_entries/1 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  y0/0,manual.composition.arity.y0.0,manual.math.y0,22,y0,composition-deferred,Current managed_operation_supported does not admit y0/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  y1/0,manual.composition.arity.y1.0,manual.math.y1,22,y1,composition-deferred,Current managed_operation_supported does not admit y1/0 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+  yn/2,manual.composition.arity.yn.2,manual.math.yn,24,yn,composition-deferred,Current managed_operation_supported does not admit yn/2 in a user-function composition; this executable jq/tq witness remains an explicit evaluator admission gap.
+witness_policy: Each documented signature keeps its original manual witness/input/options and receives a separate def-body composition case. Family contexts are supplemental and do not substitute for this per-signature mapping.
+operation_witnesses[29]{name,case_id,query_fragment,source,source_line,reason}:
+  Identity,manual.composition.operation.identity,.,crates/tq-core/src/bytecode.rs,145,The executable witness contains the Identity operation in a definition body.
+  Literal,manual.composition.operation.literal,"1",crates/tq-core/src/bytecode.rs,146,The executable witness contains the Literal operation in a definition body.
+  Variable,manual.composition.operation.variable,as $x | $x,crates/tq-core/src/bytecode.rs,147,The executable witness contains the Variable operation in a definition body.
+  Empty,manual.composition.operation.empty,empty,crates/tq-core/src/bytecode.rs,148,The executable witness contains the Empty operation in a definition body.
+  RecursiveDescent,manual.composition.operation.recursivedescent,..,crates/tq-core/src/bytecode.rs,149,The executable witness contains the RecursiveDescent operation in a definition body.
+  Label,manual.composition.operation.label,label $out,crates/tq-core/src/bytecode.rs,150,The executable witness contains the Label operation in a definition body.
+  Break,manual.composition.operation.break,break $out,crates/tq-core/src/bytecode.rs,154,The executable witness contains the Break operation in a definition body.
+  Interpolation,manual.composition.operation.interpolation,"\"\\(. )\"",crates/tq-core/src/bytecode.rs,155,The executable witness contains the Interpolation operation in a definition body.
+  AccessField,manual.composition.operation.accessfield,.a,crates/tq-core/src/bytecode.rs,156,The executable witness contains the AccessField operation in a definition body.
+  AccessIndex,manual.composition.operation.accessindex,".[0]",crates/tq-core/src/bytecode.rs,160,The executable witness contains the AccessIndex operation in a definition body.
+  Slice,manual.composition.operation.slice,".[0:1]",crates/tq-core/src/bytecode.rs,164,The executable witness contains the Slice operation in a definition body.
+  Iterate,manual.composition.operation.iterate,".[]",crates/tq-core/src/bytecode.rs,169,The executable witness contains the Iterate operation in a definition body.
+  Optional,manual.composition.operation.optional,.foo?,crates/tq-core/src/bytecode.rs,170,The executable witness contains the Optional operation in a definition body.
+  Pipe,manual.composition.operation.pipe,. | .,crates/tq-core/src/bytecode.rs,171,The executable witness contains the Pipe operation in a definition body.
+  Comma,manual.composition.operation.comma,"., .",crates/tq-core/src/bytecode.rs,175,The executable witness contains the Comma operation in a definition body.
+  Array,manual.composition.operation.array,"[.]",crates/tq-core/src/bytecode.rs,179,The executable witness contains the Array operation in a definition body.
+  Object,manual.composition.operation.object,"{value: .}",crates/tq-core/src/bytecode.rs,180,The executable witness contains the Object operation in a definition body.
+  Unary,manual.composition.operation.unary,"-.",crates/tq-core/src/bytecode.rs,181,The executable witness contains the Unary operation in a definition body.
+  Binary,manual.composition.operation.binary,. + 1,crates/tq-core/src/bytecode.rs,185,The executable witness contains the Binary operation in a definition body.
+  Conditional,manual.composition.operation.conditional,if . then 1 else 0 end,crates/tq-core/src/bytecode.rs,190,The executable witness contains the Conditional operation in a definition body.
+  Bind,manual.composition.operation.bind,as $x | $x,crates/tq-core/src/bytecode.rs,194,The executable witness contains the Bind operation in a definition body.
+  BindAlternatives,manual.composition.operation.bindalternatives,"as [$x] ?// [$y] | [$x,$y]",crates/tq-core/src/bytecode.rs,199,The executable witness contains the BindAlternatives operation in a definition body.
+  Reduce,manual.composition.operation.reduce,"reduce .[] as $x (0; . + $x)",crates/tq-core/src/bytecode.rs,204,The executable witness contains the Reduce operation in a definition body.
+  Foreach,manual.composition.operation.foreach,"[foreach .[] as $x (0; . + $x; .)]",crates/tq-core/src/bytecode.rs,210,The executable witness contains the Foreach operation in a definition body.
+  Call,manual.composition.operation.call,map(.),crates/tq-core/src/bytecode.rs,217,The executable witness contains the Call operation in a definition body.
+  UserCall,manual.composition.operation.usercall,"def g: .; g",crates/tq-core/src/bytecode.rs,221,The executable witness contains the UserCall operation in a definition body.
+  ParameterCall,manual.composition.operation.parametercall,"def apply(g): g; apply(.)",crates/tq-core/src/bytecode.rs,225,The executable witness contains the ParameterCall operation in a definition body.
+  TryCatch,manual.composition.operation.trycatch,try . catch .,crates/tq-core/src/bytecode.rs,229,The executable witness contains the TryCatch operation in a definition body.
+  Assignment,manual.composition.operation.assignment,.a = 1,crates/tq-core/src/bytecode.rs,233,The executable witness contains the Assignment operation in a definition body.

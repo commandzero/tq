@@ -1,0 +1,49 @@
+schema_version: 2
+section: assignment
+source: jq-manual/assignment.md
+examples[24]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  assignment.fence-var-plain-error,29,fenced,"$var | .foo =\n1","null",new,"Exact fenced query; the source leaves $var unbound, so both adapters exercise the compile error.",manual.assignment.fence-var-plain-error
+  assignment.fence-var-update-error,44,fenced,"$var |\n.foo |= . + 1","null",new,"Exact fenced query; the source leaves $var unbound, so both adapters exercise the compile error.",manual.assignment.fence-var-update-error
+  assignment.table-001,54,table,"(..|select(type==\"boolean\")) |= if . then 1 else 0 end","[true,false,[5,true,[true,[false]],false]]",new,Added the exact table query and input.,manual.assignment.table-001
+  assignment.fence-plain-table,80,fenced,.a = .b,"{\"a\": {\"b\": 10}, \"b\": 20}",covered,Exact fenced query and input are covered by the matching table case.,manual.assignment.table-003
+  assignment.fence-update-table,86,fenced,.a |= .b,"{\"a\": {\"b\": 10}, \"b\": 20}",covered,Exact fenced query and input are covered by the matching table case.,manual.assignment.table-004
+  assignment.table-002,64,table,.foo += 1,"{\"foo\": 42}",new,Added the exact table query and input.,manual.assignment.table-002
+  assignment.table-005,104,table,"(.a, .b) = range(3)","null",new,Added the exact table query and input.,manual.assignment.table-005
+  assignment.table-006,112,table,"(.a, .b) |= range(3)","null",new,Added the exact table query and input.,manual.assignment.table-006
+  assignment.fence-post-title,122,fenced,".posts[0].title = \"JQ Manual\"","{\"posts\":[{\"title\":\"Old title\",\"comments\":[]}] }",new,Exact fenced query with a synthesized blog-post fixture.,manual.assignment.fence-post-title
+  assignment.fence-post-comments,128,fenced,".posts[].comments |= . + [\"this is great\"]","{\"posts\":[{\"title\":\"First\",\"author\":\"stedolan\",\"comments\":[]},{\"title\":\"Second\",\"author\":\"other\",\"comments\":[\"existing\"]}]}",new,Exact fenced query with a synthesized blog-post fixture containing comments arrays.,manual.assignment.fence-post-comments
+  assignment.fence-select-posts,138,fenced,".posts[] | select(.author == \"stedolan\")","{\"posts\":[{\"title\":\"First\",\"author\":\"stedolan\",\"comments\":[]},{\"title\":\"Second\",\"author\":\"other\",\"comments\":[]}]}",new,Exact fenced query with a synthesized blog-post fixture.,manual.assignment.fence-select-posts
+  assignment.fence-select-comment,144,fenced,"(.posts[] | select(.author == \"stedolan\") | .comments) |=\n    . + [\"terrible.\"]","{\"posts\":[{\"title\":\"First\",\"author\":\"stedolan\",\"comments\":[]},{\"title\":\"Second\",\"author\":\"other\",\"comments\":[]}]}",new,Exact fenced query with a synthesized blog-post fixture.,manual.assignment.fence-select-comment
+  assignment.witness.manual.assignment.prose-field,18,witness,.foo,"{\"foo\":[1],\"bar\":[2]}",covered,Executable witness for source passage assignment.prose-field.,manual.assignment.prose-field
+  assignment.witness.manual.assignment.prose-other-field,18,witness,.bar,"{\"foo\":[1],\"bar\":[2]}",covered,Executable witness for source passage assignment.prose-other-field.,manual.assignment.prose-other-field
+  assignment.witness.manual.assignment.prose-copy-field,18,witness,.bar = .foo,"{\"foo\":[1],\"bar\":[2]}",covered,Executable witness for source passage assignment.prose-copy-field.,manual.assignment.prose-copy-field
+  assignment.witness.manual.assignment.prose-immutable,24,witness,"{a:{b:{c:1}}} | (.a.b|=3), .","null",covered,Executable witness for source passage assignment.immutable.,manual.assignment.prose-immutable
+  assignment.witness.manual.assignment.prose-var-plain-error,28,witness,$var.foo = 1,"null",covered,Executable witness for source passage assignment.var-plain-error.,manual.assignment.prose-var-plain-error
+  assignment.witness.manual.assignment.prose-var-path-error,28,witness,$var.foo,"null",covered,Executable witness for source passage assignment.var-path-error.,manual.assignment.prose-var-path-error
+  assignment.witness.manual.assignment.prose-separate-plain,35,witness,".a,.b=0","null",covered,Executable witness for source passage assignment.separate-plain.,manual.assignment.prose-separate-plain
+  assignment.witness.manual.assignment.prose-grouped-plain,35,witness,"(.a,.b)=0","null",covered,Executable witness for source passage assignment.grouped-plain.,manual.assignment.prose-grouped-plain
+  assignment.witness.manual.assignment.prose-update-both,39,witness,"(.foo, .bar) |= .+1","{\"foo\":0,\"bar\":1}",covered,Executable witness for source passage assignment.update-both.,manual.assignment.prose-update-both
+  assignment.witness.manual.assignment.prose-var-update-error,43,witness,$var.foo |= . + 1,"null",covered,Executable witness for source passage assignment.var-update-error.,manual.assignment.prose-var-update-error
+  assignment.witness.manual.assignment.prose-empty,50,witness,empty,"null",covered,Executable witness for source passage assignment.empty.,manual.assignment.prose-empty
+  assignment.witness.manual.assignment.prose-range-plain,74,witness,"(.a,.b) = range(2)","null",covered,Executable witness for source passage assignment.range-plain.,manual.assignment.prose-range-plain
+coverage_notes[20]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  assignment.prose-field,18,prose,.foo,"{\"foo\":[1],\"bar\":[2]}",new,Added a representative object fixture for the concrete field-filter example.,manual.assignment.prose-field
+  assignment.prose-other-field,18,prose,.bar,"{\"foo\":[1],\"bar\":[2]}",new,Added a representative object fixture for the concrete field-filter example.,manual.assignment.prose-other-field
+  assignment.prose-copy-field,18,prose,.bar = .foo,"{\"foo\":[1],\"bar\":[2]}",new,Added a representative object fixture for the concrete copy-assignment example.,manual.assignment.prose-copy-field
+  assignment.immutable,24,prose,"{a:{b:{c:1}}} | (.a.b|=3), .","null",new,Exact runnable prose filter; null is a representative input because the query constructs its value.,manual.assignment.prose-immutable
+  assignment.var-plain-error,28,prose,$var.foo = 1,"null",new,The documented unbound-variable form is retained as a compile-error case.,manual.assignment.prose-var-plain-error
+  assignment.var-path-error,28,prose,$var.foo,"null",new,The concrete unbound-variable path mentioned in the explanation is retained as a compile-error case.,manual.assignment.prose-var-path-error
+  assignment.separate-plain,35,prose,".a,.b=0","null",new,Exact runnable prose filter with a synthesized null input.,manual.assignment.prose-separate-plain
+  assignment.grouped-plain,35,prose,"(.a,.b)=0","null",new,Exact runnable prose filter with a synthesized null input.,manual.assignment.prose-grouped-plain
+  assignment.update-both,39,prose,"(.foo, .bar) |= .+1","{\"foo\":0,\"bar\":1}",new,Exact runnable update-assignment example with a synthesized object fixture.,manual.assignment.prose-update-both
+  assignment.path-function,41,prose,path(),null,non-executable,path() is a function-name reference in the prose; the required path argument is omitted.,null
+  assignment.var-update-error,43,prose,$var.foo |= . + 1,"null",new,The documented unbound-variable form is retained as a compile-error case.,manual.assignment.prose-var-update-error
+  assignment.empty,50,prose,empty,"null",new,The concrete empty filter is runnable with a synthesized null input.,manual.assignment.prose-empty
+  assignment.empty-repeat,52,prose,empty,"null",covered,The repeated concrete empty filter is covered by the exact case above.,manual.assignment.prose-empty
+  assignment.del-placeholder,50,prose,del(path),null,non-executable,"path is a placeholder in the explanatory text, not a concrete path expression.",null
+  assignment.arithmetic-fragment,62,prose,+= 1,null,non-executable,The operator is shown without a left-hand path; it is a syntax fragment rather than a complete jq filter.,null
+  assignment.update-fragment,62,prose,|= . + 1,null,non-executable,The update operator is shown without a left-hand path; it is a syntax fragment rather than a complete jq filter.,null
+  assignment.range-plain,74,prose,"(.a,.b) = range(2)","null",new,Exact runnable prose filter with the concrete null input implied by the output example.,manual.assignment.prose-range-plain
+  assignment.table-003,92,table,.a = .b,"{\"a\": {\"b\": 10}, \"b\": 20}",new,Added the exact table query and input.,manual.assignment.table-003
+  assignment.table-004,98,table,.a |= .b,"{\"a\": {\"b\": 10}, \"b\": 20}",new,Added the exact table query and input.,manual.assignment.table-004
+  assignment.path-symbolic,134,prose,a = b,null,non-executable,"a and b are symbolic path/filter names in the explanation, not concrete jq expressions.",null

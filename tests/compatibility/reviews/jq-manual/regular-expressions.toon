@@ -1,0 +1,46 @@
+schema_version: 2
+section: regular-expressions
+source: jq-manual/regular-expressions.md
+examples[27]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  regex.table-001,66,table,"test(\"foo\")","\"foo\"",new,Exact table query and input.,manual.regex.table-001
+  regex.table-002,72,table,".[] | test(\"a b c # spaces are ignored\"; \"ix\")","[\"xabcd\", \"ABC\"]",new,Exact table query and input.,manual.regex.table-002
+  regex.table-003,97,table,"match(\"(abc)+\"; \"g\")","\"abc abc\"",new,Exact table query and input.,manual.regex.table-003
+  regex.table-004,104,table,"match(\"foo\")","\"foo bar foo\"",new,Exact table query and input.,manual.regex.table-004
+  regex.table-005,110,table,"match([\"foo\", \"ig\"])","\"foo bar FOO\"",new,Exact table query and input.,manual.regex.table-005
+  regex.table-006,117,table,"match(\"foo (?<bar123>bar)? foo\"; \"ig\")","\"foo bar foo foo  foo\"",new,"Exact table query and input, retaining the source fixture's two spaces before the final foo.",manual.regex.table-006
+  regex.table-007,124,table,"[ match(\".\"; \"g\")] | length","\"abc\"",new,Exact table query and input.,manual.regex.table-007
+  regex.table-008,134,table,"capture(\"(?<a>[a-z]+)-(?<n>[0-9]+)\")","\"xyzzy-14\"",new,Exact table query and input.,manual.regex.table-008
+  regex.table-009,144,table,"scan(\"c\")","\"abcdefabc\"",new,Exact table query and input.,manual.regex.table-009
+  regex.table-010,151,table,"scan(\"(a+)(b+)\")","\"abaabbaaabbb\"",new,Exact table query and input.,manual.regex.table-010
+  regex.table-011,165,table,"split(\", *\"; null)","\"ab,cd, ef\"",new,Exact table query and input.,manual.regex.table-011
+  regex.table-012,175,table,"splits(\", *\")","\"ab,cd,   ef, gh\"",new,Exact table query and input.,manual.regex.table-012
+  regex.table-013,184,table,"splits(\",? *\"; \"n\")","\"ab,cd ef,  gh\"",new,Exact table query and input.,manual.regex.table-013
+  regex.table-014,197,table,"sub(\"[^a-z]*(?<x>[a-z]+)\"; \"Z\\(.x)\"; \"g\")","\"123abc456def\"",new,Exact table query and input.,manual.regex.table-014
+  regex.table-015,203,table,"[sub(\"(?<a>.)\"; \"\\(.a|ascii_upcase)\", \"\\(.a|ascii_downcase)\")]","\"aB\"",new,Exact table query and input.,manual.regex.table-015
+  regex.table-016,213,table,"gsub(\"(?<x>.)[^a]*\"; \"+\\(.x)-\")","\"Abcabc\"",new,Exact table query and input.,manual.regex.table-016
+  regex.table-017,219,table,"[gsub(\"p\"; \"a\", \"b\")]","\"p\"",new,Exact table query and input.,manual.regex.table-017
+  regex.fence-whitespace-extended,50,fenced,"\"a b\" | test(\"a\\\\sb\"; \"x\")","null",new,Exact runnable filter from the jq -n fence; null input records the command's -n mode.,manual.regex.fence-whitespace-extended
+  regex.fence-inline-flags,56,fenced,"(\"test\", \"TEst\", \"teST\", \"TEST\") | test(\"(?i)te(?-i)st\")","null",new,Exact runnable filter from the jq -n fence; null input records the command's -n mode.,manual.regex.fence-inline-flags
+  regular-expressions.witness.manual.regex.array-test,22,witness,"test([\"foo\"])","\"foo\"",covered,Executable witness for source passage regex.fence-pattern-shapes.,manual.regex.array-test
+  regular-expressions.witness.manual.regex.array-match,22,witness,"match([\"foo\"])","\"foo\"",covered,Executable witness for source passage regex.fence-pattern-shapes.,manual.regex.array-match
+  regular-expressions.witness.manual.regex.array-capture,22,witness,"capture([\"(?<x>foo)\"])","\"foo\"",covered,Executable witness for source passage regex.fence-pattern-shapes.,manual.regex.array-capture
+  regular-expressions.witness.manual.regex.array-capture-flags,22,witness,"capture([\"(?<x>foo)\", \"i\"])","\"FOO\"",covered,Executable witness for source passage regex.fence-pattern-shapes.,manual.regex.array-capture-flags
+  regular-expressions.witness.manual.regex.flag-m,41,witness,"test(\"a.b\"; \"m\")","\"a\\nb\"",covered,Executable witness for source passage regex.flag-m.,manual.regex.flag-m
+  regular-expressions.witness.manual.regex.flag-p,43,witness,"[test(\"a.b\"; \"p\"), test(\"^b\"; \"p\")]","\"a\\nb\"",covered,Executable witness for source passage regex.flag-p.,manual.regex.flag-p
+  regular-expressions.witness.manual.regex.flag-s,44,witness,"test(\"^b\"; \"s\")","\"a\\nb\"",covered,Executable witness for source passage regex.flag-s.,manual.regex.flag-s
+  regular-expressions.witness.manual.regex.flag-l,45,witness,"match(\"a|ab\"; \"l\")","\"ab\"",covered,Executable witness for source passage regex.flag-l.,manual.regex.flag-l
+coverage_notes[9]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  regex.fence-pattern-shapes,22,fenced,null,null,non-executable,"The fence defines STRING, FILTER, REGEX, and FLAGS placeholders rather than a runnable jq query.",null
+  regex.flag-m,41,prose-witness,"test(\"a.b\"; \"m\")","\"a\\nb\"",new,Representative input for the documented regex flag or argument form.,manual.regex.flag-m
+  regex.flag-p,43,prose-witness,"[test(\"a.b\"; \"p\"), test(\"^b\"; \"p\")]","\"a\\nb\"",new,Representative input for the documented regex flag or argument form.,manual.regex.flag-p
+  regex.flag-s,44,prose-witness,"test(\"^b\"; \"s\")","\"a\\nb\"",new,Representative input for the documented regex flag or argument form.,manual.regex.flag-s
+  regex.flag-l,45,prose-witness,"match(\"a|ab\"; \"l\")","\"ab\"",new,Representative input for the documented regex flag or argument form.,manual.regex.flag-l
+  regex.array-test,22,prose-witness,"test([\"foo\"])","\"foo\"",new,Representative input for the documented regex flag or argument form.,manual.regex.array-test
+  regex.array-match,22,prose-witness,"match([\"foo\"])","\"foo\"",new,Representative input for the documented regex flag or argument form.,manual.regex.array-match
+  regex.array-capture,22,prose-witness,"capture([\"(?<x>foo)\"])","\"foo\"",new,Representative input for the documented regex flag or argument form.,manual.regex.array-capture
+  regex.array-capture-flags,22,prose-witness,"capture([\"(?<x>foo)\", \"i\"])","\"FOO\"",new,Representative input for the documented regex flag or argument form.,manual.regex.array-capture-flags
+coverage_evidence[4]{note_id,case_id}:
+  regex.fence-pattern-shapes,manual.regex.array-test
+  regex.fence-pattern-shapes,manual.regex.array-match
+  regex.fence-pattern-shapes,manual.regex.array-capture
+  regex.fence-pattern-shapes,manual.regex.array-capture-flags

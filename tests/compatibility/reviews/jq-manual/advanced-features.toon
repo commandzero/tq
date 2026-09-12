@@ -1,0 +1,81 @@
+schema_version: 2
+section: advanced-features
+source: jq-manual/advanced-features.md
+examples[44]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  advanced.table-001,99,table,.bar as $x | .foo | . + $x,"{\"foo\":10, \"bar\":200}",new,Exact table query and input.,manual.advanced.table-001
+  advanced.table-002,105,table,". as $i|[(.*2|. as $i| $i), $i]","5",new,Exact table query and input.,manual.advanced.table-002
+  advanced.table-003,111,table,". as [$a, $b, {c: $c}] | $a + $b + $c","[2, 3, {\"c\": 4, \"d\": 5}]",new,Exact table query and input.,manual.advanced.table-003
+  advanced.table-004,117,table,".[] as [$a, $b] | {a: $a, b: $b}","[[0], [0, 1], [2, 1, 0]]",new,Exact table query and input.,manual.advanced.table-004
+  advanced.table-005,160,table,".[] as {$a, $b, c: {$d, $e}} ?// {$a, $b, c: [{$d, $e}]} | {$a, $b, $d, $e}","[{\"a\": 1, \"b\": 2, \"c\": {\"d\": 3, \"e\": 4}}, {\"a\": 1, \"b\": 2, \"c\": [{\"d\": 3, \"e\": 4}]}]",new,Exact table query and input.,manual.advanced.table-005
+  advanced.table-006,167,table,".[] as {$a, $b, c: {$d}} ?// {$a, $b, c: [{$e}]} | {$a, $b, $d, $e}","[{\"a\": 1, \"b\": 2, \"c\": {\"d\": 3, \"e\": 4}}, {\"a\": 1, \"b\": 2, \"c\": [{\"d\": 3, \"e\": 4}]}]",new,Exact table query and input.,manual.advanced.table-006
+  advanced.table-007,174,table,".[] as [$a] ?// [$b] | if $a != null then error(\"err: \\($a)\") else {$a,$b} end","[[3]]",new,Exact table query and input; downstream error exercises alternative retry.,manual.advanced.table-007
+  advanced.table-008,219,table,"def addvalue(f): . + [f]; map(addvalue(.[0]))","[[1,2],[10,20]]",new,Exact table query and input.,manual.advanced.table-008
+  advanced.table-009,225,table,"def addvalue(f): f as $x | map(. + $x); addvalue(.[0])","[[1,2],[10,20]]",new,Exact table query and input.,manual.advanced.table-009
+  advanced.table-010,251,table,isempty(empty),"null",new,Exact table query and input.,manual.advanced.table-010
+  advanced.table-011,257,table,"isempty(.[])","[]",new,Exact table query and input.,manual.advanced.table-011
+  advanced.table-012,263,table,"isempty(.[])","[1,2,3]",new,Exact table query and input.,manual.advanced.table-012
+  advanced.table-013,273,table,"[limit(3; .[])]","[0,1,2,3,4,5,6,7,8,9]",new,Exact table query and input.,manual.advanced.table-013
+  advanced.table-014,283,table,"[skip(3; .[])]","[0,1,2,3,4,5,6,7,8,9]",new,Exact table query and input.,manual.advanced.table-014
+  advanced.table-015,295,table,"[first(range(.)), last(range(.)), nth(5; range(.))]","10",new,Exact table query and input.,manual.advanced.table-015
+  advanced.table-016,301,table,"[first(empty), last(empty), nth(5; empty)]","null",new,Exact table query and input.,manual.advanced.table-016
+  advanced.table-017,313,table,"[range(.)]|[first, last, nth(5)]","10",new,Exact table query and input.,manual.advanced.table-017
+  advanced.table-018,335,table,"reduce .[] as $item (0; . + $item)","[1,2,3,4,5]",new,Exact table query and input.,manual.advanced.table-018
+  advanced.table-019,341,table,"reduce .[] as [$i,$j] (0; . + $i * $j)","[[1,2],[3,4],[5,6]]",new,Exact table query and input.,manual.advanced.table-019
+  advanced.table-020,347,table,"reduce .[] as {$x,$y} (null; .x += $x | .y += [$y])","[{\"x\":\"a\",\"y\":1},{\"x\":\"b\",\"y\":2},{\"x\":\"c\",\"y\":3}]",new,Exact table query and input.,manual.advanced.table-020
+  advanced.table-021,373,table,"foreach .[] as $item (0; . + $item)","[1,2,3,4,5]",new,Exact table query and input.,manual.advanced.table-021
+  advanced.table-022,383,table,"foreach .[] as $item (0; . + $item; [$item, . * 2])","[1,2,3,4,5]",new,Exact table query and input.,manual.advanced.table-022
+  advanced.table-023,393,table,"foreach .[] as $item (0; . + 1; {index: ., $item})","[\"foo\", \"bar\", \"baz\"]",new,Exact table query and input.,manual.advanced.table-023
+  advanced.table-024,433,table,"def range(init; upto; by): def _range: if (by > 0 and . < upto) or (by < 0 and . > upto) then ., ((.+by)|_range) else empty end; if init == upto then empty elif by == 0 then init else init|_range end; range(0; 10; 3)","null",new,Exact table query and input.,manual.advanced.table-024
+  advanced.table-025,442,table,"def while(cond; update): def _while: if cond then ., (update | _while) else empty end; _while; [while(.<100; .*2)]","1",new,Exact table query and input.,manual.advanced.table-025
+  advanced.fence-001,38,fenced,length as $array_length | add / $array_length,"[10,20,30]",new,Runnable fenced filter; synthesized numeric array fixture.,manual.advanced.fence-average-variable
+  advanced.fence-004,62,fenced,".realnames as $names | .posts[] | {title, author: $names[.author]}","{\"posts\": [{\"title\": \"First post\", \"author\": \"anon\"}, {\"title\": \"A well-written article\", \"author\": \"person1\"}], \"realnames\": {\"anon\": \"Anonymous Coward\", \"person1\": \"Person McPherson\"}}",new,Exact runnable fenced query with the preceding fixture.,manual.advanced.fence-post-author-lookup
+  advanced.fence-007,85,fenced,".realnames as $names | (.posts[] | {title, author: $names[.author]})","{\"posts\": [{\"title\": \"First post\", \"author\": \"anon\"}, {\"title\": \"A well-written article\", \"author\": \"person1\"}], \"realnames\": {\"anon\": \"Anonymous Coward\", \"person1\": \"Person McPherson\"}}",new,Exact runnable fenced query with the preceding fixture.,manual.advanced.fence-post-author-lookup-parenthesized
+  advanced.fence-008,91,fenced,"(.realnames as $names | .posts[]) | {title, author: $names[.author]}","{\"posts\": [{\"title\": \"First post\", \"author\": \"anon\"}, {\"title\": \"A well-written article\", \"author\": \"person1\"}], \"realnames\": {\"anon\": \"Anonymous Coward\", \"person1\": \"Person McPherson\"}}",new,Runnable negative scoping example; expected compile error is preserved.,manual.advanced.fence-post-author-lookup-out-of-scope
+  advanced.fence-010,138,fenced,".resources[] as {$id, $kind, events: {$user_id, $ts}} ?// {$id, $kind, events: [{$user_id, $ts}]} | {$user_id, $kind, $id, $ts}","{\"resources\": [{\"id\": 1, \"kind\": \"widget\", \"events\": {\"action\": \"create\", \"user_id\": 1, \"ts\": 13}}, {\"id\": 2, \"kind\": \"widget\", \"events\": [{\"action\": \"create\", \"user_id\": 1, \"ts\": 14}, {\"action\": \"destroy\", \"user_id\": 1, \"ts\": 15}]}]}",new,Exact runnable fenced query with the preceding fixture.,manual.advanced.fence-destructuring-alternative
+  advanced.fence-012,150,fenced,".resources[] as {$id, $kind, events: {$user_id, $ts}} ?// {$id, $kind, events: [{$first_user_id, $first_ts}]} | {$user_id, $first_user_id, $kind, $id, $ts, $first_ts}","{\"resources\": [{\"id\": 1, \"kind\": \"widget\", \"events\": {\"action\": \"create\", \"user_id\": 1, \"ts\": 13}}, {\"id\": 2, \"kind\": \"widget\", \"events\": [{\"action\": \"create\", \"user_id\": 1, \"ts\": 14}, {\"action\": \"destroy\", \"user_id\": 1, \"ts\": 15}]}]}",new,Exact runnable fenced query with the preceding fixture.,manual.advanced.fence-destructuring-alternative-variables
+  advanced.fence-014,184,fenced,"def increment: . + 1; 1 | increment","null",new,Declaration-only fragment is made runnable with a synthesized invocation and null input.,manual.advanced.fence-function-increment
+  advanced.fence-015,190,fenced,"def map(f): [.[] | f]; map(.+1)","[1,2,3]",new,Declaration-only fragment is made runnable with a synthesized invocation and array input.,manual.advanced.fence-function-map
+  advanced.fence-016,196,fenced,"def foo(f): f|f; 5|foo(.*2)","null",new,Exact runnable fenced function example with null input.,manual.advanced.fence-function-filter-argument
+  advanced.fence-022,329,fenced,"0 | 1 as $item | . + $item |\n    2 as $item | . + $item |\n    3 as $item | . + $item","null",new,Exact runnable expansion with synthesized null input.,manual.advanced.fence-reduce-expanded
+  advanced.fence-024,365,fenced,"0 | 1 as $item | . + $item | [$item, . * 2],\n    2 as $item | . + $item | [$item, . * 2],\n    3 as $item | . + $item | [$item, . * 2]","null",new,Exact runnable expansion with synthesized null input.,manual.advanced.fence-foreach-expanded
+  advanced.fence-025,409,fenced,"def recurse(f): def r: ., (f | select(. != null) | r); r;\n\ndef while(cond; update):\n  def _while:\n    if cond then ., (update | _while) else empty end;\n  _while;\n\ndef repeat(exp):\n  def _repeat:\n    exp, _repeat;\n  _repeat;\n.","null",new,Declaration-only library is made runnable with a synthesized identity invocation; repeat is defined but not invoked because it is unbounded.,manual.advanced.fence-recursion-library
+  advanced-features.witness.manual.advanced.prose-average-direct,34,witness,add / length,"[10,20,30]",covered,Executable witness for source passage advanced.prose-001.,manual.advanced.prose-average-direct
+  advanced-features.witness.manual.advanced.prose-object-shorthand,68,witness,"{foo}","{\"foo\":42}",covered,Executable witness for source passage advanced.prose-002.,manual.advanced.prose-object-shorthand
+  advanced-features.witness.manual.advanced.prose-variable-shorthand,68,witness,".foo as $foo | {$foo}","{\"foo\":42}",covered,Executable witness for source passage advanced.prose-003.,manual.advanced.prose-variable-shorthand
+  advanced-features.witness.manual.advanced.prose-addvalue-field,215,witness,"def addvalue(f): f as $f | map(. + $f); map(addvalue(.foo))","[{\"foo\":10},{\"foo\":20}]",covered,Executable witness for source passage advanced.prose-004.,manual.advanced.prose-addvalue-field
+  advanced-features.witness.manual.advanced.prose-addvalue-iterator,215,witness,"def addvalue(f): f as $f | map(. + $f); addvalue(.[])","[1,2]",covered,Executable witness for source passage advanced.prose-005.,manual.advanced.prose-addvalue-iterator
+  advanced-features.witness.manual.basic.iterator-prose-array,425,witness,".[]","[1,2,3]",covered,Executable witness for source passage advanced.prose-006.,manual.basic.iterator-prose-array
+  advanced-features.witness.manual.advanced.prose-range-generator,425,witness,range(0; 10),"null",covered,Executable witness for source passage advanced.prose-007.,manual.advanced.prose-range-generator
+coverage_notes[26]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  advanced.fence-002,46,fenced-fixture,null,"{\"posts\": [{\"title\": \"First post\", \"author\": \"anon\"}, {\"title\": \"A well-written article\", \"author\": \"person1\"}], \"realnames\": {\"anon\": \"Anonymous Coward\", \"person1\": \"Person McPherson\"}}",covered,Input-only fixture reused by the following variable-scope queries.,null
+  advanced.fence-003,55,fenced-output,null,null,covered,Output-only block is the result of the preceding exact query case.,manual.advanced.fence-post-author-lookup
+  advanced.fence-005,72,fenced,null,null,non-executable,Ellipsis is an incomplete placeholder expression.,null
+  advanced.fence-006,77,fenced,null,null,non-executable,Destructuring binding has no expression after the binding pipe; incomplete syntax fragment.,null
+  advanced.fence-009,131,fenced-fixture,null,"{\"resources\": [{\"id\": 1, \"kind\": \"widget\", \"events\": {\"action\": \"create\", \"user_id\": 1, \"ts\": 13}}, {\"id\": 2, \"kind\": \"widget\", \"events\": [{\"action\": \"create\", \"user_id\": 1, \"ts\": 14}, {\"action\": \"destroy\", \"user_id\": 1, \"ts\": 15}]}]}",covered,Input-only fixture reused by the following destructuring queries.,null
+  advanced.fence-011,144,fenced,null,null,non-executable,Ellipsis is an incomplete placeholder expression.,null
+  advanced.fence-013,156,fenced,"[[3]] | .[] as [$a] ?// [$b] | if $a != null then error(\"err: \\($a)\") else {$a,$b} end","[[3]]",covered,Exact fenced query and input are covered by the table case.,manual.advanced.table-007
+  advanced.fence-017,205,fenced,"def addvalue(f): f as $f | map(. + $f); addvalue(.[0])","[[1,2],[10,20]]",covered,Definition fragment is exercised by the exact table query case.,manual.advanced.table-009
+  advanced.fence-018,211,fenced,null,null,non-executable,The function body is an ellipsis placeholder.,null
+  advanced.fence-019,236,fenced,null,null,non-executable,Scoping illustration contains ellipsis placeholders and no complete program.,null
+  advanced.fence-020,241,fenced,null,null,non-executable,Scoping illustration contains ellipsis placeholders and no complete program.,null
+  advanced.fence-021,323,fenced,"reduce .[] as $item (0; . + $item)","[1,2,3,4,5]",covered,Exact fenced query and the prose fixture are covered by the table case.,manual.advanced.table-018
+  advanced.fence-023,359,fenced,"foreach .[] as $item (0; . + $item; [$item, . * 2])","[1,2,3,4,5]",covered,Exact fenced query and input are covered by the table case.,manual.advanced.table-022
+  advanced.prose-001,34,prose,add / length,"[10,20,30]",new,Runnable prose filter; synthesized numeric array fixture.,manual.advanced.prose-average-direct
+  advanced.prose-002,68,prose,"{foo}","{\"foo\":42}",new,Runnable shorthand filter; synthesized object fixture.,manual.advanced.prose-object-shorthand
+  advanced.prose-003,68,prose,".foo as $foo | {$foo}","{\"foo\":42}",new,Variable shorthand is made runnable with the binding context described by the prose and a synthesized object fixture.,manual.advanced.prose-variable-shorthand
+  advanced.prose-004,215,prose,"def addvalue(f): f as $f | map(. + $f); map(addvalue(.foo))","[{\"foo\":10},{\"foo\":20}]",new,Documented addvalue(.foo) call is made runnable with its definition and a synthesized array of objects.,manual.advanced.prose-addvalue-field
+  advanced.prose-005,215,prose,"def addvalue(f): f as $f | map(. + $f); addvalue(.[])","[1,2]",new,"Documented addvalue(.[]) call is made runnable with its definition and a synthesized numeric array.",manual.advanced.prose-addvalue-iterator
+  advanced.prose-006,425,prose,".[]","[1,2,3]",covered,Exact generator prose filter and synthesized witness are covered by an existing compatibility case.,manual.basic.iterator-prose-array
+  advanced.prose-007,425,prose,range(0; 10),"null",new,Runnable generator prose filter; synthesized null input.,manual.advanced.prose-range-generator
+  advanced.prose-008,30,prose-signature,null,null,non-executable,Heading notation uses ellipsis and a symbolic identifier placeholder.,null
+  advanced.prose-009,32,prose-conceptual,null,null,non-executable,Conceptual `a + b` discussion uses unnamed placeholder filters and supplies no executable context.,null
+  advanced.prose-010,36,prose-signature,null,null,non-executable,"`expression as $variable` is a syntax signature, not a concrete filter.",null
+  advanced.prose-011,66,prose-signature,null,null,non-executable,`exp as $x | ...` is a syntax signature with an ellipsis placeholder.,null
+  advanced.prose-012,321,prose-signature,null,null,non-executable,`reduce EXP as $var (INIT; UPDATE)` is a parameterized syntax signature.,null
+  advanced.prose-013,357,prose-signature,null,null,non-executable,`foreach EXP as $var (INIT; UPDATE; EXTRACT)` is a parameterized syntax signature.,null
+coverage_evidence[5]{note_id,case_id}:
+  advanced.fence-002,manual.advanced.fence-post-author-lookup
+  advanced.fence-002,manual.advanced.fence-post-author-lookup-parenthesized
+  advanced.fence-002,manual.advanced.fence-post-author-lookup-out-of-scope
+  advanced.fence-009,manual.advanced.fence-destructuring-alternative
+  advanced.fence-009,manual.advanced.fence-destructuring-alternative-variables
