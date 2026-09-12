@@ -1,10 +1,12 @@
 # Platform reference investigation
 
 This records reference discovery and the subsequent native investigation.
-The current-source native checkpoint executes all 608 cases, with 602 exact
-matches and six separately reviewed disparities. It is not final release
-approval: a later user-function composition finding requires another source
-revision and fresh executable-bound evidence.
+The following earlier native checkpoint is retained as historical evidence and
+is superseded by the [later executable checkpoint in the implementation
+review](implementation-review.md#current-acceptance-checkpoint-2026-09-10).
+It executes all 608 cases, with 602 exact matches and six separately reviewed
+disparities. It is not final release approval; the final campaign must renew its
+executable-bound evidence after the later user-function composition revision.
 
 The verified-source report is
 `target/linux-review/manual-linux-v2-source-verified.toon`. All fourteen pinned

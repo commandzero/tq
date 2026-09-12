@@ -393,6 +393,11 @@ Scratch sources are preserved outside the repository under
 diagnostic is under the task's `tmp/parent-rss-repro`. No scratch source is
 included in the implementation. No diagnostic process remains running.
 
+### Historical pre-worker design checkpoint
+
+The following records the pre-worker design state and is superseded by the
+[final verification report](verification-report.md).
+
 The current direct-launch design cannot substantiate target-only Linux memory
 comparisons when launcher memory exceeds the target peak. Acceptance remains
 paused for a design decision. A separately initialized, low-memory measurement

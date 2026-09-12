@@ -1,4 +1,8 @@
-# Verification checkpoint
+# Verification checkpoint (historical; superseded)
+
+This retained checkpoint records the pre-worker state. It is superseded by the
+[final verification report](verification-report.md), which records the current
+acceptance status.
 
 ## Assessment
 

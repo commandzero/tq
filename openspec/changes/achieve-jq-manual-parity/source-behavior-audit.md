@@ -3,11 +3,14 @@
 The primary reviewer read all fourteen pinned source documents, including the
 introduction. The original example ledger is necessary but not sufficient:
 published tables do not exercise every documented arity, empty stream, error,
-flag, or process effect. The verified macOS checkpoint now passes the completion
-gate with 602 exact matches and five identity-bound reviewed disparities.
-The subsequent runtime-zero witness raises the corpus to 608 cases with 603
-exact matches and unchanged observations for those five disparities; the final
-build must renew their identity-bound approvals.
+flag, or process effect. The following macOS count blocks are retained as
+historical checkpoints. The earlier verified checkpoint passed the completion
+gate with 602 exact matches and five identity-bound reviewed disparities. The
+subsequent runtime-zero witness raises the corpus to 608 cases with 603 exact
+matches and unchanged observations for those five disparities. The [later
+executable checkpoint in the implementation review](implementation-review.md#current-acceptance-checkpoint-2026-09-10)
+records the later results, and the final build must renew its identity-bound
+approvals.
 Presence of a witness alone is not a passing verdict.
 
 Source paths below are relative to the pinned companion checkout. Execution uses
