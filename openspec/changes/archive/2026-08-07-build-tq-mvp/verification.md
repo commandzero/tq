@@ -13,7 +13,7 @@
 
 - Formatting, strict workspace Clippy, workspace documentation, stable workspace tests, Rust 1.87.0 workspace tests, and strict OpenSpec validation pass.
 - The release fuzz evidence covers `query_parser`, `toon_decoder`, `bytecode_decode`, `vm_program`, and `cli_args` without a crash artifact.
-- `tests/compatibility/reviews/coverage-v1.toon` contains 154 cases and 831 observations for jq 1.8.2, yq 4.53.2, and tq over JSON, YAML, and TOON. Its jq/tq difference allowlist remains executable.
+- `tests/compatibility/reviews/coverage-v1.json` contains 154 cases and 831 observations for jq 1.8.2, yq 4.53.2, and tq over JSON, YAML, and TOON. Its jq/tq difference allowlist remains executable.
 - `docs/requirements-traceability.tsv` has one row per scenario. Every route now declares a test, report assertion, or manual finding and names a source symbol/heading checked by `requirements_traceability.rs`.
 - Benchmark semantic correctness uses an incremental, format-independent digest. It consumes JSON result texts and TOON Text Sequence records individually instead of retaining the complete normalized result sequence.
 - The `commandzero/tq-benchmarks` archive retains the refreshed standard and natural-large campaigns, including unfavorable resource and timeout outcomes. The final large event rows remain below the 128 MiB objective.
