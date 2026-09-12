@@ -610,6 +610,10 @@ fn worker_executable() -> io::Result<PathBuf> {
         ));
     }
     let current = env::current_exe()?;
+    worker_beside(&current)
+}
+
+fn worker_beside(current: &Path) -> io::Result<PathBuf> {
     let directory = current
         .parent()
         .ok_or_else(|| io::Error::other("current executable has no parent directory"))?;
@@ -626,6 +630,19 @@ fn worker_executable() -> io::Result<PathBuf> {
     let sibling = deps_parent.join("tq-bench-worker");
     if sibling.is_file() {
         return Ok(sibling);
+    }
+    // Newer Cargo versions put tests in
+    // `target/<profile>/build/<package>/<hash>/out`. Only recognize this
+    // specific layout; do not search arbitrary ancestors for executables.
+    if directory.file_name().is_some_and(|name| name == "out")
+        && let Some(build) = directory.ancestors().nth(3)
+        && build.file_name().is_some_and(|name| name == "build")
+        && let Some(profile) = build.parent()
+    {
+        let worker = profile.join("tq-bench-worker");
+        if worker.is_file() {
+            return Ok(worker);
+        }
     }
     Err(io::Error::new(
         io::ErrorKind::NotFound,
@@ -667,6 +684,48 @@ fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{CoordinatorWatchdog, PROTOCOL_VERSION, WorkerReply, WorkerResult};
+
+    #[test]
+    fn worker_lookup_preserves_direct_and_deps_layouts() {
+        let target = tempfile::tempdir().expect("target directory");
+        let worker = target.path().join("tq-bench-worker");
+        std::fs::write(&worker, []).expect("worker executable fixture");
+        for relative in ["tq-bench", "deps/benchmark_gate-test-hash"] {
+            assert_eq!(
+                super::worker_beside(&target.path().join(relative)).unwrap(),
+                worker
+            );
+        }
+    }
+
+    #[test]
+    fn worker_lookup_supports_cargo_build_directory_layout() {
+        let target = tempfile::tempdir().expect("target directory");
+        let profile = target.path().join("debug");
+        let directory = profile.join("build/tq-test-support/test-hash/out");
+        std::fs::create_dir_all(&directory).expect("test executable directory");
+        let worker = profile.join("tq-bench-worker");
+        std::fs::write(&worker, []).expect("worker executable fixture");
+        assert_eq!(
+            super::worker_beside(&directory.join("benchmark_gate-test-hash")).unwrap(),
+            worker
+        );
+    }
+
+    #[test]
+    fn worker_lookup_does_not_search_unrecognized_ancestors() {
+        let target = tempfile::tempdir().expect("target directory");
+        let directory = target.path().join("unrelated/package/hash/out");
+        std::fs::create_dir_all(&directory).expect("test executable directory");
+        std::fs::write(target.path().join("tq-bench-worker"), [])
+            .expect("unrelated executable fixture");
+        assert_eq!(
+            super::worker_beside(&directory.join("test"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
 
     #[test]
     fn reply_round_trip_preserves_u128_wall_time() {
