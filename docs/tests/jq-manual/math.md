@@ -2,7 +2,7 @@
 type: Report
 title: "jq manual math coverage"
 description: "Recorded review of jq manual math coverage."
-generated: { by: codex/gpt-6, at: 2026-09-10T02:12:04Z }
+generated: { by: codex/gpt-5.6-luna, at: 2026-09-12T17:42:14Z }
 ---
 
 # jq manual math coverage
@@ -11,7 +11,15 @@ Source: [pinned jq manual source inventory](../../../tests/compatibility/reviews
 
 The source has prose and signature lists only. It has no tables or fenced examples.
 
-The corrected ledger separates 62 executable examples from 6 coverage notes. Every named function has a case in [manual-math.jsonl](../../../tests/compatibility/cases/manual-math.jsonl), and all jq/tq adapters stay enabled so unsupported functions remain visible.
+The corrected ledger contains 62 executable examples and 6 coverage notes. This
+page displays 64 cases because `completeness.toon` assigns two additional audit
+witnesses, `manual.audit.math.integer-scale-boundary` and
+`manual.audit.math.scalb-infinite-boundary`, to this collection for `scalbln/2`
+and `scalb/2` signature coverage. Those same witnesses are linked from
+[math-boundaries](math-boundaries.md), so the page total is 62 ledger examples
+plus 2 linked audit witnesses. Every named function has a case in
+[manual-math.jsonl](../../../tests/compatibility/cases/manual-math.jsonl), and
+all jq/tq adapters stay enabled so unsupported functions remain visible.
 
 See the [model and storage comparison](math-model.md) for the schema, migration details, and measured character/token savings.
 

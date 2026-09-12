@@ -2,12 +2,12 @@
 type: Report
 title: Test fixture storage savings
 description: Exact character and tokenizer measurements for the root tests directory migration to TOON.
-generated: { by: codex/gpt-6-astra, at: 2026-09-12T01:46:15Z }
+generated: { by: codex/gpt-5.6-luna, at: 2026-09-12T17:42:14Z }
 ---
 
 # Test fixture storage savings
 
-The migration replaces 80 JSON files under the repository-root `tests/`
+The migration replaces 80 JSON-family files under the repository-root `tests/`
 directory with TOON. Only those 80 converted files enter this report's totals.
 
 The retained conversions and ledger model corrections save **163,266 o200k_base tokens, or 18.41%**,

@@ -21,8 +21,7 @@ records 10,579 primary samples: 10,570 valid timed samples and 9 samples from
 failed resource-limit attempts. Another 180 instrumented samples check RSS
 limits separately. Every recorded sample has positive native peak RSS. The
 three additional smoke workloads are rendered on their own pages and complete
-the 39-workload review with 18 timed rows and 540 measured samples; their three
-metadata-unavailable baseline comparisons remain visible in the smoke report.
+the 39-workload review with 18 timed rows and 540 measured samples.
 
 The rapid check covers 30 observations: 27 timed, 3 unsupported, and 0
 incorrect, with one positive-RSS sample for each timed row and three separate
