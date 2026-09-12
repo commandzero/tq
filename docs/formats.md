@@ -1,3 +1,10 @@
+---
+type: Report
+title: Format compatibility
+description: Input and output format support in jq, yq, and tq.
+generated: { by: codex/gpt-6-astra, at: 2026-09-09T01:24:47Z }
+---
+
 # Format compatibility
 
 This table compares native document input and output. It does not count formats
@@ -34,10 +41,15 @@ checkout. `R` means read, `W` means write, and `-` means no native support.
   triple-double-quoted strings.
 - tq keeps `.json` strict. Use `-i json5` or a `.json5` extension for JSON5.
   JSON5 is input-only and document-at-a-time.
-- tq writes an RS-framed TOON Text Sequence by default. This is not jq's RFC
-  7464 mode. Use `--seq` for JSON sequence input and output, or `-i json-seq`
-  and `-o json-seq` to select either direction. `jsonseq` is an alias.
-  Existing scripts using `--seq` for TOON output must switch to `-o toon-seq`.
+- tq writes zero or more LF-terminated TOON values by default. `-c` selects
+  compact JSON; `-o json` selects pretty JSON. `--seq` reads JSON Text Sequences
+  and writes RS-framed TOON Text Sequences by default. Thus `jq --seq` corresponds
+  to `tq --seq -o json`; `tq --seq -c` writes compact JSON sequences.
+  Use `-i json-seq` and `-o json-seq` to select either JSON sequence direction
+  independently (`jsonseq` is an alias). Use `-i toon-seq` and `-o toon-seq` for
+  TOON sequences without changing the other direction. Native format support
+  does not imply complete jq language or malformed-input parity; see the
+  [compatibility guide](compatibility.md).
 - CSV and TSV require `-i csv`, `-i tsv`, or a matching file extension. tq does
   not guess them from content. Each row after the unique-key header is one
   Document. Quoted fields remain strings, including empty and numeric-looking

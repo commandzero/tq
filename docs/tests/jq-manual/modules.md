@@ -1,0 +1,605 @@
+---
+type: Report
+title: "Modules coverage audit"
+description: "Recorded review of Modules coverage audit."
+generated: { by: codex/gpt-6, at: 2026-09-10T02:12:04Z }
+---
+
+# Modules coverage audit
+
+Source: [jq manual, Modules](https://jqlang.org/manual/#modules). The audit covers the sole fenced block plus every concrete module/path/metadata example and syntax signature in the prose. Module fixtures live under `tests/fixtures/manual-modules/`.
+
+| Source line | Example | Cases | Disposition |
+| ---: | --- | --- | --- |
+| 16 | module system | `manual.modules.import` | new |
+| 18 | import/include search paths | `manual.modules.include` | new |
+| 20 | path substitutions | `manual.modules.path-dot`, `manual.modules.path-tilde`, `manual.modules.path-origin` | new |
+| 22 | `~/` substitution | `manual.modules.path-tilde` | new |
+| 24 | `$ORIGIN/` substitution | `manual.modules.path-origin` | new |
+| 26 | `./` and including-file paths | `manual.modules.path-dot`, `manual.modules.path-dot-including` | adapted/new |
+| 28 | import search metadata | `manual.modules.import-search` | new |
+| 30 | default search path | `manual.modules.default-search-path` | new |
+| 31 | fenced default path value | `manual.modules.default-search-path` | new |
+| 37 | null/empty search termination | `manual.modules.search-terminator` | new |
+| 39 | `foo/bar` lookup candidates | `manual.modules.relative-single`, `manual.modules.relative-directory` | new |
+| 41 | repeated components | `manual.modules.repeated-component` | new |
+| 43 | `foo.jq` and `foo/foo.jq` | `manual.modules.foo-single`, `manual.modules.foo-directory` | new |
+| 45 | automatic HOME `.jq` source | `manual.modules.home-auto-source` | new |
+| 47–53 | import syntax, namespace, metadata, search | `manual.modules.import`, `manual.modules.import-metadata`, `manual.modules.import-search` | new/covered |
+| 55–59 | include syntax, scope, metadata | `manual.modules.include`, `manual.modules.include-metadata` | new/covered |
+| 61–67 | JSON import and metadata/search | `manual.modules.import-json` | new/covered |
+| 69–73 | module metadata directive and constant rule | `manual.modules.modulemeta`, `manual.modules.metadata-constant` | new |
+| 75–79 | `modulemeta` shape and program use | `manual.modules.modulemeta`, `manual.modules.modulemeta-deps` | new/covered |
+
+The jq-target cases deliberately keep tq enabled. Tilde, `$ORIGIN`, HOME auto-sourcing, repeated path components, empty roots, and JSON-module imports are executed through the same documented contracts with controlled environment roots. Result-sequence cases retain the harness’s native TOON output handling.
+
+<!-- tq-manual-compare:begin section=modules -->
+## Results
+
+[Case collection](../../../tests/compatibility/reviews/jq-manual/modules.toon)
+
+
+| Verdict | Cases |
+| --- | ---: |
+| match | 21 |
+
+Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
+
+| Output campaign | Matches | Cases |
+| --- | ---: | ---: |
+| compact_json | 21 | 21 |
+| toon | 21 | 21 |
+
+A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+
+Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+
+JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
+
+### Output size
+
+18 eligible examples. Counts use the `o200k_base` and `cl100k_base` tokenizers over complete stdout, including trailing newlines. The totals compare default `-o json` output with default LF-terminated `-o toon` results; explicitly requested `--seq -o toon` output is shown in the cases but excluded from size totals. Diff is TOON tokens minus JSON tokens. % is the signed percent difference `(TOON - JSON) / JSON`, so savings are negative and growth is positive.
+
+| Tokenizer | JSON tokens | TOON tokens | Diff | % |
+| --- | ---: | ---: | ---: | ---: |
+| `o200k_base` | 160 | 106 | -54 | -33.75% |
+| `cl100k_base` | 160 | 106 | -54 | -33.75% |
+
+Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
+
+### Reviewed disparities and historical differences
+
+| Case | Reason |
+| --- | --- |
+
+### Cases
+
+Each case shows the original jq invocation, then the complete jq, tq JSON, and tq TOON output. Control bytes use `\xNN` escapes so record separators remain visible. This section is generated by the separate `tq-manual-compare` command.
+
+#### manual.modules.default-search-path
+
+```
+# input
+jq 'import "home" as h; h::value'
+
+# jq
+"tilde-home"
+
+# tq -o json
+"tilde-home"
+
+# tq
+tilde-home
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 5 | 5 | 4 | -1 | -20% |
+| `cl100k_base` | 5 | 5 | 4 | -1 | -20% |
+
+#### manual.modules.foo-directory
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/foo-directory 'import "foo" as f; f::value'
+
+# jq
+"directory-module"
+
+# tq -o json
+"directory-module"
+
+# tq
+directory-module
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.foo-single
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/explicit 'import "foo" as f; f::value'
+
+# jq
+"single-file"
+
+# tq -o json
+"single-file"
+
+# tq
+single-file
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.home-auto-source
+
+```
+# input
+jq home_value
+
+# jq
+"auto-home"
+
+# tq -o json
+"auto-home"
+
+# tq
+auto-home
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.import
+
+```
+# input
+jq -L tests/fixtures/manual-modules 'import "basic" as b; b::value'
+
+# jq
+42
+
+# tq -o json
+42
+
+# tq
+42
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
+| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+
+#### manual.modules.import-json
+
+```
+# input
+jq -L tests/fixtures/manual-modules 'import "data" as $data; $data::data'
+
+# jq
+[
+  {
+    "name": "manual",
+    "count": 3
+  }
+]
+
+# tq -o json
+[
+  {
+    "name": "manual",
+    "count": 3
+  }
+]
+
+# tq
+[1]{name,count}:
+  manual,3
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 20 | 20 | 12 | -8 | -40% |
+| `cl100k_base` | 20 | 20 | 12 | -8 | -40% |
+
+#### manual.modules.import-metadata
+
+```
+# input
+jq -L tests/fixtures/manual-modules 'import "basic" as b {"homepage":"override"}; b::value'
+
+# jq
+42
+
+# tq -o json
+42
+
+# tq
+42
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
+| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+
+#### manual.modules.import-search
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/search-prefix 'import "meta/consumer" as c; c::value'
+
+# jq
+"prefixed"
+
+# tq -o json
+"prefixed"
+
+# tq
+prefixed
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.include
+
+```
+# input
+jq -L tests/fixtures/manual-modules 'include "included"; included_value'
+
+# jq
+"included"
+
+# tq -o json
+"included"
+
+# tq
+included
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 3 | 3 | 2 | -1 | -33.33% |
+| `cl100k_base` | 3 | 3 | 2 | -1 | -33.33% |
+
+#### manual.modules.include-metadata
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/search-prefix 'import "meta/include-consumer" as c; c::value'
+
+# jq
+"prefixed"
+
+# tq -o json
+"prefixed"
+
+# tq
+prefixed
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.metadata-constant
+
+```
+# input
+jq -L tests/fixtures/manual-modules 'import "basic" as b {"homepage": .}; b::value'
+
+# jq
+
+
+[stderr]
+jq: error: Module metadata must be constant at <top-level>, line 1, column 21:
+    import "basic" as b {"homepage": .}; b::value
+                        ^^^^^^^^^^^^^^^
+jq: 1 compile error
+
+# tq -o json
+
+
+[stderr]
+tq: query compilation failed: TQ-MODULE-METADATA-001: module metadata must be a constant expression
+
+# tq
+
+
+[stderr]
+tq: query compilation failed: TQ-MODULE-METADATA-001: module metadata must be a constant expression
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
+| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+
+#### manual.modules.modulemeta
+
+```
+# input
+jq -L tests/fixtures/manual-modules 'import "basic" as b; "basic" | modulemeta'
+
+# jq
+{
+  "homepage": "https://example.invalid/basic",
+  "deps": [],
+  "defs": [
+    "value/0"
+  ]
+}
+
+# tq -o json
+{
+  "homepage": "https://example.invalid/basic",
+  "deps": [],
+  "defs": [
+    "value/0"
+  ]
+}
+
+# tq
+homepage: "https://example.invalid/basic"
+deps[0]:
+defs[1]: value/0
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 31 | 31 | 21 | -10 | -32.26% |
+| `cl100k_base` | 31 | 31 | 21 | -10 | -32.26% |
+
+#### manual.modules.modulemeta-deps
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/search-prefix 'import "meta/consumer" as c; "meta/consumer" | modulemeta'
+
+# jq
+{
+  "deps": [
+    {
+      "search": "..",
+      "as": "helper",
+      "is_data": false,
+      "relpath": "helper"
+    }
+  ],
+  "defs": [
+    "value/0"
+  ]
+}
+
+# tq -o json
+{
+  "deps": [
+    {
+      "search": "..",
+      "as": "helper",
+      "is_data": false,
+      "relpath": "helper"
+    }
+  ],
+  "defs": [
+    "value/0"
+  ]
+}
+
+# tq
+deps[1]{search,as,is_data,relpath}:
+  ..,helper,false,helper
+defs[1]: value/0
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 54 | 54 | 30 | -24 | -44.44% |
+| `cl100k_base` | 54 | 54 | 30 | -24 | -44.44% |
+
+#### manual.modules.path-dot
+
+```
+# input
+jq -L ./tests/fixtures/manual-modules 'import "basic" as b; b::value'
+
+# jq
+42
+
+# tq -o json
+42
+
+# tq
+42
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
+| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+
+#### manual.modules.path-dot-including
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/relative 'import "main" as m; m::value'
+
+# jq
+"including-file"
+
+# tq -o json
+"including-file"
+
+# tq
+including-file
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.path-origin
+
+```
+# input
+jq -L '$ORIGIN/../../../tests/fixtures/manual-modules/roots/origin' 'import "foo" as f; f::value'
+
+# jq
+"origin-path"
+
+# tq -o json
+"origin-path"
+
+# tq
+origin-path
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.path-tilde
+
+```
+# input
+jq -L '~/.jq' 'import "home" as h; h::value'
+
+# jq
+"tilde-home"
+
+# tq -o json
+"tilde-home"
+
+# tq
+tilde-home
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 5 | 5 | 4 | -1 | -20% |
+| `cl100k_base` | 5 | 5 | 4 | -1 | -20% |
+
+#### manual.modules.relative-directory
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/relative-only 'import "foo/bar" as f; f::value'
+
+# jq
+"relative-directory"
+
+# tq -o json
+"relative-directory"
+
+# tq
+relative-directory
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.relative-single
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/relative 'import "foo/bar" as f; f::value'
+
+# jq
+"relative-file"
+
+# tq -o json
+"relative-file"
+
+# tq
+relative-file
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 4 | 4 | 3 | -1 | -25% |
+| `cl100k_base` | 4 | 4 | 3 | -1 | -25% |
+
+#### manual.modules.repeated-component
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/explicit 'import "foo/foo" as f; f::value'
+
+# jq
+
+
+[stderr]
+jq: error: module names must not have equal consecutive components: foo/foo
+
+jq: 1 compile error
+
+# tq -o json
+
+
+[stderr]
+tq: query compilation failed: TQ-MODULE-PATH-001: module path "foo/foo" repeats a component
+
+# tq
+
+
+[stderr]
+tq: query compilation failed: TQ-MODULE-PATH-001: module path "foo/foo" repeats a component
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
+| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+
+#### manual.modules.search-terminator
+
+```
+# input
+jq -L tests/fixtures/manual-modules/roots/termination/first -L '' -L tests/fixtures/manual-modules/roots/termination/second 'import "consumer" as c; c::value'
+
+# jq
+
+
+[stderr]
+jq: error: module not found: foo
+
+jq: 1 compile error
+
+# tq -o json
+
+
+[stderr]
+tq: query compilation failed: TQ-MODULE-NOT-FOUND-001: module "foo" was not found in configured roots
+
+# tq
+
+
+[stderr]
+tq: query compilation failed: TQ-MODULE-NOT-FOUND-001: module "foo" was not found in configured roots
+```
+
+| Tokenizer | jq | tq -o json | tq | Diff | % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
+| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+
+<!-- tq-manual-compare:end -->
