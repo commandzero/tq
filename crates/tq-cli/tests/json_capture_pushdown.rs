@@ -184,7 +184,7 @@ fn empty_and_all_discarded_objects_keep_result_cardinality() {
     assert_eq!(empty_object, empty_object_dom);
     assert_eq!(empty_object.status, Ok(ExitStatus::Success));
     assert_eq!(empty_object.stdout, b"{}\n{}\n{}\n");
-    assert!(empty_object.stderr.is_empty());
+    assert_eq!(empty_object.stderr, [] as [u8; 0]);
 
     assert_same(
         &json_arguments(".groups[] | select(false)"),

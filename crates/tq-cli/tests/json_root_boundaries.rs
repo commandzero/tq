@@ -127,7 +127,7 @@ fn duplicate_object_keys_use_the_last_value_before_vm_evaluation() {
     let document = execute(&arguments, input, ExecutionOverride::Document);
 
     assert_eq!(document.status, Ok(ExitStatus::Success));
-    assert!(document.stdout.is_empty());
+    assert_eq!(document.stdout, [] as [u8; 0]);
     assert_eq!(automatic, document);
 }
 
@@ -281,7 +281,7 @@ fn automatic_json_preserves_scalar_and_array_root_type_errors() {
         let document = execute(&arguments, input, ExecutionOverride::Document);
 
         assert_eq!(document.status, Ok(ExitStatus::Runtime));
-        assert!(document.stdout.is_empty());
+        assert_eq!(document.stdout, [] as [u8; 0]);
         assert_eq!(automatic, document);
     }
 }
@@ -294,7 +294,7 @@ fn automatic_json_preserves_wrong_type_at_an_array_index_ancestor() {
     let document = execute(&arguments, input, ExecutionOverride::Document);
 
     assert_eq!(document.status, Ok(ExitStatus::Runtime));
-    assert!(document.stdout.is_empty());
+    assert_eq!(document.stdout, [] as [u8; 0]);
     assert_eq!(automatic, document);
 }
 
@@ -332,7 +332,7 @@ fn duplicate_ancestor_removes_selected_descendant_instead_of_reusing_old_value()
     let document = execute(&arguments, input, ExecutionOverride::Document);
 
     assert_eq!(document.status, Ok(ExitStatus::Runtime));
-    assert!(document.stdout.is_empty());
+    assert_eq!(document.stdout, [] as [u8; 0]);
     assert_eq!(automatic, document);
 }
 

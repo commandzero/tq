@@ -241,7 +241,7 @@ fn called_first_splits_is_pull_driven_and_split_copy_is_bounded() {
         },
     )
     .expect("adequate split quota permits discarded pieces");
-    assert!(adequate.is_empty());
+    assert_eq!(adequate, [] as [tq_core::Value; 0]);
 
     let tail_input = format!("a{}", "a".repeat(1_000));
     let tail_input = serde_json::to_string(&tail_input).expect("valid JSON input");

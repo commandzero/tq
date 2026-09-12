@@ -197,14 +197,14 @@ fn relational_composition_preserves_late_errors_after_partial_results() {
         r#"def contains(f): IN(f); contains((2, error("later")))"#,
         "1",
     );
-    assert!(values.is_empty());
+    assert_eq!(values, [] as [tq_core::Value; 0]);
     assert!(error.to_string().contains("later"));
 
     let (values, error) = evaluate_until_error(
         r#"def make(f; g): INDEX(f; g); make(.[]; error("later"))"#,
         "[1]",
     );
-    assert!(values.is_empty());
+    assert_eq!(values, [] as [tq_core::Value; 0]);
     assert!(error.to_string().contains("later"));
 }
 

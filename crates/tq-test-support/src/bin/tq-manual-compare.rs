@@ -138,7 +138,8 @@ fn write_reports(
     destination: &std::path::Path,
     report: &Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for path in [destination] {
+    {
+        let path = destination;
         if let Some(parent) = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())

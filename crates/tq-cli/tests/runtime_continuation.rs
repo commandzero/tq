@@ -67,7 +67,7 @@ fn recoverable_runtime_diagnostic_precedes_a_later_parse_diagnostic() {
     let output = run_with_deadline(&["-ijson", "-ojson", "-c", ". + 1"], b"\"x\"\n{\n");
 
     assert_eq!(output.status.code(), Some(5));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     let stderr = String::from_utf8(output.stderr).expect("UTF-8 diagnostics");
     let lines = stderr.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2, "unexpected diagnostics: {stderr}");

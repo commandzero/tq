@@ -14094,7 +14094,7 @@ impl Evaluator<'_> {
             return emit(Err(invalid("fromstream stream argument missing")));
         };
         let mut root = None;
-        let stream_completed = self.emit_node(*stream, input, environment, depth, &mut |event| {
+        self.emit_node(*stream, input, environment, depth, &mut |event| {
             let event = match event {
                 Ok(event) => event,
                 Err(error) => {
@@ -14135,11 +14135,7 @@ impl Evaluator<'_> {
                 None if path.len() == 1 => emit_stream_root(&mut root, emit),
                 None => true,
             }
-        });
-        if !stream_completed {
-            return false;
-        }
-        true
+        })
     }
 
     fn truncate_stream(
@@ -17269,7 +17265,10 @@ mod tests {
             json(run("fromstream(([[0],1],[[0]],[[1],2],[[1]]))", "null",)),
             ["[1]", "[null,2]"]
         );
-        assert!(json(run("fromstream(([[0,0],1],[[0,0]]))", "null")).is_empty());
+        assert_eq!(
+            json(run("fromstream(([[0,0],1],[[0,0]]))", "null")),
+            [] as [String; 0]
+        );
         let prior_then_error = json(run("fromstream((([[],1], error(\"later\"))))", "null"));
         assert_eq!(prior_then_error[0], "1");
         assert!(prior_then_error[1].contains("later"));
@@ -17287,7 +17286,10 @@ mod tests {
             )),
             ["true"]
         );
-        assert!(run("fromstream([[0],1])", "null").is_empty());
+        assert_eq!(
+            run("fromstream([[0],1])", "null"),
+            [] as [Result<Value, String>; 0]
+        );
     }
 
     #[test]
@@ -17778,7 +17780,10 @@ mod tests {
                 r#""https://x.test?q=%3C%26""#,
             ]
         );
-        assert!(run(r#"@uri "x=\(empty)""#, "null").is_empty());
+        assert_eq!(
+            run(r#"@uri "x=\(empty)""#, "null"),
+            [] as [Result<Value, String>; 0]
+        );
         assert_eq!(
             json(run("@csv, @tsv, @sh", r#"["a b",1,null,true]"#)),
             [

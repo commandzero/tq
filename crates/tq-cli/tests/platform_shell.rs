@@ -18,7 +18,7 @@ fn assert_success(output: &std::process::Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
     assert_eq!(output.stdout, b"\"bar\"\n");
 }
 

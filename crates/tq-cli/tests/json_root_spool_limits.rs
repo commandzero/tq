@@ -98,7 +98,7 @@ fn zero_disk_budget_rejects_a_forced_spill_without_publishing_the_root() {
     );
 
     assert_eq!(observation.status, Err(ExitStatus::Resource));
-    assert!(observation.stdout.is_empty());
+    assert_eq!(observation.stdout, [] as [u8; 0]);
 }
 
 #[test]

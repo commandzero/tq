@@ -242,8 +242,8 @@ fn missing_authoritative_sample_is_unavailable_not_a_passing_gate() {
         },
     );
     assert!(!gate.evaluated);
-    assert!(gate.failures.is_empty());
-    assert!(!gate.unavailable.is_empty());
+    assert_eq!(gate.failures, [] as [std::string::String; 0]);
+    assert_ne!(gate.unavailable, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn reference_tool_identity_changes_are_metadata_for_tq_self_regression() {
         },
     );
     assert!(gate.evaluated);
-    assert!(gate.failures.is_empty());
+    assert_eq!(gate.failures, [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn uncalibrated_native_samples_are_not_comparison_evidence() {
         },
     );
     assert!(!gate.evaluated);
-    assert!(gate.failures.is_empty());
+    assert_eq!(gate.failures, [] as [std::string::String; 0]);
     assert!(gate.unavailable.iter().any(|reason| {
         reason.contains("timing precision") || reason.contains("measurement protocol")
     }));
@@ -955,7 +955,7 @@ fn rss_limited_timed_rows_require_valid_separate_instrumented_evidence() {
     );
     let gate = evaluate_regression(&baseline, &missing, regression_thresholds());
     assert!(!gate.evaluated);
-    assert!(gate.failures.is_empty());
+    assert_eq!(gate.failures, [] as [std::string::String; 0]);
     assert!(
         gate.unavailable
             .iter()
@@ -970,7 +970,7 @@ fn rss_limited_timed_rows_require_valid_separate_instrumented_evidence() {
     assert!(error.contains("instrumented"), "{error}");
     let gate = evaluate_regression(&baseline, &invalid, regression_thresholds());
     assert!(!gate.evaluated);
-    assert!(gate.failures.is_empty());
+    assert_eq!(gate.failures, [] as [std::string::String; 0]);
     assert!(
         gate.unavailable
             .iter()
@@ -1011,7 +1011,7 @@ fn instrumented_contracts_remain_separate_and_must_match_across_reports() {
     );
     let gate = evaluate_regression(&baseline, &candidate, regression_thresholds());
     assert!(!gate.evaluated);
-    assert!(gate.failures.is_empty());
+    assert_eq!(gate.failures, [] as [std::string::String; 0]);
     assert!(
         gate.unavailable
             .iter()

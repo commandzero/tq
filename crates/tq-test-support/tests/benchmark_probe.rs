@@ -229,7 +229,7 @@ fn stdin_echo_preserves_bytes_and_eof() {
     let output = run(&["stdin-echo"], input);
     assert!(output.status.success());
     assert_eq!(output.stdout, input);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn blocked_input_does_not_consume_a_large_stdin_payload() {
         .expect("wait for blocked-input probe");
     writer.join().expect("join blocked-input writer");
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
 }
 
 #[test]

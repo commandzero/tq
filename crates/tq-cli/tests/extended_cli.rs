@@ -70,7 +70,7 @@ fn label_break_stops_upstream_iteration_after_the_first_result() {
     );
     assert_eq!(output.code, 0);
     assert_eq!(output.stdout, b"1\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -102,14 +102,14 @@ fn try_only_catches_an_explicitly_grouped_pipeline() {
     );
     assert_eq!(caught.code, 0);
     assert_eq!(caught.stdout, b"\"x\"\n");
-    assert!(caught.stderr.is_empty());
+    assert_eq!(caught.stderr, [] as [u8; 0]);
 
     let uncaught = tq(
         &["-ijson", "-ojson", "-c", "try .[] | error(\"x\")"],
         b"[1,2]",
     );
     assert_eq!(uncaught.code, 5);
-    assert!(uncaught.stdout.is_empty());
+    assert_eq!(uncaught.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&uncaught.stderr).contains("runtime error: x"));
 }
 
@@ -145,7 +145,7 @@ fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(output.stdout, expected.as_bytes());
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, [] as [u8; 0]);
     }
 
     let deep = format!("{}0{}", "[".repeat(64), "]".repeat(64));
@@ -169,7 +169,7 @@ fn recursive_builtins_and_labels_cover_batch_and_streaming_routes() {
     let projected = tq(&["-ijson", "-ojson", "-c", "--stream", "recurse"], b"1");
     assert_eq!(projected.code, 0);
     assert_eq!(projected.stdout, b"[[],1]\n[]\n1\n");
-    assert!(projected.stderr.is_empty());
+    assert_eq!(projected.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn process_cli_admits_environment_while_library_policy_stays_explicit() {
     );
     assert_eq!(output.code, 0);
     assert_eq!(output.stdout, format!("\"{SENTINEL}\"\n").as_bytes());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn input_line_number_is_input_context_while_ambient_platform_data_remains_denied
         if query == "input_line_number" {
             assert_eq!(result.unwrap(), tq_cli::ExitStatus::Success);
             assert_eq!(stdout, b"1\n");
-            assert!(stderr.is_empty());
+            assert_eq!(stderr, [] as [u8; 0]);
         } else {
             let status = match result {
                 Ok(status) => status,
@@ -969,7 +969,7 @@ fn run_tests_executes_stdin_test_files_and_reports_failures() {
         String::from_utf8_lossy(&passing.stderr)
     );
     assert!(String::from_utf8_lossy(&passing.stdout).contains("1 of 1 tests passed"));
-    assert!(passing.stderr.is_empty());
+    assert_eq!(passing.stderr, [] as [u8; 0]);
 
     let failing = tq(&["--run-tests"], b".\nnull\n1\n\n");
     assert_eq!(failing.code, 1);
@@ -1213,7 +1213,7 @@ fn sort_by_accepts_a_comma_generator_as_one_argument() {
         br#"[{"a":1,"b":1},{"a":1,"b":2}]
 "#
     );
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[cfg(unix)]

@@ -249,6 +249,6 @@ fn default_toon_preserves_jq_result_cardinality_and_prior_outputs() {
     for query in ["empty", "1,2"] {
         let result = tq(&["--unframed", query], b"null");
         assert_ne!(result.code, 0);
-        assert!(result.stdout.is_empty());
+        assert_eq!(result.stdout, [] as [u8; 0]);
     }
 }

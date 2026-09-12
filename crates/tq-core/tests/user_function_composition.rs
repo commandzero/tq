@@ -115,15 +115,14 @@ fn object_constructors_preserve_value_parameters_and_nested_captures() {
 
 #[test]
 fn empty_object_key_or_value_branches_do_not_emit_or_evaluate_later_fields() {
-    assert!(
+    assert_eq!(
         evaluate("def f: {(empty): error(\"unreached\")}; f", "null")
-            .expect("empty key branch evaluates")
-            .is_empty()
+            .expect("empty key branch evaluates"),
+        [] as [tq_core::Value; 0]
     );
-    assert!(
-        evaluate("def f: {a: empty}; f", "null")
-            .expect("empty value branch evaluates")
-            .is_empty()
+    assert_eq!(
+        evaluate("def f: {a: empty}; f", "null").expect("empty value branch evaluates"),
+        [] as [tq_core::Value; 0]
     );
 }
 

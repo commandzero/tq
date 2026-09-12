@@ -48,7 +48,10 @@ fn while_and_until_update_the_current_value() {
             .collect::<Vec<_>>(),
         ["3"]
     );
-    assert!(evaluate("while(false; . + 1)", "1").is_empty());
+    assert_eq!(
+        evaluate("while(false; . + 1)", "1"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(evaluate("until(true; . + 1)", "1")[0].to_string(), "1");
 }
 
@@ -67,8 +70,14 @@ fn recursive_utilities_preserve_empty_and_multiple_update_cardinality() {
 
 #[test]
 fn recursive_conditions_preserve_empty_and_multi_result_predicates() {
-    assert!(evaluate("while(empty; . + 1)", "0").is_empty());
-    assert!(evaluate("until(empty; . + 1)", "0").is_empty());
+    assert_eq!(
+        evaluate("while(empty; . + 1)", "0"),
+        [] as [tq_core::Value; 0]
+    );
+    assert_eq!(
+        evaluate("until(empty; . + 1)", "0"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(
         evaluate("limit(6; while((. < 2, false); . + 1))", "0")
             .iter()

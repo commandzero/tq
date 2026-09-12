@@ -63,8 +63,8 @@ fn validate_operations(
             ["managed", "limited", "kernel-only"].contains(&admission),
             "{name} has unknown admission {admission}"
         );
-        assert!(!row["family"].as_str().unwrap_or_default().is_empty());
-        assert!(!row["rationale"].as_str().unwrap_or_default().is_empty());
+        assert_ne!(row["family"].as_str().unwrap_or_default(), "");
+        assert_ne!(row["rationale"].as_str().unwrap_or_default(), "");
         let Some(evidence) = row["evidence_case"].as_str() else {
             assert_eq!(
                 admission, "kernel-only",
@@ -94,7 +94,7 @@ fn validate_operations(
             case.query.contains(fragment),
             "{name}: operation witness omits {fragment:?}"
         );
-        assert!(!witness["source"].as_str().unwrap_or_default().is_empty());
+        assert_ne!(witness["source"].as_str().unwrap_or_default(), "");
         assert!(witness["source_line"].as_u64().is_some());
     }
 }
@@ -135,8 +135,8 @@ fn validate_contexts(
             review_case_ids.contains(case_id),
             "{case_id} is not source-linked"
         );
-        assert!(!context["operation"].as_str().unwrap_or_default().is_empty());
-        assert!(!context["source"].as_str().unwrap_or_default().is_empty());
+        assert_ne!(context["operation"].as_str().unwrap_or_default(), "");
+        assert_ne!(context["source"].as_str().unwrap_or_default(), "");
         let fragment = context["operation_fragment"]
             .as_str()
             .expect("context operation fragment");
@@ -240,8 +240,8 @@ fn validate_arity_witnesses(
             .as_str()
             .expect("original evidence reference");
         let witness = row["witness"].as_str().expect("original witness");
-        assert!(!original_ref.is_empty());
-        assert!(!witness.is_empty());
+        assert_ne!(original_ref, "");
+        assert_ne!(witness, "");
         if let Some(original) = cases.get(original_ref) {
             assert_eq!(
                 case.fixture.format, original.fixture.format,
@@ -276,7 +276,7 @@ fn validate_arity_witnesses(
                 "{signature}: focused witness query was replaced"
             );
         }
-        assert!(!row["reason"].as_str().unwrap_or_default().is_empty());
+        assert_ne!(row["reason"].as_str().unwrap_or_default(), "");
     }
     by_signature
 }
@@ -287,7 +287,7 @@ fn validate_arity_groups(
     cases: &Cases<'_>,
     witness_by_signature: &BTreeMap<String, String>,
 ) -> (BTreeSet<String>, BTreeSet<String>) {
-    assert!(!groups.is_empty());
+    assert_ne!(groups, [] as [Value; 0]);
     let mut names = BTreeSet::new();
     let mut signatures = BTreeSet::new();
     for group in groups {
@@ -305,7 +305,7 @@ fn validate_arity_groups(
         for name in group["names"].as_array().expect("arity names") {
             assert!(names.insert(name.as_str().expect("arity function name").to_owned()));
         }
-        assert!(!group["rationale"].as_str().unwrap_or_default().is_empty());
+        assert_ne!(group["rationale"].as_str().unwrap_or_default(), "");
         for signature in group["signatures"].as_array().expect("arity signatures") {
             let text = signature["signature"].as_str().expect("signature");
             assert!(
@@ -324,12 +324,7 @@ fn validate_arity_groups(
                         .expect("signature admission")
                 )
             );
-            assert!(
-                !signature["rationale"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .is_empty()
-            );
+            assert_ne!(signature["rationale"].as_str().unwrap_or_default(), "");
         }
     }
     (names, signatures)
@@ -358,18 +353,8 @@ fn validate_documented_arities(
             "duplicate {signature}"
         );
         assert_eq!(requirement["status"], "semantic-witness", "{signature}");
-        assert!(
-            !requirement["evidence_ref"]
-                .as_str()
-                .unwrap_or_default()
-                .is_empty()
-        );
-        assert!(
-            !requirement["witness"]
-                .as_str()
-                .unwrap_or_default()
-                .is_empty()
-        );
+        assert_ne!(requirement["evidence_ref"].as_str().unwrap_or_default(), "");
+        assert_ne!(requirement["witness"].as_str().unwrap_or_default(), "");
         let name = signature.split('/').next().unwrap();
         assert!(
             grouped_names.contains(name),
@@ -594,12 +579,7 @@ fn composition_inventory_covers_operations_arities_and_contexts() {
     )
     .expect("composition inventory");
     assert_eq!(ledger["schema_version"], 1);
-    assert!(
-        !ledger["witness_policy"]
-            .as_str()
-            .unwrap_or_default()
-            .is_empty()
-    );
+    assert_ne!(ledger["witness_policy"].as_str().unwrap_or_default(), "");
 
     let catalog = load_catalog(&repo_root.join("tests/compatibility/cases")).expect("catalog");
     let cases = catalog

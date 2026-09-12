@@ -207,9 +207,12 @@ fn try_catch_preserves_typed_error_values_and_empty_results() {
         ),
         [Value::from_json(serde_json::json!({"inner": 42})).unwrap()]
     );
-    assert!(evaluate("try empty catch .", "null").is_empty());
-    assert!(evaluate("error(42)?", "null").is_empty());
-    assert!(evaluate("error(null)?", "null").is_empty());
+    assert_eq!(
+        evaluate("try empty catch .", "null"),
+        [] as [tq_core::Value; 0]
+    );
+    assert_eq!(evaluate("error(42)?", "null"), [] as [tq_core::Value; 0]);
+    assert_eq!(evaluate("error(null)?", "null"), [] as [tq_core::Value; 0]);
     assert!(matches!(
         evaluate_result(".foo? | error(\"later\")", r#"{"foo": 1}"#),
         Err(VmError::Raised {
@@ -302,7 +305,10 @@ fn conditionals_preserve_optional_else_and_condition_cardinality() {
             Value::string("yes"),
         ]
     );
-    assert!(evaluate("if empty then 1 else 2 end", "null").is_empty());
+    assert_eq!(
+        evaluate("if empty then 1 else 2 end", "null"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(
         evaluate("[{}, error(empty)]", "null"),
         [Value::array([
@@ -989,11 +995,18 @@ fn reduce_and_foreach_preserve_destructured_accumulator_scope() {
             Value::from_json(serde_json::json!({"index":3,"item":"baz"})).unwrap(),
         ]
     );
+}
+
+#[test]
+fn reduce_and_foreach_preserve_generator_cardinality() {
     assert_eq!(
         evaluate("reduce .[] as $x (0; empty)", "[1,2]"),
         [Value::Null]
     );
-    assert!(evaluate("foreach .[] as $x (0; empty)", "[1,2]").is_empty());
+    assert_eq!(
+        evaluate("foreach .[] as $x (0; empty)", "[1,2]"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(
         evaluate("reduce .[] as $x (0; (. + $x), (. + $x + 100))", "[1,2]",),
         [Value::from_json(serde_json::json!(203)).unwrap()]
@@ -1014,9 +1027,18 @@ fn reduce_and_foreach_preserve_destructured_accumulator_scope() {
             Value::from_json(serde_json::json!(10)).unwrap(),
         ]
     );
-    assert!(evaluate("foreach empty as $x (0,10; . + $x)", "[1,2]").is_empty());
-    assert!(evaluate("reduce .[] as $x (empty; . + $x)", "[1,2]").is_empty());
-    assert!(evaluate("foreach .[] as $x (empty; . + $x)", "[1,2]").is_empty());
+    assert_eq!(
+        evaluate("foreach empty as $x (0,10; . + $x)", "[1,2]"),
+        [] as [tq_core::Value; 0]
+    );
+    assert_eq!(
+        evaluate("reduce .[] as $x (empty; . + $x)", "[1,2]"),
+        [] as [tq_core::Value; 0]
+    );
+    assert_eq!(
+        evaluate("foreach .[] as $x (empty; . + $x)", "[1,2]"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(
         evaluate("reduce .[] as $x (empty,0; . + $x)", "[1,2]"),
         [Value::from_json(serde_json::json!(3)).unwrap()]
@@ -1056,8 +1078,14 @@ fn pull_consumers_match_manual_generator_examples() {
         evaluate("def take(f): isempty(f); take(empty)", "null"),
         [Value::Bool(true)]
     );
-    assert!(evaluate("def take(f): first(f); take(empty)", "null").is_empty());
-    assert!(evaluate("def take(f): last(f); take(empty)", "null").is_empty());
+    assert_eq!(
+        evaluate("def take(f): first(f); take(empty)", "null"),
+        [] as [tq_core::Value; 0]
+    );
+    assert_eq!(
+        evaluate("def take(f): last(f); take(empty)", "null"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(
         evaluate("[first(range(.)), last(range(.)), nth(5; range(.))]", "10",),
         [Value::array([
@@ -1173,9 +1201,9 @@ fn pull_consumer_arities_preserve_direct_index_and_empty_behavior() {
         let error = evaluate_result(query, "{}").expect_err("object index must fail");
         assert!(matches!(error, VmError::Runtime { message } if message.contains("index")));
     }
-    assert!(evaluate("first(empty)", "null").is_empty());
-    assert!(evaluate("last(empty)", "null").is_empty());
-    assert!(evaluate("nth(0; empty)", "null").is_empty());
+    assert_eq!(evaluate("first(empty)", "null"), [] as [tq_core::Value; 0]);
+    assert_eq!(evaluate("last(empty)", "null"), [] as [tq_core::Value; 0]);
+    assert_eq!(evaluate("nth(0; empty)", "null"), [] as [tq_core::Value; 0]);
     assert!(matches!(
         evaluate_result("nth(-1; .[])", "[1]"),
         Err(VmError::Runtime { message }) if message.contains("non-negative")

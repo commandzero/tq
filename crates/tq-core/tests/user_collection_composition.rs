@@ -244,7 +244,7 @@ fn grouped_materialization_uses_one_cumulative_quota() {
             resource: "output-bytes"
         }
     ));
-    assert!(
+    assert_eq!(
         evaluate_with_limits(
             query,
             input,
@@ -254,8 +254,8 @@ fn grouped_materialization_uses_one_cumulative_quota() {
                 ..VmLimits::default()
             },
         )
-        .expect("the same grouping fits a sufficient quota")
-        .is_empty()
+        .expect("the same grouping fits a sufficient quota"),
+        [] as [tq_core::Value; 0]
     );
 }
 

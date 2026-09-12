@@ -266,7 +266,7 @@ fn missing_null_scalar_and_duplicate_ancestors_keep_filter_semantics() {
         br#"{"features":[{"id":45,"properties":{"mag":3}}]}"#,
     );
     assert_eq!(type_error.status, Ok(ExitStatus::Runtime));
-    assert!(type_error.stdout.is_empty());
+    assert_eq!(type_error.stdout, [] as [u8; 0]);
     assert_eq!(
         type_error.stderr,
         b"tq: runtime error: test cannot be applied to number\n"

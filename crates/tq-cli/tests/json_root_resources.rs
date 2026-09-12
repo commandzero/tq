@@ -191,7 +191,7 @@ fn automatic_object_index_has_a_bounded_capacity_budget() {
         large_input.as_bytes(),
     );
     assert_eq!(large.status, Err(ExitStatus::Resource));
-    assert!(large.stdout.is_empty());
+    assert_eq!(large.stdout, [] as [u8; 0]);
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn json_lines_rejects_adjacent_roots_on_one_physical_line() {
 "#,
     );
     assert_eq!(invalid.status, Err(ExitStatus::Input));
-    assert!(invalid.stdout.is_empty());
+    assert_eq!(invalid.stdout, [] as [u8; 0]);
 
     let valid = execute(
         [

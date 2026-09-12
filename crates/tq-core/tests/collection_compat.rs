@@ -98,8 +98,14 @@ fn index_builtins_handle_empty_patterns_and_empty_or_error_generators() {
     assert_eq!(evaluate("indices([])", "[1,2,1]")[0].to_string(), "[]");
     assert_eq!(evaluate("index([])", "[1,2]")[0].to_string(), "null");
     assert_eq!(evaluate("rindex([])", "[1,2]")[0].to_string(), "null");
-    assert!(evaluate("empty | indices(1)", "[1]").is_empty());
-    assert!(evaluate("empty | contains(1)", "[1]").is_empty());
+    assert_eq!(
+        evaluate("empty | indices(1)", "[1]"),
+        [] as [tq_core::Value; 0]
+    );
+    assert_eq!(
+        evaluate("empty | contains(1)", "[1]"),
+        [] as [tq_core::Value; 0]
+    );
     let error = evaluate_with_limits("contains(error(\"later\"))", "[1]", VmLimits::default())
         .expect_err("argument errors remain observable");
     assert!(error.to_string().contains("later"));

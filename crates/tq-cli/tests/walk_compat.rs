@@ -26,7 +26,7 @@ fn walk_cli_collects_array_callback_outputs_without_cartesian_duplication() {
     let (status, stdout, stderr) = execute("walk((., .))", "[1]\n");
     assert_eq!(status.unwrap(), ExitStatus::Success);
     assert_eq!(stdout, b"[1,1]\n[1,1]\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn walk_cli_drops_empty_array_and_object_children() {
     );
     assert_eq!(status.unwrap(), ExitStatus::Success);
     assert_eq!(stdout, b"[{},\"x\"]\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn walk_cli_stops_at_the_first_child_error() {
         "[1,2]\n",
     );
     assert_eq!(status.unwrap(), ExitStatus::Runtime);
-    assert!(stdout.is_empty());
+    assert_eq!(stdout, [] as [u8; 0]);
     assert_eq!(stderr, b"tq: runtime error: first\n");
 }
 
@@ -56,5 +56,5 @@ fn optional_repeat_cli_suppresses_the_tail_error_after_first_result() {
     let (status, stdout, stderr) = execute("[repeat(.*2, error)?]", "1\n");
     assert_eq!(status.unwrap(), ExitStatus::Success);
     assert_eq!(stdout, b"[2]\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }

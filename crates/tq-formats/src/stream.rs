@@ -2478,7 +2478,7 @@ mod tests {
             result,
             Err(crate::FormatError::Resource("interrupted"))
         ));
-        assert!(sink.begun.is_empty());
+        assert_eq!(sink.begun, [] as [u64; 0]);
         assert_eq!(sink.aborted, 0);
     }
 

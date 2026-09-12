@@ -773,7 +773,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(pull_all(state).unwrap().is_empty());
+        assert_eq!(pull_all(state).unwrap(), [] as [Value; 0]);
 
         let state = start(
             "range",
@@ -784,7 +784,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(pull_all(state).unwrap().is_empty());
+        assert_eq!(pull_all(state).unwrap(), [] as [Value; 0]);
 
         let state = start(
             "range",
@@ -995,7 +995,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(pull_all(state).unwrap().is_empty());
+        assert_eq!(pull_all(state).unwrap(), [] as [Value; 0]);
 
         let state = start(
             "combinations",
@@ -1006,7 +1006,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(pull_all(state).unwrap().is_empty());
+        assert_eq!(pull_all(state).unwrap(), [] as [Value; 0]);
 
         let state = start("combinations", &Value::Null, &[], 1, VmLimits::default())
             .unwrap()

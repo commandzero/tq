@@ -69,7 +69,7 @@ fn composed_filter_parameter_consumes_each_shared_input_once() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"[11,2,3]\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn composed_regex_replacement_keeps_value_scope_and_all_results() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"[\"a!\",\"b!\"]\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn composed_halt_is_not_catchable_and_abandons_later_results() {
     );
     assert!(output.status.success());
     assert_eq!(output.stdout, b"\"before\"\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn first_composed_branch_skips_late_effects() {
     );
     assert!(output.status.success());
     assert_eq!(output.stdout, b"\"first\"\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[cfg(unix)]
@@ -239,5 +239,5 @@ fn live_first_composed_filter_emits_before_input_eof() {
         .read_to_end(&mut stderr)
         .expect("read live stderr");
     assert!(status.success());
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }

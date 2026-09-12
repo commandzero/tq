@@ -6648,7 +6648,7 @@ mod tests {
         };
         let mut observations = Vec::new();
         record_document_observations(&observation_options(false, false), &mut observations, item);
-        assert!(observations.is_empty());
+        assert_eq!(observations, [] as [tq_core::VmObservations; 0]);
 
         let mut observations = Vec::new();
         record_document_observations(&observation_options(true, false), &mut observations, item);
@@ -6906,7 +6906,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[2,3]\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -6943,12 +6943,12 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"1\n2\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
 
         let strict_path = permissive_json.to_str().unwrap();
         let (status, output, _) = execute(&[".", strict_path], b"");
         assert_eq!(status.unwrap_err().status(), ExitStatus::Input);
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
 
         let (status, output, error) = execute(
             &[
@@ -6964,7 +6964,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"3\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -6981,7 +6981,7 @@ mod tests {
         assert_eq!(failure.status(), ExitStatus::Unsupported);
         assert!(failure.to_string().contains("JSON5"));
         assert!(failure.to_string().contains("document-at-a-time"));
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
     }
 
     #[test]
@@ -7005,7 +7005,7 @@ mod tests {
                 .to_string()
                 .contains("unknown filter unknown_filter/0")
         );
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
     }
 
     #[test]
@@ -7023,7 +7023,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[1]\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -7048,7 +7048,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[{\"case_id\":\"x\",\"evidence\":{\"x\":1}}]\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -7076,7 +7076,7 @@ mod tests {
         );
         assert_eq!(status.unwrap(), ExitStatus::Success);
         assert_eq!(output, b"[{\"case_id\":\"x\",\"evidence\":1}]\n");
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -7242,7 +7242,7 @@ mod tests {
                 .status(),
             ExitStatus::Resource
         );
-        assert!(output.is_empty());
+        assert_eq!(output, [] as [u8; 0]);
 
         for arguments in [
             ["--input-format", "json", "--output-format", "json", "."],
@@ -7537,7 +7537,7 @@ mod tests {
         assert_eq!(status, ExitStatus::FalseOrNull);
         assert!(String::from_utf8_lossy(&output).contains("0 of 1 tests passed"));
         assert!(String::from_utf8_lossy(&output).contains("Expected \"present\""));
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -7571,8 +7571,8 @@ mod tests {
             let result = run_with_io(command, &mut input, &mut output, &mut error)
                 .expect_err("implicit module roots must be denied");
             assert!(result.to_string().contains("TQ-MODULE-ROOT-001"));
-            assert!(output.is_empty());
-            assert!(error.is_empty());
+            assert_eq!(output, [] as [u8; 0]);
+            assert_eq!(error, [] as [u8; 0]);
         }
     }
 
@@ -7788,7 +7788,7 @@ mod tests {
         );
         assert_eq!(output, b"4000\n");
         assert!(input.reads < 16, "source was read {} times", input.reads);
-        assert!(error.is_empty());
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[test]
@@ -8068,7 +8068,7 @@ mod tests {
         let error = status.unwrap_err();
         assert_eq!(error.status(), ExitStatus::Input);
         assert!(matches!(error, super::RunError::Input(_)));
-        assert!(stdout.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
         let stderr = String::from_utf8(stderr).unwrap();
         assert_eq!(stderr.matches("runtime error:").count(), 1);
         assert!(stderr.starts_with("tq: runtime error:"));
@@ -8085,8 +8085,8 @@ mod tests {
         let error = status.unwrap_err();
         assert_eq!(error.status(), ExitStatus::Runtime);
         assert!(matches!(error, super::RunError::Runtime(_)));
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
 
         let (status, stdout, stderr) = execute_with_override(
             &["--slurp", "-ijson", "-ojson", "-c", ". + 1"],
@@ -8096,8 +8096,8 @@ mod tests {
         let error = status.unwrap_err();
         assert_eq!(error.status(), ExitStatus::Runtime);
         assert!(matches!(error, super::RunError::Runtime(_)));
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
 
         let (status, stdout, stderr) = execute_with_override(
             &["-R", "--slurp", "-ojson", "-c", "error(\"single\")"],
@@ -8107,8 +8107,8 @@ mod tests {
         let error = status.unwrap_err();
         assert_eq!(error.status(), ExitStatus::Runtime);
         assert!(matches!(error, super::RunError::Runtime(_)));
-        assert!(stdout.is_empty());
-        assert!(stderr.is_empty());
+        assert_eq!(stdout, [] as [u8; 0]);
+        assert_eq!(stderr, [] as [u8; 0]);
     }
 
     #[test]
@@ -8122,7 +8122,7 @@ mod tests {
         let without_e =
             execute_with_override(&arguments, b"\"x\"\n2\n", ExecutionOverride::Document);
         assert_eq!(without_e.0.unwrap(), ExitStatus::Success);
-        assert!(without_e.1.is_empty());
+        assert_eq!(without_e.1, [] as [u8; 0]);
         assert_single_runtime_diagnostic(&without_e.2);
 
         let with_e_arguments = [
@@ -8138,7 +8138,7 @@ mod tests {
             ExecutionOverride::Document,
         );
         assert_eq!(with_e.0.unwrap(), ExitStatus::NoResult);
-        assert!(with_e.1.is_empty());
+        assert_eq!(with_e.1, [] as [u8; 0]);
         assert_single_runtime_diagnostic(&with_e.2);
     }
 

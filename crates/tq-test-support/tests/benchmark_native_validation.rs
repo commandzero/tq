@@ -428,8 +428,8 @@ fn worker_public_measurement_returns_fresh_worker_identity() {
         .measurement_protocol
         .worker
         .expect("worker identity in public measurement protocol");
-    assert!(!worker.executable_sha256.is_empty());
-    assert!(!worker.launch_protocol.is_empty());
+    assert_ne!(worker.executable_sha256, "");
+    assert_ne!(worker.launch_protocol, "");
     assert_eq!(worker.collector_source_sha256, collector_source_sha256());
     assert!(outcome.peak_rss_bytes.is_some_and(|rss| rss > 0));
 }

@@ -26,7 +26,7 @@ fn paths_filter_is_applied_in_the_cli_execution_path() {
     let (status, stdout, stderr) = execute("paths(. == 2)", "[1,2]\n");
     assert_eq!(status.unwrap(), ExitStatus::Success);
     assert_eq!(stdout, b"[1]\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }
 
 #[test]

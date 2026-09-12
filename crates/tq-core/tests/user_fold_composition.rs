@@ -110,10 +110,10 @@ fn user_foreach_extraction_has_its_own_scope_and_cardinality() {
             Value::from_json(serde_json::json!({"item": 2, "total": 3})).unwrap(),
         ]
     );
-    assert!(
+    assert_eq!(
         evaluate("def f: foreach .[] as $x (0; . + $x; empty); f", "[1,2]")
-            .expect("empty extraction evaluates")
-            .is_empty()
+            .expect("empty extraction evaluates"),
+        [] as [tq_core::Value; 0]
     );
 }
 

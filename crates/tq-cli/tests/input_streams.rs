@@ -80,7 +80,7 @@ fn managed_input_sources_apply_depth_limits_before_materialization() {
         b"0\n[[1]]\n",
     );
     assert_eq!(document.code, 5);
-    assert!(document.stdout.is_empty());
+    assert_eq!(document.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&document.stderr).contains("depth"));
 
     let sequence = tq(
@@ -99,7 +99,7 @@ fn managed_input_sources_apply_token_limits_before_materialization() {
         b"0\n123\n",
     );
     assert_eq!(document.code, 5);
-    assert!(document.stdout.is_empty());
+    assert_eq!(document.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&document.stderr).contains("token-bytes"));
 
     let sequence = tq(
@@ -186,7 +186,7 @@ fn input_eof_is_an_error() {
     let output = tq(&["-n", "-ijson", "-ojsonl", "input"], b"");
     assert_ne!(output.code, 0);
     assert!(String::from_utf8_lossy(&output.stderr).contains("break"));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
 }
 
 #[cfg(unix)]
@@ -222,7 +222,7 @@ fn finite_input_consumer_exits_before_stdin_eof() {
 
     let output = child.wait_with_output().expect("collect tq output");
     assert_eq!(output.stdout, b"1\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn stream_reduce_consumes_event_values_through_inputs() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"3\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -576,13 +576,13 @@ fn json_sequence_ignores_prefix_noise_and_reports_truncated_numbers() {
 
     let truncated = tq(&["--seq", "-c", "."], b"\x1e1");
     assert_eq!(truncated.code, 0);
-    assert!(truncated.stdout.is_empty());
+    assert_eq!(truncated.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&truncated.stderr).contains("truncated"));
 
     let empty = tq(&["--seq", "-c", "."], b"");
     assert_eq!(empty.code, 0);
-    assert!(empty.stdout.is_empty());
-    assert!(empty.stderr.is_empty());
+    assert_eq!(empty.stdout, [] as [u8; 0]);
+    assert_eq!(empty.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -661,7 +661,7 @@ fn json_sequence_cursor_returns_before_stdin_eof() {
 
     let output = child.wait_with_output().expect("collect tq output");
     assert_eq!(output.stdout, b"1\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -674,7 +674,7 @@ fn json_sequence_allows_multiple_values_inside_one_rs_record() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"\x1e1\n\x1e2\n\x1e3\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -687,7 +687,7 @@ fn json_sequence_whitespace_terminates_a_numeric_record() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"\x1e1\n\x1e4\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -731,7 +731,7 @@ fn json_sequence_rejects_non_json_whitespace_and_malformed_scalar_boundaries() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"1\n2\n4\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[cfg(unix)]
@@ -767,7 +767,7 @@ fn json_sequence_cursor_emits_complete_object_before_stdin_eof() {
 
     let output = child.wait_with_output().expect("collect tq output");
     assert_eq!(output.stdout, b"{\"a\":1}\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]

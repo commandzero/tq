@@ -59,7 +59,7 @@ fn halt_error_preserves_prior_results_and_uses_raw_stderr() {
     let output = run("1,halt_error(7)", b"null\n", &[]);
     assert_eq!(output.status, 7);
     assert_eq!(output.stdout, b"1\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn halt_error_status_conversion_matches_jq_for_edge_numbers() {
 fn halt_error_without_an_argument_terminates_with_the_input_payload() {
     let output = run("halt_error", b"\"payload\"\n", &[]);
     assert_eq!(output.status, 5);
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert_eq!(output.stderr, b"payload");
 }
 
@@ -99,7 +99,7 @@ fn halt_error_payload_matches_jq_for_null_and_non_null_inputs() {
     ] {
         let output = run("halt_error(7)", input, &[]);
         assert_eq!(output.status, 7);
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, [] as [u8; 0]);
         assert_eq!(output.stderr, stderr);
     }
 }
@@ -108,8 +108,8 @@ fn halt_error_payload_matches_jq_for_null_and_non_null_inputs() {
 fn halt_is_not_catchable_and_does_not_evaluate_later_branches() {
     let output = run("try halt catch \"caught\"", b"null\n", &[]);
     assert_eq!(output.status, 0);
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -230,7 +230,7 @@ fn unbuffered_stdout_reaches_a_live_consumer_before_stdin_eof() {
         .wait_with_output()
         .expect("collect live stdout process");
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[cfg(unix)]
@@ -239,7 +239,7 @@ fn unbuffered_empty_effect_does_not_wait_for_a_delivery_acknowledgement() {
     let output = run("\"\" | stderr", b"", &["-n", "--unbuffered"]);
     assert_eq!(output.status, 0);
     assert_eq!(output.stdout, b"\"\"\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[cfg(unix)]

@@ -540,11 +540,11 @@ mod tests {
         let mut owner = spawn_grouped("exit 0");
         wait_for_exit(&mut owner);
 
-        assert!(
+        assert_eq!(
             owner
                 .live_group_members()
-                .expect("inspect reserved process group")
-                .is_empty()
+                .expect("inspect reserved process group"),
+            [] as [u32; 0]
         );
         owner.finish().expect("resource-aware reap");
     }

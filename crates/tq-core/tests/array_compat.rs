@@ -55,7 +55,10 @@ fn combinations_cover_empty_and_cardinality_forms() {
     );
     assert_eq!(evaluate("combinations(0)", "[1,2]")[0].to_string(), "[]");
     assert_eq!(evaluate("combinations(-1)", "[1,2]")[0].to_string(), "[]");
-    assert!(evaluate("combinations", "[[1],[]]").is_empty());
+    assert_eq!(
+        evaluate("combinations", "[[1],[]]"),
+        [] as [tq_core::Value; 0]
+    );
     assert_eq!(
         evaluate("combinations((1,2))", "[1,2]")
             .iter()

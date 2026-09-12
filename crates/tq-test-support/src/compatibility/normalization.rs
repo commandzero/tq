@@ -463,7 +463,7 @@ mod tests {
         };
 
         let normalized = normalize_toon_sequence(&outcome).unwrap();
-        assert!(normalized.results.is_empty());
+        assert_eq!(normalized.results, [] as [serde_json::Value; 0]);
     }
 
     #[test]
@@ -512,7 +512,7 @@ mod tests {
         };
 
         let normalized = normalize_toon_document(&outcome).unwrap();
-        assert!(normalized.results.is_empty());
+        assert_eq!(normalized.results, [] as [serde_json::Value; 0]);
         assert!(normalized.error_class.is_some());
     }
 }

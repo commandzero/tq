@@ -234,7 +234,7 @@ mod tests {
             })
         );
         assert_eq!(charges, 0);
-        assert!(accumulator.into_paths().is_empty());
+        assert_eq!(accumulator.into_paths(), [] as [Path; 0]);
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
             accumulator.push(&components, limits, &mut failing_charge),
             Err(VmError::Resource { resource: "steps" })
         );
-        assert!(accumulator.paths.is_empty());
+        assert_eq!(accumulator.paths, [] as [Path; 0]);
         assert_eq!(accumulator.retained_lower_bound, 0);
 
         let mut successful_charge = || Ok(());

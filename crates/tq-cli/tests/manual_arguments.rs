@@ -38,7 +38,7 @@ fn malformed_json_arguments_are_usage_errors_before_input_is_opened() {
         .output()
         .expect("run tq");
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("must-not-open-missing-input"));
 }
 
@@ -292,7 +292,7 @@ fn invalid_slurpfile_fails_without_consuming_input() {
         .output()
         .expect("run tq");
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(!String::from_utf8_lossy(&output.stderr).contains("missing-input.json"));
 }
 
@@ -342,6 +342,6 @@ fn removed_argfile_form_is_rejected_before_input() {
         .output()
         .expect("run tq");
     assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&output.stderr).contains("unsupported option '--argfile'"));
 }

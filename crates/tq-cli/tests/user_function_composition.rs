@@ -40,7 +40,7 @@ fn cli_executes_composed_object_and_slice_filters() {
         String::from_utf8_lossy(&object.stderr)
     );
     assert_eq!(object.stdout, b"name: 7");
-    assert!(object.stderr.is_empty());
+    assert_eq!(object.stderr, [] as [u8; 0]);
 
     let slice = run("def f: .[0.5:2.5]; f", b"[0,1,2,3]\n");
     assert!(
@@ -49,5 +49,5 @@ fn cli_executes_composed_object_and_slice_filters() {
         String::from_utf8_lossy(&slice.stderr)
     );
     assert_eq!(slice.stdout, b"[3]: 0,1,2");
-    assert!(slice.stderr.is_empty());
+    assert_eq!(slice.stderr, [] as [u8; 0]);
 }

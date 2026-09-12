@@ -53,7 +53,7 @@ fn controlled_date_environment_clock_and_source_metadata_match_contracts() {
         br#"["controlled-environment","number"]
 "#
     );
-    assert!(environment.stderr.is_empty());
+    assert_eq!(environment.stderr, [] as [u8; 0]);
 
     let date = run(
         &[
@@ -67,7 +67,7 @@ fn controlled_date_environment_clock_and_source_metadata_match_contracts() {
     );
     assert!(date.status.success(), "{date:?}");
     assert_eq!(date.stdout, b"\"2020-01-02T03:04:05Z\"\n");
-    assert!(date.stderr.is_empty());
+    assert_eq!(date.stderr, [] as [u8; 0]);
 
     let directory = tempdir().expect("source metadata directory");
     let input = directory.path().join("source.json");
@@ -89,5 +89,5 @@ fn controlled_date_environment_clock_and_source_metadata_match_contracts() {
         source.stdout,
         format!("[{:?},1]\n", input.display()).as_bytes()
     );
-    assert!(source.stderr.is_empty());
+    assert_eq!(source.stderr, [] as [u8; 0]);
 }

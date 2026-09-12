@@ -26,5 +26,5 @@ fn scan_cli_keeps_single_capture_arrays() {
     let (status, stdout, stderr) = execute(r#"[scan("(.)")]"#, r#""ab""#);
     assert_eq!(status.unwrap(), ExitStatus::Success);
     assert_eq!(stdout, b"[[\"a\"],[\"b\"]]\n");
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }

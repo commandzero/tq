@@ -85,7 +85,7 @@ fn denied_capabilities_remain_catchable_and_optional() {
 
     let suppressed = evaluate("env?", Value::Null, BTreeMap::new())
         .expect("optional capability denial is suppressible");
-    assert!(suppressed.is_empty());
+    assert_eq!(suppressed, [] as [tq_core::Value; 0]);
 }
 
 #[test]

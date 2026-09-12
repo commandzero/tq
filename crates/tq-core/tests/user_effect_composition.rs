@@ -193,13 +193,13 @@ fn composed_effect_sink_delivers_debug_and_stderr_without_duplication() {
         br#"["DEBUG:","debug-value"]
 "#
     );
-    assert!(sink.drain().is_empty());
+    assert_eq!(sink.drain(), [] as [u8; 0]);
     assert_eq!(
         vm.next_result().expect("stderr composition evaluates"),
         Some(Value::string("stderr-value")),
     );
     assert_eq!(sink.drain(), b"stderr-value");
-    assert!(sink.drain().is_empty());
+    assert_eq!(sink.drain(), [] as [u8; 0]);
     assert_eq!(
         vm.next_result().expect("effect composition completes"),
         None
@@ -233,7 +233,7 @@ fn composed_debug_argument_evaluates_each_callback_value_once() {
 "#
     );
     assert_eq!(vm.next_result().expect("debug argument completes"), None);
-    assert!(sink.drain().is_empty());
+    assert_eq!(sink.drain(), [] as [u8; 0]);
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn composed_debug_streams_effects_before_a_late_callback_error() {
         empty_vm.next_result().expect("empty debug emits input"),
         Some(Value::Null)
     );
-    assert!(empty_sink.drain().is_empty());
+    assert_eq!(empty_sink.drain(), [] as [u8; 0]);
 }
 
 #[test]

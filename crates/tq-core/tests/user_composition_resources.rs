@@ -144,7 +144,7 @@ fn first_composed_callback_skips_late_error_and_effect() {
         vm.next_result().expect("first callback result"),
         Some(Value::from_json(serde_json::json!(1)).unwrap())
     );
-    assert!(vm.take_effects().is_empty());
+    assert_eq!(vm.take_effects(), [] as [u8; 0]);
     assert_eq!(vm.next_result().expect("first completes"), None);
 }
 

@@ -191,7 +191,10 @@ fn explicit_math_arguments_preserve_generator_cartesian_order() {
         evaluate_with_limits("pow(empty; error(\"later\"))", "null", VmLimits::default())
             .expect_err("later argument errors remain observable after an empty argument");
     assert!(later_error.to_string().contains("later"));
-    assert!(evaluate("pow(error(\"first\"); empty)", "null").is_empty());
+    assert_eq!(
+        evaluate("pow(error(\"first\"); empty)", "null"),
+        [] as [tq_core::Value; 0]
+    );
 }
 
 #[test]
