@@ -1,0 +1,15 @@
+schema_version: 2
+scope: supplemental math boundary witnesses
+source: jq-manual/math.md
+coverage_notes[0]:
+examples[10]{id,source_line,kind,query,input,case_id,disposition,reason}:
+  math.scalb-infinite-boundary,24,boundary,"[scalb(0; infinite), scalb(0; -infinite), scalb(infinite; -infinite), scalb(2; 0.5)]","null",manual.audit.math.scalb-infinite-boundary,new,"Covers zero, signed infinite exponent, infinite input, and fractional exponent projection."
+  math.abs-literal-boundary,117,boundary,"[-10, -1.1, -1e-1, 1.000] | map(abs)","null",manual.audit.math.abs-literal-boundary,new,"Covers source-defined abs semantics, including positive literal identity and negative runtime negation."
+  math.abs-underflow-boundary,117,boundary,"[., . < 0, abs] | map(tojson)","-1e-400",manual.audit.math.abs-underflow-boundary,new,"Covers exact decimal sign comparison before binary64 underflow and literal-preserving absolute value projection to 1E-400."
+  math.acos-ulp,22,platform-boundary,acos,"0.5",manual.audit.math.acos-ulp,new,"Executable witness for the measured macOS libm last-bit difference; retain as a failure until scoped target approval."
+  math.exp-ulp,22,platform-boundary,exp,"1",manual.audit.math.exp-ulp,new,"Executable witness for the measured macOS libm last-bit difference; retain as a failure until scoped target approval."
+  math.erfc-ulp,22,platform-boundary,erfc,"2",manual.audit.math.erfc-ulp,new,"Executable witness for the measured macOS libm last-bit difference; retain as a failure until scoped target approval."
+  math.tgamma-ulp,22,platform-boundary,tgamma,"0.5",manual.audit.math.tgamma-ulp,new,"Executable witness for the measured macOS libm last-bit difference; retain as a failure until scoped target approval."
+  math.integer-scale-boundary,24,platform-boundary,"[ldexp(2;2147483648),ldexp(2;2147483647),ldexp(2;-2147483649),ldexp(2;nan),scalbln(2;nan)]","null",manual.audit.math.integer-scale-boundary,new,"Records verified macOS and Linux target differences in C integer exponent conversion; keep informative until a target-scoped contract is approved."
+  math.signed-zero-boundary,24,boundary,"[[-2.5,-1.5,-0.5,-0,0,0.5,1.5,2.5] | map([.,round,rint,nearbyint,trunc,floor,ceil]), [copysign(0;-1),fmin(-0;0),fmax(-0;0),nextafter(0;-1),nextafter(0;1),remainder(5;2),remainder(7;2),fmod(-5;2)]]","null",manual.audit.math.signed-zero-boundary,new,"Executable jq boundary for negative-zero preservation, ties, and remainder sign; exact output remains a required campaign match."
+  math.fmin-fmax-runtime-zero,24,boundary,"[fmin(copysign(0;-1);0),fmin(0;copysign(0;-1)),fmax(copysign(0;-1);0),fmax(0;copysign(0;-1)),fmin(copysign(0;-1);copysign(0;-1)),fmax(copysign(0;-1);copysign(0;-1)),fmin(nan;copysign(0;-1)),fmin(copysign(0;-1);nan),fmax(nan;copysign(0;-1)),fmax(copysign(0;-1);nan),fmin(nan;2),fmax(2;nan)]","null",manual.audit.math.fmin-fmax-runtime-zero,new,"Executable jq boundary for runtime signed-zero selection, same-sign negative zero, and one-NaN fallback; exact sign bits remain observable even when JSON semantic values compare equal."

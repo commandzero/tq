@@ -1,0 +1,36 @@
+schema_version: 2
+section: io
+source: "https://jqlang.org/manual/#io"
+examples[9]{id,source_line,source_fence_line,kind,query,input,disposition,reason,case_id}:
+  io.input-fence,28,28,fenced-shell-snippet,"[., input]","1 2 3 4\n",new,Exact runnable shell pipeline after adapting echo's whitespace-separated JSON stream to stdin bytes.,manual.io.input
+  io.inputs-fence,38,38,fenced-shell-snippet,reduce inputs as $i (0; . + $i),"1 2 3\n",new,Exact runnable shell pipeline and reduction query.,manual.io.inputs
+  io.debug-example,58,58,fenced,"1 as $x | 2 | debug(\"Entering function foo with $x == \\($x)\", .) | (.+1)","null",new,Exact runnable debug(msgs) example; stderr bytes are compared.,manual.io.debug-example
+  io.witness.manual.io.debug,18,null,witness,debug,"42",covered,Executable witness for source passage io.output-prose.,manual.io.debug
+  io.witness.manual.io.stderr,18,null,witness,stderr,"\"hello\"",covered,Executable witness for source passage io.output-prose.,manual.io.stderr
+  io.witness.manual.io.input-null-input,26,null,witness,"[., input]","1 2\n",covered,Executable witness for source passage io.input-null-input.,manual.io.input-null-input
+  io.witness.manual.io.debug-msgs,54,null,witness,"debug(\"message\")","42",covered,Executable witness for source passage io.debug-msgs-definition.,manual.io.debug-msgs
+  io.witness.manual.io.input-filename,75,null,witness,input_filename,"null",covered,Executable witness for source passage io.input-filename-description.,manual.io.input-filename
+  io.witness.manual.io.input-line-number,77,null,witness,input_line_number,"1\n2\n",covered,Executable witness for source passage io.input-line-number-description.,manual.io.input-line-number
+coverage_summary:
+  total_entries: 14
+  new_example_entries: 9
+  covered_entries: 5
+  non_executable_entries: 0
+  fenced_blocks[5]: 28,38,48,58,64
+  fenced_blocks_with_case_ids[5]: 28,38,48,58,64
+harness_limitations[3]: The shell fences are executed through the direct-process harness; shell tokenization itself is not under test.,"The debug output format is documented as changeable; compare_stderr is enabled to expose current jq/tq behavior, including missing tq builtins.",input_filename uses stdin for a stable <stdin> result; file-path identity is inherently temporary-process dependent.
+coverage_notes[11]{id,source_line,kind,query,input,disposition,reason,evidence_case_id,source_fence_line}:
+  io.input-prose,16,prose-capability,"[., input]","1 2 3 4\n",covered,The prose names input as an I/O builtin; the exact following fence exercises it.,manual.io.input,null
+  io.inputs-prose,16,prose-capability,reduce inputs as $i (0; . + $i),"1 2 3\n",covered,The prose names inputs as an I/O builtin; the exact following fence exercises it.,manual.io.inputs,null
+  io.output-prose,18,prose-capability,null,null,covered,The prose distinguishes JSON stdout values from debug/stderr side effects; dedicated cases cover both paths.,null,null
+  io.input-null-input,26,prose-option,"[., input]","1 2\n",new,Representative executable witness for the documented -n recommendation when using input.,manual.io.input-null-input,null
+  io.debug-description,44,prose-capability,debug,"42",new,Representative input exercises the documented debug side effect and identity result.,manual.io.debug,null
+  io.debug-output-placeholder,48,fenced-output-placeholder,null,null,covered,The output block contains the non-executable <input-value> placeholder; the debug case exercises the concrete format.,manual.io.debug,48
+  io.debug-msgs-definition,54,prose-definition,"debug(\"message\")","42",new,Representative concrete message for the documented debug(msgs) definition.,manual.io.debug-msgs,null
+  io.debug-example-output,64,fenced-output,null,null,covered,Output-only debug lines are produced by the preceding exact query case.,manual.io.debug-example,64
+  io.stderr-description,71,prose-capability,stderr,"\"hello\"",new,"Exact stderr filter behavior is exercised with byte-level stderr comparison, including no trailing newline.",manual.io.stderr,null
+  io.input-filename-description,75,prose-capability,input_filename,"null",new,Standard-input fixture verifies the stable <stdin> source name; the process CLI admits platform metadata by default.,manual.io.input-filename,null
+  io.input-line-number-description,77,prose-capability,input_line_number,"1\n2\n",new,Two JSON values exercise line numbering; the process CLI admits platform metadata by default.,manual.io.input-line-number,null
+coverage_evidence[2]{note_id,case_id}:
+  io.output-prose,manual.io.debug
+  io.output-prose,manual.io.stderr
