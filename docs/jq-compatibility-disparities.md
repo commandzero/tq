@@ -47,8 +47,7 @@ The final release measurements must determine which approvals remain needed.
 Primary review accepted four specific numerical observations and one regex
 restriction on the verified macOS build. The Linux registry now contains nine
 renewed target-scoped observations, including the platform math and callback
-boundaries. The final Linux completion report is published at
-[Linux completion report](tests/comparison-x86-64-linux.md) records 896
+boundaries. [The final Linux completion report](tests/comparison-x86-64-linux.md) records 896
 exact results, nine reviewed observations, and zero unreviewed failures across
 the 905-case inventory. This is a completion-campaign checkpoint for the
 recorded x86_64 executable, not a claim that every remaining parity or release
