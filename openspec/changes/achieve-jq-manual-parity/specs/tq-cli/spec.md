@@ -13,7 +13,7 @@ TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and s
 
 #### Scenario: Compact JSON selector
 - **WHEN** `tq -c '.'` or `tq --compact-output '.'` processes structured input
-- **THEN** it emits jq-compatible compact JSON with jq record separators and no TOON framing
+- **THEN** it emits jq-compatible compact JSON with LF-separated records and no TOON framing
 
 #### Scenario: Compact option combinations
 - **WHEN** compact output is combined with `-o json`, `-r`, `-j`, `-S`, or a bundled option such as `-cr`
