@@ -1,6 +1,7 @@
 # Linux tq self-regression review
 
-Date: 2026-09-11  
+Date: 2026-09-11
+
 Scope: standard native Linux campaign, baseline `6e357f7` versus the candidate
 release-benchmark build. This is a same-host, same-OS tq self-regression
 review; it is not a cross-OS comparison.
