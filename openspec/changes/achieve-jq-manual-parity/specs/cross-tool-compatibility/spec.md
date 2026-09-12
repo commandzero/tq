@@ -58,7 +58,7 @@ Only documented output-format selection, explicit strict JSON selection for inpu
 
 #### Scenario: TOON remains the default
 - **WHEN** a native-output test omits output selection
-- **THEN** it verifies TOON framing and round-trip values separately and does not claim that plain tq has jq's default output representation
+- **THEN** it verifies LF-terminated canonical TOON values without an RS prefix and round-trip values separately and does not claim that plain tq has jq's default output representation
 
 #### Scenario: Version reports the wrong product
 - **WHEN** tq prints a jq version string instead of its own identity
