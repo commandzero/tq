@@ -131,22 +131,19 @@ retain reviewed baseline classifications from the older campaign. The raw
 campaign dump is not tracked, and this summary is not approval for the current
 implementation.
 
-The [current macOS report](tests/jq-manual/index.md)
-records 905 cases: 900 exact matches, five reviewed safe-library disparities,
-and zero unresolved failures. Compact JSON matches 871 of 876 applicable cases;
-TOON preserves all 876 JSON execution contracts. The frozen macOS tq executable
-is `target/release/tq-bind-final-AxfMRp`, SHA-256
-`e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c`.
-All original protected matches remain exact. These results are macOS evidence
-only and do not establish native Linux or Windows compatibility. The [final
-Linux report](tests/comparison-x86-64-linux.md)
-records 896 exact results and nine reviewed observations across the same
-905-case inventory, with zero unreviewed failures. Compact JSON matches 867 of
-876 applicable cases and TOON preserves all 876 JSON execution contracts. The
-Linux completion report is green for the recorded x86_64 executable; these
-campaign reports are checkpoints, not a claim that every remaining parity
-requirement or release gate is complete. Its target-scoped approvals are not
-waivers for other builds or platforms. Native
+The [published macOS checkpoint](tests/jq-manual/index.md) records 952 cases:
+949 matches and three recorded failures. Compact JSON matches 918 of 921
+applicable cases; TOON preserves all 921 JSON execution contracts. These are
+recorded checkpoint results, not a fresh campaign for the current tree. They
+are macOS evidence only and do not establish native Linux or Windows
+compatibility. The [final Linux report](tests/comparison-x86-64-linux.md)
+records 896 exact results and nine reviewed observations against an older,
+separate 905-case inventory, with zero unreviewed failures. Compact JSON
+matches 867 of 876 applicable cases and TOON preserves all 876 JSON execution
+contracts. The Linux completion report is green for the recorded x86_64
+executable; these campaign reports are checkpoints, not a claim that every
+remaining parity requirement or release gate is complete. Its target-scoped
+approvals are not waivers for other builds or platforms. Native
 Windows execution is explicitly deferred until a runner is available, with
 its tests retained and no passing claim.
 
