@@ -332,7 +332,7 @@ impl<W: Write> Encoder<W> {
         match value {
             Value::Null => "null".to_owned(),
             Value::Bool(value) => value.to_string(),
-            Value::Number(value) => value.to_string(),
+            Value::Number(value) => value.canonical_numeric(),
             Value::String(value) => {
                 if safe_string(value, self.config.delimiter, context) {
                     value.to_string()
@@ -438,10 +438,12 @@ fn safe_string(value: &str, delimiter: Delimiter, context: ScalarContext) -> boo
 }
 
 fn looks_like_number(value: &str) -> bool {
-    tq_core::Number::parse(value).is_ok()
-        || value
-            .strip_prefix('0')
-            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit()))
+    !matches!(
+        tq_core::Number::parse(value),
+        Err(tq_core::NumberError::Invalid)
+    ) || value
+        .strip_prefix('0')
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn quote(value: &str) -> String {

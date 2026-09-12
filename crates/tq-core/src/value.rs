@@ -26,6 +26,18 @@ enum ObjectStorage {
     Large(IndexMap<Arc<str>, Value>),
 }
 
+/// Error returned when an object reservation cannot be satisfied.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObjectReserveError;
+
+impl fmt::Display for ObjectReserveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("object reservation failed")
+    }
+}
+
+impl std::error::Error for ObjectReserveError {}
+
 impl Object {
     /// Creates an empty object.
     #[must_use]
@@ -45,6 +57,49 @@ impl Object {
                 storage: ObjectStorage::Large(IndexMap::with_capacity(capacity)),
             }
         }
+    }
+
+    /// Reserves space for at least `additional` more members.
+    ///
+    /// The compact representation remains inline until it exceeds its fixed
+    /// capacity. Promotion allocates and reserves the large representation
+    /// before replacing the inline storage, so an allocation failure leaves
+    /// this object unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObjectReserveError`] when the requested capacity overflows or
+    /// cannot be allocated.
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), ObjectReserveError> {
+        let needed = self
+            .len()
+            .checked_add(additional)
+            .ok_or(ObjectReserveError)?;
+        if needed <= INLINE_OBJECT_CAPACITY {
+            return Ok(());
+        }
+
+        if matches!(&self.storage, ObjectStorage::Small(_)) {
+            let mut large = IndexMap::new();
+            large.try_reserve(needed).map_err(|_| ObjectReserveError)?;
+            let ObjectStorage::Small(values) =
+                std::mem::replace(&mut self.storage, ObjectStorage::Large(large))
+            else {
+                unreachable!("small object selected above")
+            };
+            let ObjectStorage::Large(large) = &mut self.storage else {
+                unreachable!("object was promoted")
+            };
+            large.extend(values);
+            return Ok(());
+        }
+
+        let ObjectStorage::Large(values) = &mut self.storage else {
+            unreachable!("large object selected above")
+        };
+        values
+            .try_reserve(additional)
+            .map_err(|_| ObjectReserveError)
     }
 
     /// Returns the number of members.
@@ -90,6 +145,28 @@ impl Object {
                 .find(|(candidate, _)| candidate.borrow() == key)
                 .map(|(_, value)| value),
             ObjectStorage::Large(values) => values.get_mut(key),
+        }
+    }
+
+    /// Retains members for which `keep` returns true, allowing values to be
+    /// edited before the retention decision.
+    pub fn retain(&mut self, mut keep: impl FnMut(&Arc<str>, &mut Value) -> bool) {
+        match &mut self.storage {
+            ObjectStorage::Small(values) => {
+                let mut index = 0;
+                while index < values.len() {
+                    let retained = {
+                        let (key, value) = &mut values[index];
+                        keep(key, value)
+                    };
+                    if retained {
+                        index += 1;
+                    } else {
+                        values.remove(index);
+                    }
+                }
+            }
+            ObjectStorage::Large(values) => values.retain(|key, value| keep(key, value)),
         }
     }
 
@@ -286,7 +363,7 @@ pub enum Value {
     Null,
     /// Boolean scalar.
     Bool(bool),
-    /// Hybrid finite number.
+    /// Hybrid number, including computed non-finite values.
     Number(Number),
     /// Shared immutable UTF-8 string.
     String(Arc<str>),
@@ -372,7 +449,11 @@ impl Value {
         })
     }
 
-    /// Converts to serde JSON, retaining exact numeric tokens and encounter order.
+    /// Converts to serde JSON with numeric projection and encounter order.
+    ///
+    /// Finite numeric values retain their precision, but serde JSON may
+    /// normalize their spelling. Serialize this value directly when jq-style
+    /// literal spelling (such as uppercase exponent notation) must be retained.
     ///
     /// # Errors
     ///
@@ -381,6 +462,16 @@ impl Value {
         Ok(match self {
             Self::Null => serde_json::Value::Null,
             Self::Bool(value) => serde_json::Value::Bool(*value),
+            Self::Number(value) if value.as_f64().is_nan() => serde_json::Value::Null,
+            Self::Number(value)
+                if value.exact_literal().is_none()
+                    && value.as_f64() == 0.0
+                    && value.as_f64().is_sign_negative() =>
+            {
+                serde_json::Value::Number(
+                    serde_json::Number::from_f64(-0.0).ok_or(NumberError::Invalid)?,
+                )
+            }
             Self::Number(value) => serde_json::Value::Number(
                 value
                     .to_string()
@@ -641,7 +732,7 @@ mod tests {
 
     use indexmap::IndexMap;
 
-    use super::{Object, ObjectStorage, Value, ValueKind};
+    use super::{INLINE_OBJECT_CAPACITY, Object, ObjectStorage, Value, ValueKind};
     use crate::Number;
 
     #[test]
@@ -681,6 +772,106 @@ mod tests {
             object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
             ["a", "b", "c", "d"]
         );
+    }
+
+    #[test]
+    fn fallible_reservation_promotes_and_retains_replacement_order() {
+        let mut object = Object::new();
+        for key in ["a", "b", "c"] {
+            object.insert(Arc::from(key), Value::Null);
+        }
+
+        object
+            .try_reserve(1)
+            .expect("promotion reservation succeeds");
+        assert!(matches!(&object.storage, ObjectStorage::Large(_)));
+        assert_eq!(
+            object.insert(Arc::from("b"), Value::Bool(true)),
+            Some(Value::Null)
+        );
+        object.insert(Arc::from("d"), Value::Bool(false));
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(object["b"], Value::Bool(true));
+    }
+
+    #[test]
+    fn inline_reservation_does_not_spill_small_storage() {
+        let mut object = Object::new();
+
+        object
+            .try_reserve(INLINE_OBJECT_CAPACITY)
+            .expect("inline reservation succeeds");
+        assert!(matches!(&object.storage, ObjectStorage::Small(_)));
+        object.insert(Arc::from("a"), Value::Null);
+        assert!(matches!(&object.storage, ObjectStorage::Small(_)));
+    }
+
+    #[test]
+    fn retain_edits_values_and_preserves_order_for_both_representations() {
+        for (mut object, expected) in [
+            (
+                Object::from_iter([
+                    (Arc::from("a"), Value::Null),
+                    (Arc::from("b"), Value::Null),
+                    (Arc::from("c"), Value::Null),
+                ]),
+                vec!["b", "c"],
+            ),
+            (
+                Object::from_iter([
+                    (Arc::from("a"), Value::Null),
+                    (Arc::from("b"), Value::Null),
+                    (Arc::from("c"), Value::Null),
+                    (Arc::from("d"), Value::Null),
+                ]),
+                vec!["b", "c", "d"],
+            ),
+        ] {
+            object.retain(|key, value| {
+                if key.as_ref() == "b" {
+                    *value = Value::Bool(true);
+                }
+                key.as_ref() != "a"
+            });
+            assert_eq!(
+                object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(object["b"], Value::Bool(true));
+        }
+    }
+
+    #[test]
+    fn failed_reservation_leaves_inline_object_unchanged() {
+        let mut object = Object::new();
+        for key in ["a", "b", "c"] {
+            object.insert(Arc::from(key), Value::Null);
+        }
+        let before = object.clone();
+
+        assert!(object.try_reserve(usize::MAX).is_err());
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<_>>(),
+            before.keys().map(AsRef::as_ref).collect::<Vec<_>>()
+        );
+        for key in ["a", "b", "c"] {
+            assert_eq!(object.get(key), before.get(key));
+        }
+        assert!(matches!(&object.storage, ObjectStorage::Small(_)));
+    }
+
+    #[test]
+    fn failed_reservation_leaves_large_object_unchanged() {
+        let mut object = Object::with_capacity(INLINE_OBJECT_CAPACITY + 1);
+        object.insert(Arc::from("a"), Value::Null);
+
+        assert!(object.try_reserve(usize::MAX).is_err());
+        assert_eq!(object.len(), 1);
+        assert_eq!(object.get("a"), Some(&Value::Null));
+        assert!(matches!(&object.storage, ObjectStorage::Large(_)));
     }
 
     #[test]
@@ -797,7 +988,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&value).unwrap(),
-            r#"{"z":9007199254740993,"a":[1e+1000000,0,"x"]}"#
+            r#"{"z":9007199254740993,"a":[1E+1000000,-0.0,"x"]}"#
         );
 
         let oversized = "1".repeat(4097);

@@ -22,12 +22,13 @@ fn sequence_evaluation_publishes_generator_results_before_runtime_failure() {
         ])
         .unwrap();
         let mut output = Vec::new();
-        let error =
-            tq_cli::run_with_io(command, &mut input.as_bytes(), &mut output, &mut Vec::new())
-                .unwrap_err();
-        assert_eq!(output, b"1\n11\n", "{format}");
-        assert_eq!(error.status(), tq_cli::ExitStatus::Runtime);
-        assert!(error.to_string().contains("stop"));
+        let mut errors = Vec::new();
+        let status =
+            tq_cli::run_with_io(command, &mut input.as_bytes(), &mut output, &mut errors).unwrap();
+        assert_eq!(output, b"1\n11\n2\n12\n", "{format}");
+        assert_eq!(status, tq_cli::ExitStatus::Runtime, "{format}");
+        let errors = String::from_utf8(errors).unwrap();
+        assert_eq!(errors.matches("stop").count(), 2, "{format}: {errors}");
     }
 }
 
@@ -145,8 +146,8 @@ fn proxy_stream_inputs_accepts_a_detected_empty_json_sequence() {
         tq_cli::run_with_io(command, &mut b"\x1e".as_slice(), &mut output, &mut errors).unwrap(),
         tq_cli::ExitStatus::Success
     );
-    assert!(output.is_empty());
-    assert!(errors.is_empty());
+    assert_eq!(output, [] as [u8; 0]);
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -165,8 +166,35 @@ fn json_sequence_input_stream_records_share_the_query_cursor() {
         let mut errors = Vec::new();
         tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap();
         assert_eq!(output, expected.as_bytes(), "{query}");
-        assert!(errors.is_empty());
+        assert_eq!(errors, [] as [u8; 0]);
     }
+}
+
+#[test]
+fn json_sequence_input_stream_cursor_consumes_files_in_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first.json-seq");
+    let second = directory.path().join("second.json-seq");
+    std::fs::write(&first, b"\x1e[1]\n").unwrap();
+    std::fs::write(&second, b"\x1e[2]\n").unwrap();
+    let command = parse_args([
+        "-n",
+        "--stream",
+        "-i",
+        "json-seq",
+        "-o",
+        "json",
+        "-c",
+        "[inputs]",
+        first.to_str().unwrap(),
+        second.to_str().unwrap(),
+    ])
+    .unwrap();
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    tq_cli::run_with_io(command, &mut b"".as_slice(), &mut output, &mut errors).unwrap();
+    assert_eq!(output, b"[[[0],1],[[0]],[[0],2],[[0]]]\n");
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -183,7 +211,7 @@ fn json_sequence_input_stream_errors_reset_paths_between_recoverable_failures() 
     )
     .unwrap();
     assert_eq!(output, b"[[0],1]\n[\"Invalid numeric literal at line 1, column 11 (need RS to resync)\",[1]]\n[\"Invalid numeric literal at line 1, column 13 (need RS to resync)\",[]]\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -258,7 +286,7 @@ fn delimited_output_preserves_header_across_sources_and_proxy_bytes_with_one_bud
             assert!(output.starts_with(b"a,b\n1,2\ninvalid\n"));
             assert!(output.len() <= 19);
         }
-        assert!(errors.is_empty());
+        assert_eq!(errors, [] as [u8; 0]);
     }
 }
 
@@ -283,7 +311,7 @@ fn json_sequence_input_stream_slurp_is_one_input_in_the_shared_cursor() {
         )
         .unwrap();
         assert_eq!(output, expected.as_bytes(), "{query}");
-        assert!(errors.is_empty());
+        assert_eq!(errors, [] as [u8; 0]);
     }
 }
 
@@ -310,7 +338,7 @@ fn json_sequence_input_stream_errors_are_values_on_the_remaining_cursor() {
     )
     .unwrap();
     assert_eq!(output, b"[[[0],1],[\"Invalid numeric literal at line 1, column 11 (need RS to resync)\",[1]],[[],2]]\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -331,13 +359,45 @@ fn stream_projection_remains_available_with_proxy_and_remaining_input() {
 }
 
 #[test]
+fn proxy_stream_slurp_preserves_invalid_json_source_bytes() {
+    let command = parse_args(["-x", "-s", "--stream", "-i", "json", "."]).unwrap();
+    let input = b"{\"unfinished\":\xff\n";
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let status =
+        tq_cli::run_with_io(command, &mut input.as_slice(), &mut output, &mut errors).unwrap();
+    assert_eq!(status, tq_cli::ExitStatus::Success);
+    assert_eq!(output, input);
+    assert_eq!(errors, [] as [u8; 0]);
+}
+
+#[test]
 fn json_sequence_input_frame_limit_is_fatal_even_with_a_later_separator() {
     let command = parse_args(["--seq", "--max-frame-bytes", "3", "."]).unwrap();
     let mut input = b"\x1e[1,2]\n\x1e3\n".as_slice();
     let mut output = Vec::new();
     let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut Vec::new()).unwrap_err();
     assert_eq!(error.status(), tq_cli::ExitStatus::Resource);
-    assert!(output.is_empty());
+    assert_eq!(output, [] as [u8; 0]);
+}
+
+#[test]
+fn json_sequence_stream_enforces_input_byte_limit() {
+    let command = parse_args([
+        "--stream",
+        "--seq",
+        "-o",
+        "json",
+        "--max-input-bytes",
+        "3",
+        ".",
+    ])
+    .unwrap();
+    let mut input = b"\x1e[1]\n".as_slice();
+    let mut output = Vec::new();
+    let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut Vec::new()).unwrap_err();
+    assert_eq!(error.status(), tq_cli::ExitStatus::Resource);
+    assert_eq!(output, [] as [u8; 0]);
 }
 
 #[test]
@@ -395,19 +455,48 @@ fn strict_conversion_rejects_missing_key_normalization_after_prior_rows() {
 }
 
 #[test]
-fn seq_selects_json_sequences_and_rejects_conflicts_in_either_order() {
+fn seq_defaults_to_toon_and_accepts_json_output_in_either_order() {
     let Command::Run(options) = parse_args(["--seq", "."]).unwrap() else {
         panic!("run")
     };
     assert_eq!(options.input_format, tq_formats::InputFormat::JsonSequence);
-    assert_eq!(options.output_format, OutputFormat::JsonSequence);
+    assert_eq!(options.output_format, OutputFormat::Toon);
+    assert_eq!(options.framing, ToonFraming::Sequence);
+    assert!(options.json_sequence);
+
     for args in [
         vec!["--seq", "-i", "json"],
         vec!["-i", "json", "--seq"],
+        vec!["--seq", "-i", "json", "-o", "toon"],
+        vec!["-i", "json", "--seq", "-o", "toon"],
         vec!["--seq", "-o", "toon-seq"],
         vec!["-o", "toon-seq", "--seq"],
+        vec!["--seq", "-o", "json"],
+        vec!["-o", "json", "--seq"],
+        vec!["--seq", "-c"],
+    ] {
+        let Command::Run(options) = parse_args(args.clone()).unwrap() else {
+            panic!("run: {args:?}")
+        };
+        assert_eq!(
+            options.input_format,
+            tq_formats::InputFormat::JsonSequence,
+            "{args:?}"
+        );
+        assert_eq!(options.framing, ToonFraming::Sequence, "{args:?}");
+        assert!(options.json_sequence, "{args:?}");
+    }
+    for input in ["csv", "tsv", "yaml"] {
+        assert!(
+            parse_args(["--seq", "-i", input]).is_err(),
+            "--seq should reject {input} input"
+        );
+    }
+    for args in [
         vec!["--seq", "--toon-sequence-input"],
+        vec!["--toon-sequence-input", "--seq"],
         vec!["--unframed", "--seq"],
+        vec!["--seq", "--unframed"],
     ] {
         assert!(parse_args(args.clone()).is_err(), "{args:?}");
     }
@@ -417,7 +506,7 @@ fn seq_selects_json_sequences_and_rejects_conflicts_in_either_order() {
     let mut errors = Vec::new();
     tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap();
     assert_eq!(output, b"\x1e{\"a\":1}\n\x1e{\"b\":2}\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -443,7 +532,7 @@ fn json_sequence_output_uses_json_formatting_controls() {
     let mut errors = Vec::new();
     tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap();
     assert_eq!(output, b"\x1e{\n \"a\": \"\\u00e9\"\n}\n");
-    assert!(errors.is_empty());
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -476,7 +565,7 @@ fn null_input_runs_once_but_leaves_documents_available_to_input_functions() {
             tq_cli::ExitStatus::Success
         );
         assert_eq!(String::from_utf8(output).unwrap(), expected, "{query}");
-        assert!(errors.is_empty());
+        assert_eq!(errors, [] as [u8; 0]);
     }
 }
 
@@ -491,7 +580,7 @@ fn event_input_resets_paths_for_each_json_document() {
         String::from_utf8(output).unwrap(),
         "[[\"a\"],1]\n[[\"a\"]]\n[[\"b\"],2]\n[[\"b\"]]\n"
     );
-    assert!(errors.is_empty());
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -505,7 +594,7 @@ fn event_input_retains_jq_error_value_mapping() {
         String::from_utf8(output).unwrap(),
         "[[0],1]\n[\"Invalid numeric literal at line 1, column 8\",[1]]\n"
     );
-    assert!(errors.is_empty());
+    assert_eq!(errors, [] as [u8; 0]);
 }
 
 #[test]
@@ -534,7 +623,7 @@ fn json_sequence_input_functions_raise_parse_failures() {
     let mut errors = Vec::new();
     let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap_err();
     assert_eq!(error.status(), tq_cli::ExitStatus::Runtime);
-    assert!(output.is_empty());
+    assert_eq!(output, [] as [u8; 0]);
     assert!(
         errors.is_empty(),
         "query errors must not also emit recovery warnings"
@@ -627,7 +716,7 @@ fn json_sequence_input_keeps_prior_warnings_before_a_fatal_resource_error() {
     let mut errors = Vec::new();
     let error = tq_cli::run_with_io(command, &mut input, &mut output, &mut errors).unwrap_err();
     assert_eq!(error.status(), tq_cli::ExitStatus::Resource);
-    assert!(output.is_empty());
+    assert_eq!(output, [] as [u8; 0]);
     assert!(
         String::from_utf8(errors)
             .unwrap()

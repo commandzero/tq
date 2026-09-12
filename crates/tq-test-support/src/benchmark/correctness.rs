@@ -8,13 +8,25 @@ use super::OutputContractKind;
 use crate::compatibility::{ErrorClass, ProcessStatus};
 
 /// Bounded identity of an ordered structured-result sequence.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SemanticDigest {
     /// Number of result values included in the digest.
     pub result_count: u64,
     /// SHA-256 over canonical JSON values separated as JSON Text Sequences.
     pub sha256: [u8; 32],
+    /// Per-result hashes retained only for file-backed TOON boundary checks.
+    pub(crate) value_digests: Option<Vec<[u8; 32]>>,
+    /// Canonical LF line counts used as a linear-time TOON boundary hint.
+    pub(crate) toon_line_counts: Option<Vec<u64>>,
 }
+
+impl PartialEq for SemanticDigest {
+    fn eq(&self, other: &Self) -> bool {
+        self.result_count == other.result_count && self.sha256 == other.sha256
+    }
+}
+
+impl Eq for SemanticDigest {}
 
 /// Contract-specific correctness payload.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,7 +131,7 @@ pub fn correctness_gate(
 pub fn semantic_digest<'a>(
     values: impl IntoIterator<Item = &'a Value>,
 ) -> Result<SemanticDigest, serde_json::Error> {
-    let mut digest = SemanticDigester::default();
+    let mut digest = SemanticDigester::with_value_witness();
     for value in values {
         digest.push(value)?;
     }
@@ -131,13 +143,29 @@ pub fn semantic_digest<'a>(
 pub(crate) struct SemanticDigester {
     hasher: Sha256,
     result_count: u64,
+    value_digests: Option<Vec<[u8; 32]>>,
+    toon_line_counts: Option<Vec<u64>>,
 }
 
 impl SemanticDigester {
+    pub(crate) fn with_value_witness() -> Self {
+        Self {
+            value_digests: Some(Vec::new()),
+            toon_line_counts: Some(Vec::new()),
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn push(&mut self, value: &Value) -> Result<(), serde_json::Error> {
         self.hasher.update([0x1e]);
         serde_json::to_writer(HashWriter(&mut self.hasher), &CanonicalValue(value))?;
         self.hasher.update(b"\n");
+        if let Some(value_digests) = &mut self.value_digests {
+            value_digests.push(value_digest(value)?);
+        }
+        if let Some(line_counts) = &mut self.toon_line_counts {
+            line_counts.push(toon_line_count(value)?);
+        }
         self.result_count = self.result_count.saturating_add(1);
         Ok(())
     }
@@ -148,8 +176,23 @@ impl SemanticDigester {
         SemanticDigest {
             result_count: self.result_count,
             sha256: self.hasher.finalize().into(),
+            value_digests: self.value_digests,
+            toon_line_counts: self.toon_line_counts,
         }
     }
+}
+
+pub(crate) fn value_digest(value: &Value) -> Result<[u8; 32], serde_json::Error> {
+    let mut hasher = Sha256::new();
+    serde_json::to_writer(HashWriter(&mut hasher), &CanonicalValue(value))?;
+    Ok(hasher.finalize().into())
+}
+
+fn toon_line_count(value: &Value) -> Result<u64, serde_json::Error> {
+    let value = tq_core::Value::from_json(value.clone())
+        .map_err(|error| serde_json::Error::io(std::io::Error::other(error.to_string())))?;
+    let encoded = tq_toon::encode(&value, tq_toon::WriterConfig::default());
+    Ok(encoded.bytes().filter(|byte| *byte == b'\n').count() as u64 + 1)
 }
 
 struct HashWriter<'a>(&'a mut Sha256);

@@ -442,6 +442,27 @@ fn json_sequence_input_keeps_documents_before_failure_and_resumes_in_the_segment
 }
 
 #[test]
+fn json_sequence_input_reports_document_end_lines_for_multiline_adjacent_values() {
+    let mut input = NativeFormat::JsonSequence
+        .select_input(DecodeOptions::default(), InputRepresentation::Documents)
+        .unwrap()
+        .open(
+            b"\x1e[\n1\n]\n2\n{\"x\":\n 3\n}\n\x1e4\n".as_slice(),
+            "lines.jsonseq",
+        );
+
+    for (expected_value, expected_line) in [("[1]", 3), ("2", 4), ("{\"x\":3}", 7), ("4", 8)] {
+        let NativeInputObservation::Document(document) = input.next_observation().unwrap().unwrap()
+        else {
+            panic!("expected document");
+        };
+        assert_eq!(document.value.to_string(), expected_value);
+        assert_eq!(document.line_number, expected_line);
+    }
+    assert!(input.next_observation().unwrap().is_none());
+}
+
+#[test]
 fn json_sequence_input_exempts_fixed_keywords_from_token_limits() {
     let mut input = NativeFormat::JsonSequence
         .select_input(

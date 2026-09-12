@@ -79,7 +79,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut patch_text = String::from("*** Begin Patch\n");
     for (rank, (question, benchmark)) in questions.iter().zip(benchmarks).enumerate() {
         let (answer, selection) = choose_answer(question, &answers)?;
-        let filename = format!("{:02}-{}.json", rank + 1, slug(&question.title));
+        let filename = format!("{:02}-{}.toon", rank + 1, slug(&question.title));
         let scenario_path = options.output.join(filename);
         let scenario = json!({
             "schema_version": 1,
@@ -109,7 +109,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "input": benchmark.input,
             },
         });
-        let content = serde_json::to_string_pretty(&scenario)?;
+        let content = tq_test_support::fixture_data::to_toon(&scenario)?;
         patch_text.push_str(&patch_for(&scenario_path, &content));
         patch_text.push('\n');
     }
@@ -129,7 +129,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut questions = None;
     let mut answers = None;
-    let mut benchmarks = PathBuf::from("tests/stack-overflow-benchmarks.json");
+    let mut benchmarks = PathBuf::from("tests/stack-overflow-benchmarks.toon");
     let mut output = PathBuf::from("tests/stack-overflow");
     let mut patch = None;
     let mut arguments = env::args().skip(1);
@@ -200,7 +200,7 @@ fn load_answers(
 }
 
 fn load_benchmarks(path: &Path) -> Result<Vec<BenchmarkDefinition>, Box<dyn std::error::Error>> {
-    read_json(path)
+    Ok(tq_test_support::fixture_data::read(path)?)
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, Box<dyn std::error::Error>> {
@@ -265,6 +265,13 @@ fn invalid_file_name(path: &Path) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::slug;
+
+    #[test]
+    fn stored_toon_benchmarks_load_without_losing_entries() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/stack-overflow-benchmarks.toon");
+        assert_eq!(super::load_benchmarks(&path).unwrap().len(), 50);
+    }
 
     #[test]
     fn slug_matches_fixture_naming_rules() {

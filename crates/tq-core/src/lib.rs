@@ -20,16 +20,20 @@
 
 mod ast;
 mod bytecode;
+mod collection;
 mod diagnostic;
 mod eval;
 mod format;
+mod json_input;
 mod lexer;
+mod math;
 mod number;
 mod parser;
 mod path;
 mod phase;
 mod resolve;
 mod stdlib;
+mod string_compat;
 mod value;
 mod vm;
 
@@ -40,8 +44,12 @@ pub use diagnostic::{
 pub use eval::{
     StableSortPipeline, StableSortPipelineObservations, parallel_worker_count, stable_sort_values,
 };
+pub use json_input::{
+    JsonEvent, JsonInput, JsonInputError, JsonInputOptions, JsonLimit, JsonPosition,
+    parse_jq_number, parse_json, parse_json_bytes,
+};
 pub use number::{Number, NumberError, NumberLimits};
-pub use parser::{parse, parse_bytes};
+pub use parser::{parse, parse_bytes, parse_with_startup};
 pub use path::{Path, PathComponent, PathError};
 pub use phase::{
     Analysis, Analyzed, AutomaticPlan, Blocking, Capabilities, CapabilityCause, Compiled, Document,
@@ -54,5 +62,5 @@ pub use resolve::{
     AnalysisContext, Builtin, BuiltinRegistry, ResolveOptions, analyze, analyze_with_context,
     resolve,
 };
-pub use value::{Object, Value, ValueKind};
-pub use vm::{InputCursor, InputValue, Vm, VmError, VmLimits, VmObservations};
+pub use value::{Object, ObjectReserveError, Value, ValueKind};
+pub use vm::{EffectSink, InputCursor, InputValue, Vm, VmError, VmLimits, VmObservations};

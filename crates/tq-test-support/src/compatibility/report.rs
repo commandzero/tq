@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt::Write as _};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{ErrorClass, FixtureFormat, ProcessStatus, ToolIdentity, ToolKind};
+use super::{ErrorClass, FixtureFormat, ProcessStatus, ToolIdentity, ToolKind, TqContract};
 use crate::corpus::ArtifactIdentity;
 
 /// Report schema version.
@@ -265,4 +265,84 @@ pub fn encode_hex(bytes: &[u8]) -> String {
             write!(hex, "{byte:02x}").expect("write bytes to string");
             hex
         })
+}
+
+/// Checks one of the fixed tq-native identity contracts against an observation.
+#[must_use]
+pub fn tq_contract_matches(contract: TqContract, observation: &ToolObservation) -> bool {
+    let Some(stdout_hex) = observation.raw_stdout_hex.as_deref() else {
+        return false;
+    };
+    let Some(stdout) = decode_hex(stdout_hex) else {
+        return false;
+    };
+    let (prefix, needles): (Option<&[u8]>, &[&[u8]]) = match contract {
+        TqContract::Version => (Some(b"tq "), &[b"jq target 1.8.x"]),
+        TqContract::BuildConfiguration => {
+            (None, &[b"target=", b"formats=toon", b"jq-target=1.8.x"])
+        }
+        TqContract::Help => (
+            None,
+            &[
+                b"tq - jq-compatible queries over TOON",
+                b"Usage: tq",
+                b"-i, --input-format FORMAT",
+                b"-o, --output-format FORMAT",
+                b"-n, --null-input",
+                b"-R, --raw-input",
+                b"-s, --slurp",
+                b"-c, --compact-output",
+                b"-r, --raw-output",
+                b"--raw-output0",
+                b"-j, --join-output",
+                b"-a, --ascii-output",
+                b"-S, --sort-keys",
+                b"-C, --color-output",
+                b"-M, --monochrome-output",
+                b"--tab",
+                b"--indent N",
+                b"--unbuffered",
+                b"--allow-environment",
+                b"--allow-platform",
+                b"--stream",
+                b"--stream-errors",
+                b"-x, --proxy-on-error",
+                b"--seq",
+                b"-f, --from-file FILE",
+                b"-L, --library-path DIR",
+                b"--arg NAME VALUE",
+                b"--argjson NAME JSON",
+                b"--argtoon NAME TOON",
+                b"--slurpfile NAME FILE",
+                b"--rawfile NAME FILE",
+                b"--args",
+                b"--jsonargs",
+                b"-e, --exit-status",
+                b"-b, --binary",
+                b"-V, --version",
+                b"--build-configuration",
+                b"--run-tests [FILE]",
+                b"-h, --help",
+                b"Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq",
+                b"-o, --output-format toon|yaml|json|jsonl",
+                b"select TOON",
+                b"emit compact JSON",
+            ],
+        ),
+    };
+    observation.state == ObservationState::Executed
+        && observation.process_status == Some(ProcessStatus::Exited)
+        && observation.exit_code == Some(0)
+        && prefix.is_none_or(|prefix| stdout.starts_with(prefix))
+        && needles.iter().all(|needle| {
+            !needle.is_empty() && stdout.windows(needle.len()).any(|window| window == *needle)
+        })
+        && observation.stderr_hex.is_none()
+}
+
+fn decode_hex(hex: &str) -> Option<Vec<u8>> {
+    (0..hex.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(hex.get(index..index + 2)?, 16).ok())
+        .collect()
 }

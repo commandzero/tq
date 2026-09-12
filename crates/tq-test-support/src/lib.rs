@@ -8,3 +8,6 @@ pub mod compatibility;
 
 /// Correctness-gated performance measurement and reporting.
 pub mod benchmark;
+
+/// Repository-owned TOON fixture storage and typed decoding.
+pub mod fixture_data;

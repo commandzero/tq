@@ -30,7 +30,7 @@ fn json_sequence_output_frames_each_result_and_keeps_exact_numbers() {
     let selection = NativeFormat::JsonSequence
         .select_output(OutputOptions::default())
         .unwrap();
-    let mut sequence = NativeOutputSequence::new(selection);
+    let mut sequence = NativeOutputSequence::new(selection.clone());
     let mut bytes = Vec::new();
     sequence
         .write_result(
@@ -45,7 +45,7 @@ fn json_sequence_output_frames_each_result_and_keeps_exact_numbers() {
     let mut empty = NativeOutputSequence::new(selection);
     let mut bytes = Vec::new();
     empty.finish(&mut bytes).unwrap();
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, [] as [u8; 0]);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn native_output_retains_yaml_separators_until_completion() {
     let selection = NativeFormat::Yaml
         .select_output(OutputOptions::default())
         .unwrap();
-    let mut sequence = NativeOutputSequence::new(selection);
+    let mut sequence = NativeOutputSequence::new(selection.clone());
     let mut bytes = Vec::new();
     sequence
         .write_result(&mut bytes, &Value::Bool(true))
@@ -73,15 +73,15 @@ fn native_output_unframed_validates_cardinality_before_publication() {
             ..OutputOptions::default()
         })
         .unwrap();
-    let mut sequence = NativeOutputSequence::new(selection);
+    let mut sequence = NativeOutputSequence::new(selection.clone());
     let mut bytes = Vec::new();
     sequence
         .write_result(&mut bytes, &Value::Bool(true))
         .unwrap();
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, [] as [u8; 0]);
     assert!(sequence.write_result(&mut bytes, &Value::Null).is_err());
     assert!(sequence.finish(&mut bytes).is_err());
-    assert!(bytes.is_empty());
+    assert_eq!(bytes, [] as [u8; 0]);
     let mut one = NativeOutputSequence::new(selection);
     one.write_result(&mut bytes, &Value::Bool(true)).unwrap();
     one.finish(&mut bytes).unwrap();
@@ -120,7 +120,7 @@ fn native_output_io_failure_is_terminal_and_keeps_partial_bytes() {
     let mut recovered = Vec::new();
     assert!(sequence.write_result(&mut recovered, &Value::Null).is_err());
     assert!(sequence.finish(&mut recovered).is_err());
-    assert!(recovered.is_empty());
+    assert_eq!(recovered, [] as [u8; 0]);
 }
 
 #[test]

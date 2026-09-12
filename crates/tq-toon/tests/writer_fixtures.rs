@@ -3,10 +3,11 @@
 use std::{fs, io::Cursor, path::PathBuf};
 
 use serde_json::Value as JsonValue;
-use tq_core::{SourceId, Value};
+use tq_core::{Number, SourceId, Span, Value};
 use tq_toon::{
-    DecoderConfig, Delimiter, KeyFolding, PathExpansion, WriterConfig, decode_to_value, encode,
-    write_value,
+    ArrayPreparationConfig, DecoderConfig, Delimiter, DuplicateKeyPolicy, Event, EventConsumer,
+    KeyFolding, PathExpansion, PreparationArena, PreparationLimits, TranscodeCommitment,
+    TranscodeConsumer, WriterConfig, decode_to_value, encode, write_value,
 };
 
 fn fixture_files() -> Vec<PathBuf> {
@@ -21,6 +22,29 @@ fn fixture_files() -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     files.sort();
     files
+}
+
+#[test]
+fn canonical_toon_numbers_do_not_inherit_json_literal_presentation() {
+    for (literal, expected) in [
+        ("1.000", "1"),
+        ("100e-2", "1"),
+        ("12.3400", "12.34"),
+        ("-0.0", "0"),
+        ("1e2", "100"),
+    ] {
+        let value = Value::Number(Number::parse(literal).unwrap());
+        assert_eq!(
+            encode(&value, WriterConfig::default()),
+            expected,
+            "{literal}"
+        );
+        let mut output = Vec::new();
+        write_value(&mut output, &value, WriterConfig::default()).unwrap();
+        assert_eq!(output, expected.as_bytes(), "{literal} sink output");
+    }
+    let computed_zero = Value::Number(Number::from_runtime_f64(-0.0));
+    assert_eq!(encode(&computed_zero, WriterConfig::default()), "0");
 }
 
 #[test]
@@ -90,4 +114,38 @@ fn canonical_writer_matches_every_official_encode_fixture() {
         }
     }
     assert_eq!(exercised, 147, "encode fixture coverage changed");
+}
+
+#[test]
+fn lightweight_transcode_matches_dom_numeric_projection() {
+    for literal in ["1.000", "100e-2", "-0.0", "1E1234567890"] {
+        let span = Span::new(SourceId::new(1), 0, u64::try_from(literal.len()).unwrap());
+        let arena = PreparationArena::new(PreparationLimits::default());
+        let mut transcode = TranscodeConsumer::new(
+            Vec::new(),
+            WriterConfig::default(),
+            ArrayPreparationConfig::default(),
+            arena,
+            DuplicateKeyPolicy::LastValueFirstPosition,
+            TranscodeCommitment::AtomicUnframed,
+        );
+        transcode.consume(Event::DocumentStart { span }).unwrap();
+        transcode
+            .consume_number_literal(span, literal.to_owned())
+            .unwrap();
+        transcode.consume(Event::DocumentEnd { span }).unwrap();
+        let fast = String::from_utf8(transcode.into_inner()).unwrap();
+        let dom = encode(
+            &Value::Number(Number::parse(literal).unwrap()),
+            WriterConfig::default(),
+        );
+        assert_eq!(fast, dom, "{literal}");
+    }
+    assert_eq!(
+        encode(
+            &Value::Number(Number::from_runtime_f64(-0.0)),
+            WriterConfig::default()
+        ),
+        "0"
+    );
 }

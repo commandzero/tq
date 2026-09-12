@@ -1,13 +1,19 @@
 //! Query-independent JSON structural events without root materialization.
 
-use std::{fmt, io::Read};
+use std::{
+    fmt, io,
+    io::Read,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use crate::{FormatError, InputFormat};
-use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
-use tq_core::{SourceId, Span};
-use tq_toon::{DecoderCapabilities, Event, EventConsumer};
-
-const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
+use tq_core::{
+    JsonEvent, JsonInput, JsonInputError, JsonInputOptions, JsonPosition, SourceId, Span, Value,
+};
+use tq_toon::{DecoderCapabilities, Event, EventConsumer, Scalar};
 
 /// Resource bounds for query-independent JSON structural decoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,9 +69,11 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
-    decode_json_events_classified(reader, source, consumer, options).map_err(legacy_event_error)
+    let mut checkpoint = || Ok(());
+    decode_json_events_with_options_control(reader, source, consumer, options, &mut checkpoint)
 }
 
+/// Classified compatibility wrapper used by the native input adapters.
 pub(crate) fn decode_json_events_classified<R: Read, C: EventConsumer>(
     reader: R,
     source: SourceId,
@@ -75,31 +83,192 @@ pub(crate) fn decode_json_events_classified<R: Read, C: EventConsumer>(
 where
     C::Error: fmt::Display,
 {
-    let span = Span::new(source, 0, 0);
-    emit(consumer, Event::DocumentStart { span }).map_err(event_failure)?;
-    let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
+    let mut checkpoint = || Ok(());
+    let mut retain = |_path: &[tq_core::PathComponent]| true;
+    decode_json_events_selected_with_options_control_typed(
         reader,
-        options.maximum_depth,
-        options.maximum_token_bytes,
-    );
-    let classify = |error| {
-        limit_failure
-            .get()
-            .map_or_else(|| classify_json_error(error), FormatError::Resource)
-    };
-    let mut deserializer =
-        serde_json::Deserializer::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader));
-    deserializer.disable_recursion_limit();
-    EventSeed {
-        consumer,
         source,
+        consumer,
         options,
-        depth: 0,
+        &mut checkpoint,
+        &mut retain,
+        false,
+        None,
+    )
+    .map_err(|error| map_json_input_error(error, InputFormat::Json))
+}
+
+/// Emits one bounded JSON document with a cooperative cancellation/resource
+/// checkpoint invoked throughout lexical scanning.
+///
+/// # Errors
+///
+/// Returns JSON syntax, numeric-envelope, resource-limit, or consumer failures.
+pub fn decode_json_events_with_options_control<R, C, F>(
+    reader: R,
+    source: SourceId,
+    consumer: &mut C,
+    options: JsonEventOptions,
+    checkpoint: &mut F,
+) -> Result<(), String>
+where
+    R: Read,
+    C: EventConsumer,
+    C::Error: fmt::Display,
+    F: FnMut() -> io::Result<()>,
+{
+    let mut retain = |_path: &[tq_core::PathComponent]| true;
+    decode_json_events_selected_with_options_control_typed(
+        reader,
+        source,
+        consumer,
+        options,
+        checkpoint,
+        &mut retain,
+        false,
+        None,
+    )
+    .map_err(|error| json_input_error(&error))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_json_events_selected_with_options_control_typed<R, C, F, S>(
+    reader: R,
+    source: SourceId,
+    consumer: &mut C,
+    options: JsonEventOptions,
+    checkpoint: &mut F,
+    retain: &mut S,
+    selection_enabled: bool,
+    depth_high_water: Option<&mut usize>,
+) -> Result<(), JsonInputError>
+where
+    R: Read,
+    C: EventConsumer,
+    C::Error: fmt::Display,
+    F: FnMut() -> io::Result<()>,
+    S: FnMut(&[tq_core::PathComponent]) -> bool,
+{
+    let mut input = JsonInput::new(
+        reader,
+        JsonInputOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+    );
+    let mut adapter = JsonEventAdapter::new(consumer, source, selection_enabled);
+    let started = if selection_enabled {
+        input.next_events_selected(&mut |event| adapter.consume(event), checkpoint, retain)
+    } else {
+        input.next_events(&mut |event| adapter.consume(event), checkpoint)
+    };
+    if let Some(output) = depth_high_water {
+        *output = (*output).max(input.depth_high_water());
     }
-    .deserialize(&mut deserializer)
-    .map_err(classify)?;
-    deserializer.end().map_err(classify)?;
-    emit(consumer, Event::DocumentEnd { span }).map_err(event_failure)
+    let started = started?;
+    if !started {
+        return Err(JsonInputError::Syntax {
+            position: input.position(),
+            message: Arc::from("JSON document contained no value"),
+        });
+    }
+    input.check_end(checkpoint)?;
+    adapter
+        .finish(input.position())
+        .map_err(|error| JsonInputError::Consumer(io::Error::other(error)))
+}
+
+/// Decodes a whitespace-separated JSON stream one root at a time while
+/// retaining the selected structural consumer between roots.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_json_events_selected_roots_with_options_control<R, C, B, E, A, F, S>(
+    reader: R,
+    source: SourceId,
+    consumer: &mut C,
+    options: JsonEventOptions,
+    cancellation: Option<Arc<AtomicBool>>,
+    on_begin: &mut B,
+    on_finish: &mut E,
+    on_abort: &mut A,
+    checkpoint: &mut F,
+    retain: &mut S,
+    depth_high_water: Option<&mut usize>,
+) -> Result<u64, JsonInputError>
+where
+    R: Read,
+    C: EventConsumer,
+    C::Error: fmt::Display,
+    B: FnMut(u64) -> Result<(), String>,
+    E: FnMut() -> Result<(), String>,
+    A: FnMut(),
+    F: FnMut() -> io::Result<()>,
+    S: FnMut(&[tq_core::PathComponent]) -> bool,
+{
+    let cancellation = cancellation.map(|flag| Arc::clone(&flag));
+    let mut input = JsonInput::new(
+        reader,
+        JsonInputOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
+    );
+    let mut documents = 0_u64;
+    let mut depth_high_water = depth_high_water;
+    loop {
+        let mut adapter = JsonEventAdapter::new(consumer, source, true);
+        let mut root_started = false;
+        let mut root_opened = false;
+        let cancellation = cancellation.clone();
+        let mut root_checkpoint = || {
+            if cancellation
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return Err(io::Error::other("selected decoding interrupted"));
+            }
+            checkpoint()
+        };
+        let started = input.next_events_selected(
+            &mut |event| {
+                if !root_started {
+                    root_started = true;
+                    on_begin(documents).map_err(io::Error::other)?;
+                    root_opened = true;
+                }
+                adapter.consume(event)
+            },
+            &mut root_checkpoint,
+            retain,
+        );
+        if let Some(output) = depth_high_water.as_deref_mut() {
+            *output = (*output).max(input.depth_high_water());
+        }
+        let started = match started {
+            Ok(started) => started,
+            Err(error) => {
+                if root_opened {
+                    on_abort();
+                }
+                return Err(error);
+            }
+        };
+        if !started {
+            return Ok(documents);
+        }
+        if let Err(error) = adapter.finish(input.position()) {
+            if root_opened {
+                on_abort();
+            }
+            return Err(JsonInputError::Consumer(io::Error::other(error)));
+        }
+        if let Err(error) = on_finish() {
+            if root_opened {
+                on_abort();
+            }
+            return Err(JsonInputError::Consumer(io::Error::other(error)));
+        }
+        documents = documents.saturating_add(1);
+    }
 }
 
 /// Emits a whitespace-separated stream of bounded JSON documents.
@@ -118,23 +287,11 @@ where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
-    decode_json_event_stream_classified(reader, source, consumer, options)
-        .map_err(legacy_event_error)
+    decode_json_event_stream_typed(reader, source, consumer, options)
+        .map_err(|error| json_input_error(&error))
 }
 
-fn legacy_event_error(error: FormatError) -> String {
-    match error {
-        FormatError::Resource("depth") => {
-            "JSON nesting depth limit exceeded: input resource limit exceeded: depth".to_owned()
-        }
-        FormatError::Resource("token-bytes") => {
-            "JSON token byte limit exceeded: input resource limit exceeded: token-bytes".to_owned()
-        }
-        FormatError::Parse { message, .. } => message,
-        error => error.to_string(),
-    }
-}
-
+/// Classified compatibility wrapper used by the native input adapters.
 pub(crate) fn decode_json_event_stream_classified<R: Read, C: EventConsumer>(
     reader: R,
     source: SourceId,
@@ -144,403 +301,287 @@ pub(crate) fn decode_json_event_stream_classified<R: Read, C: EventConsumer>(
 where
     C::Error: fmt::Display,
 {
-    let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
+    decode_json_event_stream_typed(reader, source, consumer, options)
+        .map_err(|error| map_json_input_error(error, InputFormat::Json))
+}
+
+/// Typed counterpart to [`decode_json_event_stream`] for adapters that must
+/// distinguish syntax/resource failures from consumer or I/O failures.
+pub(crate) fn decode_json_event_stream_typed<R, C>(
+    reader: R,
+    source: SourceId,
+    consumer: &mut C,
+    options: JsonEventOptions,
+) -> Result<u64, JsonInputError>
+where
+    R: Read,
+    C: EventConsumer,
+    C::Error: fmt::Display,
+{
+    let mut input = JsonInput::new(
         reader,
-        options.maximum_depth,
-        options.maximum_token_bytes,
+        JsonInputOptions {
+            maximum_depth: options.maximum_depth,
+            maximum_token_bytes: options.maximum_token_bytes,
+        },
     );
-    let mut deserializer =
-        serde_json::Deserializer::from_reader(std::io::BufReader::with_capacity(64 * 1024, reader));
-    deserializer.disable_recursion_limit();
     let mut documents = 0_u64;
     loop {
-        let mut document = LazyDocumentConsumer::new(consumer, source);
-        let result = EventSeed {
-            consumer: &mut document,
-            source,
-            options,
-            depth: 0,
+        let mut adapter = JsonEventAdapter::new(consumer, source, false);
+        let mut checkpoint = || Ok(());
+        let started = input.next_events(&mut |event| adapter.consume(event), &mut checkpoint)?;
+        if !started {
+            return Ok(documents);
         }
-        .deserialize(&mut deserializer);
-        match result {
-            Ok(()) => {
-                document.finish().map_err(event_failure)?;
-                documents = documents.saturating_add(1);
-            }
-            Err(error) if error.is_eof() && !document.started => return Ok(documents),
-            Err(error) => {
-                return Err(limit_failure
-                    .get()
-                    .map_or_else(|| classify_json_error(error), FormatError::Resource));
-            }
-        }
+        adapter
+            .finish(input.position())
+            .map_err(|error| JsonInputError::Consumer(io::Error::other(error)))?;
+        documents = documents.saturating_add(1);
     }
 }
 
-fn event_failure(message: String) -> FormatError {
-    FormatError::Parse {
-        format: InputFormat::Json,
-        message,
+fn map_json_input_error(error: JsonInputError, format: InputFormat) -> FormatError {
+    match error {
+        JsonInputError::Io(error) => FormatError::Io(error),
+        JsonInputError::Consumer(error) => FormatError::Parse {
+            format,
+            message: error.to_string(),
+        },
+        JsonInputError::Limit { limit, .. } => FormatError::Resource(match limit {
+            tq_core::JsonLimit::TokenBytes => "token-bytes",
+            tq_core::JsonLimit::Depth => "depth",
+        }),
+        error @ JsonInputError::Syntax { .. } => FormatError::Parse {
+            format,
+            message: error.to_string(),
+        },
     }
 }
 
-pub(crate) fn classify_json_error(error: serde_json::Error) -> FormatError {
-    if let Some(kind) = error.io_error_kind() {
-        return FormatError::Io(std::io::Error::new(kind, error));
-    }
-    let message = error.to_string();
-    // serde erases visitor error types. Only our exact data-error prefixes
-    // identify these limits; syntax errors and source text are not classified.
-    if error.is_data() {
-        if message.starts_with("input resource limit exceeded: token-bytes")
-            || message.starts_with(
-                "JSON token byte limit exceeded: input resource limit exceeded: token-bytes",
-            )
-        {
-            return FormatError::Resource("token-bytes");
-        }
-        if message.starts_with("stream depth limit exceeded")
-            || message.starts_with(
-                "JSON nesting depth limit exceeded: input resource limit exceeded: depth",
-            )
-        {
-            return FormatError::Resource("depth");
-        }
-    }
-    event_failure(message)
+#[derive(Clone, Copy, Debug)]
+enum JsonEventFrame {
+    Array { count: u64 },
+    Object,
 }
 
-struct LazyDocumentConsumer<'a, C> {
+struct JsonEventAdapter<'a, C> {
     consumer: &'a mut C,
     source: SourceId,
+    selected: bool,
     started: bool,
+    frames: Vec<JsonEventFrame>,
+    pending_key: Option<(std::sync::Arc<str>, JsonPosition)>,
+    pending_root_scalar: Option<(Value, JsonPosition)>,
 }
 
-impl<'a, C> LazyDocumentConsumer<'a, C> {
-    const fn new(consumer: &'a mut C, source: SourceId) -> Self {
-        Self {
-            consumer,
-            source,
-            started: false,
-        }
-    }
-}
-
-impl<C> LazyDocumentConsumer<'_, C>
+impl<'a, C> JsonEventAdapter<'a, C>
 where
     C: EventConsumer,
     C::Error: fmt::Display,
 {
-    fn ensure_started(&mut self) -> Result<(), String> {
+    fn new(consumer: &'a mut C, source: SourceId, selected: bool) -> Self {
+        Self {
+            consumer,
+            source,
+            selected,
+            started: false,
+            frames: Vec::new(),
+            pending_key: None,
+            pending_root_scalar: None,
+        }
+    }
+
+    fn consume(&mut self, event: JsonEvent) -> io::Result<()> {
+        let position = match &event {
+            JsonEvent::StartArray(position)
+            | JsonEvent::EndArray(position)
+            | JsonEvent::StartObject(position)
+            | JsonEvent::EndObject(position)
+            | JsonEvent::Key { position, .. }
+            | JsonEvent::Scalar { position, .. }
+            | JsonEvent::Skipped { position } => *position,
+        };
         if !self.started {
-            emit(
-                self.consumer,
-                Event::DocumentStart {
-                    span: Span::new(self.source, 0, 0),
-                },
-            )?;
+            self.send(Event::DocumentStart {
+                span: self.start_span(position),
+            })?;
             self.started = true;
+        }
+        match event {
+            JsonEvent::StartArray(position) => {
+                self.flush_pending_key()?;
+                self.send(Event::ArrayStart {
+                    span: self.start_span(position),
+                    declared_count: None,
+                })?;
+                self.frames.push(JsonEventFrame::Array { count: 0 });
+            }
+            JsonEvent::EndArray(position) => {
+                let Some(JsonEventFrame::Array { count }) = self.frames.pop() else {
+                    return Err(io::Error::other("JSON array frame underflow"));
+                };
+                self.send(Event::ArrayEnd {
+                    span: self.end_span(position),
+                    observed_count: count,
+                })?;
+                self.complete_value();
+            }
+            JsonEvent::StartObject(position) => {
+                self.flush_pending_key()?;
+                self.send(Event::ObjectStart {
+                    span: self.start_span(position),
+                })?;
+                self.frames.push(JsonEventFrame::Object);
+            }
+            JsonEvent::EndObject(position) => {
+                let Some(JsonEventFrame::Object) = self.frames.pop() else {
+                    return Err(io::Error::other("JSON object frame underflow"));
+                };
+                self.send(Event::ObjectEnd {
+                    span: self.end_span(position),
+                })?;
+                self.complete_value();
+            }
+            JsonEvent::Key { value, position } => {
+                if !matches!(self.frames.last(), Some(JsonEventFrame::Object)) {
+                    return Err(io::Error::other("JSON key outside object"));
+                }
+                if self.selected {
+                    if self.pending_key.replace((value, position)).is_some() {
+                        return Err(io::Error::other("JSON object key has no value"));
+                    }
+                } else {
+                    self.consumer
+                        .consume_text_key(self.start_span(position), value.to_string(), true)
+                        .map_err(io::Error::other)?;
+                }
+            }
+            JsonEvent::Scalar { value, position } => {
+                self.flush_pending_key()?;
+                if self.frames.is_empty() {
+                    self.pending_root_scalar = Some((value, position));
+                } else {
+                    self.consume_scalar(value, position)?;
+                }
+                self.complete_value();
+            }
+            JsonEvent::Skipped { position } => {
+                if !self.selected {
+                    return Err(io::Error::other("skipped event outside selected adapter"));
+                }
+                if let Some((value, key_position)) = self.pending_key.take() {
+                    self.send(Event::Key {
+                        span: self.start_span(key_position),
+                        value,
+                        quoted: true,
+                    })?;
+                }
+                self.send(Event::Scalar {
+                    span: self.start_span(position),
+                    value: Scalar::Null,
+                })?;
+                self.complete_value();
+            }
         }
         Ok(())
     }
 
-    fn finish(&mut self) -> Result<(), String> {
+    fn flush_pending_key(&mut self) -> io::Result<()> {
+        let Some((value, position)) = self.pending_key.take() else {
+            return Ok(());
+        };
+        self.consumer
+            .consume_text_key(self.start_span(position), value.to_string(), true)
+            .map_err(io::Error::other)
+    }
+
+    fn consume_scalar(&mut self, value: Value, position: JsonPosition) -> io::Result<()> {
+        let span = self.start_span(position);
+        match value {
+            Value::Null => self.consumer.consume_null(span).map_err(io::Error::other),
+            Value::Bool(value) => self
+                .consumer
+                .consume_bool(span, value)
+                .map_err(io::Error::other),
+            Value::String(value) => self
+                .consumer
+                .consume_text_string(span, value.to_string())
+                .map_err(io::Error::other),
+            Value::Number(number) => {
+                if let Some(literal) = number.exact_literal() {
+                    self.consumer
+                        .consume_number_literal(span, literal.to_owned())
+                        .map_err(io::Error::other)
+                } else {
+                    self.send(Event::Scalar {
+                        span,
+                        value: Scalar::Number(number),
+                    })
+                }
+            }
+            Value::Array(_) | Value::Object(_) => {
+                Err(io::Error::other("JSON scalar contained a composite value"))
+            }
+        }
+    }
+
+    fn complete_value(&mut self) {
+        if let Some(JsonEventFrame::Array { count }) = self.frames.last_mut() {
+            *count = count.saturating_add(1);
+        }
+    }
+
+    fn finish(mut self, position: JsonPosition) -> Result<(), String> {
         if !self.started {
             return Err("JSON document contained no value".to_owned());
         }
-        emit(
-            self.consumer,
-            Event::DocumentEnd {
-                span: Span::new(self.source, 0, 0),
-            },
+        if !self.frames.is_empty() {
+            return Err("JSON document ended with an open container".to_owned());
+        }
+        self.flush_pending_key()
+            .map_err(|error| error.to_string())?;
+        if let Some((value, position)) = self.pending_root_scalar.take() {
+            self.consume_scalar(value, position)
+                .map_err(|error| error.to_string())?;
+        }
+        self.consumer
+            .consume(Event::DocumentEnd {
+                span: self.end_span(position),
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    fn send(&mut self, event: Event) -> io::Result<()> {
+        self.consumer
+            .consume(event)
+            .map_err(|error| io::Error::other(error.to_string()))
+    }
+
+    const fn start_span(&self, position: JsonPosition) -> Span {
+        Span::new(self.source, position.offset as u64, position.offset as u64)
+    }
+
+    const fn end_span(&self, position: JsonPosition) -> Span {
+        Span::new(
+            self.source,
+            position.offset.saturating_sub(1) as u64,
+            position.offset as u64,
         )
     }
 }
 
-impl<C> EventConsumer for LazyDocumentConsumer<'_, C>
-where
-    C: EventConsumer,
-    C::Error: fmt::Display,
-{
-    type Error = String;
-
-    fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
-        self.ensure_started()?;
-        emit(self.consumer, event)
-    }
-
-    fn consume_text_key(&mut self, span: Span, value: String, quoted: bool) -> Result<(), String> {
-        self.ensure_started()?;
-        self.consumer.consume_text_key(span, value, quoted)
-    }
-
-    fn consume_null(&mut self, span: Span) -> Result<(), String> {
-        self.ensure_started()?;
-        self.consumer.consume_null(span)
-    }
-
-    fn consume_bool(&mut self, span: Span, value: bool) -> Result<(), String> {
-        self.ensure_started()?;
-        self.consumer.consume_bool(span, value)
-    }
-
-    fn consume_text_string(&mut self, span: Span, value: String) -> Result<(), String> {
-        self.ensure_started()?;
-        self.consumer.consume_text_string(span, value)
-    }
-
-    fn consume_number_literal(&mut self, span: Span, literal: String) -> Result<(), String> {
-        self.ensure_started()?;
-        self.consumer.consume_number_literal(span, literal)
-    }
-}
-
-struct EventSeed<'a, C> {
-    consumer: &'a mut C,
-    source: SourceId,
-    options: JsonEventOptions,
-    depth: usize,
-}
-
-impl<'de, C> DeserializeSeed<'de> for EventSeed<'_, C>
-where
-    C: EventConsumer,
-    C::Error: fmt::Display,
-{
-    type Value = ();
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(EventVisitor {
-            consumer: self.consumer,
-            source: self.source,
-            options: self.options,
-            depth: self.depth,
-        })
-    }
-}
-
-struct EventVisitor<'a, C> {
-    consumer: &'a mut C,
-    source: SourceId,
-    options: JsonEventOptions,
-    depth: usize,
-}
-
-impl<C> EventVisitor<'_, C>
-where
-    C: EventConsumer,
-    C::Error: fmt::Display,
-{
-    const fn span(&self) -> Span {
-        Span::new(self.source, 0, 0)
-    }
-}
-
-impl<'de, C> Visitor<'de> for EventVisitor<'_, C>
-where
-    C: EventConsumer,
-    C::Error: fmt::Display,
-{
-    type Value = ();
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a JSON value")
-    }
-
-    fn visit_bool<E: de::Error>(self, value: bool) -> Result<(), E> {
-        self.consumer
-            .consume_bool(self.span(), value)
-            .map_err(E::custom)
-    }
-
-    fn visit_i64<E: de::Error>(mut self, value: i64) -> Result<(), E> {
-        self.number(value.to_string())
-    }
-
-    fn visit_i128<E: de::Error>(mut self, value: i128) -> Result<(), E> {
-        self.number(value.to_string())
-    }
-
-    fn visit_u64<E: de::Error>(mut self, value: u64) -> Result<(), E> {
-        self.number(value.to_string())
-    }
-
-    fn visit_u128<E: de::Error>(mut self, value: u128) -> Result<(), E> {
-        self.number(value.to_string())
-    }
-
-    fn visit_f64<E: de::Error>(mut self, value: f64) -> Result<(), E> {
-        self.number(value.to_string())
-    }
-
-    fn visit_str<E: de::Error>(self, value: &str) -> Result<(), E> {
-        self.check_token::<E>(value.len())?;
-        self.consumer
-            .consume_text_string(self.span(), value.to_owned())
-            .map_err(E::custom)
-    }
-
-    fn visit_string<E: de::Error>(self, value: String) -> Result<(), E> {
-        self.check_token::<E>(value.len())?;
-        self.consumer
-            .consume_text_string(self.span(), value)
-            .map_err(E::custom)
-    }
-
-    fn visit_none<E: de::Error>(self) -> Result<(), E> {
-        self.consumer.consume_null(self.span()).map_err(E::custom)
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<(), D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        EventSeed {
-            consumer: self.consumer,
-            source: self.source,
-            options: self.options,
-            depth: self.depth,
-        }
-        .deserialize(deserializer)
-    }
-
-    fn visit_unit<E: de::Error>(self) -> Result<(), E> {
-        self.consumer.consume_null(self.span()).map_err(E::custom)
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<(), A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let child_depth = self.child_depth::<A::Error>()?;
-        self.consumer
-            .consume(Event::ArrayStart {
-                span: self.span(),
-                declared_count: None,
-            })
-            .map_err(|error| de::Error::custom(error.to_string()))?;
-        let mut observed = 0_u64;
-        while sequence
-            .next_element_seed(EventSeed {
-                consumer: self.consumer,
-                source: self.source,
-                options: self.options,
-                depth: child_depth,
-            })?
-            .is_some()
-        {
-            observed = observed.saturating_add(1);
-        }
-        self.consumer
-            .consume(Event::ArrayEnd {
-                span: self.span(),
-                observed_count: observed,
-            })
-            .map_err(|error| de::Error::custom(error.to_string()))
-    }
-
-    fn visit_map<A>(mut self, mut map: A) -> Result<(), A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let child_depth = self.child_depth::<A::Error>()?;
-        let Some(first_key) = map.next_key::<String>()? else {
-            self.consumer
-                .consume(Event::ObjectStart { span: self.span() })
-                .map_err(|error| de::Error::custom(error.to_string()))?;
-            return self
-                .consumer
-                .consume(Event::ObjectEnd { span: self.span() })
-                .map_err(|error| de::Error::custom(error.to_string()));
-        };
-        if first_key == SERDE_JSON_NUMBER_TOKEN {
-            let literal = map.next_value::<String>()?;
-            self.check_token::<A::Error>(literal.len())?;
-            if map.next_key::<de::IgnoredAny>()?.is_some() {
-                return Err(de::Error::custom(
-                    "invalid arbitrary-precision number envelope",
-                ));
-            }
-            return self.number(literal);
-        }
-
-        self.consumer
-            .consume(Event::ObjectStart { span: self.span() })
-            .map_err(|error| de::Error::custom(error.to_string()))?;
-        self.key::<A::Error>(first_key)?;
-        map.next_value_seed(EventSeed {
-            consumer: self.consumer,
-            source: self.source,
-            options: self.options,
-            depth: child_depth,
-        })?;
-        while let Some(key) = map.next_key::<String>()? {
-            self.key::<A::Error>(key)?;
-            map.next_value_seed(EventSeed {
-                consumer: self.consumer,
-                source: self.source,
-                options: self.options,
-                depth: child_depth,
-            })?;
-        }
-        self.consumer
-            .consume(Event::ObjectEnd { span: self.span() })
-            .map_err(|error| de::Error::custom(error.to_string()))
-    }
-}
-
-impl<C> EventVisitor<'_, C>
-where
-    C: EventConsumer,
-    C::Error: fmt::Display,
-{
-    fn number<E: de::Error>(&mut self, literal: String) -> Result<(), E> {
-        self.check_token::<E>(literal.len())?;
-        self.consumer
-            .consume_number_literal(self.span(), literal)
-            .map_err(E::custom)
-    }
-
-    fn key<E: de::Error>(&mut self, value: String) -> Result<(), E> {
-        self.check_token::<E>(value.len())?;
-        self.consumer
-            .consume_text_key(self.span(), value, true)
-            .map_err(E::custom)
-    }
-
-    fn check_token<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
-        if bytes > self.options.maximum_token_bytes {
-            return Err(E::custom(
-                "JSON token byte limit exceeded: input resource limit exceeded: token-bytes",
-            ));
-        }
-        Ok(())
-    }
-
-    fn child_depth<E: de::Error>(&self) -> Result<usize, E> {
-        if self.depth >= self.options.maximum_depth {
-            return Err(E::custom(
-                "JSON nesting depth limit exceeded: input resource limit exceeded: depth",
-            ));
-        }
-        Ok(self.depth + 1)
-    }
-}
-
-fn emit<C>(consumer: &mut C, event: Event) -> Result<(), String>
-where
-    C: EventConsumer,
-    C::Error: fmt::Display,
-{
-    consumer.consume(event).map_err(|error| error.to_string())
+fn json_input_error(error: &JsonInputError) -> String {
+    error.to_string()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
+    use std::{
+        cell::Cell,
+        convert::Infallible,
+        io::{self, Cursor, Read},
+        rc::Rc,
+    };
 
     use tq_core::SourceId;
     use tq_toon::{Event, EventConsumer, Scalar};
@@ -656,7 +697,9 @@ mod tests {
 
         assert_eq!(collector.keys, ["key"]);
         assert_eq!(collector.strings, ["value"]);
-        assert_eq!(collector.numbers, ["1e+2"]);
+        // The shared core reader canonicalizes finite number literals before
+        // delivering them to the structural consumer.
+        assert_eq!(collector.numbers, ["1E+2"]);
         assert_eq!(collector.booleans, [true]);
         assert_eq!(collector.nulls, 1);
         assert!(
@@ -684,6 +727,66 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::DocumentEnd { .. }))
         );
+    }
+
+    #[test]
+    fn malformed_containers_do_not_publish_unconfirmed_scalars() {
+        for input in [
+            br"[1 2]".as_slice(),
+            br#"["a" 2]"#.as_slice(),
+            br"[true 2]".as_slice(),
+            br#"{"a":1 "b":2}"#.as_slice(),
+            br"[1".as_slice(),
+        ] {
+            let mut collector = Collector::default();
+            assert!(decode_json_events(input, SourceId::new(1), &mut collector).is_err());
+            assert!(
+                !collector
+                    .0
+                    .iter()
+                    .any(|event| matches!(event, Event::Scalar { .. }))
+            );
+        }
+
+        let mut collector = Collector::default();
+        assert!(decode_json_events(br"[1,".as_slice(), SourceId::new(1), &mut collector).is_err());
+        assert!(
+            collector
+                .0
+                .iter()
+                .any(|event| matches!(event, Event::Scalar { .. }))
+        );
+    }
+
+    #[test]
+    fn exact_one_rejects_a_trailing_root_without_draining_it() {
+        struct OneByteReader {
+            input: Cursor<Vec<u8>>,
+            bytes_read: Rc<Cell<usize>>,
+        }
+
+        impl Read for OneByteReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                if buffer.is_empty() {
+                    return Ok(0);
+                }
+                let count = self.input.read(&mut buffer[..1])?;
+                self.bytes_read
+                    .set(self.bytes_read.get().saturating_add(count));
+                Ok(count)
+            }
+        }
+
+        let input = b"1 {this second root is intentionally unfinished".to_vec();
+        let bytes_read = Rc::new(Cell::new(0));
+        let reader = OneByteReader {
+            input: Cursor::new(input.clone()),
+            bytes_read: Rc::clone(&bytes_read),
+        };
+        let mut collector = Collector::default();
+        let error = decode_json_events(reader, SourceId::new(1), &mut collector).unwrap_err();
+        assert!(error.contains("trailing JSON input"));
+        assert!(bytes_read.get() < input.len());
     }
 
     #[test]
@@ -724,7 +827,7 @@ mod tests {
                 options,
             )
             .unwrap_err()
-            .contains("nesting depth")
+            .contains("depth")
         );
         let mut collector = Collector::default();
         assert!(
@@ -735,7 +838,7 @@ mod tests {
                 options,
             )
             .unwrap_err()
-            .contains("token byte")
+            .contains("token-bytes")
         );
     }
 }

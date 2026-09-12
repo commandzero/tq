@@ -157,6 +157,9 @@ pub struct BenchmarkAdapter {
     pub input_format: InputFormat,
     /// Whether the parser/execution combination applies.
     pub applicable: bool,
+    /// Why this adapter is excluded when it is not applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unsupported_reason: Option<String>,
     /// Tool arguments before the query.
     pub args: Vec<String>,
     /// Tool-specific expression when its language differs from jq syntax.

@@ -190,15 +190,14 @@ fn registered_natural_sources_are_valid_and_uniquely_identified() {
         .map(|entry| entry.expect("source directory entry").path())
         .filter(|path| {
             path.extension()
-                .is_some_and(|extension| extension == "json")
+                .is_some_and(|extension| extension == "toon")
         })
         .collect::<Vec<_>>();
     paths.sort();
 
     for path in paths {
         let source: Value =
-            serde_json::from_slice(&fs::read(&path).expect("registered source must be readable"))
-                .expect("registered source must be JSON");
+            tq_test_support::fixture_data::read(&path).expect("registered TOON source");
         assert!(
             validator.is_valid(&source),
             "{} must satisfy the source schema",
