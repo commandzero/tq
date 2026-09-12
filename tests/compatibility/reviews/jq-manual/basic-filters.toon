@@ -1,0 +1,245 @@
+schema_version: 2
+section: basic-filters
+source: jq-manual/basic-filters.md
+examples[51]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  basic.identity.large-exponent,24,fenced,1E1234567890 | .,"null",new,Added executable fenced example with synthesized null input because the literal is self-contained.,manual.basic.identity-large-exponent
+  basic.identity.hello,42,table,.,"\"Hello, world!\"",new,Added exact table query/input case.,manual.basic.identity-hello
+  basic.identity.decimal,48,table,.,"0.12345678901234567890123456789",new,Added exact table query/input case.,manual.basic.identity-decimal
+  basic.identity.have-decnum-positive,54,table,"[., tojson] == if have_decnum then [12345678909876543212345,\"12345678909876543212345\"] else [12345678909876543000000,\"12345678909876543000000\"] end","12345678909876543212345",new,Added exact table query/input case.,manual.basic.identity-have-decnum-positive
+  basic.identity.have-decnum-negative,60,table,"[1234567890987654321,-1234567890987654321 | tojson] == if have_decnum then [\"1234567890987654321\",\"-1234567890987654321\"] else [\"1234567890987654400\",\"-1234567890987654400\"] end","null",new,Added exact table query/input case.,manual.basic.identity-have-decnum-negative
+  basic.identity.precision-compare,66,table,. < 0.12345678901234567890123456788,"0.12345678901234567890123456789",new,Added exact table query/input case.,manual.basic.identity-precision-compare
+  basic.identity.decimal-forms,72,table,"map([., . == 1]) | tojson == if have_decnum then \"[[1,true],[1.000,true],[1.0,true],[1.00,true]]\" else \"[[1,true],[1,true],[1,true],[1,true]]\" end","[1, 1.000, 1.0, 100e-2]",new,Added exact table query/input case.,manual.basic.identity-decimal-forms
+  basic.identity.big-comparison,78,table,". as $big | [$big, $big + 1] | map(. > 10000000000000000000000000000000) | . == if have_decnum then [true, false] else [false, false] end","10000000000000000000000000000001",new,Added exact table query/input case.,manual.basic.identity-big-comparison
+  basic.object.table-present,96,table,.foo,"{\"foo\": 42, \"bar\": \"less interesting data\"}",new,Added exact table query/input case.,manual.basic.object-field-present
+  basic.object.table-missing,102,table,.foo,"{\"notfoo\": true, \"alsonotfoo\": false}",new,Added exact table query/input case.,manual.basic.object-field-missing
+  basic.object.table-computed,108,table,".[\"foo\"]","{\"foo\": 42}",new,Added exact table query/input case.,manual.basic.object-computed-field
+  basic.optional.present,118,table,.foo?,"{\"foo\": 42, \"bar\": \"less interesting data\"}",new,Added exact table query/input case.,manual.basic.optional-field-present
+  basic.optional.missing,124,table,.foo?,"{\"notfoo\": true, \"alsonotfoo\": false}",new,Added exact table query/input case.,manual.basic.optional-field-missing
+  basic.optional.computed,130,table,".[\"foo\"]?","{\"foo\": 42}",new,Added exact table query/input case.,manual.basic.optional-computed-field
+  basic.optional.array,136,table,"[.foo?]","[1,2]",new,Added exact table query/input case.,manual.basic.optional-array-field
+  basic.array-index.zero,152,table,".[0]","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]",new,Added exact table query/input case.,manual.basic.array-index-zero
+  basic.array-index.out-of-range,158,table,".[2]","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]",new,Added exact table query/input case.,manual.basic.array-index-out-of-range
+  basic.array-index.negative,164,table,".[-2]","[1,2,3]",new,Added exact table query/input case.,manual.basic.array-index-negative
+  basic.slice.array-middle,174,table,".[2:4]","[\"a\",\"b\",\"c\",\"d\",\"e\"]",new,Added exact table query/input case.,manual.basic.slice-array-middle
+  basic.slice.string-middle,180,table,".[2:4]","\"abcdefghi\"",new,Added exact table query/input case.,manual.basic.slice-string-middle
+  basic.slice.array-prefix,186,table,".[:3]","[\"a\",\"b\",\"c\",\"d\",\"e\"]",new,Added exact table query/input case.,manual.basic.slice-array-prefix
+  basic.slice.array-suffix,192,table,".[-2:]","[\"a\",\"b\",\"c\",\"d\",\"e\"]",new,Added exact table query/input case.,manual.basic.slice-array-suffix
+  basic.iterator.array,206,table,".[]","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]",new,Added exact table query/input case.,manual.basic.iterator-array
+  basic.iterator.empty-array,213,table,".[]","[]",new,Added exact table query/input case.,manual.basic.iterator-empty-array
+  basic.iterator.field-array,219,table,".foo[]","{\"foo\":[1,2,3]}",new,Added exact table query/input case.,manual.basic.iterator-field-array
+  basic.iterator.object,227,table,".[]","{\"a\": 1, \"b\": 1}",new,Added exact table query/input case.,manual.basic.iterator-object
+  basic.comma.prose,241,fenced,".foo,\n.bar","{\"foo\":1,\"bar\":2}",new,Added synthesized object fixture for runnable fenced fragment.,manual.basic.prose-comma-code
+  basic.comma.fields,249,table,".foo, .bar","{\"foo\": 42, \"bar\": \"something else\", \"baz\": true}",new,Added exact table query/input case.,manual.basic.comma-fields
+  basic.comma.user-projects,256,table,".user, .projects[]","{\"user\":\"stedolan\", \"projects\": [\"jq\", \"wikiflow\"]}",new,Added exact table query/input case.,manual.basic.comma-user-projects
+  basic.comma.indexes,264,table,".[4,2]","[\"a\",\"b\",\"c\",\"d\",\"e\"]",new,Added exact table query/input case.,manual.basic.comma-indexes
+  basic.pipe.name,281,table,".[] | .name","[{\"name\":\"JSON\", \"good\":true}, {\"name\":\"XML\", \"good\":false}]",new,Added exact table query/input case.,manual.basic.pipe-name
+  basic.parentheses.arithmetic,292,table,(. + 2) * 5,"1",new,Added exact table query/input case.,manual.basic.parentheses-arithmetic
+  basic-filters.witness.manual.basic.prose-identity,18,witness,.,"null",covered,Executable witness for source passage basic.identity.prose-filter.,manual.basic.prose-identity
+  basic-filters.witness.manual.basic.prose-pretty-print,20,witness,.,"{\"hello\":\"world\"}",covered,Executable witness for source passage basic.identity.pretty-print.,manual.basic.prose-pretty-print
+  basic-filters.witness.manual.basic.prose-object-field,86,witness,.foo,"{\"foo\":42}",covered,Executable witness for source passage basic.object.field-present.,manual.basic.prose-object-field
+  basic-filters.witness.manual.basic.prose-object-chain,88,witness,.foo.bar,"{\"foo\":{\"bar\":42}}",covered,Executable witness for source passage basic.object.chained-field.,manual.basic.prose-object-chain
+  basic-filters.witness.manual.basic.prose-object-chain-pipe,88,witness,.foo | .bar,"{\"foo\":{\"bar\":42}}",covered,Executable witness for source passage basic.object.chained-field-pipe.,manual.basic.prose-object-chain-pipe
+  basic-filters.witness.manual.basic.prose-special-key-identifier,92,witness,".\"foo$\"","{\"foo$\":42}",covered,Executable witness for source passage basic.object.special-key-identifier.,manual.basic.prose-special-key-identifier
+  basic-filters.witness.manual.basic.prose-special-key-index,92,witness,".[\"foo$\"]","{\"foo$\":42}",covered,Executable witness for source passage basic.object.special-key-index.,manual.basic.prose-special-key-index
+  basic-filters.witness.manual.basic.prose-colon-key,94,witness,".[\"foo::bar\"]","{\"foo::bar\":42}",covered,Executable witness for source passage basic.object.colon-key.,manual.basic.prose-colon-key
+  basic-filters.witness.manual.basic.prose-dot-key,94,witness,".[\"foo.bar\"]","{\"foo.bar\":42}",covered,Executable witness for source passage basic.object.dot-key.,manual.basic.prose-dot-key
+  basic-filters.witness.manual.basic.invalid-colon-key,94,witness,".foo::bar","{\"foo::bar\":42}",covered,Executable witness for source passage basic.object.invalid-dot-key.,manual.basic.invalid-colon-key
+  basic-filters.witness.manual.basic.prose-array-index-third,148,witness,".[2]","[0,1,2]",covered,Executable witness for source passage basic.array-index.third-element.,manual.basic.prose-array-index-third
+  basic-filters.witness.manual.basic.prose-array-index-last,150,witness,".[-1]","[1,2,3]",covered,Executable witness for source passage basic.array-index.last-element.,manual.basic.prose-array-index-last
+  basic-filters.witness.manual.basic.prose-slice-example,172,witness,".[10:15]","[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]",covered,Executable witness for source passage basic.slice.example.,manual.basic.prose-slice-example
+  basic-filters.witness.manual.basic.iterator-prose-array,200,witness,".[]","[1,2,3]",covered,Executable witness for source passage basic.iterator.prose-array.,manual.basic.iterator-prose-array
+  basic-filters.witness.manual.basic.prose-pipe-field,275,witness,".[] | .foo","[{\"foo\":1},{\"foo\":2}]",covered,Executable witness for source passage basic.pipe.prose-field.,manual.basic.prose-pipe-field
+  basic-filters.witness.manual.basic.prose-pipe-chain,277,witness,.a.b.c,"{\"a\":{\"b\":{\"c\":42}}}",covered,Executable witness for source passage basic.pipe.chained-equivalence.,manual.basic.prose-pipe-chain
+  basic-filters.witness.manual.basic.prose-pipe-chain-expanded,277,witness,.a | .b | .c,"{\"a\":{\"b\":{\"c\":42}}}",covered,Executable witness for source passage basic.pipe.chained-equivalence-expanded.,manual.basic.prose-pipe-chain-expanded
+  basic-filters.witness.manual.basic.prose-pipe-identity,279,witness,.a | . | .b,"{\"a\":{\"b\":42}}",covered,Executable witness for source passage basic.pipe.identity-stage.,manual.basic.prose-pipe-identity
+  basic-filters.witness.manual.basic.prose-pipe-identity-equivalent,279,witness,.a.b,"{\"a\":{\"b\":42}}",covered,Executable witness for source passage basic.pipe.identity-stage-equivalent.,manual.basic.prose-pipe-identity-equivalent
+coverage_notes[26]{id,source_line,kind,query,input,disposition,reason,evidence_case_id,expected_output}:
+  basic.identity.prose-filter,18,prose,.,"null",new,Added synthesized null fixture for runnable prose filter.,manual.basic.prose-identity,null
+  basic.identity.pretty-print,20,prose,.,"{\"hello\":\"world\"}",new,Added synthesized object fixture for runnable prose filter.,manual.basic.prose-pretty-print,null
+  basic.object.field-present,86,prose,.foo,"{\"foo\":42}",new,Added synthesized object fixture for runnable prose filter.,manual.basic.prose-object-field,null
+  basic.object.chained-field,88,prose,.foo.bar,"{\"foo\":{\"bar\":42}}",new,Added synthesized nested-object fixture for runnable prose filter.,manual.basic.prose-object-chain,null
+  basic.object.chained-field-pipe,88,prose,.foo | .bar,"{\"foo\":{\"bar\":42}}",new,Added synthesized nested-object fixture for runnable prose filter.,manual.basic.prose-object-chain-pipe,null
+  basic.object.special-key-identifier,92,prose,".\"foo$\"","{\"foo$\":42}",new,Added synthesized special-key object fixture.,manual.basic.prose-special-key-identifier,null
+  basic.object.special-key-index,92,prose,".[\"foo$\"]","{\"foo$\":42}",new,Added synthesized special-key object fixture.,manual.basic.prose-special-key-index,null
+  basic.object.colon-key,94,prose,".[\"foo::bar\"]","{\"foo::bar\":42}",new,Added synthesized special-key object fixture.,manual.basic.prose-colon-key,null
+  basic.object.dot-key,94,prose,".[\"foo.bar\"]","{\"foo.bar\":42}",new,Added synthesized special-key object fixture.,manual.basic.prose-dot-key,null
+  basic.object.invalid-dot-key,94,prose,".foo::bar","{\"foo::bar\":42}",new,Negative syntax is executable as a compile-error case; the object fixture is synthesized.,manual.basic.invalid-colon-key,null
+  basic.object-index.syntax,144,prose,".[\"foo\"]","{\"foo\":42}",covered,Exact query/input is covered by the table case.,manual.basic.object-computed-field,null
+  basic.array-index.placeholder,148,prose,".[<number>]",null,non-executable,Placeholder syntax is not a runnable jq query.,null,null
+  basic.array-index.third-element,148,prose,".[2]","[0,1,2]",new,Added synthesized array fixture for runnable prose filter.,manual.basic.prose-array-index-third,null
+  basic.array-index.last-element,150,prose,".[-1]","[1,2,3]",new,Added synthesized array fixture for runnable prose filter.,manual.basic.prose-array-index-last,null
+  basic.array-index.next-to-last,150,prose,".[-2]","[1,2,3]",covered,Exact query/input is covered by the table case.,manual.basic.array-index-negative,null
+  basic.slice.placeholder,172,prose,".[<number>:<number>]",null,non-executable,Placeholder slice syntax is not a runnable jq query.,null,null
+  basic.slice.example,172,prose,".[10:15]","[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]",new,Added synthesized array fixture for runnable prose filter.,manual.basic.prose-slice-example,null
+  basic.iterator.prose-array,200,prose,".[]","[1,2,3]",new,Added concrete prose iterator example.,manual.basic.iterator-prose-array,null
+  basic.iterator.prose-field,200,prose,".foo[]","{\"foo\":[1,2,3]}",covered,Exact query/input is covered by the table case.,manual.basic.iterator-field-array,null
+  basic.iterator.prose-object,202,prose,".[]","{\"a\": 1, \"b\": 1}",covered,Exact query/input is covered by the table case.,manual.basic.iterator-object,null
+  basic.pipe.prose-field,275,prose,".[] | .foo","[{\"foo\":1},{\"foo\":2}]",new,Added synthesized array-of-objects fixture for runnable prose filter.,manual.basic.prose-pipe-field,null
+  basic.pipe.chained-equivalence,277,prose,.a.b.c,"{\"a\":{\"b\":{\"c\":42}}}",new,Added synthesized nested-object fixture for runnable prose filter.,manual.basic.prose-pipe-chain,null
+  basic.pipe.chained-equivalence-expanded,277,prose,.a | .b | .c,"{\"a\":{\"b\":{\"c\":42}}}",new,Added synthesized nested-object fixture for runnable prose filter.,manual.basic.prose-pipe-chain-expanded,null
+  basic.pipe.identity-stage,279,prose,.a | . | .b,"{\"a\":{\"b\":42}}",new,Added synthesized nested-object fixture for runnable prose filter.,manual.basic.prose-pipe-identity,null
+  basic.pipe.identity-stage-equivalent,279,prose,.a.b,"{\"a\":{\"b\":42}}",new,Added synthesized nested-object fixture for runnable prose filter.,manual.basic.prose-pipe-identity-equivalent,null
+  basic.parentheses.description,290,prose,grouping operator,null,non-executable,Conceptual parenthesis description contains no concrete jq query/input.,null,null
+source_values[54]:
+  - entry_id: basic.identity.prose-filter
+    field: expected_output
+    value[1]: "null"
+  - entry_id: basic.identity.pretty-print
+    field: expected_output
+    value[1]: "{\"hello\":\"world\"}"
+  - entry_id: basic.identity.large-exponent
+    field: expected_output
+    value[1]: "1.7976931348623157e+308"
+  - entry_id: basic.identity.hello
+    field: expected_output
+    value[1]: "\"Hello, world!\""
+  - entry_id: basic.identity.decimal
+    field: expected_output
+    value[1]: "0.12345678901234567890123456789"
+  - entry_id: basic.identity.have-decnum-positive
+    field: expected_output
+    value[1]: "true"
+  - entry_id: basic.identity.have-decnum-negative
+    field: expected_output
+    value[1]: "true"
+  - entry_id: basic.identity.precision-compare
+    field: expected_output
+    value[1]: "false"
+  - entry_id: basic.identity.decimal-forms
+    field: expected_output
+    value[1]: "true"
+  - entry_id: basic.identity.big-comparison
+    field: expected_output
+    value[1]: "true"
+  - entry_id: basic.object.field-present
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.chained-field
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.chained-field-pipe
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.special-key-identifier
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.special-key-index
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.colon-key
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.dot-key
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.table-present
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.object.table-missing
+    field: expected_output
+    value[1]: "null"
+  - entry_id: basic.object.table-computed
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.optional.present
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.optional.missing
+    field: expected_output
+    value[1]: "null"
+  - entry_id: basic.optional.computed
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.optional.array
+    field: expected_output
+    value[1]: "[]"
+  - entry_id: basic.object-index.syntax
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.array-index.third-element
+    field: expected_output
+    value[1]: "2"
+  - entry_id: basic.array-index.last-element
+    field: expected_output
+    value[1]: "3"
+  - entry_id: basic.array-index.next-to-last
+    field: expected_output
+    value[1]: "2"
+  - entry_id: basic.array-index.zero
+    field: expected_output
+    value[1]: "{\"name\":\"JSON\", \"good\":true}"
+  - entry_id: basic.array-index.out-of-range
+    field: expected_output
+    value[1]: "null"
+  - entry_id: basic.array-index.negative
+    field: expected_output
+    value[1]: "2"
+  - entry_id: basic.slice.example
+    field: expected_output
+    value[1]: "[10,11,12,13,14]"
+  - entry_id: basic.slice.array-middle
+    field: expected_output
+    value[1]: "[\"c\", \"d\"]"
+  - entry_id: basic.slice.string-middle
+    field: expected_output
+    value[1]: "\"cd\""
+  - entry_id: basic.slice.array-prefix
+    field: expected_output
+    value[1]: "[\"a\", \"b\", \"c\"]"
+  - entry_id: basic.slice.array-suffix
+    field: expected_output
+    value[1]: "[\"d\", \"e\"]"
+  - entry_id: basic.iterator.prose-array
+    field: expected_output
+    value[3]: "1","2","3"
+  - entry_id: basic.iterator.prose-field
+    field: expected_output
+    value[3]: "1","2","3"
+  - entry_id: basic.iterator.prose-object
+    field: expected_output
+    value[2]: "1","1"
+  - entry_id: basic.iterator.array
+    field: expected_output
+    value[2]: "{\"name\":\"JSON\", \"good\":true}","{\"name\":\"XML\", \"good\":false}"
+  - entry_id: basic.iterator.empty-array
+    field: expected_output
+    value[0]:
+  - entry_id: basic.iterator.field-array
+    field: expected_output
+    value[3]: "1","2","3"
+  - entry_id: basic.iterator.object
+    field: expected_output
+    value[2]: "1","1"
+  - entry_id: basic.comma.prose
+    field: expected_output
+    value[2]: "1","2"
+  - entry_id: basic.comma.fields
+    field: expected_output
+    value[2]: "42","\"something else\""
+  - entry_id: basic.comma.user-projects
+    field: expected_output
+    value[3]: "\"stedolan\"","\"jq\"","\"wikiflow\""
+  - entry_id: basic.comma.indexes
+    field: expected_output
+    value[2]: "\"e\"","\"c\""
+  - entry_id: basic.pipe.prose-field
+    field: expected_output
+    value[2]: "1","2"
+  - entry_id: basic.pipe.chained-equivalence
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.pipe.chained-equivalence-expanded
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.pipe.identity-stage
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.pipe.identity-stage-equivalent
+    field: expected_output
+    value[1]: "42"
+  - entry_id: basic.pipe.name
+    field: expected_output
+    value[2]: "\"JSON\"","\"XML\""
+  - entry_id: basic.parentheses.arithmetic
+    field: expected_output
+    value[1]: "15"

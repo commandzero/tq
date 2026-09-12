@@ -1,0 +1,434 @@
+[5]:
+  - case_id: manual.audit.math.acos-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the recorded macOS acos(0.5) observation, 1 binary64 ULP from pinned jq. Safe libm 0.2.16 is retained without native FFI. The 92-input boundary corpus observed at most 1 ULP for acos; this is not a global bound. Angular calculations can differ in the last bit. Reconsider after implementation when the safe library, reference build, target, or observed outputs change."
+    evidence:
+      case_fingerprint: 233fdf63ee98c3e3383d63a3a6c097a36c2f61c9a16b1f7b12b053fe2914c472
+      reference_identity:
+        tool: jq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+          bytes: 841408
+          sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+        build_features[1]: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
+      target_identity:
+        tool: tq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+          bytes: 15283344
+          sha256: e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.0471975511965976
+        stdout_hex: 312e303437313937353531313936353937360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.0471975511965979
+        stdout_hex: 312e303437313937353531313936353937390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.0471975511965979
+        stdout_hex: "312e30343731393735353131393635393739"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.0471975511965976
+        stdout_hex: 312e303437313937353531313936353937360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.0471975511965979
+        stdout_hex: 312e303437313937353531313936353937390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.audit.math.erfc-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the recorded macOS erfc(2) observation, 2 binary64 ULP from pinned jq. Safe libm 0.2.16 is retained without native FFI. The 92-input boundary corpus observed at most 2 ULP for erfc; this is not a global bound. Tail-probability calculations can differ in the last bits. Reconsider after implementation when the safe library, reference build, target, or observed outputs change."
+    evidence:
+      case_fingerprint: 14e461f8cb65eed28f86932428699c192637e644ea8269f2ea645735f75b5b87
+      reference_identity:
+        tool: jq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+          bytes: 841408
+          sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+        build_features[1]: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
+      target_identity:
+        tool: tq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+          bytes: 15283344
+          sha256: e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.0046777349810472645
+        stdout_hex: 302e303034363737373334393831303437323634350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047266
+        stdout_hex: 302e3030343637373733343938313034373236360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047266
+        stdout_hex: "302e303034363737373334393831303437323636"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.0046777349810472645
+        stdout_hex: 302e303034363737373334393831303437323634350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047266
+        stdout_hex: 302e3030343637373733343938313034373236360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.audit.math.exp-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the recorded macOS exp(1) observation, 1 binary64 ULP from pinned jq. Safe libm 0.2.16 is retained without native FFI. The 92-input boundary corpus observed at most 1 ULP for exp; this is not a global bound. Exponential calculations can differ in the last bit. Reconsider after implementation when the safe library, reference build, target, or observed outputs change."
+    evidence:
+      case_fingerprint: 47de0b88d21a990b49f7f0e2f4dbd97f553e3019fe1f2b70547efc01b1d9c4c5
+      reference_identity:
+        tool: jq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+          bytes: 841408
+          sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+        build_features[1]: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
+      target_identity:
+        tool: tq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+          bytes: 15283344
+          sha256: e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 2.718281828459045
+        stdout_hex: 322e3731383238313832383435393034350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 2.7182818284590455
+        stdout_hex: 322e373138323831383238343539303435350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 2.7182818284590455
+        stdout_hex: "322e37313832383138323834353930343535"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 2.718281828459045
+        stdout_hex: 322e3731383238313832383435393034350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 2.7182818284590455
+        stdout_hex: 322e373138323831383238343539303435350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.audit.math.tgamma-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Primary review: accept only the recorded macOS tgamma(0.5) observation, 1 binary64 ULP from pinned jq. Safe libm 0.2.16 is retained without native FFI. The 92-input boundary corpus observed at most 2 ULP for tgamma; this is not a global bound. Gamma-function calculations can differ in the last bits. Reconsider after implementation when the safe library, reference build, target, or observed outputs change."
+    evidence:
+      case_fingerprint: 09e9b15fc57e248fc8c6056faebfb2ec1efe2464f3f1418a984ed0b4b7808ea2
+      reference_identity:
+        tool: jq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+          bytes: 841408
+          sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+        build_features[1]: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
+      target_identity:
+        tool: tq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+          bytes: 15283344
+          sha256: e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.772453850905516
+        stdout_hex: 312e3737323435333835303930353531360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: "312e37373234353338353039303535313539"
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.772453850905516
+        stdout_hex: 312e3737323435333835303930353531360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.regex.flag-l
+    contract: result-sequence
+    difference_summary: "result sequence, exit code, error class"
+    rationale: "Primary review: accept only the recorded longest-match witness as an explicit restriction of fancy-regex 0.19.1. tq rejects the l flag with the recorded diagnostic and exit status rather than returning an incorrect first-alternative match. Scripts requiring longest matching cannot substitute tq. Reconsider after implementation when a safe Rust library provides longest matching with captures and bounded work; no other regex behavior is exempt."
+    evidence:
+      case_fingerprint: 5c063226233dbf1942cdaf91e2e6eeb6431ff3bd3bf7ac0ff9e42aa14c08871c
+      reference_identity:
+        tool: jq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+        version: jq-1.8.1
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/reference-build/jq/jq
+          bytes: 841408
+          sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+        build_features[1]: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
+      target_identity:
+        tool: tq
+        path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+        version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+        executable:
+          path: /Users/reno/Development/commandzero/worktrees/tq/delta/tq/target/release/tq-bind-final-AxfMRp
+          bytes: 15283344
+          sha256: e9478b0ad46e951a1654efbe4d9d52440da49b8b57283754a0c86fb69f1d4f0c
+        build_features[0]:
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - offset: 0
+            length: 2
+            string: ab
+            captures[0]:
+        stdout_hex: 7b0a2020226f6666736574223a20302c0a2020226c656e677468223a20322c0a202022737472696e67223a20226162222c0a2020226361707475726573223a205b5d0a7d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[0]:
+        stdout_hex: ""
+        raw_stdout_hex: null
+        stderr_hex: 74713a2062797465636f6465206f7065726174696f6e206973206e6f742065786563757461626c6520696e2074686973206c616e677561676520776176653a20726567657820666c616720276c2720286c6f6e676573742d6d61746368206d6f6465290a
+        process_status: exited
+        exit_code: 2
+        error_class: cli-usage
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[0]:
+        stdout_hex: ""
+        raw_stdout_hex: null
+        stderr_hex: 74713a2062797465636f6465206f7065726174696f6e206973206e6f742065786563757461626c6520696e2074686973206c616e677561676520776176653a20726567657820666c616720276c2720286c6f6e676573742d6d61746368206d6f6465290a
+        process_status: exited
+        exit_code: 2
+        error_class: cli-usage
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]:
+          - offset: 0
+            length: 2
+            string: ab
+            captures[0]:
+        stdout_hex: 7b226f6666736574223a302c226c656e677468223a322c22737472696e67223a226162222c226361707475726573223a5b5d7d0a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[0]:
+        stdout_hex: ""
+        raw_stdout_hex: null
+        stderr_hex: 74713a2062797465636f6465206f7065726174696f6e206973206e6f742065786563757461626c6520696e2074686973206c616e677561676520776176653a20726567657820666c616720276c2720286c6f6e676573742d6d61746368206d6f6465290a
+        process_status: exited
+        exit_code: 2
+        error_class: cli-usage
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,"result sequence, exit code, error class"
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,"result sequence, exit code, error class"

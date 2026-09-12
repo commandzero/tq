@@ -1,0 +1,47 @@
+schema_version: 2
+section: conditionals-and-comparisons
+source: jq-manual/conditionals-and-comparisons.md
+examples[25]{id,source_line,kind,query,input,disposition,reason,case_id}:
+  condcomp.eq-false,22,table,. == false,"null",new,Added exact table query/input case.,manual.condcomp.eq-false
+  condcomp.eq-object,28,table,". == {\"b\": {\"d\": (4 + 1e-20), \"c\": 3}, \"a\":1}","{\"a\":1, \"b\": {\"c\": 3, \"d\": 4}}",new,Added exact table query/input case.,manual.condcomp.eq-object
+  condcomp.eq-stream,34,table,".[] == 1","[1, 1.0, \"1\", \"banana\"]",new,Added exact table query/input case.,manual.condcomp.eq-stream
+  condcomp.if-elif,55,table,"if . == 0 then\n  \"zero\"\nelif . == 1 then\n  \"one\"\nelse\n  \"many\"\nend","2",new,Added exact table query/input case.,manual.condcomp.if-elif
+  condcomp.compare-lt,67,table,. < 5,"2",new,Added exact table query/input case.,manual.condcomp.compare-lt
+  condcomp.and-string,88,table,"42 and \"a string\"","null",new,Added exact table query/input case.,manual.condcomp.and-string
+  condcomp.or-stream,94,table,"(true, false) or false","null",new,Added exact table query/input case.,manual.condcomp.or-stream
+  condcomp.and-stream,101,table,"(true, true) and (true, false)","null",new,Added exact table query/input case.,manual.condcomp.and-stream
+  condcomp.not-array,110,table,"[true, false | not]","null",new,Added exact table query/input case.,manual.condcomp.not-array
+  condcomp.alt-empty,136,table,empty // 42,"null",new,Added exact table query/input case.,manual.condcomp.alt-empty
+  condcomp.alt-present,142,table,.foo // 42,"{\"foo\": 19}",new,Added exact table query/input case.,manual.condcomp.alt-present
+  condcomp.alt-missing,148,table,.foo // 42,"{}",new,Added exact table query/input case.,manual.condcomp.alt-missing
+  condcomp.alt-generator,154,table,"(false, null, 1) // 42","null",new,Added exact table query/input case.,manual.condcomp.alt-generator
+  condcomp.alt-pipe,160,table,"(false, null, 1) | . // 42","null",new,Added exact table query/input case.,manual.condcomp.alt-pipe
+  condcomp.try-catch-type,174,table,"try .a catch \". is not an object\"","true",new,Added exact table query/input case.,manual.condcomp.try-catch-type
+  condcomp.try-catch-array,180,table,"[.[]|try .a]","[{}, true, {\"a\":1}]",new,Added exact table query/input case.,manual.condcomp.try-catch-array
+  condcomp.try-catch-error,186,table,"try error(\"some exception\") catch .","true",new,Added exact table query/input case.,manual.condcomp.try-catch-error
+  condcomp.optional-field,233,table,"[.[] | .a?]","[{}, true, {\"a\":1}]",new,Added exact table query/input case.,manual.condcomp.optional-field
+  condcomp.optional-tonumber,239,table,"[.[] | tonumber?]","[\"1\", \"invalid\", \"3\", 4]",new,Added exact table query/input case.,manual.condcomp.optional-tonumber
+  condcomp.not-fence,80,fenced,".foo and .bar |\nnot","{\"foo\":true,\"bar\":false}",new,Added a synthesized object input for the runnable fence.,manual.condcomp.fence-not
+  condcomp.alt-generic-fence,121,fenced,"1\n// 2","null",new,The fence uses symbolic operands a and b; replaced them with literals 1 and 2 to exercise the runnable operator form.,manual.condcomp.fence-generic
+  condcomp.alt-precedence-fence,130,fenced,"false,\n(1 // 2)","null",new,Added the exact runnable fenced query with a synthesized null input.,manual.condcomp.fence-precedence
+  condcomp.break-unbound,223,fenced,break $out,"null",new,Added the exact negative syntax example as a compile-error case.,manual.condcomp.fence-break-error
+  conditionals-and-comparisons.witness.manual.condcomp.prose-default,127,witness,.foo // 1,"{}",covered,Executable witness for source passage condcomp.alt-default-prose.,manual.condcomp.prose-default
+  conditionals-and-comparisons.witness.manual.condcomp.prose-precedence,129,witness,"false, 1 // 2","null",covered,Executable witness for source passage condcomp.alt-precedence-prose.,manual.condcomp.prose-precedence
+coverage_notes[17]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  condcomp.break-helper,198,fenced,null,null,non-executable,The repeat(exp) sketch leaves repeat and exp undefined and uses a prose ellipsis for the error branch.,null
+  condcomp.break-label-sketch,207,fenced,null,null,non-executable,"The label example contains ellipses in both the body and break site, so it is an incomplete placeholder.",null
+  condcomp.break-reduce-sketch,217,fenced,null,null,non-executable,The reduce example contains an ellipsis in its branch and is not a complete jq program.,null
+  condcomp.eq-prose,18,prose,a == b,null,non-executable,a and b are symbolic operands; the paragraph provides semantics rather than a complete jq program.,null
+  condcomp.neq-prose,20,prose,a != b,null,non-executable,a and b are symbolic operands; the paragraph provides semantics rather than a complete jq program.,null
+  condcomp.if-prose,45,prose,if A then B else C end,null,non-executable,"A, B, and C are metavariables, not a complete executable filter.",null
+  condcomp.if-optional-prose,47,prose,if A then B end,null,non-executable,"A and B are metavariables, not a complete executable filter.",null
+  condcomp.if-truthiness-prose,49,prose,"if .name then A else B end; if .name == \"\" then A else B end",null,non-executable,Both examples leave their branches A and B unspecified.,null
+  condcomp.elif-prose,53,prose,elif A then B,null,non-executable,"A and B are metavariables, not a complete executable filter.",null
+  condcomp.alt-default-prose,127,prose,.foo // 1,"{}",new,Added a synthesized empty-object input for the runnable default example.,manual.condcomp.prose-default
+  condcomp.alt-precedence-prose,129,prose,"false, 1 // 2","null",new,Added a synthesized null input for the runnable precedence example.,manual.condcomp.prose-precedence
+  condcomp.alt-pipe-prose,134,prose,"(false, null, 1) | . // 42","null",covered,Exact query/input is covered by the table case.,manual.condcomp.alt-pipe
+  condcomp.alt-generator-prose,134,prose,"(false, null, 1) // 42","null",covered,Exact query/input is covered by the table case.,manual.condcomp.alt-generator
+  condcomp.try-catch-prose,170,prose,try EXP catch EXP,null,non-executable,EXP is a metavariable and the paragraph provides no complete filter or input.,null
+  condcomp.try-prose,172,prose,try EXP,null,non-executable,EXP is a metavariable and the paragraph provides no complete filter or input.,null
+  condcomp.break-name-prose,211,prose,break $label_name,null,non-executable,The label name is symbolic and no matching label or complete program is provided.,null
+  condcomp.optional-prose,231,prose,EXP?,null,non-executable,EXP is a metavariable rather than a complete executable filter.,null

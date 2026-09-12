@@ -1,0 +1,11 @@
+schema_version: 2
+section: introduction
+source: jq-manual/index.md
+examples[3]{id,source_line,kind,query,input,case_id,disposition,reason}:
+  introduction.witness.manual.introduction.literal-string,13,witness,"\"hello\"","{\"ignored\":true}",manual.introduction.literal-string,covered,Executable witness for source passage introduction.literal-string.
+  introduction.witness.manual.types.inline-literal-number,13,witness,"42","null",manual.types.inline-literal-number,covered,Executable witness for source passage introduction.literal-number.
+  introduction.witness.manual.advanced.prose-average-direct,13,witness,add / length,"[10,20,30]",manual.advanced.prose-average-direct,covered,Executable witness for source passage introduction.average.
+coverage_notes[3]{id,source_line,kind,query,input,disposition,reason,evidence_case_id}:
+  introduction.literal-string,13,prose,"\"hello\"","{\"ignored\":true}",new,Representative input shows that a literal filter ignores incoming data.,manual.introduction.literal-string
+  introduction.literal-number,13,prose,"42","null",covered,Exact literal query already covered by the types audit.,manual.types.inline-literal-number
+  introduction.average,13,prose,add / length,"[10,20,30]",covered,Exact average query already covered by the advanced-features audit.,manual.advanced.prose-average-direct
