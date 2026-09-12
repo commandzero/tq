@@ -349,8 +349,13 @@ fn explicit_toon_sequence_and_json_output_are_normalized_from_arguments() {
     let json_output = script(
         directory.path(),
         "json-output-values",
-        "printf '{\\\"a\\\":1}\\n2\\n'",
+        "printf '%s\\n' '{\"a\":1}' '2'",
     );
+    let fixture_output = std::process::Command::new(&json_output)
+        .output()
+        .expect("JSON fixture output");
+    assert!(fixture_output.status.success());
+    assert_eq!(fixture_output.stdout, b"{\"a\":1}\n2\n");
     let mut json_invocation = invocation(json_output);
     json_invocation.args = vec!["--output-format".to_owned(), "json".to_owned()];
     let json_row = run_gated_row(
