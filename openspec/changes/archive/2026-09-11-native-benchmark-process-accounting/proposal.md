@@ -11,6 +11,7 @@
 - Remove mandatory RSS polling and `time` wrappers from primary measurements. Keep explicitly requested diagnostic sampling or limit enforcement separately labeled and bounded.
 - **BREAKING**: Replace the benchmark policy requiring `time` and `ps` with verified native accounting. Add explicit method, scope, availability, and timing precision to reports; preserve old provenance and reject incompatible comparisons.
 - Validate short allocation bursts, units, independent children, threads, termination, and timing controls on both native platforms. Compare native counters independently with platform `time`.
+- Compare tools only within the same native host and OS using equivalent harness settings, timing boundaries, instrumentation and disclosed concessions. Record startup/scheduling effects without treating sleep-control excess runtime as timer error or requiring a universal 1 ms guarantee.
 - Rerun the supported jq/yq/tq matrix and update stable comparison Results blocks while preserving authored explanations.
 - Format comparison tables with units in each measurement cell and one decimal place. Use `-` for missing or untimed measurements, explain placeholders before each table, and keep collector source labels out of the tables while retaining provenance in report metadata and method descriptions.
 - Apply issue #30's self-regression acceptance policy: disclose each comparable increase above 20%; documented increases through 50% are acceptable; above 50% blocks acceptance.

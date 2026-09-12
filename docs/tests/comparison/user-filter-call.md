@@ -30,29 +30,32 @@ function.
 Last updated: 2026-09-11
 Profile: `standard` | Status: `observed-failures`
 
-Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
-Environment: `linux` / `x86_64`, 16 logical CPUs, compiler profile `release-benchmark`
+Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
+Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.0-ogc4.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Aug 20 16:15:37 UTC 2026`; compiler profile `release-benchmark`
 
-Peak RSS is authoritative only after the campaign RSS preflight passes. Captured values show their source when present; missing values are `not captured`, never estimates.
+Peak RSS is authoritative only after the campaign RSS preflight passes. Missing or invalid values are `-`, never estimates. RSS collector provenance (outside measurement tables): `linux-wait4`.
+Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.1 ms`; primary timing is sampler-free.
 
-Compare columns with the same input format to isolate tool differences. Missing adapters are marked `not recorded`.
+Compare columns with the same input format to isolate tool differences. Missing adapters have `-` measurement cells and `not recorded` outcome/detail cells.
 
-Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU, throughput, and output cells use the captured summary values.
+Timing rows show numeric medians followed by compact MAD / p95 / range rows, with one decimal place and a unit in each measurement cell. CPU, throughput, and output cells use the captured summary values.
 
 ### usgs-all-day
 
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`, `yq rejects the catalog jq def expression used by this adapter.`.
+
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 23.674 | not measured | not measured | 23.547 | 23.157 | 23.509 |
-| Wall dispersion (MAD / p95 / range) | 0.222 / 24.860 / 22.913-24.860 | not measured | not measured | 0.202 / 24.901 / 22.047-24.901 | 0.515 / 24.145 / 22.203-24.145 | 0.428 / 24.632 / 22.799-24.632 |
-| First output (ms) | 23.659 | not measured | not measured | 23.529 | 23.145 | 23.492 |
-| First output dispersion (MAD / p95 / range) | 0.223 / 24.845 / 22.889-24.845 | not measured | not measured | 0.204 / 24.882 / 22.032-24.882 | 0.515 / 24.130 / 22.186-24.130 | 0.429 / 24.619 / 22.785-24.619 |
-| User CPU (ms) | 0.000 | not captured | not captured | 0.000 | 0.000 | 0.000 |
-| System CPU (ms) | 0.000 | not captured | not captured | 0.000 | 0.000 | 0.000 |
-| Peak RSS (MiB, source) | 4.40 (gnu-time-v) | not measured | not measured | 9.06 (gnu-time-v) | 9.65 (gnu-time-v) | 9.12 (gnu-time-v) |
-| Logical throughput (records/s) | 8194.471 | not measured | not measured | 8239.016 | 8377.416 | 8252.334 |
-| Physical throughput (MiB/s) | 5.610 | not measured | not measured | 5.641 | 5.727 | 6.680 |
-| Output bytes | 839 | not measured | not measured | 839 | 839 | 839 |
+| Wall time | 2.8 ms | - | - | 4.8 ms | 5.5 ms | 5.3 ms |
+| Wall time dispersion | 0.1 ms / 3.1 ms / 2.6-3.1 ms | - | - | 0.2 ms / 5.1 ms / 4.6-5.1 ms | 0.0 ms / 5.9 ms / 5.4-5.9 ms | 0.1 ms / 5.7 ms / 5.1-5.7 ms |
+| First output | 2.7 ms | - | - | 4.5 ms | 5.2 ms | 5.1 ms |
+| First output dispersion | 0.1 ms / 2.9 ms / 2.6-2.9 ms | - | - | 0.1 ms / 4.8 ms / 4.5-4.8 ms | 0.1 ms / 5.6 ms / 5.1-5.6 ms | 0.1 ms / 5.3 ms / 4.8-5.3 ms |
+| User CPU | 1.6 ms | - | - | 2.6 ms | 3.4 ms | 2.7 ms |
+| System CPU | 1.1 ms | - | - | 2.2 ms | 2.0 ms | 2.6 ms |
+| Peak RSS | 4.4 MiB | - | - | 9.0 MiB | 9.6 MiB | 9.1 MiB |
+| Logical throughput | 69897.3 records/s | - | - | 40095.1 records/s | 35482.4 records/s | 36770.3 records/s |
+| Physical throughput | 47.9 MiB/s | - | - | 27.4 MiB/s | 24.3 MiB/s | 29.8 MiB/s |
+| Output bytes | 839.0 B | - | - | 839.0 B | 839.0 B | 839.0 B |
 | Outcome | timed | unsupported | unsupported | timed | timed | timed |
 | Details | none | yq rejects the catalog jq def expression used by this adapter. | yq rejects the catalog jq def expression used by this adapter. | none | none | none |
 | Samples (warmups) | 10 measured (2 warmup) | not timed | not timed | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
@@ -60,18 +63,20 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU
 
 ### usgs-all-hour
 
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`, `yq rejects the catalog jq def expression used by this adapter.`.
+
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 23.860 | not measured | not measured | 23.394 | 23.585 | 23.601 |
-| Wall dispersion (MAD / p95 / range) | 0.434 / 24.812 / 22.708-25.453 | not measured | not measured | 0.488 / 24.370 / 22.239-25.144 | 0.296 / 24.419 / 22.566-24.612 | 0.288 / 24.519 / 22.093-24.797 |
-| First output (ms) | 23.843 | not measured | not measured | 23.378 | 23.570 | 23.584 |
-| First output dispersion (MAD / p95 / range) | 0.435 / 24.796 / 22.693-25.434 | not measured | not measured | 0.486 / 24.358 / 22.226-25.126 | 0.293 / 24.403 / 22.551-24.597 | 0.288 / 24.508 / 22.079-24.786 |
-| User CPU (ms) | 0.000 | not captured | not captured | 0.000 | 0.000 | 0.000 |
-| System CPU (ms) | 0.000 | not captured | not captured | 0.000 | 0.000 | 0.000 |
-| Peak RSS (MiB, source) | 4.02 (gnu-time-v) | not measured | not measured | 8.03 (gnu-time-v) | 8.41 (gnu-time-v) | 7.93 (gnu-time-v) |
-| Logical throughput (records/s) | 83.824 | not measured | not measured | 85.492 | 84.800 | 84.744 |
-| Physical throughput (MiB/s) | 0.071 | not measured | not measured | 0.072 | 0.072 | 0.082 |
-| Output bytes | 10 | not measured | not measured | 10 | 10 | 10 |
+| Wall time | 1.5 ms | - | - | 1.3 ms | 1.3 ms | 1.3 ms |
+| Wall time dispersion | 0.1 ms / 1.8 ms / 1.3-1.8 ms | - | - | 0.1 ms / 1.5 ms / 1.2-1.5 ms | 0.1 ms / 1.6 ms / 1.1-1.6 ms | 0.1 ms / 1.6 ms / 1.1-1.6 ms |
+| First output | 1.3 ms | - | - | 1.0 ms | 1.0 ms | 1.0 ms |
+| First output dispersion | 0.0 ms / 1.7 ms / 1.2-1.7 ms | - | - | 0.0 ms / 1.3 ms / 1.0-1.4 ms | 0.0 ms / 1.4 ms / 1.0-1.4 ms | 0.0 ms / 1.4 ms / 1.0-1.5 ms |
+| User CPU | 0.7 ms | - | - | 0.0 ms | 0.0 ms | 0.0 ms |
+| System CPU | 0.7 ms | - | - | 1.1 ms | 1.1 ms | 1.1 ms |
+| Peak RSS | 4.1 MiB | - | - | 8.0 MiB | 8.4 MiB | 7.9 MiB |
+| Logical throughput | 1343.6 records/s | - | - | 1531.4 records/s | 1516.3 records/s | 1559.5 records/s |
+| Physical throughput | 1.1 MiB/s | - | - | 1.3 MiB/s | 1.3 MiB/s | 1.5 MiB/s |
+| Output bytes | 10.0 B | - | - | 10.0 B | 10.0 B | 10.0 B |
 | Outcome | timed | unsupported | unsupported | timed | timed | timed |
 | Details | none | yq rejects the catalog jq def expression used by this adapter. | yq rejects the catalog jq def expression used by this adapter. | none | none | none |
 | Samples (warmups) | 30 measured (2 warmup) | not timed | not timed | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) |
@@ -79,18 +84,20 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU
 
 ### usgs-all-month
 
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`, `yq rejects the catalog jq def expression used by this adapter.`.
+
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 120.784 | not measured | not measured | 211.928 | 249.910 | 248.918 |
-| Wall dispersion (MAD / p95 / range) | 17.605 / 140.153 / 100.473-140.153 | not measured | not measured | 1.014 / 216.378 / 207.547-216.378 | 1.657 / 285.988 / 247.108-285.988 | 1.703 / 251.414 / 214.153-251.414 |
-| First output (ms) | 80.450 | not measured | not measured | 195.870 | 238.185 | 213.955 |
-| First output dispersion (MAD / p95 / range) | 0.548 / 82.158 / 79.506-82.158 | not measured | not measured | 1.087 / 202.431 / 194.320-202.431 | 1.368 / 248.544 / 236.021-248.544 | 2.739 / 219.625 / 209.114-219.625 |
-| User CPU (ms) | 70.000 | not captured | not captured | 140.000 | 175.000 | 150.000 |
-| System CPU (ms) | 20.000 | not captured | not captured | 50.000 | 60.000 | 50.000 |
-| Peak RSS (MiB, source) | 60.54 (gnu-time-v) | not measured | not measured | 69.29 (gnu-time-v) | 89.36 (gnu-time-v) | 77.99 (gnu-time-v) |
-| Logical throughput (records/s) | 93340.564 | not measured | not measured | 53197.312 | 45112.240 | 45292.024 |
-| Physical throughput (MiB/s) | 63.270 | not measured | not measured | 36.059 | 30.536 | 36.363 |
-| Output bytes | 50801 | not measured | not measured | 50801 | 50801 | 50801 |
+| Wall time | 99.3 ms | - | - | 195.2 ms | 238.2 ms | 213.8 ms |
+| Wall time dispersion | 1.4 ms / 103.8 ms / 97.6-103.8 ms | - | - | 2.2 ms / 201.2 ms / 192.1-201.2 ms | 2.1 ms / 241.7 ms / 232.2-241.7 ms | 1.7 ms / 223.4 ms / 210.4-223.4 ms |
+| First output | 79.8 ms | - | - | 191.6 ms | 232.8 ms | 209.6 ms |
+| First output dispersion | 0.8 ms / 82.8 ms / 78.2-82.8 ms | - | - | 2.2 ms / 195.9 ms / 188.7-195.9 ms | 1.9 ms / 236.0 ms / 227.8-236.0 ms | 1.7 ms / 218.5 ms / 206.8-218.5 ms |
+| User CPU | 74.9 ms | - | - | 140.1 ms | 177.2 ms | 156.6 ms |
+| System CPU | 23.9 ms | - | - | 54.2 ms | 61.4 ms | 57.6 ms |
+| Peak RSS | 60.7 MiB | - | - | 69.2 MiB | 89.4 MiB | 78.1 MiB |
+| Logical throughput | 113556.5 records/s | - | - | 57755.4 records/s | 47337.0 records/s | 52732.6 records/s |
+| Physical throughput | 77.0 MiB/s | - | - | 39.1 MiB/s | 32.0 MiB/s | 42.3 MiB/s |
+| Output bytes | 50801.0 B | - | - | 50801.0 B | 50801.0 B | 50801.0 B |
 | Outcome | timed | unsupported | unsupported | timed | timed | timed |
 | Details | none | yq rejects the catalog jq def expression used by this adapter. | yq rejects the catalog jq def expression used by this adapter. | none | none | none |
 | Samples (warmups) | 10 measured (2 warmup) | not timed | not timed | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
@@ -98,18 +105,20 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU
 
 ### usgs-all-week
 
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`, `yq rejects the catalog jq def expression used by this adapter.`.
+
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 24.117 | not measured | not measured | 60.556 | 61.932 | 60.685 |
-| Wall dispersion (MAD / p95 / range) | 0.554 / 24.940 / 22.178-24.940 | not measured | not measured | 0.473 / 61.387 / 59.801-61.387 | 0.459 / 62.955 / 60.607-62.955 | 0.508 / 61.771 / 59.551-61.771 |
-| First output (ms) | 18.113 | not measured | not measured | 40.816 | 47.950 | 44.227 |
-| First output dispersion (MAD / p95 / range) | 0.524 / 18.967 / 17.254-18.967 | not measured | not measured | 0.962 / 42.388 / 38.887-42.388 | 0.358 / 48.810 / 47.232-48.810 | 0.621 / 60.339 / 41.623-60.339 |
-| User CPU (ms) | 10.000 | not captured | not captured | 20.000 | 30.000 | 25.000 |
-| System CPU (ms) | 0.000 | not captured | not captured | 5.000 | 10.000 | 10.000 |
-| Peak RSS (MiB, source) | 14.73 (gnu-time-v) | not measured | not measured | 20.08 (gnu-time-v) | 24.20 (gnu-time-v) | 21.59 (gnu-time-v) |
-| Logical throughput (records/s) | 92258.573 | not measured | not measured | 36742.546 | 35926.210 | 36664.744 |
-| Physical throughput (MiB/s) | 62.514 | not measured | not measured | 24.896 | 24.309 | 29.425 |
-| Output bytes | 9903 | not measured | not measured | 9903 | 9903 | 9903 |
+| Wall time | 20.4 ms | - | - | 39.8 ms | 47.1 ms | 42.8 ms |
+| Wall time dispersion | 0.3 ms / 22.1 ms / 18.8-22.1 ms | - | - | 0.7 ms / 40.9 ms / 38.0-40.9 ms | 0.7 ms / 48.0 ms / 44.9-48.0 ms | 0.8 ms / 45.2 ms / 41.1-45.2 ms |
+| First output | 17.5 ms | - | - | 38.9 ms | 46.0 ms | 42.0 ms |
+| First output dispersion | 0.2 ms / 18.8 ms / 16.4-18.8 ms | - | - | 0.7 ms / 40.0 ms / 37.0-40.0 ms | 0.6 ms / 46.9 ms / 43.8-46.9 ms | 0.9 ms / 44.3 ms / 40.4-44.3 ms |
+| User CPU | 13.9 ms | - | - | 27.9 ms | 34.2 ms | 28.9 ms |
+| System CPU | 6.5 ms | - | - | 11.3 ms | 12.7 ms | 12.9 ms |
+| Peak RSS | 14.7 MiB | - | - | 20.0 MiB | 24.4 MiB | 21.6 MiB |
+| Logical throughput | 109154.2 records/s | - | - | 55939.0 records/s | 47289.6 records/s | 51931.4 records/s |
+| Physical throughput | 74.0 MiB/s | - | - | 37.9 MiB/s | 32.0 MiB/s | 41.7 MiB/s |
+| Output bytes | 9903.0 B | - | - | 9903.0 B | 9903.0 B | 9903.0 B |
 | Outcome | timed | unsupported | unsupported | timed | timed | timed |
 | Details | none | yq rejects the catalog jq def expression used by this adapter. | yq rejects the catalog jq def expression used by this adapter. | none | none | none |
 | Samples (warmups) | 10 measured (2 warmup) | not timed | not timed | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |

@@ -73,9 +73,11 @@ it for separate enforcement repetitions. Production measurements never require
 `/usr/bin/time` or Python probes.
 
 Reports record the direct spawn-to-exit timing boundary, input-delivery method,
-RSS scope, and validated timing accuracy. One-decimal display precision is a
-presentation choice, not evidence of sub-millisecond or nanosecond accuracy;
-no-op and known-duration controls establish the supported precision. Native
+RSS scope, and observed timing controls. One-decimal display precision is a
+presentation choice, not evidence of sub-millisecond or nanosecond accuracy.
+No-op and known-duration controls include startup and scheduling effects, not
+just timer error. Compare tools on the same host and OS with equivalent
+measurement settings, using repetitions and dispersion. Native
 Windows accounting remains deferred to issue #31 and cannot be claimed as
 verified by cross-compilation or emulation.
 

@@ -40,10 +40,12 @@ is deferred to issue #31 and cannot be verified through cross-compilation or
 emulation.
 
 Reports retain the direct spawn-to-exit boundary, input-delivery method, RSS
-scope, collector provenance, and validated timing accuracy. Display precision
-is presentation only: one decimal does not imply one-decimal accuracy, and
-nanosecond storage does not imply nanosecond accuracy. Repeat no-op and
-known-duration controls to establish the supported precision.
+scope, collector provenance, and observed timing controls. Display precision
+is presentation only. One decimal does not imply one-decimal accuracy, and
+nanosecond storage does not imply nanosecond accuracy. No-op and known-duration
+controls include startup and scheduling effects, not just timer error. Compare
+tools on the same host and OS with equivalent measurement settings, using
+repeated samples and dispersion to interpret small differences.
 
 State whether the platform waiter accounts for only the waited-for child or
 also includes waited-for descendants. Limit process-only comparisons to

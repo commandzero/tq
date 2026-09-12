@@ -4,42 +4,56 @@ Compare jq, yq, and tq on common data-processing tasks. Each page explains
 what the query does and shows the latest available results for that workload.
 
 Only outputs that pass the correctness check are timed. Failed, unsupported,
-and unmeasured cases remain visible. The accepted Linux review below uses the
-recorded Ironhide run with jq 1.8.1, pinned yq 4.53.2, and the recorded tq
-release build. The later Brew yq 4.53.6 installation was not mixed into these
-measurements. The earlier macOS captures remain historical correctness and
-execution evidence only because they lacked verified RSS.
+and unmeasured cases remain visible. This Linux review uses `tq-bench` native
+measurements of jq 1.8.1, pinned yq 4.53.2, and the recorded tq release build.
+This round includes Linux measurements only.
+
+The [Linux worker-validation results](worker-validation.md) cover the new
+native accounting path separately. They are helper controls, not jq/yq/tq
+workload measurements. Every workload table below comes from the full native
+rerun; no wrapper-based measurements are included.
 
 ## Findings
 
 The standard review covers 846 adapter observations: 703 timed, 134
 unsupported capability rows, 9 resource-limit rows, and 0 incorrect rows. It
-records 10,579 process samples: 10,570 valid timed samples and 9 samples from
-failed resource-limit attempts. Every recorded sample has positive GNU-time
-per-process RSS. The three additional smoke workloads are rendered on their
-own pages and complete the 39-workload review with 18 timed rows, 540 measured
-samples, and no incorrect or unsupported rows.
+records 10,579 primary samples: 10,570 valid timed samples and 9 samples from
+failed resource-limit attempts. Another 180 instrumented samples check RSS
+limits separately. Every recorded sample has positive native peak RSS. The
+three additional smoke workloads are rendered on their own pages and complete
+the 39-workload review with 18 timed rows and 540 measured samples; their three
+metadata-unavailable baseline comparisons remain visible in the smoke report.
 
 The rapid check covers 30 observations: 27 timed, 3 unsupported, and 0
-incorrect, with one positive-RSS sample for each timed row. In the standard
+incorrect, with one positive-RSS sample for each timed row and three separate
+instrumented limit checks. In the standard
 review, the 134 unsupported observations are 130 yq adapters and 4 tq YAML
 event-stream adapters. The rapid exclusions are the two yq event-stream
 adapters and the tq YAML event-stream adapter.
 
-On `usgs-all-month`, identity shows the main tradeoff. jq took 211.41 ms and
-used 64.92 MiB; tq JSON took 543.79 ms and 15.27 MiB; tq TOON took 541.50 ms
-and 15.22 MiB. Path update favored tq JSON at 175.26 ms versus jq at 210.44
-ms, while RSS was 69.71 MiB versus 64.86 MiB. Event streaming favored jq at
-282.40 ms and 4.00 MiB versus tq JSON at 1,138.87 ms and 8.15 MiB.
-Recursive scalar traversal also favored jq at 360.75 ms and 64.86 MiB versus
-tq JSON at 2,278.14 ms and 69.30 MiB. Object construction took 24,622.29 ms
-and 490.74 MiB for yq JSON and 23,476.39 ms and 1,475.91 MiB for yq YAML;
-jq took 138.44 ms and 65.82 MiB, while tq reached its resource limit.
+On `usgs-all-month`, identity shows the main tradeoff. jq took 196.7 ms and
+used 64.9 MiB; tq JSON took 533.6 ms and 15.4 MiB; tq TOON took 527.2 ms
+and 15.3 MiB. Path update favored tq JSON at 168.6 ms versus jq at 196.8 ms,
+while RSS was 69.5 MiB versus 64.9 MiB. Event streaming favored jq at
+257.4 ms and 3.9 MiB versus tq JSON at 1,153.1 ms and 7.9 MiB. Recursive
+scalar traversal also favored jq at 342.7 ms and 64.9 MiB versus tq JSON at
+2,297.7 ms and 69.1 MiB. Object construction took 23,812.7 ms and 491.4 MiB
+for yq JSON and 22,755.4 ms and 1,475.8 MiB for yq YAML; jq took 111.3 ms
+and 65.8 MiB, while tq reached its resource limit.
+
+The Linux self-regression gate evaluated 410 comparable standard tq rows. No
+independent wall-time or peak-RSS increase exceeded 20%, so there are no
+disclosures and no blocking increases above 50%. Thirteen rows were excluded
+from evaluation: four unsupported tq YAML event-stream rows and nine
+resource-limit attempts (three object-construction and six string-reduction
+rows). The full gate evidence and unrounded supporting samples are retained
+in the OpenSpec Linux regression review.
 
 These examples describe workload-specific tradeoffs rather than an overall
 winner. Unsupported and resource-limit rows do not support speed rankings.
-The resource-limit statuses are recorded; their engine-level cause remains
-subject to stderr confirmation.
+The resource-limit rows record tq's classified resource exit, status 5.
+These measurements do not establish a tq self-regression against earlier
+wrapper-based reports, which use a different measurement method.
 
 ## Results
 
@@ -48,6 +62,11 @@ Last updated: 2026-09-11
 Profile: `standard` | Status: `observed-failures`
 
 846 adapter observations across 36 workloads. Only correctness-checked outputs are timed; failed rows cannot support a speed ranking.
+
+Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.0-ogc4.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Aug 20 16:15:37 UTC 2026`; compiler profile `release-benchmark`
+
+RSS collector provenance (outside measurement tables): `instrumented linux-wait4`, `linux-wait4`.
+Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.1 ms`; primary timing is sampler-free; instrumented `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads; sampled worker process group`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.0 ms`; RSS-limit enforcement uses a separate worker process-group sampler and is not pooled with primary timing.
 
 ### Campaign coverage
 
@@ -62,100 +81,95 @@ Profile: `standard` | Status: `observed-failures`
 
 ### usgs-all-month
 
-Largest recorded JSON input: 8013185 bytes, 11274 logical records. Each row compares the same workload across tools. Wall time is in milliseconds and captured peak RSS is in MiB. Lower is better. Missing RSS is not captured; compare matching formats and check each workload page for outcomes and sample counts.
+Largest recorded JSON input: 8013185 bytes, 11274 logical records. Each row compares the same workload across tools. Wall time cells use milliseconds and peak RSS cells use MiB, with one decimal place. Lower is better. A `-` cell means no valid comparable measurement, not zero; compare matching formats and check each workload page for outcomes and sample counts.
 
 | Workload | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| array-construction | Wall (ms) | 138.626 | 569.176 | 1119.989 | 176.037 | 215.935 | 175.361 |
-| array-construction | Peak RSS (MiB, source) | 64.67 (gnu-time-v) | 474.99 (gnu-time-v) | 1306.37 (gnu-time-v) | 74.12 (gnu-time-v) | 94.23 (gnu-time-v) | 83.05 (gnu-time-v) |
-| blocking-sort | Wall (ms) | 139.322 | 337.389 | 944.942 | 172.518 | 215.201 | 170.535 |
-| blocking-sort | Peak RSS (MiB, source) | 60.90 (gnu-time-v) | 332.33 (gnu-time-v) | 1299.50 (gnu-time-v) | 9.30 (gnu-time-v) | 90.80 (gnu-time-v) | 8.69 (gnu-time-v) |
-| comma-generator-sort | Wall (ms) | 250.113 | 995.106 | 1516.708 | 215.988 | 291.662 | 254.006 |
-| comma-generator-sort | Peak RSS (MiB, source) | 64.96 (gnu-time-v) | 738.21 (gnu-time-v) | 1524.91 (gnu-time-v) | 72.84 (gnu-time-v) | 93.03 (gnu-time-v) | 81.75 (gnu-time-v) |
-| dead-sort-length | Wall (ms) | 101.633 | 336.211 | 927.943 | 135.675 | 178.732 | 134.135 |
-| dead-sort-length | Peak RSS (MiB, source) | 60.48 (gnu-time-v) | 332.97 (gnu-time-v) | 1302.80 (gnu-time-v) | 8.51 (gnu-time-v) | 90.09 (gnu-time-v) | 8.08 (gnu-time-v) |
-| event-stream | Wall (ms) | 282.396 | unsupported | unsupported | 1138.871 | unsupported | 1097.745 |
-| event-stream | Peak RSS (MiB, source) | 4.00 (gnu-time-v) | unsupported | unsupported | 8.15 (gnu-time-v) | unsupported | 7.91 (gnu-time-v) |
-| format-base64-roundtrip | Wall (ms) | 138.752 | 492.760 | 1089.118 | 395.119 | 250.638 | 209.940 |
-| format-base64-roundtrip | Peak RSS (MiB, source) | 60.31 (gnu-time-v) | 453.43 (gnu-time-v) | 1305.14 (gnu-time-v) | 11.70 (gnu-time-v) | 89.42 (gnu-time-v) | 8.30 (gnu-time-v) |
-| format-csv | Wall (ms) | 137.877 | 1120.377 | 1749.505 | 248.434 | 289.065 | 250.909 |
-| format-csv | Peak RSS (MiB, source) | 60.68 (gnu-time-v) | 478.52 (gnu-time-v) | 1440.90 (gnu-time-v) | 69.40 (gnu-time-v) | 89.43 (gnu-time-v) | 78.07 (gnu-time-v) |
-| format-json | Wall (ms) | 251.400 | 997.104 | 1526.081 | 288.026 | 329.652 | 287.628 |
-| format-json | Peak RSS (MiB, source) | 63.67 (gnu-time-v) | 832.21 (gnu-time-v) | 1528.47 (gnu-time-v) | 69.53 (gnu-time-v) | 89.61 (gnu-time-v) | 78.13 (gnu-time-v) |
-| format-shell | Wall (ms) | 137.446 | unsupported | unsupported | 249.396 | 287.150 | 250.443 |
-| format-shell | Peak RSS (MiB, source) | 60.68 (gnu-time-v) | unsupported | unsupported | 69.35 (gnu-time-v) | 89.54 (gnu-time-v) | 78.18 (gnu-time-v) |
-| format-template | Wall (ms) | 137.901 | unsupported | unsupported | 393.692 | 288.551 | 244.650 |
-| format-template | Peak RSS (MiB, source) | 60.28 (gnu-time-v) | unsupported | unsupported | 11.71 (gnu-time-v) | 89.50 (gnu-time-v) | 8.24 (gnu-time-v) |
-| format-tsv | Wall (ms) | 137.263 | 528.732 | 1119.732 | 246.251 | 290.156 | 248.085 |
-| format-tsv | Peak RSS (MiB, source) | 60.67 (gnu-time-v) | 460.48 (gnu-time-v) | 1304.88 (gnu-time-v) | 69.42 (gnu-time-v) | 89.61 (gnu-time-v) | 78.26 (gnu-time-v) |
-| format-uri-html | Wall (ms) | 135.571 | unsupported | unsupported | 393.517 | 287.263 | 211.285 |
-| format-uri-html | Peak RSS (MiB, source) | 60.30 (gnu-time-v) | unsupported | unsupported | 11.64 (gnu-time-v) | 89.31 (gnu-time-v) | 8.27 (gnu-time-v) |
-| identity-reencode | Wall (ms) | 211.411 | 760.572 | 1297.316 | 543.793 | 215.493 | 541.504 |
-| identity-reencode | Peak RSS (MiB, source) | 64.92 (gnu-time-v) | 483.57 (gnu-time-v) | 1361.74 (gnu-time-v) | 15.27 (gnu-time-v) | 88.91 (gnu-time-v) | 15.22 (gnu-time-v) |
-| issue5-collection | Wall (ms) | 139.129 | 574.232 | 1128.168 | 175.655 | 215.812 | 176.321 |
-| issue5-collection | Peak RSS (MiB, source) | 61.42 (gnu-time-v) | 618.60 (gnu-time-v) | 1528.16 (gnu-time-v) | 72.40 (gnu-time-v) | 92.89 (gnu-time-v) | 81.12 (gnu-time-v) |
-| issue5-json-conversion | Wall (ms) | 100.061 | 258.304 | 932.736 | 136.829 | 174.562 | 174.827 |
-| issue5-json-conversion | Peak RSS (MiB, source) | 60.18 (gnu-time-v) | 293.32 (gnu-time-v) | 1302.04 (gnu-time-v) | 69.39 (gnu-time-v) | 89.40 (gnu-time-v) | 78.12 (gnu-time-v) |
-| issue5-paths | Wall (ms) | 99.451 | unsupported | unsupported | 136.736 | 177.092 | 173.982 |
-| issue5-paths | Peak RSS (MiB, source) | 60.27 (gnu-time-v) | unsupported | unsupported | 69.27 (gnu-time-v) | 89.31 (gnu-time-v) | 78.15 (gnu-time-v) |
-| issue5-predicate | Wall (ms) | 100.031 | unsupported | unsupported | 136.101 | 176.332 | 175.238 |
-| issue5-predicate | Peak RSS (MiB, source) | 60.25 (gnu-time-v) | unsupported | unsupported | 69.46 (gnu-time-v) | 89.31 (gnu-time-v) | 78.00 (gnu-time-v) |
-| issue5-scalar-utilities | Wall (ms) | 213.758 | unsupported | unsupported | 175.484 | 213.125 | 210.055 |
-| issue5-scalar-utilities | Peak RSS (MiB, source) | 60.61 (gnu-time-v) | unsupported | unsupported | 70.47 (gnu-time-v) | 90.59 (gnu-time-v) | 79.18 (gnu-time-v) |
-| label-early-break | Wall (ms) | 100.436 | unsupported | unsupported | 135.022 | 174.734 | 174.181 |
-| label-early-break | Peak RSS (MiB, source) | 60.29 (gnu-time-v) | unsupported | unsupported | 69.35 (gnu-time-v) | 89.38 (gnu-time-v) | 78.10 (gnu-time-v) |
-| multi-result-projection | Wall (ms) | 136.729 | 375.233 | 1040.836 | 169.334 | 251.576 | 132.898 |
-| multi-result-projection | Peak RSS (MiB, source) | 60.54 (gnu-time-v) | 331.81 (gnu-time-v) | 1302.93 (gnu-time-v) | 7.77 (gnu-time-v) | 89.38 (gnu-time-v) | 7.23 (gnu-time-v) |
-| numeric-reduction | Wall (ms) | 136.095 | 336.009 | 926.003 | 157.481 | 212.229 | 176.177 |
-| numeric-reduction | Peak RSS (MiB, source) | 60.29 (gnu-time-v) | 344.36 (gnu-time-v) | 1296.59 (gnu-time-v) | 69.21 (gnu-time-v) | 89.41 (gnu-time-v) | 78.05 (gnu-time-v) |
-| object-construction | Wall (ms) | 138.439 | 24622.290 | 23476.393 | resource-limit | resource-limit | resource-limit |
-| object-construction | Peak RSS (MiB, source) | 65.82 (gnu-time-v) | 490.74 (gnu-time-v) | 1475.91 (gnu-time-v) | resource-limit | resource-limit | resource-limit |
-| parse-discard | Wall (ms) | 100.554 | 260.953 | 926.953 | 137.826 | 175.416 | 173.940 |
-| parse-discard | Peak RSS (MiB, source) | 60.34 (gnu-time-v) | 292.48 (gnu-time-v) | 1300.65 (gnu-time-v) | 68.70 (gnu-time-v) | 88.78 (gnu-time-v) | 77.20 (gnu-time-v) |
-| path-update | Wall (ms) | 210.435 | 761.375 | 1327.983 | 175.259 | 215.352 | 209.443 |
-| path-update | Peak RSS (MiB, source) | 64.86 (gnu-time-v) | 485.11 (gnu-time-v) | 1308.05 (gnu-time-v) | 69.71 (gnu-time-v) | 89.57 (gnu-time-v) | 78.30 (gnu-time-v) |
-| recurse-bounded | Wall (ms) | 293.298 | unsupported | unsupported | 250.351 | 288.916 | 252.353 |
-| recurse-bounded | Peak RSS (MiB, source) | 64.86 (gnu-time-v) | unsupported | unsupported | 69.47 (gnu-time-v) | 89.36 (gnu-time-v) | 78.05 (gnu-time-v) |
-| recursive-scalars | Wall (ms) | 360.748 | unsupported | unsupported | 2278.141 | 2316.437 | 2322.709 |
-| recursive-scalars | Peak RSS (MiB, source) | 64.86 (gnu-time-v) | unsupported | unsupported | 69.30 (gnu-time-v) | 89.25 (gnu-time-v) | 78.18 (gnu-time-v) |
-| regex-test | Wall (ms) | 136.136 | unsupported | unsupported | 249.018 | 288.128 | 249.071 |
-| regex-test | Peak RSS (MiB, source) | 60.73 (gnu-time-v) | unsupported | unsupported | 71.22 (gnu-time-v) | 91.10 (gnu-time-v) | 79.79 (gnu-time-v) |
-| scalar-extraction | Wall (ms) | 98.934 | 259.637 | 922.644 | 136.457 | 176.583 | 172.616 |
-| scalar-extraction | Peak RSS (MiB, source) | 60.23 (gnu-time-v) | 293.19 (gnu-time-v) | 1301.94 (gnu-time-v) | 69.27 (gnu-time-v) | 89.49 (gnu-time-v) | 78.29 (gnu-time-v) |
-| selective-filter | Wall (ms) | 138.513 | 375.164 | 970.181 | 171.315 | 215.421 | 207.912 |
-| selective-filter | Peak RSS (MiB, source) | 60.30 (gnu-time-v) | 380.99 (gnu-time-v) | 1296.11 (gnu-time-v) | 9.09 (gnu-time-v) | 89.55 (gnu-time-v) | 8.16 (gnu-time-v) |
-| string-reduction | Wall (ms) | 137.102 | 336.334 | 945.400 | resource-limit | resource-limit | resource-limit |
-| string-reduction | Peak RSS (MiB, source) | 60.86 (gnu-time-v) | 332.57 (gnu-time-v) | 1293.37 (gnu-time-v) | resource-limit | resource-limit | resource-limit |
-| user-filter-call | Wall (ms) | 120.784 | unsupported | unsupported | 211.928 | 249.910 | 248.918 |
-| user-filter-call | Peak RSS (MiB, source) | 60.54 (gnu-time-v) | unsupported | unsupported | 69.29 (gnu-time-v) | 89.36 (gnu-time-v) | 77.99 (gnu-time-v) |
-| user-filter-map | Wall (ms) | 137.681 | unsupported | unsupported | 141.069 | 215.710 | 175.232 |
-| user-filter-map | Peak RSS (MiB, source) | 60.54 (gnu-time-v) | unsupported | unsupported | 70.21 (gnu-time-v) | 90.07 (gnu-time-v) | 78.92 (gnu-time-v) |
-| user-filter-select | Wall (ms) | 137.483 | unsupported | unsupported | 175.120 | 215.022 | 176.126 |
-| user-filter-select | Peak RSS (MiB, source) | 60.33 (gnu-time-v) | unsupported | unsupported | 69.60 (gnu-time-v) | 89.80 (gnu-time-v) | 78.38 (gnu-time-v) |
-| user-filter-sort-by | Wall (ms) | 138.519 | unsupported | unsupported | 176.911 | 215.619 | 180.022 |
-| user-filter-sort-by | Peak RSS (MiB, source) | 61.42 (gnu-time-v) | unsupported | unsupported | 72.45 (gnu-time-v) | 92.93 (gnu-time-v) | 81.25 (gnu-time-v) |
-| walk-structural | Wall (ms) | 952.231 | unsupported | unsupported | 695.054 | 740.195 | 734.899 |
-| walk-structural | Peak RSS (MiB, source) | 86.61 (gnu-time-v) | unsupported | unsupported | 107.47 (gnu-time-v) | 127.68 (gnu-time-v) | 116.25 (gnu-time-v) |
+| array-construction | Wall time | 114.7 ms | 559.5 ms | 1157.8 ms | 147.5 ms | 190.6 ms | 166.6 ms |
+| array-construction | Peak RSS | 64.6 MiB | 474.4 MiB | 1310.3 MiB | 74.2 MiB | 94.2 MiB | 82.9 MiB |
+| blocking-sort | Wall time | 106.0 ms | 320.5 ms | 932.5 ms | 146.2 ms | 180.8 ms | 139.8 ms |
+| blocking-sort | Peak RSS | 60.9 MiB | 332.9 MiB | 1303.5 MiB | 9.3 MiB | 90.7 MiB | 8.6 MiB |
+| comma-generator-sort | Wall time | 216.3 ms | 983.0 ms | 1512.5 ms | 207.1 ms | 249.8 ms | 226.5 ms |
+| comma-generator-sort | Peak RSS | 64.7 MiB | 851.4 MiB | 1528.0 MiB | 72.7 MiB | 93.3 MiB | 81.8 MiB |
+| dead-sort-length | Wall time | 99.3 ms | 304.0 ms | 957.7 ms | 125.7 ms | 171.4 ms | 117.4 ms |
+| dead-sort-length | Peak RSS | 60.5 MiB | 331.4 MiB | 1296.0 MiB | 8.7 MiB | 90.1 MiB | 8.1 MiB |
+| event-stream | Wall time | 257.4 ms | - | - | 1153.1 ms | - | 1081.8 ms |
+| event-stream | Peak RSS | 3.9 MiB | - | - | 7.9 MiB | - | 7.7 MiB |
+| format-base64-roundtrip | Wall time | 106.4 ms | 484.1 ms | 1082.3 ms | 369.7 ms | 245.1 ms | 202.9 ms |
+| format-base64-roundtrip | Peak RSS | 60.2 MiB | 454.4 MiB | 1305.3 MiB | 11.6 MiB | 89.6 MiB | 8.1 MiB |
+| format-csv | Wall time | 117.8 ms | 1093.8 ms | 1709.8 ms | 217.6 ms | 258.0 ms | 235.9 ms |
+| format-csv | Peak RSS | 60.6 MiB | 476.7 MiB | 1439.7 MiB | 69.3 MiB | 89.4 MiB | 78.1 MiB |
+| format-json | Wall time | 225.3 ms | 974.4 ms | 1489.7 ms | 256.2 ms | 299.1 ms | 274.5 ms |
+| format-json | Peak RSS | 63.7 MiB | 832.6 MiB | 1528.0 MiB | 69.6 MiB | 89.6 MiB | 78.3 MiB |
+| format-shell | Wall time | 116.6 ms | - | - | 217.7 ms | 260.4 ms | 240.5 ms |
+| format-shell | Peak RSS | 60.5 MiB | - | - | 69.4 MiB | 89.4 MiB | 78.1 MiB |
+| format-template | Wall time | 120.5 ms | - | - | 374.0 ms | 258.9 ms | 212.9 ms |
+| format-template | Peak RSS | 60.2 MiB | - | - | 11.6 MiB | 89.4 MiB | 8.0 MiB |
+| format-tsv | Wall time | 118.1 ms | 506.4 ms | 1052.9 ms | 215.0 ms | 258.2 ms | 236.5 ms |
+| format-tsv | Peak RSS | 60.5 MiB | 463.3 MiB | 1309.7 MiB | 69.5 MiB | 89.4 MiB | 78.0 MiB |
+| format-uri-html | Wall time | 114.6 ms | - | - | 371.0 ms | 250.0 ms | 203.7 ms |
+| format-uri-html | Peak RSS | 60.2 MiB | - | - | 11.6 MiB | 89.5 MiB | 8.1 MiB |
+| identity-reencode | Wall time | 196.7 ms | 728.9 ms | 1318.5 ms | 533.6 ms | 210.9 ms | 527.2 ms |
+| identity-reencode | Peak RSS | 64.9 MiB | 487.3 MiB | 1362.2 MiB | 15.4 MiB | 88.8 MiB | 15.2 MiB |
+| issue5-collection | Wall time | 113.0 ms | 564.5 ms | 1090.4 ms | 146.7 ms | 187.2 ms | 164.0 ms |
+| issue5-collection | Peak RSS | 61.4 MiB | 615.3 MiB | 1357.8 MiB | 72.3 MiB | 93.0 MiB | 81.5 MiB |
+| issue5-json-conversion | Wall time | 94.4 ms | 257.3 ms | 912.9 ms | 120.1 ms | 161.5 ms | 137.8 ms |
+| issue5-json-conversion | Peak RSS | 60.3 MiB | 293.4 MiB | 1299.4 MiB | 69.3 MiB | 89.5 MiB | 78.3 MiB |
+| issue5-paths | Wall time | 94.1 ms | - | - | 121.5 ms | 163.5 ms | 139.5 ms |
+| issue5-paths | Peak RSS | 60.3 MiB | - | - | 69.3 MiB | 89.5 MiB | 78.1 MiB |
+| issue5-predicate | Wall time | 94.4 ms | - | - | 121.2 ms | 164.6 ms | 139.4 ms |
+| issue5-predicate | Peak RSS | 60.3 MiB | - | - | 69.3 MiB | 89.4 MiB | 78.1 MiB |
+| issue5-scalar-utilities | Wall time | 211.6 ms | - | - | 154.7 ms | 198.5 ms | 172.7 ms |
+| issue5-scalar-utilities | Peak RSS | 60.7 MiB | - | - | 70.4 MiB | 90.6 MiB | 79.3 MiB |
+| label-early-break | Wall time | 95.2 ms | - | - | 122.6 ms | 164.7 ms | 141.1 ms |
+| label-early-break | Peak RSS | 60.3 MiB | - | - | 69.4 MiB | 89.5 MiB | 78.0 MiB |
+| multi-result-projection | Wall time | 100.8 ms | 370.6 ms | 1005.5 ms | 134.0 ms | 229.6 ms | 118.7 ms |
+| multi-result-projection | Peak RSS | 60.5 MiB | 332.4 MiB | 1303.8 MiB | 7.9 MiB | 89.3 MiB | 7.2 MiB |
+| numeric-reduction | Wall time | 100.5 ms | 327.5 ms | 894.5 ms | 136.3 ms | 175.9 ms | 152.7 ms |
+| numeric-reduction | Peak RSS | 60.1 MiB | 335.4 MiB | 1296.8 MiB | 69.5 MiB | 89.3 MiB | 78.1 MiB |
+| object-construction | Wall time | 111.3 ms | 23812.7 ms | 22755.4 ms | - | - | - |
+| object-construction | Peak RSS | 65.8 MiB | 491.4 MiB | 1475.8 MiB | - | - | - |
+| parse-discard | Wall time | 93.5 ms | 261.7 ms | 906.2 ms | 120.3 ms | 161.3 ms | 137.0 ms |
+| parse-discard | Peak RSS | 60.3 MiB | 294.4 MiB | 1301.3 MiB | 68.6 MiB | 88.7 MiB | 77.4 MiB |
+| path-update | Wall time | 196.8 ms | 737.7 ms | 1337.6 ms | 168.6 ms | 210.4 ms | 184.6 ms |
+| path-update | Peak RSS | 64.9 MiB | 481.8 MiB | 1362.4 MiB | 69.5 MiB | 89.6 MiB | 78.0 MiB |
+| recurse-bounded | Wall time | 284.7 ms | - | - | 226.8 ms | 274.3 ms | 247.5 ms |
+| recurse-bounded | Peak RSS | 64.9 MiB | - | - | 69.4 MiB | 89.3 MiB | 78.1 MiB |
+| recursive-scalars | Wall time | 342.7 ms | - | - | 2297.7 ms | 2314.8 ms | 2336.4 ms |
+| recursive-scalars | Peak RSS | 64.9 MiB | - | - | 69.1 MiB | 89.1 MiB | 77.9 MiB |
+| regex-test | Wall time | 113.8 ms | - | - | 194.6 ms | 235.6 ms | 211.4 ms |
+| regex-test | Peak RSS | 60.7 MiB | - | - | 70.9 MiB | 90.9 MiB | 79.8 MiB |
+| scalar-extraction | Wall time | 94.1 ms | 260.0 ms | 848.6 ms | 121.3 ms | 162.3 ms | 137.3 ms |
+| scalar-extraction | Peak RSS | 60.2 MiB | 294.1 MiB | 1301.3 MiB | 69.2 MiB | 89.3 MiB | 78.2 MiB |
+| selective-filter | Wall time | 101.4 ms | 365.8 ms | 969.3 ms | 163.4 ms | 202.3 ms | 197.2 ms |
+| selective-filter | Peak RSS | 60.3 MiB | 344.6 MiB | 1296.4 MiB | 8.8 MiB | 89.4 MiB | 8.0 MiB |
+| string-reduction | Wall time | 104.5 ms | 314.8 ms | 886.1 ms | - | - | - |
+| string-reduction | Peak RSS | 60.9 MiB | 333.4 MiB | 1296.1 MiB | - | - | - |
+| user-filter-call | Wall time | 99.3 ms | - | - | 195.2 ms | 238.2 ms | 213.8 ms |
+| user-filter-call | Peak RSS | 60.7 MiB | - | - | 69.2 MiB | 89.4 MiB | 78.1 MiB |
+| user-filter-map | Wall time | 101.2 ms | - | - | 135.3 ms | 178.7 ms | 153.7 ms |
+| user-filter-map | Peak RSS | 60.5 MiB | - | - | 69.9 MiB | 90.0 MiB | 79.1 MiB |
+| user-filter-select | Wall time | 103.5 ms | - | - | 145.5 ms | 186.8 ms | 162.9 ms |
+| user-filter-select | Peak RSS | 60.4 MiB | - | - | 69.6 MiB | 89.7 MiB | 78.4 MiB |
+| user-filter-sort-by | Wall time | 118.1 ms | - | - | 156.0 ms | 199.7 ms | 174.2 ms |
+| user-filter-sort-by | Peak RSS | 61.5 MiB | - | - | 72.8 MiB | 93.1 MiB | 81.4 MiB |
+| walk-structural | Wall time | 940.8 ms | - | - | 690.3 ms | 734.7 ms | 708.0 ms |
+| walk-structural | Peak RSS | 86.5 MiB | - | - | 107.4 MiB | 127.3 MiB | 116.2 MiB |
 <!-- benchmark-results:end -->
 
 ## Method
 
-The catalog compares `jq`, `yq`, and `tq` on JSON, YAML, and TOON where each
-adapter applies. The harness checks semantic output before timing a row. Each
-workload page has one table per dataset, with tool/input-format columns and
-rows for wall time, first-output latency, CPU, authoritative RSS, logical and
-physical throughput, output bytes, outcomes, diagnostics, sample counts, and
-dispersion. Compare columns with the same input format to isolate tool
-differences. Native-format rows show how each tool performs with its supported
-input formats. Harness wall time includes process wrapping, polling, and sampler
-shutdown, so startup overhead can matter for short workloads and the value is
-not pure executable time. First-output latency uses the first captured output
-when available and may fall back to completed output. Linux authoritative RSS
-comes from per-process GNU `/usr/bin/time -v`; sampled process-group RSS is a
-separate inspection signal. The raw report records the measurement source
-snapshot and executable identities; the findings describe that frozen release
-run and do not claim exact clean-commit equivalence with later renderer or
-lint-only changes. Findings apply to the recorded machine and inputs only.
+`tq-bench` checks correctness, then measures each executable from launch to
+exit observation. Input preparation, worker startup and cleanup are excluded.
+Native `wait4` records CPU time and lifetime peak RSS, including launch,
+threads and waited descendants. The launch RSS floor is not subtracted.
+First-output latency uses the earliest observed output, or completion if output
+was only visible at exit.
+
+Primary measurements run without RSS sampling; separate passes enforce RSS
+limits. Compare tools on the same host and OS using repeated samples and
+dispersion. The observed 1.1 ms control excess is not a timer-error guarantee.
+See the [measurement details](../benchmark-harness.md).
 
 ## Workloads
 

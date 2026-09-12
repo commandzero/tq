@@ -27,34 +27,42 @@ object order. No filtering or transformation is part of this workload.
 ## Results
 
 <!-- benchmark-results:start -->
+### Host: linux / x86_64 / smoke
+
 Last updated: 2026-09-11
 Profile: `smoke` | Status: `passed`
 
-Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
-Environment: `linux` / `x86_64`, 16 logical CPUs, compiler profile `release-benchmark`
+Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
+Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.0-ogc4.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Aug 20 16:15:37 UTC 2026`; compiler profile `release-benchmark`
 
-Peak RSS is authoritative only after the campaign RSS preflight passes. Captured values show their source when present; missing values are `not captured`, never estimates.
+Peak RSS is authoritative only after the campaign RSS preflight passes. Missing or invalid values are `-`, never estimates. RSS collector provenance (outside measurement tables): `linux-wait4`.
+Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.1 ms`; primary timing is sampler-free.
 
-Compare columns with the same input format to isolate tool differences. Missing adapters are marked `not recorded`.
+Compare columns with the same input format to isolate tool differences. Missing adapters have `-` measurement cells and `not recorded` outcome/detail cells.
 
-Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU, throughput, and output cells use the captured summary values.
+Timing rows show numeric medians followed by compact MAD / p95 / range rows, with one decimal place and a unit in each measurement cell. CPU, throughput, and output cells use the captured summary values.
 
 ### startup
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 22.956 | 23.326 | 23.427 | 23.259 | 23.294 | 23.047 |
-| Wall dispersion (MAD / p95 / range) | 0.314 / 24.223 / 22.050-24.930 | 0.436 / 24.480 / 21.886-24.525 | 0.350 / 24.161 / 22.478-24.409 | 0.468 / 24.776 / 22.004-25.143 | 0.328 / 24.314 / 22.024-25.023 | 0.446 / 24.528 / 21.676-24.534 |
-| First output (ms) | 22.941 | 23.313 | 23.411 | 23.244 | 23.282 | 23.031 |
-| First output dispersion (MAD / p95 / range) | 0.314 / 24.209 / 22.035-24.914 | 0.438 / 24.469 / 21.869-24.505 | 0.352 / 24.144 / 22.463-24.398 | 0.468 / 24.762 / 21.982-25.131 | 0.326 / 24.300 / 22.010-25.011 | 0.445 / 24.514 / 21.661-24.521 |
-| User CPU (ms) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| System CPU (ms) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| Peak RSS (MiB, source) | 4.08 (gnu-time-v) | 10.77 (gnu-time-v) | 11.14 (gnu-time-v) | 7.02 (gnu-time-v) | 7.31 (gnu-time-v) | 7.01 (gnu-time-v) |
-| Logical throughput (records/s) | 43.562 | 42.870 | 42.687 | 42.993 | 42.930 | 43.390 |
-| Physical throughput (MiB/s) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| Output bytes | 5 | 5 | 5 | 5 | 5 | 5 |
+| Wall time | 1.3 ms | 2.9 ms | 2.8 ms | 1.0 ms | 1.0 ms | 1.0 ms |
+| Wall time dispersion | 0.0 ms / 1.7 ms / 1.3-1.7 ms | 0.1 ms / 3.1 ms / 2.7-3.3 ms | 0.1 ms / 3.1 ms / 2.6-3.2 ms | 0.0 ms / 1.3 ms / 1.0-1.3 ms | 0.0 ms / 1.4 ms / 1.0-1.4 ms | 0.0 ms / 1.2 ms / 1.0-1.3 ms |
+| First output | 1.3 ms | 2.4 ms | 2.4 ms | 0.9 ms | 0.9 ms | 0.9 ms |
+| First output dispersion | 0.1 ms / 1.5 ms / 1.2-1.5 ms | 0.1 ms / 2.8 ms / 2.2-2.8 ms | 0.1 ms / 2.7 ms / 2.2-2.8 ms | 0.0 ms / 1.2 ms / 0.8-1.2 ms | 0.0 ms / 1.2 ms / 0.8-1.2 ms | 0.0 ms / 1.0 ms / 0.8-1.2 ms |
+| User CPU | 1.2 ms | 1.0 ms | 1.4 ms | 0.0 ms | 0.0 ms | 0.0 ms |
+| System CPU | 0.0 ms | 1.9 ms | 1.5 ms | 0.9 ms | 0.9 ms | 0.9 ms |
+| Peak RSS | 4.1 MiB | 10.8 MiB | 11.0 MiB | 7.0 MiB | 7.4 MiB | 7.0 MiB |
+| Logical throughput | 741.3 records/s | 346.7 records/s | 362.6 records/s | 970.9 records/s | 976.6 records/s | 984.3 records/s |
+| Physical throughput | 0.0 MiB/s | 0.0 MiB/s | 0.0 MiB/s | 0.0 MiB/s | 0.0 MiB/s | 0.0 MiB/s |
+| Output bytes | 5.0 B | 5.0 B | 5.0 B | 5.0 B | 5.0 B | 5.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
 | Samples (warmups) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) |
 | Comparison view | same input | same input | same input | same input | same input | native input |
+---
+
+### Host: linux / x86_64 / standard
+
+No row was recorded for `benchmark.startup` on this host; all measurements are unmeasured (`-`).
 <!-- benchmark-results:end -->

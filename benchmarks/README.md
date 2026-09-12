@@ -16,6 +16,13 @@ local executable paths, or exhaustive provenance in them. Raw samples, logs,
 and corpus artifacts remain in the benchmark archive. Render smoke before
 standard; rendering standard last leaves the index on the full standard review.
 
+Every benchmark report must include the measured host's CPU model, logical
+CPU count, RAM capacity, OS, architecture, kernel, and build profile. Use
+recorded run metadata, not specifications from a different machine or a later
+session. Mark unavailable specifications as not recorded. Never include the
+hostname in published benchmark artifacts. Keep worker-validation controls
+separate from jq/yq/tq workload measurements.
+
 To update only these result blocks from saved measurements without rerunning
 the tools, use:
 
@@ -29,7 +36,7 @@ the three additional workload pages included in the current review.
 
 ## Required execution permissions and accounting
 
-The audited `wait4 0.1.3` dependency assumes valid, nonnegative OS counters
+The audited `wait4 0.2.0` dependency assumes valid, nonnegative OS counters
 within its numeric range. Its internal conversions expose no overflow error;
 on supported 64-bit hosts, RSS overflow would require roughly 8 EiB and CPU
 overflow roughly 292,000 CPU-years. First-party arithmetic remains checked,
@@ -45,10 +52,10 @@ baseline for this change.
 Run every authoritative benchmark campaign outside restricted sandboxes with
 the elevated permissions needed for native child accounting. In Codex, this
 means approving elevated execution for the complete campaign command. The
-required production path is the Rust harness invoking each executable directly
-and, once its native backend passes lifecycle and audited-counter validation,
-using one resource-aware waiter to collect the exact child's exit status, CPU
-usage, and OS-recorded peak RSS. Its allocation preflight runs through that same
+required production path is `tq-bench` using an isolated Rust worker to invoke
+each executable directly. One resource-aware waiter collects the exact child's
+exit status, CPU usage, and OS-recorded peak RSS. The worker keeps coordinator
+memory out of the child's inherited RSS floor. Its allocation preflight runs through that same
 native interface before corpus preparation. If preflight cannot collect positive
 RSS, valid units, or explicit collector provenance, abandon the campaign before
 corpus work and repair the host permissions before retrying. A later missing or
@@ -81,7 +88,7 @@ no sampled observation; its native exit-time peak still enforces the limit.
 Reports keep that sampled field unavailable rather than fabricating zero.
 
 Reports retain the direct spawn-to-exit timing boundary, input-delivery method,
-RSS scope, collector provenance, and host-validated timing accuracy. Displayed
+RSS scope, collector provenance, and observed host timing controls. Displayed
 one-decimal values are presentation only; stored precision and clock
 resolution do not establish equivalent accuracy, and nanosecond storage does
 not imply nanosecond accuracy. Repeat no-op and known-duration controls when
@@ -101,11 +108,15 @@ For publication, pass the successful control summary to the campaign with
 compiled collector-source identity, release profile, control sample counts, and
 measurement protocol. Repeat the option when separate instrumentation needs
 separate controls. An uninstrumented control cannot validate a sampled run.
-The report retains the summary's SHA-256 and observed known-duration bound.
-That bound includes process startup and sleep scheduling, is not a universal
-accuracy guarantee, and is never subtracted from samples. Runs without linked
-controls retain unknown accuracy and are diagnostic evidence, not a completed
-native publication review.
+The report retains the summary's SHA-256 and maximum observed control excess
+duration. This is full process runtime minus the requested control interval,
+including startup, sleep scheduling and exit observation. It is not isolated
+timer error or a guaranteed bound, and is never subtracted from samples.
+Compare tools only within the same host and OS, with equivalent harness
+settings, timing boundaries, instrumentation and disclosed concessions.
+Repeated samples and dispersion remain necessary; a shared harness does not
+make noise cancel exactly. Runs without linked controls are diagnostic
+evidence, not a completed native publication review.
 
 For `scripts/run-campaign.sh benchmark standard`, set
 `TQ_TIMING_CALIBRATION` to that summary path. The script requires it before
@@ -224,7 +235,7 @@ binary under test.
 
 Before a full review, verify that jq, yq, and tq are all discoverable and that
 their recorded paths, versions, and build identities match that campaign's
-pinned inputs. For the current Ironhide review, the pinned yq identity is
+pinned inputs. For the current Linux review, the pinned yq identity is
 4.53.2. A missing or mismatched required executable is an environment blocker:
 stop and repair discovery or installation instead of recording its adapters as
 unsupported. Claim a final comparison only after all three tools have completed
@@ -249,13 +260,13 @@ unverified output or load a multi-gigabyte result into the runner.
 
 The production contract launches the selected executable directly and freezes
 wall time at native child exit observation, after inputs and captures are
-prepared and before cleanup or report generation. Once the native backend has
-passed lifecycle and audited-counter validation, the harness records this
-boundary. First-result latency is the first captured output when available; its
+prepared and before cleanup or report generation. Worker startup and request
+delivery are outside this boundary. First-result latency is the first captured output when available; its
 observation method and validated precision are recorded in the report. Native
-RSS is scoped to the waited-for child (and any descendants included by the
-platform waiter), not a heap, physical-footprint, or summed process-tree
-metric. A draft or unverified backend is not accepted evidence.
+RSS covers the waited-for child's lifetime, including its pre-exec footprint,
+threads, and waited-for descendants included by the platform waiter. It is not
+a heap, physical-footprint, or summed process-tree metric. The small worker
+footprint remains a measured RSS floor; it is not subtracted from results.
 
 Reports must state whether the platform waiter accounts for only the waited-for
 child or also includes waited-for descendants. Limit process-only comparisons

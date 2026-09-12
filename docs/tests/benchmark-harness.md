@@ -3,7 +3,7 @@ type: Review
 title: Benchmark harness repair
 description: Tasks and verification for correctness checks in the rapid, standard, and smoke benchmark campaigns.
 status: stable
-generated: { by: codex/gpt-6, at: 2026-09-10T22:20:03Z }
+generated: { by: codex/gpt-6, at: 2026-09-11T21:00:40Z }
 ---
 
 # Benchmark harness repair and review readiness
@@ -19,7 +19,7 @@ Default TOON output does not require RS framing.
 4. [x] Return a failing campaign exit status when observations fail, while preserving the report and showing progress.
 5. [x] Verify rapid and standard correctness coverage with freshly built executables.
 6. [x] Require an RSS preflight and abort immediately when authoritative RSS cannot be collected.
-7. [x] Run the accepted Linux rapid, standard, and smoke review on Ironhide with the final reports.
+7. [x] Run the accepted Linux rapid, standard, and smoke review with the final reports.
 8. [x] Render the accepted Linux reports and write the wall/RSS findings in the comparison index.
 
 Three Luna subagents at xhigh reasoning handled stream decoding, adapter
@@ -40,9 +40,10 @@ Do not force sequencing or disable a working adapter to conceal a mismatch.
 Resource limits and unsupported adapters remain visible with reasons.
 They do not count as successful correctness checks or timed results.
 
-An accepted campaign must first prove that the platform collector returns numeric
-RSS for the selected time implementation, process-group inspection, and one
-measured child. If that preflight fails, abandon the campaign immediately and
+An accepted campaign must first prove that the native accounting collector
+returns positive RSS for a measured allocation child. Explicit process-group
+inspection is checked separately when selected for limit enforcement. If
+preflight fails, abandon the campaign immediately and
 repair the sandbox or host. If any later measured sample lacks authoritative
 RSS, abort the campaign and discard the partial performance report.
 
@@ -65,11 +66,29 @@ The [comparison pages](comparison/index.md) contain generated observations.
 The [catalog](../../benchmarks/cases/workloads.jsonl) defines workload commands
 and adapter eligibility. Each excluded adapter has a capability reason.
 
-The earlier macOS captures used freshly built tq, jq 1.8.1, and yq 4.53.2 on the
-frozen corpus. Each timed row had one measured sample, but every measured row
-lacked authoritative RSS. They remain historical correctness and execution
-evidence only; they are not an accepted performance benchmark and must not
-support memory or speed findings. The accepted review is the Linux run below.
+The current review reruns the full 39-workload catalog on Linux using only
+`tq-bench` native workload measurements. It uses jq 1.8.1, yq 4.53.2, and the
+recorded release tq executable on the frozen corpus. The host has an AMD
+Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM, and x86_64 Linux
+kernel `7.2.0-ogc4.1.fc44.x86_64`. No macOS workload results are included.
+
+Inputs and captures are prepared before an isolated worker launches each
+target directly. Wall time ends at native exit observation and excludes worker
+startup, request delivery, and cleanup. Native waiting supplies user/system
+CPU and lifetime peak RSS, including pre-exec effects and waited descendants.
+The measured 2.5 MiB residual RSS floor is retained, not subtracted. Primary
+measurements have no recurring RSS sampler. Separate instrumented repetitions
+enforce selected process-group limits and are not pooled into primary results.
+Timing controls report excess duration above their requested interval. This
+includes startup and scheduling, not just exit-observation delay, and is not a
+timer-error bound. Comparisons stay within the same host and OS using the
+same measurement method and concessions; repeated samples retain dispersion.
+
+The standard report has 10,579 primary samples and 180 instrumented samples.
+Smoke adds 540 primary samples; rapid adds 27 primary and three instrumented
+samples. Every sample has positive native peak RSS. Non-empty output always
+has a first-output observation, falling back to recorded completion when a
+short-lived target exits before the metadata poll.
 
 | Suite | Rows | Timed | Incorrect | Unsupported | Resource limit |
 | --- | ---: | ---: | ---: | ---: | ---: |

@@ -28,6 +28,17 @@ Use a safe resource-aware wait API with either bounded nonblocking waits or a de
 
 Track the dedicated process group for bounded descendant cleanup. The old policy of preserving the `/usr/bin/time` supervisor no longer applies. Keep cleanup failures visible and stop reusing an execution path that could leave live processes. Freeze duration when exit is observed even if later cleanup fails. Do not depend on sampler shutdown to discover completion.
 
+On macOS, polling waits use safe Rust thread parking against an `Instant`
+deadline. Two full native campaigns reproduced a standard-library
+`nanosleep` EINVAL assertion in the former sleep-based polling path. Parking
+avoids that path; the deadline loop handles early or spurious unparks without
+shortening the requested delay. Linux retains its existing sleep implementation.
+The workaround does not change polling intervals, exit-observation ownership,
+timeouts, or CPU/RSS acceptance gates. Rebuild and recalibrate the macOS worker
+before its replacement campaigns. Retain the completed Linux campaigns under
+their original frozen collector identity; do not relabel or pool them with the
+new macOS collector.
+
 Alternatives rejected: retaining the wrapper measures a different launched executable; a second wait path races with resource collection; cumulative `RUSAGE_CHILDREN` mixes sample accounting.
 
 ### Isolated measurement worker investigation
@@ -42,7 +53,9 @@ Keep one target completion owner in the worker. The coordinator may manage the w
 
 The result remains native child lifetime RSS, including validated pre-exec launch and waited-descendant effects. Do not claim a pure post-exec metric, subtract an estimated floor, or reset a live target's peak. Record the worker executable identity, launch protocol, resource scope, residual floor evidence, and collector source identity. A changed worker or protocol invalidates old calibration and incompatible comparisons.
 
-Before adopting the worker, repeat the same small target with coordinator allocations of 0, 32 MiB, and a larger corpus-representative size, plus high/low request sequences. Test large prepared input delivery separately so the worker cannot reintroduce the floor by copying stdin. Require independence within declared page-aware tolerances and agreement with independent GNU time on Linux and BSD time on macOS. Existing tolerances must not be loosened merely to accommodate the failed collector. A residual floor that obscures the supported small-tool workloads blocks adoption. Fresh controls and calibration are required for the final measurement path on both hosts before matrices or publication resume.
+Before adopting the worker, repeat the same small target with coordinator allocations of 0, 32 MiB, and a larger corpus-representative size, plus high/low request sequences. Test large prepared input delivery separately so the worker cannot reintroduce the floor by copying stdin. Require independence within declared page-aware tolerances and agreement with independent GNU time on Linux and BSD time on macOS. RSS tolerances must not be loosened merely to accommodate the failed collector. A residual floor that obscures the supported small-tool workloads blocks adoption. Fresh controls and calibration are required for the final measurement path on both hosts before matrices or publication resume.
+
+CPU validation divides each user/system absolute difference by native target wall duration. At most 10% is automatically green; above 10% through 20% is green with an info notice; above 20% but below 50% is yellow with a warning requiring approval; 50% or more is red, blocks acceptance, and requires the implementing agent to begin investigation without asking permission. Below 500 ms, a difference strictly below `max(20 ms, 10% of runtime)` overrides these bands to automatic green. Exactly 500 ms uses percentage bands without the floor. Zero difference is green; at zero duration other differences use the short-run floor, then red. The duration basis excludes worker and time-wrapper overhead. Retain severity and diagnostics with raw evidence. Yellow cannot authorize calibration without explicit approval; red cannot be approved without investigation and resolution. Preserve original failed evidence and identify reevaluation separately. RSS tolerances, timing-accuracy claims, and tq self-regression thresholds are unchanged.
 
 ### Safe API audit before dependency selection
 
@@ -55,6 +68,10 @@ The OS manuals support targeted resource-aware waiting, but returned accounting 
 ### Explicit timing and memory evidence
 
 Retain existing duration storage where adequate and add timing-method and validated-precision metadata. Persist the captured interval; never call `elapsed()` again to manufacture the final duration. Precision documentation must include scheduling and wait observation overhead, not just clock resolution. No-op and known-duration helpers quantify it; do not subtract an estimated constant from individual samples.
+
+Compare tools within the same native host and operating system using the same harness version, timing boundaries, instrumentation family, and disclosed concessions. Do not compare or rank runtimes across operating systems. Host-specific startup and scheduling effects are accepted under this common measurement contract; acceptance does not require a universal 1 ms accuracy guarantee. A shared harness does not prove that noise or tool-dependent effects cancel, so retain repeated samples and dispersion.
+
+Full spawn-to-exit duration minus a requested sleep interval is observed excess duration, not isolated timer error. It includes legitimate target startup, sleep overshoot, shutdown, and exit-observation delay. Keep those components conceptually separate and report the observed control values without labeling them a guaranteed error bound. A busy-deadline control can distinguish sleep overshoot from other components, but its child interval alone does not validate full-process timer accuracy. This interpretation does not relax CPU/RSS validation or self-regression thresholds.
 
 Extend RSS provenance with explicit native methods and scope while preserving old `bsd-time-l` and `gnu-time-v` records as historical methods. Normalize platform units once: Linux `ru_maxrss` is KiB; verify macOS units against its native API and independent controls before publishing byte values. If a dependency already normalizes units, do not multiply twice. First-party conversions use checked arithmetic and reject detectable invalid or overflowed values.
 
@@ -74,7 +91,7 @@ Issue #30 supersedes the current mandatory `time`/`ps` guidance for these campai
 
 Generate only the bounded Results regions in stable `docs/tests/comparison/` pages. Preserve explanations outside them byte-for-byte and avoid dated report filenames or local archive paths. Maintain raw campaign evidence in the existing external benchmark storage and use stable repository-facing references where needed.
 
-Use plain metric labels such as `Wall time` and `Peak RSS`. Each measurement cell includes its own unit and exactly one decimal place, for example `138.6 ms`, `64.7 MiB`, or `42.0 MiB/s`. Keep counts as integers. Round only for presentation; preserve full stored precision for calculations and acceptance checks. State validated timing accuracy in the method description so display precision does not imply measurement accuracy.
+Use plain metric labels such as `Wall time` and `Peak RSS`. Each measurement cell includes its own unit and exactly one decimal place, for example `138.6 ms`, `64.7 MiB`, or `42.0 MiB/s`. Keep counts as integers. Round only for presentation; preserve full stored precision for calculations and acceptance checks. Describe observed timing controls and their limitations in the method description so display precision does not imply measurement accuracy.
 
 Do not put source labels such as `gnu-time-v`, `bsd-time-l`, or native collector identifiers in table cells or headers. Keep collection provenance in machine-readable metadata and describe the measurement method outside the tables. Render unavailable, unsupported, failed, unmeasured, and non-comparable measurement cells as `-`. Before every affected table, explain that `-` means no valid comparable measurement and is not zero; describe applicable exclusions and failures there so their meaning remains visible. Outcome coverage tables can retain outcome names and integer counts because those rows describe coverage rather than measurements.
 

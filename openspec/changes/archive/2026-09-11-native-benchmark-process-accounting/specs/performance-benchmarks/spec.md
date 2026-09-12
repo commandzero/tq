@@ -63,7 +63,9 @@ For issue #30 acceptance, each comparable workload's wall-time and peak-RSS incr
 ### Requirement: Direct invocation and timing boundary
 The benchmark SHALL launch the selected executable directly with its argument vector and requested environment and working directory. An isolated, low-memory Rust measurement worker MAY perform that launch and own the exact-child measurement after passing the worker-isolation validation below. It MUST NOT insert a shell or external measurement wrapper between itself and the selected executable unless that executable is explicitly the subject of a separate benchmark. Inputs, correctness checks, command construction, and capture destinations SHALL be prepared before timing. A monotonic interval in the process owning the target SHALL begin immediately before spawning and end when the child's exit is observed by its resource-collecting waiter. Worker startup, request and reply transfer, subsequent parsing, worker joins, cleanup, and report generation MUST NOT extend that duration. Spawn failures SHALL be infrastructure failures, not successful zero-duration executions.
 
-Reports SHALL distinguish stored duration resolution and display precision from validated accuracy. Millisecond accuracy SHALL be validated on supported hosts; one-decimal presentation MUST NOT imply accuracy finer than supported by control measurements. Nanosecond storage MUST NOT imply nanosecond accuracy. Instrumentation that measurably distorts timing SHALL use separately labeled timing and memory repetitions with equivalent workloads and identities.
+Reports SHALL distinguish stored duration resolution and display precision from validated accuracy. Acceptance SHALL use comparisons within the same native host and OS with equivalent harness versions, timing boundaries, instrumentation families, and disclosed concessions; it SHALL NOT require a universal 1 ms accuracy guarantee. Cross-OS runtime comparisons or rankings MUST NOT be produced. One-decimal presentation MUST NOT imply accuracy finer than supported by evidence, and nanosecond storage MUST NOT imply nanosecond accuracy. Instrumentation that measurably distorts timing SHALL use separately labeled timing and memory repetitions with equivalent workloads and identities.
+
+Known-duration controls SHALL report observed excess duration and dispersion. Full spawn-to-exit duration minus requested sleep includes legitimate startup, sleep overshoot, shutdown, and exit-observation delay; it MUST NOT be labeled isolated timer error or a guaranteed error bound. Host-specific effects are acceptable when all compared tools use the same measurement contract and concessions. Repeated samples and dispersion remain required; a shared harness MUST NOT be treated as proof that noise or bias cancels. CPU/RSS validation and tq self-regression gates remain unchanged.
 
 #### Scenario: Literal arguments
 - **WHEN** an argument contains spaces, wildcard characters, or shell metacharacters
@@ -76,6 +78,11 @@ Reports SHALL distinguish stored duration resolution and display precision from 
 #### Scenario: Timing calibration
 - **WHEN** no-op and known-duration controls are repeated on a native host
 - **THEN** validation reports spawn/wait overhead, dispersion, and supported reporting precision without subtracting invented overhead from samples
+
+#### Scenario: Same-OS comparison with observed scheduling effects
+- **WHEN** repeated controls show excess duration on a native host and all compared tools use the same harness, timing boundaries, instrumentation family and disclosed concessions
+- **THEN** comparisons within that host and OS may proceed without a universal 1 ms accuracy guarantee, retaining observed control values and dispersion
+- **AND** reports neither label the control excess as isolated timer error nor use it to compare tools across operating systems
 
 ### Requirement: Isolated measurement worker
 An internal Rust worker MAY isolate target launching from the campaign coordinator's memory. It SHALL initialize its own executable image before launching the target and SHALL return the target's exact-child resource usage, never its own lifetime usage. Bulk input and capture preparation SHALL remain outside the worker's target-launch memory footprint. Control messages SHALL be bounded and preserve the existing public invocation contract without loading corpus-sized input or reports into the worker before target launch.
@@ -131,6 +138,18 @@ The workspace SHALL declare a minimum Rust version of 1.95 to support the select
 The approved dependency MAY rely on valid, nonnegative OS counters within its audited numeric range when its internal conversions expose no overflow error. This assumption and its limits MUST be documented; the implementation MUST NOT claim it can detect every malformed upstream counter after conversion. First-party conversions SHALL use checked arithmetic and reject detectable invalid, zero-RSS, unavailable, or overflowed results. Independent native validation remains mandatory.
 
 Validation SHALL use helpers that allocate and touch pages, release memory, and exit, including bursts shorter than the previous sampling interval without an intentional polling dwell. Multiple allocation sizes, independent children, and allocations across threads SHALL validate peak behavior and platform conversion. Tolerances SHALL account for page size, runtime baseline, and allocator behavior rather than equating heap bytes to RSS. Native `time` comparisons SHALL independently validate accounting on both OSes. Cross-compilation or emulation alone MUST NOT satisfy native verification.
+
+Native versus independent-time user and system CPU comparisons SHALL classify each absolute difference as a percentage of native target spawn-to-exit wall duration. At most 10% SHALL be automatic green; above 10% through 20% SHALL be green with an info notice; above 20% but below 50% SHALL be yellow with a warning requiring explicit approval; 50% or more SHALL be red with an acceptance block and automatic investigation by the implementing agent. Below 500 ms, differences strictly less than the larger of 20 ms and 10% of runtime SHALL override these bands to automatic green. Exactly 500 ms SHALL use the percentage bands without the short-run floor. Zero difference SHALL be green; for zero duration, differences outside the short-run floor SHALL be red. Validation SHALL use unrounded measurements, exclude worker and time-wrapper overhead from the duration basis, and retain severity and diagnostics. Yellow SHALL NOT authorize calibration without recorded approval. Red SHALL require investigation and resolution before acceptance. This policy SHALL NOT change RSS tolerances, timing-accuracy claims, or tq self-regression thresholds. Earlier failed evidence SHALL remain unchanged; reevaluation SHALL identify the new policy separately.
+
+#### Scenario: CPU validation tolerance boundaries
+- **WHEN** paired CPU measurements differ by 30 ms for a 300 ms native target duration
+- **THEN** the CPU comparison is automatically green, and a difference above 30 ms through 60 ms is green with an info notice
+- **AND** at 500 ms duration, differences of 50 ms, 100 ms, 100.001 ms, and 250 ms are respectively green, green with info, yellow requiring approval, and red requiring investigation
+
+#### Scenario: Short-run allowance overrides severity
+- **WHEN** a target runs for 30 ms and CPU differs by 19.999 ms
+- **THEN** the short-run floor makes the comparison automatically green
+- **AND** a difference of exactly 20 ms falls outside the floor and is red under the percentage bands
 
 #### Scenario: Brief released allocation
 - **WHEN** a helper touches and releases a large allocation before exiting without waiting for a sampler

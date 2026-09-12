@@ -151,9 +151,11 @@ RSS limit still use it in separate enforcement repetitions. Production runs
 need neither platform `time` nor Python allocation probes.
 
 Reports record the direct spawn-to-exit timing boundary, input-delivery method,
-RSS scope, and host-validated precision. One-decimal display values are
-presentation only; stored nanoseconds do not imply nanosecond accuracy. Repeat
-no-op and known-duration controls when validating supported precision. Native
+RSS scope, and observed timing controls. One-decimal display values are
+presentation only; stored nanoseconds do not imply nanosecond accuracy.
+Compare tools on the same host and OS with equivalent measurement settings.
+No-op and known-duration controls include startup and scheduling effects;
+use repeated samples and dispersion to interpret small differences. Native
 Windows accounting is deferred to issue #31 and cannot be claimed from
 cross-compilation or emulation.
 

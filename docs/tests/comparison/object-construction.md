@@ -31,29 +31,30 @@ records.
 Last updated: 2026-09-11
 Profile: `standard` | Status: `observed-failures`
 
-Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
-Environment: `linux` / `x86_64`, 16 logical CPUs, compiler profile `release-benchmark`
+Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
+Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.0-ogc4.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Aug 20 16:15:37 UTC 2026`; compiler profile `release-benchmark`
 
-Peak RSS is authoritative only after the campaign RSS preflight passes. Captured values show their source when present; missing values are `not captured`, never estimates.
+Peak RSS is authoritative only after the campaign RSS preflight passes. Missing or invalid values are `-`, never estimates. RSS collector provenance (outside measurement tables): `linux-wait4`.
+Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.1 ms`; primary timing is sampler-free.
 
-Compare columns with the same input format to isolate tool differences. Missing adapters are marked `not recorded`.
+Compare columns with the same input format to isolate tool differences. Missing adapters have `-` measurement cells and `not recorded` outcome/detail cells.
 
-Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU, throughput, and output cells use the captured summary values.
+Timing rows show numeric medians followed by compact MAD / p95 / range rows, with one decimal place and a unit in each measurement cell. CPU, throughput, and output cells use the captured summary values.
 
 ### usgs-all-day
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 22.738 | 25.143 | 63.438 | 23.339 | 23.375 | 23.095 |
-| Wall dispersion (MAD / p95 / range) | 0.268 / 23.754 / 22.359-23.754 | 0.468 / 27.686 / 24.202-27.686 | 0.507 / 64.234 / 62.415-64.234 | 0.381 / 24.267 / 21.948-24.267 | 0.236 / 25.958 / 21.848-25.958 | 0.213 / 23.573 / 22.435-23.573 |
-| First output (ms) | 22.724 | 25.125 | 63.152 | 23.323 | 23.360 | 23.082 |
-| First output dispersion (MAD / p95 / range) | 0.264 / 23.738 / 22.343-23.738 | 0.636 / 27.667 / 18.206-27.667 | 0.747 / 64.215 / 26.217-64.215 | 0.380 / 24.250 / 21.934-24.250 | 0.234 / 25.942 / 21.834-25.942 | 0.210 / 23.562 / 22.424-23.562 |
-| User CPU (ms) | 0.000 | 20.000 | 20.000 | 0.000 | 0.000 | 0.000 |
-| System CPU (ms) | 0.000 | 0.000 | 10.000 | 0.000 | 0.000 | 0.000 |
-| Peak RSS (MiB, source) | 4.56 (gnu-time-v) | 24.64 (gnu-time-v) | 38.52 (gnu-time-v) | 9.23 (gnu-time-v) | 9.78 (gnu-time-v) | 9.27 (gnu-time-v) |
-| Logical throughput (records/s) | 8531.785 | 7715.712 | 3058.128 | 8312.267 | 8299.465 | 8400.087 |
-| Physical throughput (MiB/s) | 5.841 | 5.282 | 2.091 | 5.691 | 5.674 | 6.800 |
-| Output bytes | 4324 | 3547 | 3547 | 3351 | 3351 | 3351 |
+| Wall time | 3.1 ms | 17.6 ms | 25.5 ms | 4.5 ms | 5.5 ms | 4.8 ms |
+| Wall time dispersion | 0.1 ms / 3.6 ms / 2.8-3.6 ms | 0.2 ms / 18.4 ms / 16.5-18.4 ms | 0.3 ms / 27.6 ms / 24.7-27.6 ms | 0.1 ms / 5.0 ms / 4.3-5.0 ms | 0.0 ms / 5.9 ms / 5.1-5.9 ms | 0.2 ms / 5.3 ms / 4.6-5.3 ms |
+| First output | 2.9 ms | 17.5 ms | 25.3 ms | 4.2 ms | 5.2 ms | 4.6 ms |
+| First output dispersion | 0.1 ms / 3.3 ms / 2.6-3.3 ms | 0.2 ms / 18.3 ms / 16.4-18.3 ms | 0.1 ms / 26.3 ms / 24.6-26.3 ms | 0.2 ms / 4.5 ms / 4.0-4.5 ms | 0.1 ms / 5.6 ms / 4.8-5.6 ms | 0.2 ms / 5.1 ms / 4.3-5.1 ms |
+| User CPU | 2.0 ms | 17.9 ms | 26.6 ms | 2.1 ms | 3.8 ms | 2.8 ms |
+| System CPU | 1.0 ms | 11.4 ms | 16.3 ms | 2.1 ms | 1.6 ms | 1.9 ms |
+| Peak RSS | 4.5 MiB | 24.9 MiB | 38.3 MiB | 9.2 MiB | 9.8 MiB | 9.2 MiB |
+| Logical throughput | 63017.7 records/s | 10996.8 records/s | 7618.6 records/s | 43115.9 records/s | 35527.9 records/s | 40492.6 records/s |
+| Physical throughput | 43.1 MiB/s | 7.5 MiB/s | 5.2 MiB/s | 29.5 MiB/s | 24.3 MiB/s | 32.8 MiB/s |
+| Output bytes | 4324.0 B | 3547.0 B | 3547.0 B | 3351.0 B | 3351.0 B | 3351.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
 | Samples (warmups) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
@@ -63,16 +64,16 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 23.391 | 23.431 | 23.248 | 23.234 | 23.607 | 23.383 |
-| Wall dispersion (MAD / p95 / range) | 0.345 / 24.258 / 22.068-24.780 | 0.446 / 24.308 / 21.994-24.369 | 0.343 / 24.336 / 22.163-24.429 | 0.335 / 23.995 / 22.061-24.736 | 0.353 / 24.279 / 22.512-24.324 | 0.315 / 24.128 / 21.703-24.480 |
-| First output (ms) | 23.377 | 23.417 | 23.233 | 23.219 | 23.596 | 23.368 |
-| First output dispersion (MAD / p95 / range) | 0.343 / 24.243 / 22.053-24.763 | 0.444 / 24.291 / 21.984-24.351 | 0.341 / 24.325 / 22.146-24.415 | 0.335 / 23.977 / 22.045-24.720 | 0.350 / 24.263 / 22.497-24.308 | 0.315 / 24.113 / 21.691-24.465 |
-| User CPU (ms) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| System CPU (ms) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| Peak RSS (MiB, source) | 4.06 (gnu-time-v) | 12.02 (gnu-time-v) | 12.27 (gnu-time-v) | 8.09 (gnu-time-v) | 8.57 (gnu-time-v) | 7.95 (gnu-time-v) |
-| Logical throughput (records/s) | 85.503 | 85.355 | 86.029 | 86.081 | 84.721 | 85.532 |
-| Physical throughput (MiB/s) | 0.072 | 0.072 | 0.073 | 0.073 | 0.072 | 0.083 |
-| Output bytes | 47 | 38 | 38 | 34 | 34 | 34 |
+| Wall time | 1.5 ms | 3.1 ms | 3.1 ms | 1.2 ms | 1.3 ms | 1.2 ms |
+| Wall time dispersion | 0.0 ms / 1.8 ms / 1.3-1.8 ms | 0.1 ms / 3.4 ms / 2.9-3.7 ms | 0.1 ms / 3.4 ms / 2.9-3.5 ms | 0.0 ms / 1.5 ms / 1.1-1.7 ms | 0.1 ms / 1.5 ms / 1.2-1.6 ms | 0.1 ms / 1.5 ms / 1.1-1.5 ms |
+| First output | 1.4 ms | 2.7 ms | 2.8 ms | 1.0 ms | 1.0 ms | 1.0 ms |
+| First output dispersion | 0.0 ms / 1.7 ms / 1.2-1.7 ms | 0.1 ms / 3.1 ms / 2.4-3.2 ms | 0.0 ms / 3.1 ms / 2.6-3.1 ms | 0.0 ms / 1.4 ms / 1.0-1.4 ms | 0.0 ms / 1.4 ms / 1.0-1.5 ms | 0.0 ms / 1.4 ms / 1.0-1.4 ms |
+| User CPU | 1.3 ms | 1.0 ms | 1.1 ms | 0.0 ms | 0.0 ms | 0.0 ms |
+| System CPU | 0.0 ms | 2.0 ms | 2.1 ms | 1.1 ms | 1.2 ms | 1.2 ms |
+| Peak RSS | 4.1 MiB | 11.9 MiB | 12.1 MiB | 8.0 MiB | 8.5 MiB | 8.1 MiB |
+| Logical throughput | 1344.5 records/s | 651.6 records/s | 646.4 records/s | 1679.3 records/s | 1504.9 records/s | 1622.7 records/s |
+| Physical throughput | 1.1 MiB/s | 0.6 MiB/s | 0.5 MiB/s | 1.4 MiB/s | 1.3 MiB/s | 1.6 MiB/s |
+| Output bytes | 47.0 B | 38.0 B | 38.0 B | 34.0 B | 34.0 B | 34.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
 | Samples (warmups) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) |
@@ -80,18 +81,20 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU
 
 ### usgs-all-month
 
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `process exited with classified error Resource (exit status 5)`, `tool identity differs`.
+
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 138.439 | 24622.290 | 23476.393 | not measured | not measured | not measured |
-| Wall dispersion (MAD / p95 / range) | 1.844 / 142.543 / 134.413-142.543 | 36.373 / 24720.131 / 24545.205-24720.131 | 95.745 / 23713.697 / 23271.108-23713.697 | not measured | not measured | not measured |
-| First output (ms) | 107.597 | 24562.186 | 23372.218 | not measured | not measured | not measured |
-| First output dispersion (MAD / p95 / range) | 0.557 / 112.204 / 106.292-112.204 | 40.865 / 24668.050 / 24510.235-24668.050 | 89.207 / 23598.949 / 23163.985-23598.949 | not measured | not measured | not measured |
-| User CPU (ms) | 80.000 | 55355.000 | 52810.000 | not captured | not captured | not captured |
-| System CPU (ms) | 20.000 | 325.000 | 635.000 | not captured | not captured | not captured |
-| Peak RSS (MiB, source) | 65.82 (gnu-time-v) | 490.74 (gnu-time-v) | 1475.91 (gnu-time-v) | not measured | not measured | not measured |
-| Logical throughput (records/s) | 81436.884 | 457.878 | 480.227 | not measured | not measured | not measured |
-| Physical throughput (MiB/s) | 55.201 | 0.310 | 0.325 | not measured | not measured | not measured |
-| Output bytes | 251352 | 206255 | 206255 | not measured | not measured | not measured |
+| Wall time | 111.3 ms | 23812.7 ms | 22755.4 ms | - | - | - |
+| Wall time dispersion | 0.5 ms / 113.9 ms / 110.4-113.9 ms | 24.9 ms / 23938.3 ms / 23775.6-23938.3 ms | 167.3 ms / 23182.8 ms / 22450.2-23182.8 ms | - | - | - |
+| First output | 104.9 ms | 23781.1 ms | 22671.8 ms | - | - | - |
+| First output dispersion | 0.6 ms / 108.1 ms / 104.2-108.1 ms | 25.4 ms / 23905.7 ms / 23743.6-23905.7 ms | 165.6 ms / 23094.1 ms / 22368.2-23094.1 ms | - | - | - |
+| User CPU | 87.4 ms | 54849.7 ms | 50771.0 ms | - | - | - |
+| System CPU | 24.5 ms | 343.8 ms | 657.5 ms | - | - | - |
+| Peak RSS | 65.8 MiB | 491.4 MiB | 1475.8 MiB | - | - | - |
+| Logical throughput | 101296.1 records/s | 473.4 records/s | 495.4 records/s | - | - | - |
+| Physical throughput | 68.7 MiB/s | 0.3 MiB/s | 0.3 MiB/s | - | - | - |
+| Output bytes | 251352.0 B | 206255.0 B | 206255.0 B | - | - | - |
 | Outcome | timed | timed | timed | resource-limit | resource-limit | resource-limit |
 | Details | none | none | none | process exited with classified error Resource (exit status 5) | process exited with classified error Resource (exit status 5) | process exited with classified error Resource (exit status 5) |
 | Samples (warmups) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | not timed | not timed | not timed |
@@ -101,16 +104,16 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows. CPU
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall (ms) | 24.887 | 783.399 | 858.529 | 135.679 | 135.833 | 135.089 |
-| Wall dispersion (MAD / p95 / range) | 0.365 / 60.381 / 24.459-60.381 | 1.784 / 863.556 / 778.944-863.556 | 3.205 / 862.215 / 822.027-862.215 | 0.618 / 136.703 / 133.397-136.703 | 0.513 / 137.335 / 135.083-137.335 | 0.758 / 136.590 / 134.101-136.590 |
-| First output (ms) | 22.073 | 746.051 | 811.159 | 104.180 | 111.359 | 106.813 |
-| First output dispersion (MAD / p95 / range) | 0.642 / 23.801 / 21.234-23.801 | 4.327 / 846.905 / 741.231-846.905 | 2.896 / 814.169 / 802.592-814.169 | 0.372 / 105.777 / 102.741-105.777 | 0.485 / 112.142 / 110.164-112.142 | 1.190 / 109.299 / 105.117-109.299 |
-| User CPU (ms) | 10.000 | 2110.000 | 2100.000 | 90.000 | 100.000 | 100.000 |
-| System CPU (ms) | 0.000 | 50.000 | 130.000 | 0.000 | 0.000 | 0.000 |
-| Peak RSS (MiB, source) | 15.73 (gnu-time-v) | 111.27 (gnu-time-v) | 283.89 (gnu-time-v) | 21.46 (gnu-time-v) | 25.65 (gnu-time-v) | 22.97 (gnu-time-v) |
-| Logical throughput (records/s) | 89404.107 | 2840.187 | 2591.642 | 16398.940 | 16380.469 | 16470.623 |
-| Physical throughput (MiB/s) | 60.579 | 1.924 | 1.754 | 11.112 | 11.084 | 13.218 |
-| Output bytes | 49953 | 41052 | 41052 | 38825 | 38825 | 38825 |
+| Wall time | 21.9 ms | 739.1 ms | 825.4 ms | 102.2 ms | 109.3 ms | 105.5 ms |
+| Wall time dispersion | 0.7 ms / 23.0 ms / 20.6-23.0 ms | 1.7 ms / 750.5 ms / 733.7-750.5 ms | 2.8 ms / 831.4 ms / 807.4-831.4 ms | 0.6 ms / 103.3 ms / 100.2-103.3 ms | 1.0 ms / 115.3 ms / 107.1-115.3 ms | 0.4 ms / 107.7 ms / 103.7-107.7 ms |
+| First output | 20.7 ms | 731.0 ms | 807.7 ms | 101.2 ms | 108.1 ms | 104.5 ms |
+| First output dispersion | 0.5 ms / 21.8 ms / 19.5-21.8 ms | 1.3 ms / 744.2 ms / 726.1-744.2 ms | 3.3 ms / 811.9 ms / 791.9-811.9 ms | 0.5 ms / 102.0 ms / 99.2-102.0 ms | 0.8 ms / 114.1 ms / 105.7-114.1 ms | 0.4 ms / 106.5 ms / 102.6-106.5 ms |
+| User CPU | 15.7 ms | 2134.3 ms | 2129.9 ms | 94.4 ms | 100.9 ms | 98.5 ms |
+| System CPU | 5.1 ms | 58.5 ms | 128.2 ms | 7.1 ms | 8.0 ms | 6.6 ms |
+| Peak RSS | 15.6 MiB | 110.5 MiB | 283.1 MiB | 21.3 MiB | 25.6 MiB | 23.2 MiB |
+| Logical throughput | 101691.0 records/s | 3010.4 records/s | 2695.5 records/s | 21764.4 records/s | 20353.6 records/s | 21098.9 records/s |
+| Physical throughput | 68.9 MiB/s | 2.0 MiB/s | 1.8 MiB/s | 14.7 MiB/s | 13.8 MiB/s | 16.9 MiB/s |
+| Output bytes | 49953.0 B | 41052.0 B | 41052.0 B | 38825.0 B | 38825.0 B | 38825.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
 | Samples (warmups) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
