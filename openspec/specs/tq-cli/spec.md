@@ -29,11 +29,13 @@ The CLI SHALL support `tq [OPTIONS] [FILTER [FILE...]]` and a filter file option
 ### Requirement: Best-effort input detection with strict override
 When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file paths as JSON Lines, `.json-seq` and `.jsonseq` paths as RFC 7464 JSON Text Sequences, `.json5` paths as JSON5, `.yaml` and `.yml` paths as YAML, `.json` paths as JSON, `.toon` paths as TOON, `.csv` paths as CSV, and `.tsv` paths as TSV before applying bounded syntax probing to sources without a recognized extension. Canonical TOON syntax SHALL remain preferred during probing, an RS first non-whitespace byte SHALL commit to JSON Text Sequence input, JSON object and non-TOON array openers SHALL commit to strict JSON before YAML, and YAML document, directive, or root-sequence markers SHALL commit to YAML. Content probing MUST NOT select JSON5, CSV, TSV, TOML, INI, or Properties. Once a parser commits, later syntax errors SHALL be reported for that format without restarting detection. If every probed parser rejects, tq SHALL emit a combined input diagnostic containing bounded, useful failure context from each candidate.
 
-`--input-format toon|toon-seq|yaml|json|json5|jsonl|json-seq|csv|tsv` SHALL select exactly one parser and disable detection or faildown. `ndjson` SHALL be accepted as an alias for `jsonl`, `toon-sequence` as an alias for `toon-seq`, and `jsonseq` as an alias for `json-seq`. An explicit override SHALL take precedence over a recognized file extension. TOON SHALL remain the default structured output format, while TOON sequence, YAML, JSON, JSON Lines, JSON sequence, CSV, and TSV output SHALL be available through `--output-format toon|toon-seq|yaml|json|jsonl|json-seq|csv|tsv` with the same aliases. JSON5 output SHALL remain unsupported. `--seq` SHALL select jq-compatible JSON sequence input and output; it MUST conflict with explicit non-JSON-sequence native formats rather than silently changing one direction.
+`--input-format toon|toon-seq|yaml|json|json5|jsonl|json-seq|csv|tsv` SHALL select exactly one parser and disable detection or faildown. `ndjson` SHALL be accepted as an alias for `jsonl`, `toon-sequence` as an alias for `toon-seq`, and `jsonseq` as an alias for `json-seq`. An explicit override SHALL take precedence over a recognized file extension. TOON SHALL remain the default structured output format, while TOON sequence, YAML, JSON, JSON Lines, JSON sequence, CSV, and TSV output SHALL be available through `--output-format toon|toon-seq|yaml|json|jsonl|json-seq|csv|tsv` with the same aliases. JSON5 output SHALL remain unsupported.
+
+`--seq` SHALL select jq-compatible JSON sequence input and TOON sequence output by default. `--seq --output-format json` SHALL select JSON sequence output, and `--seq -c` SHALL select compact JSON sequence output. Explicit JSON input SHALL be accepted with `--seq` and normalized to JSON sequence input. Explicit incompatible input formats and `--unframed` MUST fail before input is consumed, regardless of option order.
 
 #### Scenario: Default format
 - **WHEN** no format option is provided for a source without a recognized extension
-- **THEN** bounded syntax probing selects TOON, strict JSON, JSON Text Sequence, or YAML and structured output uses TOON Text Sequence framing
+- **THEN** bounded syntax probing selects TOON, strict JSON, JSON Text Sequence, or YAML and structured output emits LF-terminated canonical TOON values without RS
 
 #### Scenario: JSON interoperability
 - **WHEN** both input and output formats are explicitly set to JSON
@@ -104,15 +106,19 @@ When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file pat
 - **THEN** tq invokes only the JSON5 parser and never probes TOON, strict JSON, or YAML
 
 #### Scenario: jq-compatible sequence switch
-- **WHEN** `--seq` is supplied without conflicting format options
+- **WHEN** `--seq --output-format json` is supplied
 - **THEN** tq reads and writes RFC 7464 JSON Text Sequences with jq-compatible recovery and framing
+
+#### Scenario: Default sequence output
+- **WHEN** `--seq` is supplied without an output-format option
+- **THEN** tq reads JSON Text Sequences and emits TOON Text Sequence frames
 
 #### Scenario: Explicit TOON sequence
 - **WHEN** `--input-format toon-seq --output-format toon-seq` is supplied
-- **THEN** tq reads and writes TOON Text Sequence frames without interpreting `--seq` as TOON framing
+- **THEN** tq reads and writes TOON Text Sequence frames without selecting JSON sequence input
 
 #### Scenario: Sequence switch conflict
-- **WHEN** `--seq` is combined with `--input-format csv` or `--output-format toon-seq`
+- **WHEN** `--seq` is combined with `--input-format csv` or `--unframed`
 - **THEN** tq reports an incompatible-option usage error before consuming input
 
 #### Scenario: Mixed-format files
@@ -132,7 +138,7 @@ When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file pat
 - **THEN** tq reports that format's parse error and does not reinterpret the source with another parser
 
 ### Requirement: Structured and raw output modes
-Structured TOON output SHALL use TOON Text Sequence framing by default. `--unframed` SHALL require exactly one result. `-r/--raw-output` SHALL write strings without structured quoting, and `-j/--join-output` SHALL suppress raw-output separators as defined by jq-compatible cases.
+Structured TOON output SHALL emit zero or more canonical values, each followed by LF, without RS by default. Explicit `--seq` or `--output-format toon-seq` SHALL select TOON Text Sequence framing; `--seq` additionally selects JSON sequence input. `--unframed` SHALL require exactly one result. `-r/--raw-output` SHALL write strings without structured quoting, and `-j/--join-output` SHALL suppress raw-output separators as defined by jq-compatible cases.
 
 #### Scenario: Raw string
 - **WHEN** `-r '.name'` emits a string
