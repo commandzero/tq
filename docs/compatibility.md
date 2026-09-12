@@ -2,7 +2,7 @@
 type: Report
 title: jq compatibility
 description: Supported jq behavior and the manual compatibility evidence policy.
-generated: { by: codex/gpt-5, at: 2026-09-09T17:44:58Z }
+generated: { by: codex/gpt-5.6-luna, at: 2026-09-12T16:53:23Z }
 ---
 
 # jq compatibility
@@ -126,8 +126,10 @@ original 518 cases, including 303 protected matches. It compares ordered JSON
 results and process behavior, exact compact JSON bytes, and whether TOON
 preserves the JSON execution contract. See the
 [campaign instructions and review inventories](../tests/compatibility/README.md).
-The older `coverage-v1.toon` campaign is historical evidence, not approval for
-the current implementation or its former expected-difference labels.
+The [selected historical assertions](../tests/compatibility/reviews/coverage-summary.toon)
+retain reviewed baseline classifications from the older campaign. The raw
+campaign dump is not tracked, and this summary is not approval for the current
+implementation.
 
 The [current macOS report](tests/jq-manual/index.md)
 records 905 cases: 900 exact matches, five reviewed safe-library disparities,
