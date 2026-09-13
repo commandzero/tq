@@ -1,8 +1,9 @@
 # Implementation evidence
 
-## Resumed native worker testing
+## Resumed native worker testing (historical checkpoint; superseded)
 
-The repeated controls are recorded in [native worker proof results](worker-proof.md).
+This early checkpoint is retained for audit history and is superseded by the
+final repeated native controls recorded in [native worker proof results](worker-proof.md).
 Across two unchanged release runs per host, all 480 RSS comparisons passed
 but 11 CPU comparisons failed. The failed evidence remains retained and
 cannot authorize worker adoption or campaign publication.

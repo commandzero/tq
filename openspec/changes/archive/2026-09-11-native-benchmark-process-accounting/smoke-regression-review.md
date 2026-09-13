@@ -14,6 +14,13 @@ one-decimal units. The threshold decision uses the unrounded values from the
 retained reports. Percentages are shown to one decimal. A positive change
 means the candidate is slower or uses more memory.
 
+Six smoke pairs were accepted by the automated comparison gate. The three
+smoke pairs whose retained raw reports still have an automated `unavailable`
+status were manually validated against those reports. Thus the review accepts
+6 automatically comparable plus 3 manually validated pairs, for 9 accepted
+smoke pairs total; the manual validation does not rewrite the retained raw
+comparison statuses.
+
 | Workload / adapter | Samples (baseline / candidate) | Wall median (MAD), baseline | Wall median (MAD), candidate | Wall change | Peak RSS max (sample MAD), baseline | Peak RSS max (sample MAD), candidate | RSS change |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `format-base64-startup` / `tq-json` | 30 / 30 | 1.2 ms (MAD 0.0 ms) | 1.2 ms (MAD 0.0 ms) | -0.3% | 7.9 MiB (sample MAD 0.1 MiB) | 7.8 MiB (sample MAD 0.0 MiB) | -0.5% |
@@ -27,7 +34,9 @@ means the candidate is slower or uses more memory.
 | `startup` / `tq-toon` | 30 / 30 | 1.0 ms (MAD 0.0 ms) | 1.0 ms (MAD 0.0 ms) | -1.0% | 7.0 MiB (sample MAD 0.1 MiB) | 7.0 MiB (sample MAD 0.1 MiB) | -0.9% |
 
 No row reaches the 20% disclosure threshold or the 50% blocking threshold.
-All nine rows are therefore accepted by the issue #30 smoke regression policy.
+All nine rows are therefore accepted by the issue #30 smoke regression policy,
+with six accepted automatically and three accepted by manual validation as
+described above.
 RSS acceptance uses the report peak RSS maximum; the sample MAD values provide
 dispersion context and are not substituted for that gate metric. No sample was
 removed, rewritten, substituted, or rerun for this evaluation.
