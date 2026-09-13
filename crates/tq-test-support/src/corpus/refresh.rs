@@ -166,11 +166,14 @@ fn source_definitions(directory: &Path) -> Result<Vec<SourceDefinition>, Refresh
     let mut paths = fs::read_dir(directory)?
         .map(|entry| entry.map(|value| value.path()))
         .collect::<Result<Vec<_>, _>>()?;
-    paths.retain(|path| path.extension().is_some_and(|value| value == "json"));
+    paths.retain(|path| {
+        path.extension()
+            .is_some_and(|value| value == "toon" || value == "json")
+    });
     paths.sort();
     paths
         .into_iter()
-        .map(|path| Ok(serde_json::from_reader(fs::File::open(path)?)?))
+        .map(|path| Ok(crate::fixture_data::read(&path)?))
         .collect()
 }
 
