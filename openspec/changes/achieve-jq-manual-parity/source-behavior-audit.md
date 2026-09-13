@@ -63,8 +63,8 @@ the exact source line, query, input, and case ID without nested ID arrays.
   before errors in `path-boundaries.toon`. All reference outcomes were
   verified with pinned jq. This brought the required catalog to 546 cases.
 - Added a tiny-decimal `abs` witness, four measured math rounding witnesses,
-  and a single-capture `scan` witness. The current strict selection contains
-  608 cases, including the subsequent runtime-zero min/max witness and the
+  and a single-capture `scan` witness. That historical strict selection
+  contained 608 cases, including the subsequent runtime-zero min/max witness and the
   original `date.strptime` case outside
   manual-named files; the original 303 cases remain protected.
 - Added `completeness.toon` with 220 source-line rows that point each

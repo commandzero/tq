@@ -94,18 +94,22 @@ whether spooling occurred.
 - **THEN** their replay and transient retained bytes do not exceed the configured aggregate threshold apart from bounded bookkeeping and current tokens
 
 ### Requirement: TOON Text Sequence framing
-Explicit TOON sequence output selected with `--output-format toon-seq`, or with `--seq` when TOON output is selected, SHALL encode every result as ASCII RS (`0x1e`), followed by one canonical TOON document, followed by LF. Sequence framing SHALL be distinct from the bytes of a standalone TOON document.
+Explicit TOON sequence output selected with `--output-format toon-seq`, or
+with `--seq` when the selected structured output is TOON (the default or
+`--output-format toon`), SHALL encode every result as ASCII RS (`0x1e`),
+followed by one canonical TOON document, followed by LF. Sequence framing SHALL
+be distinct from the bytes of a standalone TOON document.
 
 #### Scenario: Emit multiple results
-- **WHEN** a filter emits two multiline objects with `--output-format toon-seq`, or with `--seq` when TOON output is selected
+- **WHEN** a filter emits two multiline objects with `--output-format toon-seq`, or with `--seq` using default TOON output or `--output-format toon`
 - **THEN** the output contains two independently parseable RS-framed records in emission order
 
 #### Scenario: Emit zero results
-- **WHEN** a filter emits no values with `--output-format toon-seq`, or with `--seq` when TOON output is selected
+- **WHEN** a filter emits no values with `--output-format toon-seq`, or with `--seq` using default TOON output or `--output-format toon`
 - **THEN** the structured sequence output is empty
 
 #### Scenario: Emit one result
-- **WHEN** a filter emits one structured value with `--output-format toon-seq`, or with `--seq` when TOON output is selected
+- **WHEN** a filter emits one structured value with `--output-format toon-seq`, or with `--seq` using default TOON output or `--output-format toon`
 - **THEN** the output still contains exactly one RS-framed record
 
 ### Requirement: Default TOON result output

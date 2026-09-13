@@ -4,7 +4,7 @@ Matching tasks in this plan target jq behavior subject to the reviewed safe-libr
 
 - [x] 1.8 Add reviewed disparity validation and separate exact/completion gate modes; reject stale or unknown approvals, preserve exact observations and all prior matches, and keep skips/timeouts/crashes as failures.
 - [x] 1.1 Pin the manual fingerprint, section inventory, and jq 1.8.1 build identity; verify a changed source or executable fingerprint fails reference validation.
-- [x] 1.2 Connect `gap-inventory.toon` to the executable catalog and review model; verify exactly 198 failures, 15 former differences, and 2 arity probes are accounted for, with no duplicate or missing IDs.
+- [x] 1.2 Connect `gap-inventory.toon` to the executable catalog and review model; verify exactly 198 `failure` rows, 15 `expected-difference` rows, and 2 `reference-discrepancy` rows are accounted for, with no duplicate or missing IDs.
 - [x] 1.3 Separate source corrections from execution verdicts; verify both invalid arity probes, corrected `/0` witnesses, and both whitespace corrections retain original provenance and execute.
 - [x] 1.4 Add the strict manual campaign exit policy; test injected mismatch, skip, missing reference, timeout, normalization error, and deleted source mapping all cause nonzero exit.
 - [x] 1.5 Add semantic JSON, exact compact-byte, and independent TOON-output campaigns; verify numeric changes, changed result order, and changed explicit stderr payloads cannot normalize into a pass.

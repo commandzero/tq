@@ -12,6 +12,12 @@ Acceptance is 63 of 69 tasks. Task 7.2 is complete after primary review of
 root staging, typed replay, duplicate-key ordering, shared memory limits,
 per-root VM limits, and recoverable runtime-error continuation.
 
+The v7-v9 native and benchmark paragraphs below are retained historical
+component checkpoints, each bound to its named executable and archive. They do
+not supersede the in-progress v12 evidence or the unchecked release tasks; an
+archived native result is not current release evidence without renewed source
+and executable identity.
+
 The capture-path decoder optimization passes primary review and 11 integration
 tests comparing automatic execution with forced document execution. Witnesses
 assert admission to the new mode and cover empty retained shells, sibling and
