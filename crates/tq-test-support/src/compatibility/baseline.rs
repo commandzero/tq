@@ -224,7 +224,7 @@ pub fn accept_reviewed_candidate(
 ///
 /// Returns I/O or JSON errors.
 pub fn read_baseline(path: &Path) -> Result<CompatibilityBaseline, BaselineError> {
-    Ok(serde_json::from_slice(&fs::read(path)?)?)
+    Ok(crate::fixture_data::read(path)?)
 }
 
 /// Writes a newline-terminated baseline via atomic rename.
@@ -239,8 +239,12 @@ pub fn write_baseline_atomic(
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut temporary = NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(&mut temporary, baseline)?;
-    temporary.write_all(b"\n")?;
+    if path.extension().is_some_and(|ext| ext == "toon") {
+        temporary.write_all(crate::fixture_data::to_toon(baseline)?.as_bytes())?;
+    } else {
+        serde_json::to_writer_pretty(&mut temporary, baseline)?;
+        temporary.write_all(b"\n")?;
+    }
     temporary.flush()?;
     temporary.as_file().sync_all()?;
     temporary.persist(path)?;
