@@ -2,8 +2,9 @@
 
 use std::{
     collections::{BTreeMap, VecDeque},
+    io::Write,
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
@@ -128,6 +129,179 @@ impl InputCursor {
     }
 }
 
+#[derive(Debug)]
+struct EffectGateState {
+    acknowledged: bool,
+    cancelled: bool,
+}
+
+#[derive(Debug)]
+struct EffectGate {
+    state: Mutex<EffectGateState>,
+    wake: Condvar,
+}
+
+#[derive(Debug)]
+pub(crate) struct EffectState {
+    bytes: Mutex<Vec<u8>>,
+    gate: Mutex<Option<Arc<EffectGate>>>,
+}
+
+impl EffectState {
+    #[cfg(test)]
+    pub(crate) fn new_for_test() -> Self {
+        Self {
+            bytes: Mutex::new(Vec::new()),
+            gate: Mutex::new(None),
+        }
+    }
+
+    pub(crate) fn append(&self, bytes: &[u8], limit: usize) -> Result<(), VmError> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        {
+            let mut effects = self.bytes.lock().map_err(|_| VmError::Runtime {
+                message: "effect sink is unavailable".into(),
+            })?;
+            let remaining = limit.saturating_sub(effects.len());
+            if bytes.len() > remaining {
+                return Err(VmError::Resource {
+                    resource: "output-bytes",
+                });
+            }
+            effects
+                .try_reserve(bytes.len())
+                .map_err(|_| VmError::Resource {
+                    resource: "output-bytes",
+                })?;
+            effects.extend_from_slice(bytes);
+        }
+        self.wait_for_acknowledgement()
+    }
+
+    fn wait_for_acknowledgement(&self) -> Result<(), VmError> {
+        let gate = self
+            .gate
+            .lock()
+            .map_err(|_| VmError::Runtime {
+                message: "effect gate is unavailable".into(),
+            })?
+            .clone();
+        let Some(gate) = gate else {
+            return Ok(());
+        };
+        let mut state = gate.state.lock().map_err(|_| VmError::Runtime {
+            message: "effect gate is unavailable".into(),
+        })?;
+        while !state.acknowledged && !state.cancelled {
+            state = gate.wake.wait(state).map_err(|_| VmError::Runtime {
+                message: "effect gate is unavailable".into(),
+            })?;
+        }
+        if state.cancelled {
+            return Err(VmError::Interrupted);
+        }
+        state.acknowledged = false;
+        Ok(())
+    }
+}
+
+/// Opaque handle used to drain effects emitted by a running VM.
+///
+/// The evaluator owns the buffer and is the only code that can append to it;
+/// callers can only take the bytes that are currently ready for delivery.
+#[derive(Clone, Debug)]
+pub struct EffectSink(Arc<EffectState>);
+
+impl EffectSink {
+    /// Takes all currently buffered effect bytes.
+    #[must_use]
+    pub fn drain(&self) -> Vec<u8> {
+        let effects = self
+            .0
+            .bytes
+            .lock()
+            .map(|mut effects| std::mem::take(&mut *effects))
+            .unwrap_or_default();
+        if !effects.is_empty() {
+            self.acknowledge();
+        }
+        effects
+    }
+
+    /// Enables delivery acknowledgements for a live VM consumer.
+    pub(crate) fn enable_acknowledgements(&self) {
+        if let Ok(mut gate) = self.0.gate.lock() {
+            *gate = Some(Arc::new(EffectGate {
+                state: Mutex::new(EffectGateState {
+                    acknowledged: false,
+                    cancelled: false,
+                }),
+                wake: Condvar::new(),
+            }));
+        }
+    }
+
+    /// Writes and flushes one currently buffered batch, acknowledging it only
+    /// after the destination accepted every byte and completed its flush. A
+    /// failed destination cancels the producer before the scoped worker is
+    /// joined.
+    ///
+    /// # Errors
+    ///
+    /// Returns the destination's write or flush error and cancels the live
+    /// producer.
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        let effects = self
+            .0
+            .bytes
+            .lock()
+            .map(|mut effects| std::mem::take(&mut *effects))
+            .unwrap_or_default();
+        if effects.is_empty() {
+            return Ok(());
+        }
+        if let Err(error) = writer.write_all(&effects) {
+            self.cancel();
+            return Err(error);
+        }
+        if let Err(error) = writer.flush() {
+            self.cancel();
+            return Err(error);
+        }
+        self.acknowledge();
+        Ok(())
+    }
+
+    /// Cancels a producer waiting for delivery acknowledgement.
+    pub fn cancel(&self) {
+        let Ok(gate) = self.0.gate.lock() else {
+            return;
+        };
+        let Some(gate) = gate.as_ref() else {
+            return;
+        };
+        if let Ok(mut state) = gate.state.lock() {
+            state.cancelled = true;
+            gate.wake.notify_all();
+        }
+    }
+
+    fn acknowledge(&self) {
+        let Ok(gate) = self.0.gate.lock() else {
+            return;
+        };
+        let Some(gate) = gate.as_ref() else {
+            return;
+        };
+        if let Ok(mut state) = gate.state.lock() {
+            state.acknowledged = true;
+            gate.wake.notify_all();
+        }
+    }
+}
+
 /// Explicit VM stack and step limits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct VmLimits {
@@ -141,7 +315,10 @@ pub struct VmLimits {
     pub fork_stack: usize,
     /// Maximum instructions across all pulled results.
     pub steps: u64,
-    /// Maximum bytes in one materialized interpolation result.
+    /// Byte budget for bounded value builders and buffered process effects.
+    ///
+    /// Builders can reject a known lower bound before materialization. This
+    /// budget is separate from the final serializer's output-byte limit.
     pub output_bytes: usize,
     /// Maximum nesting depth accepted by `fromjson`.
     pub json_depth: usize,
@@ -153,6 +330,12 @@ pub struct VmLimits {
     pub regex_input_bytes: usize,
     /// Maximum compiled regex program bytes requested from the engine.
     pub regex_compiled_bytes: usize,
+    /// Maximum backtracking steps permitted by the regex engine.
+    pub regex_backtrack_limit: usize,
+    /// Maximum matches retained while constructing regex substitutions.
+    pub regex_match_limit: usize,
+    /// Maximum replacement branches retained per regex match.
+    pub regex_replacement_limit: usize,
 }
 
 impl Default for VmLimits {
@@ -169,6 +352,9 @@ impl Default for VmLimits {
             regex_pattern_bytes: 64 * 1024,
             regex_input_bytes: 64 * 1024 * 1024,
             regex_compiled_bytes: 2 * 1024 * 1024,
+            regex_backtrack_limit: 1_000_000,
+            regex_match_limit: 1_000_000,
+            regex_replacement_limit: 4096,
         }
     }
 }
@@ -213,6 +399,24 @@ pub enum VmError {
         /// Stable human message.
         message: Arc<str>,
     },
+    /// An ambient capability was denied by the host policy.
+    ///
+    /// This retains the runtime diagnostic and status contract, while giving
+    /// host runners a typed boundary that must not be treated as a
+    /// recoverable per-input-root failure.
+    #[error("runtime error: {message}")]
+    CapabilityDenied {
+        /// Stable human message, without input or capability contents.
+        message: Arc<str>,
+    },
+    /// A jq `error(value)` carrying the original JSON-shaped value.
+    #[error("runtime error: {message}")]
+    Raised {
+        /// Value supplied to the jq error instruction.
+        value: Value,
+        /// Human rendering retained for diagnostics and existing callers.
+        message: Arc<str>,
+    },
     /// A configured managed-stack or work limit was exceeded.
     #[error("VM resource limit exceeded: {resource}")]
     Resource {
@@ -247,6 +451,14 @@ pub enum VmError {
     /// Execution was cancelled by the caller or an interrupt handler.
     #[error("execution interrupted")]
     Interrupted,
+    /// jq's non-catchable process termination effect.
+    #[error("halted with status {status}")]
+    Halt {
+        /// Process status requested by `halt_error`, or zero for `halt`.
+        status: u8,
+        /// Raw stderr bytes committed by `halt_error`.
+        stderr: Arc<[u8]>,
+    },
 }
 
 impl VmError {
@@ -259,9 +471,12 @@ impl VmError {
             Self::NumericRange { .. } => DiagnosticClass::NumericRange,
             Self::Unsupported { .. } => DiagnosticClass::Unsupported,
             Self::Interrupted => DiagnosticClass::Cancelled,
-            Self::Runtime { .. } | Self::InvalidProgram { .. } | Self::Break { .. } => {
-                DiagnosticClass::Runtime
-            }
+            Self::Runtime { .. }
+            | Self::CapabilityDenied { .. }
+            | Self::Raised { .. }
+            | Self::InvalidProgram { .. }
+            | Self::Break { .. }
+            | Self::Halt { .. } => DiagnosticClass::Runtime,
         };
         Diagnostic::new("TQ-VM-001", class, self.to_string())
     }
@@ -312,6 +527,7 @@ pub struct Vm {
     tree_stop: Arc<AtomicBool>,
     cancellation: Option<Arc<AtomicBool>>,
     input_cursor: Option<InputCursor>,
+    effects: Arc<EffectState>,
 }
 
 impl Vm {
@@ -393,6 +609,32 @@ impl Vm {
         )
     }
 
+    /// Creates a VM for one static-prefix access while recovering a bounded
+    /// prefix witness. The automatic runner applies these one-step programs
+    /// and then invokes the shared producer/base program, preserving jq's
+    /// type errors without materializing a dense array for a large index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `plan` was not constructed by automatic plan selection or
+    /// `component` is not less than the plan's static prefix length.
+    #[must_use]
+    pub fn new_automatic_prefix_access<M>(
+        plan: &Plan<Compiled, M>,
+        component: usize,
+        input: Value,
+        limits: VmLimits,
+        variables: BTreeMap<Arc<str>, Value>,
+    ) -> Self {
+        Self::from_bytecode(
+            plan.automatic_prefix_access_bytecode(component)
+                .expect("automatic prefix-access VM requires a valid automatic component"),
+            input,
+            limits,
+            variables,
+        )
+    }
+
     /// Creates a VM for the suffix of a validated hybrid blocking plan.
     ///
     /// # Panics
@@ -448,6 +690,10 @@ impl Vm {
             tree_stop: Arc::new(AtomicBool::new(false)),
             cancellation: None,
             input_cursor: None,
+            effects: Arc::new(EffectState {
+                bytes: Mutex::new(Vec::new()),
+                gate: Mutex::new(None),
+            }),
         }
     }
 
@@ -470,6 +716,14 @@ impl Vm {
     #[must_use]
     pub fn with_input_cursor(mut self, cursor: InputCursor) -> Self {
         self.input_cursor = Some(cursor);
+        self
+    }
+
+    /// Enables acknowledgement-gated effect delivery for a live consumer.
+    #[must_use]
+    pub fn with_effect_acknowledgements(self) -> Self {
+        let sink = self.effect_sink();
+        sink.enable_acknowledgements();
         self
     }
 
@@ -607,6 +861,7 @@ impl Vm {
                 self.cancellation.as_deref(),
                 &self.tree_stop,
                 self.input_cursor.as_ref(),
+                &self.effects,
                 |result, _| match result {
                     Ok(value) => emit(value),
                     Err(error) => {
@@ -637,6 +892,7 @@ impl Vm {
         let limits = self.limits;
         let cancellation = self.cancellation.clone();
         let input_cursor = self.input_cursor.clone();
+        let effects = Arc::clone(&self.effects);
         let stop = Arc::clone(&self.tree_stop);
         let (result_sender, result_receiver) = sync_channel(0);
         let (demand_sender, demand_receiver) = sync_channel(0);
@@ -654,6 +910,7 @@ impl Vm {
                     cancellation.as_deref(),
                     &stop,
                     input_cursor.as_ref(),
+                    &effects,
                     |result, observations| {
                         result_sender
                             .send(TreeMessage::Result(result, observations))
@@ -737,6 +994,19 @@ impl Vm {
     #[must_use]
     pub fn trace(&self) -> &[String] {
         &self.trace
+    }
+
+    /// Takes stderr bytes emitted by `debug` and `stderr` since the last call.
+    #[must_use]
+    pub fn take_effects(&self) -> Vec<u8> {
+        EffectSink(Arc::clone(&self.effects)).drain()
+    }
+
+    /// Shares the bounded effect buffer with a caller that is draining a
+    /// running VM from another thread.
+    #[must_use]
+    pub fn effect_sink(&self) -> EffectSink {
+        EffectSink(Arc::clone(&self.effects))
     }
 
     #[allow(
@@ -949,7 +1219,7 @@ impl Drop for Vm {
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     };
 
@@ -962,6 +1232,22 @@ mod tests {
 
     fn number(value: &str) -> Value {
         Value::Number(Number::parse(value).unwrap())
+    }
+
+    #[test]
+    fn effect_quota_rejection_does_not_partially_append() {
+        let state = Arc::new(super::EffectState {
+            bytes: Mutex::new(Vec::new()),
+            gate: Mutex::new(None),
+        });
+        state.append(b"abc", 4).unwrap();
+        assert_eq!(
+            state.append(b"de", 4),
+            Err(VmError::Resource {
+                resource: "output-bytes"
+            })
+        );
+        assert_eq!(super::EffectSink(state).drain(), b"abc");
     }
 
     #[test]
@@ -1310,7 +1596,7 @@ mod tests {
         let mut vm = Vm::new(&plan, Value::Null, VmLimits::default());
         assert_eq!(vm.next_result().unwrap(), Some(number("1")));
         assert_eq!(vm.next_result().unwrap(), Some(number("3")));
-        assert!(matches!(vm.next_result(), Err(VmError::Runtime { .. })));
+        assert!(matches!(vm.next_result(), Err(VmError::Raised { .. })));
         assert_eq!(vm.next_result().unwrap(), None);
     }
 

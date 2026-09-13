@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::{
     Bytecode, Diagnostic, DiagnosticClass, PathComponent, SourceFile, Span, Value,
     ast::{self, Access, Expr, ExprKind},
+    resolve::ResolveOptions,
 };
 
 mod sealed {
@@ -178,6 +179,8 @@ pub enum TranscodeDuplicatePolicy {
 pub enum TranscodeCommitment {
     /// Record-separator framing publishes each completed record independently.
     DirectSequence,
+    /// LF-terminated values without RS framing.
+    DirectValues,
     /// Bytes remain private until exactly one successful result is known.
     AtomicUnframed,
 }
@@ -310,6 +313,7 @@ struct QueryInner {
     ast: Arc<Expr>,
     analysis: Analysis,
     modules: Vec<ModuleInfo>,
+    resolve_options: ResolveOptions,
 }
 
 /// Query in one sealed compilation phase.
@@ -327,6 +331,7 @@ impl Query<Parsed> {
                 ast: Arc::new(ast),
                 analysis: Analysis::default(),
                 modules: Vec::new(),
+                resolve_options: ResolveOptions::default(),
             }),
             phase: PhantomData,
         }
@@ -343,6 +348,10 @@ impl Query<Parsed> {
 
     pub(crate) fn set_modules(&mut self, modules: Vec<ModuleInfo>) {
         Arc::make_mut(&mut self.inner).modules = modules;
+    }
+
+    pub(crate) fn set_resolve_options(&mut self, options: ResolveOptions) {
+        Arc::make_mut(&mut self.inner).resolve_options = options;
     }
 }
 
@@ -469,7 +478,11 @@ impl Query<Analyzed> {
     /// Returns a source-spanned compile/resource diagnostic when lowering or
     /// mandatory validation fails.
     pub fn compile(self) -> Result<Program<Compiled>, Box<Diagnostic>> {
-        let bytecode = Bytecode::compile(&self.inner.ast, &self.inner.modules)?;
+        let bytecode = Bytecode::compile(
+            &self.inner.ast,
+            &self.inner.modules,
+            &self.inner.resolve_options,
+        )?;
         if let Some(span) = crate::eval::user_execution_gap(&bytecode) {
             return Err(Box::new(
                 Diagnostic::new(
@@ -537,13 +550,18 @@ impl Program<Compiled> {
                         "automatic stream proof could not be lowered",
                     )
                 })?;
-                let item_bytecode = Arc::new(Bytecode::compile(&lowering.item, &[])?);
-                let base_bytecode = Arc::new(Bytecode::compile(&lowering.base, &[])?);
+                let CompiledAutomaticParts {
+                    item: item_bytecode,
+                    base: base_bytecode,
+                    prefix_accesses: prefix_access_bytecode,
+                } = compile_automatic_parts(&lowering, &self.inner.resolve_options)?;
                 let execution = Some(AutomaticExecution {
                     prefix: lowering.prefix,
                     projection: lowering.projection,
+                    capture_paths: lowering.capture_paths,
                     item_bytecode,
                     base_bytecode,
+                    prefix_access_bytecode,
                     scalar_events_only: self.inner.analysis.selected_plan == PlanKind::Events,
                     suffix_bytecode: None,
                     preparation: HybridPreparation::Collect,
@@ -574,16 +592,25 @@ impl Program<Compiled> {
                         "hybrid stream proof could not be lowered",
                     )
                 })?;
-                let item_bytecode = Arc::new(Bytecode::compile(&lowering.producer.item, &[])?);
-                let base_bytecode = Arc::new(Bytecode::compile(&lowering.producer.base, &[])?);
-                let suffix_bytecode = Arc::new(Bytecode::compile(&lowering.suffix, &[])?);
+                let CompiledAutomaticParts {
+                    item: item_bytecode,
+                    base: base_bytecode,
+                    prefix_accesses: prefix_access_bytecode,
+                } = compile_automatic_parts(&lowering.producer, &self.inner.resolve_options)?;
+                let suffix_bytecode = Arc::new(Bytecode::compile(
+                    &lowering.suffix,
+                    &[],
+                    &self.inner.resolve_options,
+                )?);
                 Ok(AutomaticPlan::HybridBlocking(Plan {
                     program: self,
                     automatic: Some(AutomaticExecution {
                         prefix: lowering.producer.prefix,
                         projection: lowering.producer.projection,
+                        capture_paths: lowering.producer.capture_paths,
                         item_bytecode,
                         base_bytecode,
+                        prefix_access_bytecode,
                         scalar_events_only: lowering.producer.scalar_events_only,
                         suffix_bytecode: Some(suffix_bytecode),
                         preparation: lowering.preparation,
@@ -771,8 +798,15 @@ pub struct Plan<P: QueryPhase, M> {
 struct AutomaticExecution {
     prefix: Vec<PathComponent>,
     projection: Option<Vec<PathComponent>>,
+    /// Object-only field paths that the automatic item proof allows the CLI
+    /// to retain. `None` means the item's complete shape is observable.
+    capture_paths: Option<Vec<Vec<PathComponent>>>,
     item_bytecode: Arc<Bytecode>,
     base_bytecode: Arc<Bytecode>,
+    /// One-step bytecode for each static prefix access. Prefix recovery runs
+    /// these shared operations before the single producer bytecode, avoiding
+    /// a cloned producer for every possible boundary.
+    prefix_access_bytecode: Vec<Arc<Bytecode>>,
     scalar_events_only: bool,
     suffix_bytecode: Option<Arc<Bytecode>>,
     preparation: HybridPreparation,
@@ -816,6 +850,15 @@ impl<M> Plan<Compiled, M> {
             .and_then(|plan| plan.projection.as_deref())
     }
 
+    /// Returns a conservative object-field footprint for automatic item
+    /// retention. The paths are relative to each selected item.
+    #[must_use]
+    pub fn automatic_capture_paths(&self) -> Option<&[Vec<PathComponent>]> {
+        self.automatic
+            .as_ref()
+            .and_then(|plan| plan.capture_paths.as_deref())
+    }
+
     pub(crate) fn automatic_item_bytecode(&self) -> Option<Arc<Bytecode>> {
         self.automatic
             .as_ref()
@@ -826,6 +869,15 @@ impl<M> Plan<Compiled, M> {
         self.automatic
             .as_ref()
             .map(|plan| Arc::clone(&plan.base_bytecode))
+    }
+
+    pub(crate) fn automatic_prefix_access_bytecode(
+        &self,
+        component: usize,
+    ) -> Option<Arc<Bytecode>> {
+        self.automatic
+            .as_ref()
+            .and_then(|plan| plan.prefix_access_bytecode.get(component).cloned())
     }
 
     /// Whether this automatic event plan only admits scalar child values.
@@ -861,8 +913,10 @@ impl<M> Plan<Compiled, M> {
 struct AutomaticLowering {
     prefix: Vec<PathComponent>,
     projection: Option<Vec<PathComponent>>,
+    capture_paths: Option<Vec<Vec<PathComponent>>>,
     item: Expr,
     base: Expr,
+    prefix_accesses: Vec<(Access, Span)>,
     scalar_events_only: bool,
 }
 
@@ -873,6 +927,26 @@ struct HybridLowering {
     collection: Span,
     blocking_cause: Span,
     preparation: HybridPreparation,
+}
+
+struct CompiledAutomaticParts {
+    item: Arc<Bytecode>,
+    base: Arc<Bytecode>,
+    prefix_accesses: Vec<Arc<Bytecode>>,
+}
+
+fn compile_automatic_parts(
+    lowering: &AutomaticLowering,
+    options: &ResolveOptions,
+) -> Result<CompiledAutomaticParts, Box<Diagnostic>> {
+    let item_bytecode = Arc::new(Bytecode::compile(&lowering.item, &[], options)?);
+    let base_bytecode = Arc::new(Bytecode::compile(&lowering.base, &[], options)?);
+    let prefix_access_bytecode = compile_prefix_accesses(&lowering.prefix_accesses, options)?;
+    Ok(CompiledAutomaticParts {
+        item: item_bytecode,
+        base: base_bytecode,
+        prefix_accesses: prefix_access_bytecode,
+    })
 }
 
 pub(crate) fn hybrid_stream_proof(expr: &Expr) -> Option<HybridProof> {
@@ -972,6 +1046,25 @@ pub(crate) fn automatic_stream_proof(expr: &Expr) -> Option<(StreamProof, PlanKi
     ))
 }
 
+fn compile_prefix_accesses(
+    accesses: &[(Access, Span)],
+    options: &ResolveOptions,
+) -> Result<Vec<Arc<Bytecode>>, Box<Diagnostic>> {
+    accesses
+        .iter()
+        .map(|(access, span)| {
+            let expression = Expr::new(
+                ExprKind::Access {
+                    base: Box::new(Expr::new(ExprKind::Identity, *span)),
+                    access: access.clone(),
+                },
+                *span,
+            );
+            Bytecode::compile(&expression, &[], options).map(Arc::new)
+        })
+        .collect()
+}
+
 fn automatic_lowering(expr: &Expr) -> Option<AutomaticLowering> {
     let mut stages = Vec::new();
     flatten_pipe(expr, &mut stages);
@@ -1024,10 +1117,111 @@ fn automatic_lowering(expr: &Expr) -> Option<AutomaticLowering> {
     Some(AutomaticLowering {
         prefix,
         projection,
+        capture_paths: object_capture_paths(&item),
         scalar_events_only: scalar_event_filter(&item),
         item,
         base,
+        prefix_accesses: accesses[..iterate].to_vec(),
     })
+}
+
+/// Computes a deliberately narrow object-field footprint for an automatic
+/// item. This proof reduces retained input shape only; the original item
+/// bytecode still executes against the retained value. Any construct whose
+/// result or input shape could be observed falls back to full retention.
+fn object_capture_paths(item: &Expr) -> Option<Vec<Vec<PathComponent>>> {
+    let mut stages = Vec::new();
+    flatten_pipe(item, &mut stages);
+    let mut input_stage = true;
+    let mut selected_field = false;
+    let mut paths = Vec::new();
+
+    for stage in stages {
+        match &stage.kind {
+            ExprKind::Identity if input_stage => {}
+            ExprKind::Call {
+                name,
+                arguments,
+                target: Some(ast::CallTarget::Builtin),
+            } if input_stage && &**name == "select" && arguments.len() == 1 => {
+                collect_object_paths(&arguments[0], &mut paths)?;
+            }
+            ExprKind::Access { .. } if input_stage => {
+                let path = static_object_path(stage)?;
+                if path.is_empty() {
+                    return None;
+                }
+                push_unique_object_path(&mut paths, path);
+                selected_field = true;
+                input_stage = false;
+            }
+            ExprKind::Call {
+                name,
+                arguments,
+                target: Some(ast::CallTarget::Builtin),
+            } if !input_stage
+                && selected_field
+                && &**name == "test"
+                && !arguments.is_empty()
+                && arguments
+                    .iter()
+                    .all(|argument| matches!(argument.kind, ExprKind::Literal(_))) =>
+            {
+                // `test` consumes only the scalar produced by the preceding
+                // static field access. Keep the original bytecode so its
+                // type errors, steps, and regex argument semantics remain.
+            }
+            _ => return None,
+        }
+    }
+
+    if !selected_field || paths.is_empty() {
+        return None;
+    }
+    Some(paths)
+}
+
+fn push_unique_object_path(paths: &mut Vec<Vec<PathComponent>>, path: Vec<PathComponent>) {
+    if !paths.iter().any(|candidate| candidate == &path) {
+        paths.push(path);
+    }
+}
+
+fn static_object_path(expr: &Expr) -> Option<Vec<PathComponent>> {
+    match &expr.kind {
+        ExprKind::Identity => Some(Vec::new()),
+        ExprKind::Access {
+            base,
+            access: Access::Field(key),
+        } => {
+            let mut path = static_object_path(base)?;
+            path.push(PathComponent::Key(Arc::clone(key)));
+            Some(path)
+        }
+        _ => None,
+    }
+}
+
+fn collect_object_paths(expr: &Expr, paths: &mut Vec<Vec<PathComponent>>) -> Option<()> {
+    match &expr.kind {
+        ExprKind::Literal(_) => Some(()),
+        ExprKind::Access { .. } => {
+            let path = static_object_path(expr)?;
+            if path.is_empty() {
+                return None;
+            }
+            push_unique_object_path(paths, path);
+            Some(())
+        }
+        ExprKind::Optional(expression) | ExprKind::Unary { expression, .. } => {
+            collect_object_paths(expression, paths)
+        }
+        ExprKind::Binary { left, right, .. } => {
+            collect_object_paths(left, paths)?;
+            collect_object_paths(right, paths)
+        }
+        _ => None,
+    }
 }
 
 fn projection_path(
@@ -1105,7 +1299,9 @@ fn scalar_event_filter(expr: &Expr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AnalysisContext, ResolveOptions, analyze_with_context, parse, resolve};
+    use crate::{
+        AnalysisContext, PathComponent, ResolveOptions, analyze_with_context, parse, resolve,
+    };
 
     use super::{
         Analysis, AutomaticPlan, Capabilities, PlanKind, TranscodeCommitment,
@@ -1224,6 +1420,71 @@ mod tests {
             whole.compile().unwrap().automatic_plan().unwrap(),
             AutomaticPlan::WholeInput(_)
         ));
+    }
+
+    #[test]
+    fn automatic_capture_proof_keeps_only_static_object_reads() {
+        let automatic = |source| {
+            crate::analyze(resolve(parse(source).unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .automatic_plan()
+                .unwrap()
+        };
+        let AutomaticPlan::Subtree(select_plan) =
+            automatic(".features[] | select(.properties.mag >= 2) | .id")
+        else {
+            panic!("expected subtree plan for select")
+        };
+        let select_paths = select_plan.automatic_capture_paths().unwrap();
+        assert!(select_paths.contains(&vec![
+            PathComponent::Key("properties".into()),
+            PathComponent::Key("mag".into()),
+        ]));
+        assert!(select_paths.contains(&vec![PathComponent::Key("id".into())]));
+
+        let AutomaticPlan::Subtree(regex_plan) = automatic(r#".features[].id | test("^[a-z]+")"#)
+        else {
+            panic!("expected subtree plan for regex")
+        };
+        assert_eq!(
+            regex_plan.automatic_capture_paths(),
+            Some(&[vec![PathComponent::Key("id".into())]][..])
+        );
+    }
+
+    #[test]
+    fn automatic_capture_proof_rejects_shape_alias_and_user_filter_observers() {
+        let automatic = |source| {
+            crate::analyze(resolve(parse(source).unwrap(), &ResolveOptions::default()).unwrap())
+                .compile()
+                .unwrap()
+                .automatic_plan()
+                .unwrap()
+        };
+        if let AutomaticPlan::Subtree(shape_plan) =
+            automatic(".features[] | select(keys | length > 0) | .id")
+        {
+            assert_eq!(shape_plan.automatic_capture_paths(), None);
+        }
+
+        if let AutomaticPlan::Subtree(alias_plan) =
+            automatic(".features[] | (. as $feature | select(.properties.mag >= 2)) | .id")
+        {
+            assert_eq!(alias_plan.automatic_capture_paths(), None);
+        }
+
+        if let AutomaticPlan::Subtree(user_plan) =
+            automatic("def select(f): f; .features[] | select(.properties.mag >= 2) | .id")
+        {
+            assert_eq!(user_plan.automatic_capture_paths(), None);
+        }
+
+        if let AutomaticPlan::Subtree(select_plan) =
+            automatic(".features[] | select(.properties.mag >= 2)")
+        {
+            assert_eq!(select_plan.automatic_capture_paths(), None);
+        }
     }
 
     #[test]
