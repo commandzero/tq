@@ -15,7 +15,7 @@ fn every_catalog_case_is_schema_valid_and_uniquely_identified() {
     let mut count = 0;
     for entry in fs::read_dir(root).expect("case directory") {
         let path = entry.expect("case entry").path();
-        for (line_index, line) in fs::read_to_string(&path)
+        for (line_index, line) in tq_test_support::fixture_data::case_lines(&path)
             .expect("case file")
             .lines()
             .enumerate()
@@ -157,7 +157,7 @@ fn composition_construction_operator_numeric_and_variable_groups_are_complete() 
 fn every_mvp_builtin_has_a_case_and_execution_classification() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/compatibility/cases/builtins.jsonl");
-    let cases = fs::read_to_string(path).expect("built-in cases");
+    let cases = tq_test_support::fixture_data::case_lines(&path).expect("built-in cases");
     for builtin in [
         "empty",
         "error",
@@ -336,8 +336,8 @@ fn recursive_builtins_labels_and_deferred_groups_cover_the_spec() {
     );
     assert_capabilities("deferred.jsonl", &["deferred.nonfinite-result"]);
 
-    let deferred = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
+    let deferred = tq_test_support::fixture_data::case_lines(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/compatibility/cases/deferred.jsonl"),
     )
     .expect("deferred cases");
@@ -410,9 +410,6 @@ fn assert_capabilities(file: &str, required: &[&str]) {
     )
     .unwrap_or_else(|error| panic!("failed to read {file}: {error}"));
     for capability in required {
-        assert!(
-            cases.contains(&format!("\"{capability}\"")),
-            "{file} is missing {capability}"
-        );
+        assert!(cases.contains(capability), "{file} is missing {capability}");
     }
 }
