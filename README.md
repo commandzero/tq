@@ -85,7 +85,7 @@ standalone strings. Escaped quotes within content keep the string/key style.
 
 Colors are presentation, not a data-format compatibility promise. Forced-color
 streams contain ANSI escapes; use `-M` when a consumer needs plain format bytes.
-See the [output color measurements](docs/output-colors-performance.md) for
+See the [output color measurements](docs/tests/output-colors-performance.md) for
 the added time, memory, and output bytes on document and transcode paths.
 
 ## Streaming and memory

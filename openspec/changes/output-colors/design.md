@@ -60,7 +60,7 @@ For all native formats and writer routes, verify that removing only generated st
 
 - ANSI changes bytes in explicitly colored streams. Automatic redirection stays plain, and docs explain `-M` and forced terminal presentation.
 - A missed writer route would leave inconsistent colors. Enumerate native writers, raw/non-string fallback, JSON event output, TOON tabular/folded output, and direct transcode in acceptance coverage.
-- Per-span resets add SGR bytes and runtime while keeping style boundaries and limit handling explicit. Retain the plain fast path; colors do not grant extra resource allowance. The [measured overhead](../../../docs/output-colors-performance.md) is accepted for this change. The all-month corpus is larger than a typical terminal-color workload, so its higher time ratios do not require further optimization before acceptance.
+- Per-span resets add SGR bytes and runtime while keeping style boundaries and limit handling explicit. Retain the plain fast path; colors do not grant extra resource allowance. The [measured overhead](../../../docs/tests/output-colors-performance.md) is accepted for this change. The all-month corpus is larger than a typical terminal-color workload, so its higher time ratios do not require further optimization before acceptance.
 - Bright-black contrast varies by terminal theme. Preserve the supplied default and document terminal-palette dependence; do not invent adaptive RGB behavior.
 - Custom array/object styles make quote context visible. Specify and test immediate-container ownership and the root fallback; preserve the seven-slot key fallback even when its number style differs from the default key color.
 

@@ -22,7 +22,7 @@
 - [x] 4.1 Account for SGR bytes in output and applicable spool limits, reserve normal span-closing bytes, and reset where possible on errors; verify limit-boundary, partial-write, late-failure, empty-result, atomic-publication, cancellation, and broken-pipe cases.
 - [x] 4.2 Extend the versioned compatibility matrix with tq presentation cases and review PR #33's jq color cases individually; verify jq semantic/plain-output comparisons and JQ_COLORS mappings remain intact and expected default-palette and enclosing-quote differences are explicitly classified.
 - [x] 4.3 Run the complete native-output matrix through monochrome and forced color, including streamed event results and custom palettes with distinct array/object/string/key styles; verify root/nested/table quote ownership, escaped-content roles, and exact stripped-byte equality for each writer route and alias.
-- [x] 4.4 Measure representative plain/colored document and identity-transcode output outside the restricted sandbox; record time, actual output bytes, and peak memory and verify coloring does not introduce result-sized buffering or growth with completed frames. See [release measurements](../../../docs/output-colors-performance.md).
+- [x] 4.4 Measure representative plain/colored document and identity-transcode output outside the restricted sandbox; record time, actual output bytes, and peak memory and verify coloring does not introduce result-sized buffering or growth with completed frames. See [release measurements](../../../docs/tests/output-colors-performance.md).
 
 ## 5. Documentation and delivery
 
