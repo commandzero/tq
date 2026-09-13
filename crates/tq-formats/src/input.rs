@@ -128,6 +128,7 @@ impl<R: Read> JsonSequenceInput<R> {
                                 identity: identity.to_owned(),
                                 format: crate::InputFormat::JsonSequence,
                                 index: self.document_index,
+                                line_number: current.document_line(),
                             })
                         })
                     })
@@ -186,10 +187,12 @@ impl<R: Read> JsonSequenceInput<R> {
                 return Ok(None);
             };
             self.segment_index = index;
-            let decoder = crate::json_recovery::JsonRecoveryDecoder::new(
+            let segment_line = self.frames.borrow().location().0 as u64;
+            let decoder = crate::json_recovery::JsonRecoveryDecoder::new_with_line(
                 SegmentReader(Rc::clone(&self.frames)),
                 self.maximum_depth,
                 self.maximum_token_bytes,
+                segment_line,
             );
             self.current = Some(if self.representation == InputRepresentation::Events {
                 decoder.events_only()
@@ -267,7 +270,7 @@ impl SelectedInput {
                     maximum_token_bytes: self.options.maximum_token_bytes,
                     representation: self.representation,
                 }),
-                NativeFormat::Json => InputState::Json(JsonDocumentSource::new(
+                NativeFormat::Json => InputState::Json(JsonDocumentSource::with_decode_options(
                     BufReader::with_capacity(64 * 1024, reader),
                     identity.clone(),
                     self.options,
