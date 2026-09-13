@@ -25,7 +25,7 @@ fn delimited_output_enforces_row_field_and_count_limits_before_header() {
                 ..Default::default()
             })
             .unwrap();
-        let mut output = NativeOutputSequence::new(selection);
+        let mut output = NativeOutputSequence::new(selection.clone());
         let mut bytes = Vec::new();
         let value: Value = serde_json::from_str(r#"{"a":"bbb"}"#).unwrap();
         assert!(
@@ -35,7 +35,7 @@ fn delimited_output_enforces_row_field_and_count_limits_before_header() {
                 .to_string()
                 .contains("resource limit exceeded")
         );
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, [] as [u8; 0]);
     }
 }
 
@@ -45,18 +45,18 @@ fn delimited_output_validates_the_whole_row_before_committing_bytes() {
         .select_output(OutputOptions::default())
         .unwrap();
     for invalid in [r#"{"a":[],"b":1}"#, "[]", "42"] {
-        let mut output = NativeOutputSequence::new(selection);
+        let mut output = NativeOutputSequence::new(selection.clone());
         let mut bytes = Vec::new();
         assert!(
             output
                 .write_result(&mut bytes, &serde_json::from_str::<Value>(invalid).unwrap())
                 .is_err()
         );
-        assert!(bytes.is_empty());
+        assert_eq!(bytes, [] as [u8; 0]);
         assert!(output.finish(&mut bytes).is_err());
     }
     for invalid in [r#"{"a":1,"b":2}"#, r#"{"a":{}}"#] {
-        let mut output = NativeOutputSequence::new(selection);
+        let mut output = NativeOutputSequence::new(selection.clone());
         let mut bytes = Vec::new();
         output
             .write_result(
