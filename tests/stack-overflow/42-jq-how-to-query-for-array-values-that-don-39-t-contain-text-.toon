@@ -19,7 +19,7 @@ answer:
   body_html: "<p>You can use <code>not</code> to reverse the logic</p>\n\n<pre><code>(.imageTags[] | contains(\\\"latest\\\") | not)\n</code></pre>\n\n<p>Also, I'd imagine you can simplify your pipeline into a single <code>jq</code> call.</p>\n"
 benchmark:
   input_format: json
-  query: ".[] | .name"
+  query: ".[] | select(any(.imageTags[]; contains(\"latest\")) | not) | .name"
   input[3]:
     - name: one
       imageTags[2]: latest,stable

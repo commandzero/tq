@@ -19,7 +19,7 @@ answer:
   body_html: "<p>When a key contains characters that are invalid for identifiers, you'll have to quote the name.</p>\n<pre><code>.&quot;OPEN.BTC&quot;\n</code></pre>\n<p>Or for older versions of jq, use an index.</p>\n<pre><code>.[&quot;OPEN.BTC&quot;]\n</code></pre>\n<h4>Example</h4>\n<pre class=\"lang-sh prettyprint-override\"><code>... | jq '.&quot;OPEN.BTC&quot;'\n</code></pre>\n"
 benchmark:
   input_format: json
-  query: .USD.price
+  query: ".[\"OPEN.BTC\"]"
   input:
     OPEN.BTC:
       volume24: 0.932166
