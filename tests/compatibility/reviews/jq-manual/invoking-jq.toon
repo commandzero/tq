@@ -1,7 +1,7 @@
 schema_version: 2
 section: Invoking jq
 source: "https://jqlang.org/manual/#invoking-jq"
-manual_file: /Users/reno/Development/commandzero/tq-benchmarks/jq-manual/invoking-jq.md
+manual_file: jq-manual/invoking-jq.md
 reviewed_at: 2026-09-08
 examples[48]{id,source_line,kind,query,input,invocation,disposition,reason,case_id,expected_output,input_hex}:
   invoking.identity-filter,18,inline-filter,.,"{\"foo\":\"bar\"}",jq '.',new,"Added an exact identity-filter case; the source gives the filter but no concrete input, so the ledger uses a minimal JSON witness.",manual.invoking.identity,null,null
