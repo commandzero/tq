@@ -1,6 +1,7 @@
 //! Ordered, loss-aware format adapters and independent per-source probing.
 
 use std::{
+    collections::VecDeque,
     fmt,
     io::{self, BufRead, BufReader, Cursor, Read},
     sync::Arc,
@@ -10,11 +11,15 @@ use serde::{
     Deserialize,
     de::{self, MapAccess, SeqAccess, Visitor},
 };
-use tq_core::{Number, Object, SourceId, Value};
+use tq_core::{
+    JsonInput, JsonInputError, JsonInputOptions, JsonLimit, Number, Object, SourceId, Value,
+};
 use tq_toon::{DecoderConfig, decode_to_value};
 
 use crate::json5_input::{PreprocessError, preprocess};
-use crate::{Document, FormatError, InputFormat};
+use crate::{Document, DocumentSource, FormatError, InputFormat};
+
+const DEFAULT_MAXIMUM_FRAME_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 /// Structured decode controls shared by CLI sources.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,7 +79,7 @@ impl Default for DecodeOptions {
         Self {
             format: InputFormat::Auto,
             maximum_source_bytes: 2 * 1024 * 1024 * 1024,
-            maximum_frame_bytes: 2 * 1024 * 1024 * 1024,
+            maximum_frame_bytes: DEFAULT_MAXIMUM_FRAME_BYTES,
             maximum_depth: 256,
             maximum_token_bytes: 8 * 1024 * 1024,
             maximum_line_bytes: 16 * 1024 * 1024,
@@ -106,63 +111,1038 @@ pub(crate) fn toon_input_error(error: tq_toon::DecodeError) -> FormatError {
     }
 }
 
+/// In-memory pull source used by document-at-a-time adapters.
+#[derive(Debug, Default)]
+pub struct VecDocumentSource {
+    documents: VecDeque<Document>,
+}
+
+impl VecDocumentSource {
+    /// Wraps documents in pull order.
+    #[must_use]
+    pub fn new(documents: Vec<Document>) -> Self {
+        Self {
+            documents: documents.into(),
+        }
+    }
+}
+
+impl crate::DocumentSource for VecDocumentSource {
+    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        Ok(self.documents.pop_front())
+    }
+}
+
 /// Incremental source for whitespace-separated JSON values.
-pub(crate) struct JsonDocumentSource<R: Read> {
-    stream: serde_json::StreamDeserializer<
-        'static,
-        serde_json::de::IoRead<std::io::BufReader<crate::json_limits::JsonLimitReader<R>>>,
-        Value,
-    >,
+pub struct JsonDocumentSource<R: Read> {
+    reader: JsonInput<R>,
     identity: String,
     index: u64,
-    limit_failure: crate::json_limits::LimitFailure,
 }
 
 impl<R: Read> JsonDocumentSource<R> {
     /// Creates a pull source that parses only the next requested JSON value.
     #[must_use]
-    pub fn new(reader: R, identity: impl Into<String>, options: DecodeOptions) -> Self {
-        let (reader, limit_failure) = crate::json_limits::JsonLimitReader::new(
-            reader,
-            options.maximum_depth,
-            options.maximum_token_bytes,
-        );
-        let mut deserializer = serde_json::Deserializer::from_reader(
-            std::io::BufReader::with_capacity(64 * 1024, reader),
-        );
-        deserializer.disable_recursion_limit();
+    pub fn new(reader: R, identity: impl Into<String>) -> Self {
+        Self::with_options(reader, identity, JsonInputOptions::default())
+    }
+
+    /// Creates a pull source with explicit JSON resource limits.
+    #[must_use]
+    pub fn with_options(reader: R, identity: impl Into<String>, options: JsonInputOptions) -> Self {
         Self {
-            stream: deserializer.into_iter(),
+            reader: JsonInput::new(reader, options),
             identity: identity.into(),
             index: 0,
-            limit_failure,
         }
+    }
+
+    /// Creates a pull source from the complete adapter controls.
+    #[must_use]
+    pub fn with_decode_options(
+        reader: R,
+        identity: impl Into<String>,
+        options: DecodeOptions,
+    ) -> Self {
+        Self::with_options(
+            reader,
+            identity,
+            JsonInputOptions {
+                maximum_depth: options.maximum_depth,
+                maximum_token_bytes: options.maximum_token_bytes,
+            },
+        )
     }
 }
 
 impl<R: Read> JsonDocumentSource<R> {
-    pub(crate) fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
-        let Some(value) = self.stream.next() else {
+    /// Pulls the next complete JSON document without requiring whole-source buffering.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed JSON syntax, I/O, or resource-limit failure.
+    pub fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        let mut checkpoint = || Ok(());
+        let Some(value) = self
+            .reader
+            .next_value(&mut checkpoint)
+            .map_err(format_json_input_error)?
+        else {
             return Ok(None);
         };
-        if let Some(resource) = self.limit_failure.get() {
-            return Err(FormatError::Resource(resource));
-        }
-        let value = value.map_err(|error| match error.io_error_kind() {
-            Some(kind) => FormatError::Io(io::Error::new(kind, error)),
-            None => FormatError::Parse {
-                format: InputFormat::Json,
-                message: error.to_string(),
-            },
-        })?;
         let index = self.index;
         self.index = self.index.saturating_add(1);
+        let line_number = self.reader.position().line as u64;
         Ok(Some(Document {
             value,
             identity: self.identity.clone(),
             format: InputFormat::Json,
             index,
+            line_number,
         }))
+    }
+}
+
+impl<R: Read> crate::DocumentSource for JsonDocumentSource<R> {
+    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        Self::next_document(self)
+    }
+}
+
+fn parse_json_record(bytes: &[u8], options: JsonInputOptions) -> Result<Value, JsonInputError> {
+    let mut reader = JsonInput::new(Cursor::new(bytes), options);
+    let mut checkpoint = || Ok(());
+    let value = reader.next_value(&mut checkpoint).and_then(|value| {
+        value.ok_or_else(|| JsonInputError::Syntax {
+            position: reader.position(),
+            message: "expected JSON value".into(),
+        })
+    })?;
+    reader.check_end(&mut checkpoint)?;
+    Ok(value)
+}
+
+fn format_json_input_error(error: JsonInputError) -> FormatError {
+    match error {
+        JsonInputError::Io(error) => FormatError::Io(error),
+        JsonInputError::Limit { limit, .. } => FormatError::Resource(match limit {
+            JsonLimit::TokenBytes => "token-bytes",
+            JsonLimit::Depth => "depth",
+        }),
+        JsonInputError::Consumer(error) => FormatError::Parse {
+            format: InputFormat::Json,
+            message: error.to_string(),
+        },
+        error @ JsonInputError::Syntax { .. } => FormatError::Parse {
+            format: InputFormat::Json,
+            message: error.to_string(),
+        },
+    }
+}
+
+/// Incremental source for jq's Record Separator framed JSON sequence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JsonSequenceScan {
+    Empty,
+    NeedMore,
+    Complete { start: usize, end: usize },
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JsonSequenceErrorKind {
+    Generic,
+    Literal,
+    Numeric,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum JsonSequenceToken {
+    Structured {
+        start: usize,
+        cursor: usize,
+        depth: usize,
+        in_string: bool,
+        escaped: bool,
+        string_raw_bytes: usize,
+        scalar_start: Option<usize>,
+    },
+    String {
+        start: usize,
+        cursor: usize,
+        escaped: bool,
+        raw_bytes: usize,
+    },
+    Number {
+        start: usize,
+        cursor: usize,
+    },
+    Literal {
+        start: usize,
+        cursor: usize,
+        expected: &'static [u8],
+    },
+    Word {
+        start: usize,
+        cursor: usize,
+    },
+}
+
+const fn is_json_sequence_whitespace(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
+}
+
+const fn is_json_sequence_token_delimiter(byte: u8) -> bool {
+    is_json_sequence_whitespace(byte)
+        || matches!(byte, b'[' | b'{' | b'}' | b']' | b',' | b':' | b'"')
+}
+
+fn is_keyword_prefix(token: &[u8]) -> bool {
+    [b"true".as_slice(), b"false", b"null"]
+        .iter()
+        .any(|keyword| keyword.starts_with(token))
+}
+
+/// Pull-oriented RS source. It scans only until one complete JSON token is
+/// available, then decodes that slice once. This preserves finite consumers
+/// on live pipes while avoiding reparsing an ever-growing record.
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "the source tracks independent JSON-sequence and record boundaries"
+)]
+pub struct JsonSequenceDocumentSource<R: BufRead> {
+    reader: R,
+    identity: String,
+    json_options: JsonInputOptions,
+    maximum_frame_bytes: usize,
+    started: bool,
+    prefix_seen: bool,
+    eof: bool,
+    record_boundary: bool,
+    physical_line: u64,
+    record_line: u64,
+    record_column: u64,
+    record_index: u64,
+    document_index: u64,
+    record_document_count: usize,
+    record: Vec<u8>,
+    scan_offset: usize,
+    scan_token: Option<JsonSequenceToken>,
+    scan_error: Option<(usize, JsonSequenceErrorKind)>,
+    scan_resource: Option<JsonLimit>,
+    record_newlines: Vec<usize>,
+    last_byte: Option<u8>,
+    record_bytes_seen: usize,
+    terminal_error_emitted: bool,
+    terminal_resource_error: bool,
+}
+
+impl<R: BufRead> JsonSequenceDocumentSource<R> {
+    /// Creates a pull source that resynchronizes at each ASCII RS marker.
+    #[must_use]
+    pub fn new(reader: R, identity: impl Into<String>) -> Self {
+        Self::with_options(reader, identity, JsonInputOptions::default())
+    }
+
+    /// Creates a pull source with explicit JSON resource limits.
+    #[must_use]
+    pub fn with_options(
+        reader: R,
+        identity: impl Into<String>,
+        json_options: JsonInputOptions,
+    ) -> Self {
+        Self::with_options_and_maximum_frame_bytes(
+            reader,
+            identity,
+            json_options,
+            DEFAULT_MAXIMUM_FRAME_BYTES,
+        )
+    }
+
+    /// Creates a pull source with explicit JSON and frame-byte resource limits.
+    #[must_use]
+    pub fn with_options_and_maximum_frame_bytes(
+        reader: R,
+        identity: impl Into<String>,
+        json_options: JsonInputOptions,
+        maximum_frame_bytes: usize,
+    ) -> Self {
+        Self {
+            reader,
+            identity: identity.into(),
+            json_options,
+            maximum_frame_bytes,
+            started: false,
+            prefix_seen: false,
+            eof: false,
+            record_boundary: false,
+            physical_line: 1,
+            record_line: 1,
+            record_column: 1,
+            record_index: 0,
+            document_index: 0,
+            record_document_count: 0,
+            record: Vec::new(),
+            scan_offset: 0,
+            scan_token: None,
+            scan_error: None,
+            scan_resource: None,
+            record_newlines: Vec::new(),
+            last_byte: None,
+            record_bytes_seen: 0,
+            terminal_error_emitted: false,
+            terminal_resource_error: false,
+        }
+    }
+
+    fn reset_record(&mut self) {
+        self.record.clear();
+        self.scan_offset = 0;
+        self.scan_token = None;
+        self.scan_error = None;
+        self.scan_resource = None;
+        self.record_newlines.clear();
+        self.last_byte = None;
+        self.record_bytes_seen = 0;
+        self.record_document_count = 0;
+        self.record_line = self.physical_line;
+        self.record_column = 1;
+        self.record_boundary = false;
+    }
+
+    fn charge_frame_bytes(&mut self, count: usize) -> Result<(), FormatError> {
+        if count
+            > self
+                .maximum_frame_bytes
+                .saturating_sub(self.record_bytes_seen)
+        {
+            self.terminal_resource_error = true;
+            return Err(FormatError::Resource("frame-bytes"));
+        }
+        self.record_bytes_seen += count;
+        Ok(())
+    }
+
+    fn append_record_bytes(&mut self, bytes: &[u8]) {
+        let offset = self.record.len();
+        for (index, byte) in bytes.iter().enumerate() {
+            if *byte == b'\n' {
+                self.record_newlines.push(offset + index + 1);
+            }
+        }
+        self.record.extend_from_slice(bytes);
+        if let Some(byte) = bytes.last().copied() {
+            self.last_byte = Some(byte);
+        }
+        self.physical_line = self
+            .physical_line
+            .saturating_add(memchr::memchr_iter(b'\n', bytes).count() as u64);
+    }
+
+    fn read_more(&mut self) -> Result<(), FormatError> {
+        if self.record_boundary || self.eof {
+            return Ok(());
+        }
+        let byte = {
+            let available = self.reader.fill_buf().map_err(FormatError::Io)?;
+            let Some(byte) = available.first().copied() else {
+                self.eof = true;
+                self.record_boundary = true;
+                return Ok(());
+            };
+            byte
+        };
+        if byte == 0x1e {
+            self.record_boundary = true;
+        } else {
+            self.charge_frame_bytes(1)?;
+            self.reader.consume(1);
+            self.append_record_bytes(&[byte]);
+        }
+        Ok(())
+    }
+
+    fn start_record(&mut self) -> Result<bool, FormatError> {
+        if self.eof {
+            return Ok(false);
+        }
+        if self.record_boundary {
+            let available = self.reader.fill_buf().map_err(FormatError::Io)?;
+            if available.first() == Some(&0x1e) {
+                self.reader.consume(1);
+                self.record_index = self.record_index.saturating_add(1);
+                self.reset_record();
+                return Ok(true);
+            }
+            self.eof = true;
+            return Ok(false);
+        }
+        if self.started {
+            return Ok(true);
+        }
+        loop {
+            let byte = {
+                let available = self.reader.fill_buf().map_err(FormatError::Io)?;
+                let Some(byte) = available.first().copied() else {
+                    self.eof = true;
+                    return Ok(false);
+                };
+                byte
+            };
+            self.reader.consume(1);
+            self.prefix_seen = true;
+            if byte == 0x1e {
+                self.started = true;
+                self.record_index = self.record_index.saturating_add(1);
+                self.reset_record();
+                return Ok(true);
+            }
+            if byte == b'\n' {
+                self.physical_line = self.physical_line.saturating_add(1);
+            }
+        }
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "JSON-sequence scanning keeps token, framing, and recovery state together"
+    )]
+    fn scan_value(&mut self) -> JsonSequenceScan {
+        if self.scan_token.is_none() {
+            let mut start = self.scan_offset;
+            while start < self.record.len() && is_json_sequence_whitespace(self.record[start]) {
+                start += 1;
+            }
+            self.scan_offset = start;
+            if start == self.record.len() {
+                return if self.record_boundary || self.eof {
+                    JsonSequenceScan::Empty
+                } else {
+                    self.compact_record();
+                    JsonSequenceScan::NeedMore
+                };
+            }
+            self.scan_token = Some(match self.record[start] {
+                b'{' | b'[' => JsonSequenceToken::Structured {
+                    start,
+                    cursor: start,
+                    depth: 0,
+                    in_string: false,
+                    escaped: false,
+                    string_raw_bytes: 0,
+                    scalar_start: None,
+                },
+                b'"' => JsonSequenceToken::String {
+                    start,
+                    cursor: start + 1,
+                    escaped: false,
+                    raw_bytes: 1,
+                },
+                b'0'..=b'9' => JsonSequenceToken::Number {
+                    start,
+                    cursor: start,
+                },
+                b't' => JsonSequenceToken::Literal {
+                    start,
+                    cursor: start,
+                    expected: b"true",
+                },
+                b'f' => JsonSequenceToken::Literal {
+                    start,
+                    cursor: start,
+                    expected: b"false",
+                },
+                b'n' | b's' | b'S' | b'.' | b'-' | b'+' | b'N' | b'I' | b'i' => {
+                    JsonSequenceToken::Word {
+                        start,
+                        cursor: start,
+                    }
+                }
+                _ => {
+                    // jq's sequence parser reports an unknown token as a
+                    // numeric literal unless it starts a reserved literal.
+                    // Keep the offset at the token start so recovery reports
+                    // the RS-delimited line rather than a later byte.
+                    self.scan_error = Some((
+                        start,
+                        if matches!(self.record[start], b'f' | b't') {
+                            JsonSequenceErrorKind::Literal
+                        } else {
+                            JsonSequenceErrorKind::Numeric
+                        },
+                    ));
+                    return JsonSequenceScan::Invalid;
+                }
+            });
+        }
+
+        let token = self
+            .scan_token
+            .expect("a JSON sequence token is initialized above");
+        match token {
+            JsonSequenceToken::Structured {
+                start,
+                mut cursor,
+                mut depth,
+                mut in_string,
+                mut escaped,
+                mut string_raw_bytes,
+                mut scalar_start,
+            } => {
+                while cursor < self.record.len() {
+                    let byte = self.record[cursor];
+                    cursor += 1;
+                    if in_string {
+                        string_raw_bytes = string_raw_bytes.saturating_add(1);
+                        if string_raw_bytes
+                            > self
+                                .json_options
+                                .maximum_token_bytes
+                                .saturating_mul(6)
+                                .saturating_add(2)
+                        {
+                            self.scan_resource = Some(JsonLimit::TokenBytes);
+                            self.scan_token = None;
+                            return JsonSequenceScan::Invalid;
+                        }
+                        if escaped {
+                            escaped = false;
+                        } else if byte == b'\\' {
+                            escaped = true;
+                        } else if byte == b'"' {
+                            in_string = false;
+                            string_raw_bytes = 0;
+                        }
+                        continue;
+                    }
+                    match byte {
+                        b'"' => {
+                            scalar_start = None;
+                            in_string = true;
+                            string_raw_bytes = 1;
+                        }
+                        b'{' | b'[' => {
+                            scalar_start = None;
+                            if depth >= self.json_options.maximum_depth {
+                                self.scan_resource = Some(JsonLimit::Depth);
+                                self.scan_token = None;
+                                return JsonSequenceScan::Invalid;
+                            }
+                            depth = depth.saturating_add(1);
+                        }
+                        b'}' | b']' => {
+                            scalar_start = None;
+                            if depth == 0 {
+                                self.scan_error = Some((
+                                    cursor.saturating_sub(1),
+                                    JsonSequenceErrorKind::Generic,
+                                ));
+                                self.scan_token = None;
+                                return JsonSequenceScan::Invalid;
+                            }
+                            depth -= 1;
+                            if depth == 0 {
+                                self.scan_token = None;
+                                return JsonSequenceScan::Complete { start, end: cursor };
+                            }
+                        }
+                        byte if is_json_sequence_whitespace(byte)
+                            || matches!(byte, b',' | b':') =>
+                        {
+                            scalar_start = None;
+                        }
+                        _ => {
+                            let token_start = scalar_start.get_or_insert(cursor - 1);
+                            let token = &self.record[*token_start..cursor];
+                            if token.len() > self.json_options.maximum_token_bytes
+                                && !is_keyword_prefix(token)
+                            {
+                                self.scan_resource = Some(JsonLimit::TokenBytes);
+                                self.scan_token = None;
+                                return JsonSequenceScan::Invalid;
+                            }
+                        }
+                    }
+                }
+                self.scan_token = Some(JsonSequenceToken::Structured {
+                    start,
+                    cursor,
+                    depth,
+                    in_string,
+                    escaped,
+                    string_raw_bytes,
+                    scalar_start,
+                });
+                if self.record_boundary || self.eof {
+                    self.scan_error = Some((self.record.len(), JsonSequenceErrorKind::Generic));
+                    self.scan_token = None;
+                    JsonSequenceScan::Invalid
+                } else {
+                    JsonSequenceScan::NeedMore
+                }
+            }
+            JsonSequenceToken::String {
+                start,
+                mut cursor,
+                mut escaped,
+                mut raw_bytes,
+            } => {
+                while cursor < self.record.len() {
+                    let byte = self.record[cursor];
+                    cursor += 1;
+                    raw_bytes = raw_bytes.saturating_add(1);
+                    if raw_bytes
+                        > self
+                            .json_options
+                            .maximum_token_bytes
+                            .saturating_mul(6)
+                            .saturating_add(2)
+                    {
+                        self.scan_resource = Some(JsonLimit::TokenBytes);
+                        self.scan_token = None;
+                        return JsonSequenceScan::Invalid;
+                    }
+                    if escaped {
+                        escaped = false;
+                    } else if byte == b'\\' {
+                        escaped = true;
+                    } else if byte == b'"' {
+                        self.scan_token = None;
+                        return JsonSequenceScan::Complete { start, end: cursor };
+                    }
+                }
+                self.scan_token = Some(JsonSequenceToken::String {
+                    start,
+                    cursor,
+                    escaped,
+                    raw_bytes,
+                });
+                if self.record_boundary || self.eof {
+                    self.scan_error = Some((self.record.len(), JsonSequenceErrorKind::Generic));
+                    self.scan_token = None;
+                    JsonSequenceScan::Invalid
+                } else {
+                    JsonSequenceScan::NeedMore
+                }
+            }
+            JsonSequenceToken::Number { start, mut cursor } => {
+                while cursor < self.record.len()
+                    && matches!(
+                        self.record[cursor],
+                        b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E'
+                    )
+                {
+                    cursor += 1;
+                    if cursor.saturating_sub(start) > self.json_options.maximum_token_bytes {
+                        self.scan_resource = Some(JsonLimit::TokenBytes);
+                        self.scan_token = None;
+                        return JsonSequenceScan::Invalid;
+                    }
+                }
+                if cursor == self.record.len() {
+                    self.scan_token = Some(JsonSequenceToken::Number { start, cursor });
+                    if self.record_boundary || self.eof {
+                        self.scan_token = None;
+                        JsonSequenceScan::Complete { start, end: cursor }
+                    } else {
+                        JsonSequenceScan::NeedMore
+                    }
+                } else if is_json_sequence_token_delimiter(self.record[cursor]) {
+                    self.scan_token = None;
+                    JsonSequenceScan::Complete { start, end: cursor }
+                } else {
+                    self.scan_error = Some((cursor, JsonSequenceErrorKind::Numeric));
+                    self.scan_token = None;
+                    JsonSequenceScan::Invalid
+                }
+            }
+            JsonSequenceToken::Literal {
+                start,
+                mut cursor,
+                expected,
+            } => {
+                while cursor < self.record.len() && cursor - start < expected.len() {
+                    if self.record[cursor] != expected[cursor - start] {
+                        self.scan_error = Some((cursor, JsonSequenceErrorKind::Literal));
+                        self.scan_token = None;
+                        return JsonSequenceScan::Invalid;
+                    }
+                    cursor += 1;
+                }
+                if cursor - start < expected.len() {
+                    self.scan_token = Some(JsonSequenceToken::Literal {
+                        start,
+                        cursor,
+                        expected,
+                    });
+                    if self.record_boundary || self.eof {
+                        self.scan_error = Some((self.record.len(), JsonSequenceErrorKind::Literal));
+                        self.scan_token = None;
+                        JsonSequenceScan::Invalid
+                    } else {
+                        JsonSequenceScan::NeedMore
+                    }
+                } else if cursor == self.record.len() {
+                    self.scan_token = Some(JsonSequenceToken::Literal {
+                        start,
+                        cursor,
+                        expected,
+                    });
+                    if self.record_boundary || self.eof {
+                        self.scan_token = None;
+                        JsonSequenceScan::Complete { start, end: cursor }
+                    } else {
+                        JsonSequenceScan::NeedMore
+                    }
+                } else if is_json_sequence_token_delimiter(self.record[cursor]) {
+                    self.scan_token = None;
+                    JsonSequenceScan::Complete { start, end: cursor }
+                } else {
+                    self.scan_error = Some((cursor, JsonSequenceErrorKind::Literal));
+                    self.scan_token = None;
+                    JsonSequenceScan::Invalid
+                }
+            }
+            JsonSequenceToken::Word { start, mut cursor } => {
+                while cursor < self.record.len()
+                    && !is_json_sequence_token_delimiter(self.record[cursor])
+                {
+                    cursor += 1;
+                    let token = &self.record[start..cursor];
+                    if token.len() > self.json_options.maximum_token_bytes
+                        && !is_keyword_prefix(token)
+                    {
+                        self.scan_resource = Some(JsonLimit::TokenBytes);
+                        self.scan_token = None;
+                        return JsonSequenceScan::Invalid;
+                    }
+                }
+                if cursor == self.record.len() {
+                    self.scan_token = Some(JsonSequenceToken::Word { start, cursor });
+                    if self.record_boundary || self.eof {
+                        self.scan_token = None;
+                        JsonSequenceScan::Complete { start, end: cursor }
+                    } else {
+                        JsonSequenceScan::NeedMore
+                    }
+                } else {
+                    self.scan_token = None;
+                    JsonSequenceScan::Complete { start, end: cursor }
+                }
+            }
+        }
+    }
+
+    fn line_number(&self, end: usize) -> u64 {
+        self.record_line.saturating_add(
+            self.record_newlines
+                .iter()
+                .take_while(|newline| **newline < end)
+                .count() as u64,
+        )
+    }
+
+    fn jq_line_column(&self, offset: usize, boundary_invalid: bool) -> (u64, u64) {
+        let mut end = offset.min(self.record.len());
+        let mut zero_column = false;
+        if boundary_invalid {
+            if matches!(self.record.get(end), Some(b'\x0b' | b'\x0c')) {
+                end = end.saturating_add(1).min(self.record.len());
+                zero_column = true;
+            } else if let Some(relative) = self.record[end..]
+                .iter()
+                .position(|byte| matches!(*byte, b'\n' | b'\r'))
+            {
+                end = end.saturating_add(relative).saturating_add(1);
+                zero_column = true;
+            }
+        }
+        let mut line = self.record_line;
+        let mut column = self.record_column.saturating_sub(1);
+        for byte in &self.record[..end] {
+            if matches!(*byte, b'\n' | b'\r' | b'\x0b' | b'\x0c') {
+                line = line.saturating_add(1);
+                column = 0;
+            } else {
+                column = column.saturating_add(1);
+            }
+        }
+        if !zero_column {
+            column = column.saturating_add(1);
+        }
+        (line, column)
+    }
+
+    fn jq_scan_error(&self, offset: usize, kind: JsonSequenceErrorKind) -> String {
+        let (line, column) = self.jq_line_column(offset, true);
+        let eof = if self.eof { " at EOF" } else { "" };
+        let label = match kind {
+            JsonSequenceErrorKind::Literal => "Invalid literal",
+            JsonSequenceErrorKind::Numeric => "Invalid numeric literal",
+            JsonSequenceErrorKind::Generic => "Invalid JSON value",
+        };
+        if kind == JsonSequenceErrorKind::Generic {
+            format!("record {}: {label}", self.record_index.saturating_sub(1))
+        } else {
+            format!("{label}{eof} at line {line}, column {column} (need RS to resync)")
+        }
+    }
+
+    fn jq_structured_error(&self, start: usize, end: usize, error: &str) -> String {
+        let detail = error.rsplit_once(": ").map_or(error, |(_, detail)| detail);
+        let (line, column) = self.jq_line_column(end, false);
+        if detail.starts_with("expected ':' after object key") {
+            return format!(
+                "Expected separator between values at line {line}, column {column} (need RS to resync)"
+            );
+        }
+        let value = &self.record[start.min(self.record.len())..end.min(self.record.len())];
+        if detail.starts_with("expected JSON value") || detail.starts_with("expected object key") {
+            match value.last() {
+                Some(b']') if value.get(value.len().saturating_sub(2)) == Some(&b',') => {
+                    return format!(
+                        "Expected another array element at line {line}, column {column} (need RS to resync)"
+                    );
+                }
+                Some(b'}') if value.get(value.len().saturating_sub(2)) == Some(&b',') => {
+                    return format!(
+                        "Expected another key-value pair at line {line}, column {column} (need RS to resync)"
+                    );
+                }
+                Some(b'}') if value.get(value.len().saturating_sub(2)) == Some(&b':') => {
+                    return format!(
+                        "Unmatched '}}' at line {line}, column {column} (need RS to resync)"
+                    );
+                }
+                _ => {}
+            }
+            return format!(
+                "Invalid numeric literal at line {line}, column {column} (need RS to resync)"
+            );
+        }
+        format!("Invalid JSON value at line {line}, column {column} (need RS to resync)")
+    }
+
+    fn compact_record(&mut self) {
+        const COMPACTION_THRESHOLD: usize = 64 * 1024;
+        let consumed = self.scan_offset;
+        if consumed < COMPACTION_THRESHOLD || consumed.saturating_mul(2) < self.record.len() {
+            return;
+        }
+        let consumed_newlines = self
+            .record_newlines
+            .iter()
+            .take_while(|newline| **newline <= consumed)
+            .count() as u64;
+        let consumed_column = self
+            .record_newlines
+            .iter()
+            .take_while(|newline| **newline <= consumed)
+            .last()
+            .map_or_else(
+                || self.record_column.saturating_add(consumed as u64),
+                |newline| consumed.saturating_sub(*newline).saturating_add(1) as u64,
+            );
+        self.record_line = self.record_line.saturating_add(consumed_newlines);
+        self.record_column = consumed_column;
+        self.record.drain(..consumed);
+        self.record_newlines.retain(|newline| *newline > consumed);
+        for newline in &mut self.record_newlines {
+            *newline -= consumed;
+        }
+        self.scan_offset = 0;
+    }
+
+    fn discard_record(&mut self) -> Result<(), FormatError> {
+        self.record.clear();
+        self.scan_offset = 0;
+        self.scan_token = None;
+        self.scan_error = None;
+        self.record_newlines.clear();
+        self.last_byte = None;
+        while !self.record_boundary && !self.eof {
+            let (take, found_rs) = {
+                let available = self.reader.fill_buf().map_err(FormatError::Io)?;
+                if available.is_empty() {
+                    self.eof = true;
+                    self.record_boundary = true;
+                    break;
+                }
+                let position = available.iter().position(|byte| *byte == 0x1e);
+                (position.unwrap_or(available.len()), position.is_some())
+            };
+            if take > 0 {
+                self.charge_frame_bytes(take)?;
+                let available = self.reader.fill_buf().map_err(FormatError::Io)?;
+                self.physical_line = self
+                    .physical_line
+                    .saturating_add(memchr::memchr_iter(b'\n', &available[..take]).count() as u64);
+                self.reader.consume(take);
+            }
+            if found_rs && take == 0 {
+                self.record_boundary = true;
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns the next decoded result or one recoverable record error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an I/O error when the source cannot be read, or a framing error
+    /// when the JSON-sequence stream cannot be advanced.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "JSON-sequence recovery keeps scanner state, diagnostics, and document emission ordered"
+    )]
+    pub fn next_record(&mut self) -> Result<Option<Result<Document, FormatError>>, FormatError> {
+        if self.terminal_resource_error {
+            return Ok(None);
+        }
+        loop {
+            let needs_next_record =
+                !self.started || (self.record_boundary && self.scan_offset >= self.record.len());
+            if needs_next_record && !self.start_record()? {
+                if !self.started && self.prefix_seen && !self.terminal_error_emitted {
+                    self.terminal_error_emitted = true;
+                    return Ok(Some(Err(FormatError::Parse {
+                        format: InputFormat::JsonSequence,
+                        message: format!(
+                            "{}: sequence input ended before the first record separator",
+                            self.identity
+                        ),
+                    })));
+                }
+                return Ok(None);
+            }
+            let scan = self.scan_value();
+            if scan == JsonSequenceScan::NeedMore {
+                self.read_more()?;
+                continue;
+            }
+            let JsonSequenceScan::Complete { start, end } = scan else {
+                if matches!(scan, JsonSequenceScan::Empty) {
+                    if self.record_boundary || self.eof {
+                        self.scan_offset = self.record.len();
+                        self.compact_record();
+                        self.started = true;
+                        if self.eof {
+                            return Ok(None);
+                        }
+                        continue;
+                    }
+                    self.read_more()?;
+                    continue;
+                }
+                if let Some(limit) = self.scan_resource.take() {
+                    self.terminal_resource_error = true;
+                    return Err(FormatError::Resource(match limit {
+                        JsonLimit::TokenBytes => "token-bytes",
+                        JsonLimit::Depth => "depth",
+                    }));
+                }
+                let scan_error = self
+                    .scan_error
+                    .take()
+                    .unwrap_or((self.scan_offset, JsonSequenceErrorKind::Generic));
+                let has_position = self.record_boundary
+                    || self.eof
+                    || self.record[scan_error.0..]
+                        .iter()
+                        .any(|byte| matches!(*byte, b'\n' | b'\r' | b'\x0b' | b'\x0c'));
+                let message = has_position.then(|| self.jq_scan_error(scan_error.0, scan_error.1));
+                self.discard_record()?;
+                self.scan_offset = self.record.len();
+                return Ok(Some(Err(FormatError::Parse {
+                    format: InputFormat::JsonSequence,
+                    message: message.unwrap_or_else(|| match scan_error.1 {
+                        JsonSequenceErrorKind::Literal => format!(
+                            "Invalid literal at line {}, column 0 (need RS to resync)",
+                            self.physical_line
+                        ),
+                        JsonSequenceErrorKind::Numeric => format!(
+                            "Invalid numeric literal at line {}, column 0 (need RS to resync)",
+                            self.physical_line
+                        ),
+                        JsonSequenceErrorKind::Generic => format!(
+                            "record {}: invalid JSON value",
+                            self.record_index.saturating_sub(1)
+                        ),
+                    }),
+                })));
+            };
+            let value = match parse_json_record(&self.record[start..end], self.json_options) {
+                Ok(value) => value,
+                Err(error) => {
+                    if matches!(error, JsonInputError::Limit { .. }) {
+                        self.terminal_resource_error = true;
+                        return Err(format_json_input_error(error));
+                    }
+                    let error = error.to_string();
+                    let message = self.jq_structured_error(start, end, &error);
+                    self.discard_record()?;
+                    self.scan_offset = self.record.len();
+                    self.scan_token = None;
+                    return Ok(Some(Err(FormatError::Parse {
+                        format: InputFormat::JsonSequence,
+                        message,
+                    })));
+                }
+            };
+            let truncated_number = matches!(&value, Value::Number(_))
+                && (self.record_boundary || self.eof)
+                && self.record[end..]
+                    .iter()
+                    .all(|byte| is_json_sequence_whitespace(*byte))
+                && !self.last_byte.is_some_and(is_json_sequence_whitespace);
+            if truncated_number {
+                let (line, mut column) = self.jq_line_column(end, false);
+                // jq reports the RS delimiter column for a number that ends
+                // immediately before the next record. Its EOF diagnostic
+                // instead points one column after the final digit.
+                if self.record_boundary
+                    && !self.eof
+                    && !self.record[..end].contains(&b'\n')
+                    && !self.record[..end].contains(&b'\r')
+                {
+                    column = column.saturating_add(1);
+                }
+                self.discard_record()?;
+                self.scan_offset = self.record.len();
+                self.scan_token = None;
+                let eof = if self.eof { " at EOF" } else { "" };
+                return Ok(Some(Err(FormatError::Parse {
+                    format: InputFormat::JsonSequence,
+                    message: format!(
+                        "Potentially truncated top-level numeric value{eof} at line {line}, column {column}"
+                    ),
+                })));
+            }
+            let line_number = self.line_number(end);
+            self.scan_offset = end;
+            self.compact_record();
+            self.record_document_count = self.record_document_count.saturating_add(1);
+            let document = Document {
+                value,
+                identity: self.identity.clone(),
+                format: InputFormat::JsonSequence,
+                index: self.document_index,
+                line_number,
+            };
+            self.document_index = self.document_index.saturating_add(1);
+            return Ok(Some(Ok(document)));
+        }
+    }
+}
+
+impl<R: BufRead> DocumentSource for JsonSequenceDocumentSource<R> {
+    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        match self.next_record()? {
+            None => Ok(None),
+            Some(Ok(document)) => Ok(Some(document)),
+            Some(Err(error)) => Err(error),
+        }
     }
 }
 
@@ -187,7 +1167,7 @@ pub fn decode_bytes(
     match options.format {
         InputFormat::Toon => decode_toon(bytes, identity, options.toon),
         InputFormat::Yaml => decode_yaml(bytes, identity),
-        InputFormat::Json => decode_json(bytes, identity),
+        InputFormat::Json => decode_json_with_options(bytes, identity, options),
         InputFormat::Json5 => decode_json5(bytes, identity, options),
         InputFormat::JsonLines => decode_json_lines(bytes, identity, options),
         InputFormat::ToonSequence => decode_toon_sequence(bytes, identity, options.toon),
@@ -245,7 +1225,7 @@ pub fn decode_bytes(
 
 /// Incremental JSON Lines document source with bounded physical records.
 #[derive(Debug)]
-pub(crate) struct JsonLinesDocumentSource<R> {
+pub struct JsonLinesDocumentSource<R> {
     reader: R,
     identity: String,
     options: DecodeOptions,
@@ -339,7 +1319,14 @@ impl<R: BufRead> JsonLinesDocumentSource<R> {
             identity: self.identity.clone(),
             format: InputFormat::JsonLines,
             index,
+            line_number: physical_line,
         }))
+    }
+}
+
+impl<R: BufRead> crate::DocumentSource for JsonLinesDocumentSource<R> {
+    fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
+        Self::next_document(self)
     }
 }
 
@@ -509,6 +1496,11 @@ pub fn probe_format(
             InputFormat::Yaml,
             Some("YAML root-sequence marker".to_owned()),
         )
+    } else if json_scalar_stream_is_complete(trimmed) {
+        (
+            InputFormat::Json,
+            Some("JSON scalar stream is not canonical TOON".to_owned()),
+        )
     } else {
         (InputFormat::Toon, None)
     };
@@ -530,6 +1522,30 @@ pub fn probe_format(
     })
 }
 
+fn json_scalar_stream_is_complete(input: &str) -> bool {
+    let first = input.as_bytes().first().copied();
+    if !matches!(
+        first,
+        Some(
+            b'"' | b'+' | b'-' | b'.' | b'0'
+                ..=b'9' | b'I' | b'N' | b'S' | b'f' | b'i' | b'n' | b's' | b't',
+        )
+    ) {
+        return false;
+    }
+    let mut reader = JsonInput::new(Cursor::new(input.as_bytes()), JsonInputOptions::default());
+    let mut checkpoint = || Ok(());
+    let mut count = 0_u8;
+    loop {
+        match reader.next_value(&mut checkpoint) {
+            Ok(Some(_)) => count = count.saturating_add(1),
+            Ok(None) => break,
+            Err(_) => return false,
+        }
+    }
+    count >= 2 || (count == 1 && (first == Some(b'"') || input.as_bytes().last() == Some(&b'\n')))
+}
+
 /// Reads bounded lookahead, returns its decision, and preserves every byte in a
 /// replay reader for the selected parser.
 ///
@@ -546,8 +1562,16 @@ pub fn probe_reader<R: Read>(
 ) -> Result<(ProbeReport, ReplayReader<R>), FormatError> {
     let capacity = maximum_lookahead_bytes.saturating_add(3);
     let mut prefix = Vec::with_capacity(capacity);
-    let mut limited = (&mut reader).take(capacity as u64);
-    limited.read_to_end(&mut prefix)?;
+    while prefix.len() < capacity {
+        let mut byte = [0_u8; 1];
+        if reader.read(&mut byte)? == 0 {
+            break;
+        }
+        prefix.push(byte[0]);
+        if probe_commit_boundary(&prefix, maximum_lookahead_bytes) {
+            break;
+        }
+    }
     let report = probe_format(&prefix, maximum_lookahead_bytes)?;
     Ok((
         report,
@@ -556,6 +1580,59 @@ pub fn probe_reader<R: Read>(
             reader,
         },
     ))
+}
+
+fn probe_commit_boundary(bytes: &[u8], maximum_lookahead_bytes: usize) -> bool {
+    let Ok(report) = probe_format(bytes, maximum_lookahead_bytes) else {
+        return false;
+    };
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // A root TOON counted-array header begins with the same `[` byte as a JSON
+    // array.  Do not commit to JSON while the count/header is still arriving;
+    // a one-byte probe otherwise permanently selects JSON for a fragmented
+    // `[2]:` or `[2]{key}:` document.  A physical newline ends that candidate
+    // because TOON headers cannot span lines.
+    let first_line = trimmed.lines().next().unwrap_or("");
+    if root_toon_array_header_prefix(first_line) && bytes.last() != Some(&b'\n') {
+        return false;
+    }
+    let structural_prefix = trimmed.starts_with(['{', '[', '%'])
+        || trimmed.starts_with("---")
+        || trimmed.starts_with("- ");
+    structural_prefix && report.selected != InputFormat::Toon || bytes.last() == Some(&b'\n')
+}
+
+fn root_toon_array_header_prefix(line: &str) -> bool {
+    if !line.starts_with('[') {
+        return false;
+    }
+    if line == "[" {
+        return true;
+    }
+    if let Some(close) = line.find(']') {
+        if root_toon_array_header(line) {
+            return true;
+        }
+        if close + 1 == line.len() {
+            let declaration = &line[1..close];
+            let count = declaration
+                .strip_suffix([',', '|', '\t'])
+                .unwrap_or(declaration);
+            return !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit());
+        }
+        return false;
+    }
+    let declaration = &line[1..];
+    let count = declaration
+        .strip_suffix([',', '|', '\t'])
+        .unwrap_or(declaration);
+    !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn root_toon_array_header(line: &str) -> bool {
@@ -592,6 +1669,7 @@ pub fn decode_toon(
         identity: identity.into(),
         format: InputFormat::Toon,
         index: 0,
+        line_number: 1,
     }])
 }
 
@@ -604,23 +1682,73 @@ pub fn decode_json(
     bytes: &[u8],
     identity: impl Into<String>,
 ) -> Result<Vec<Document>, FormatError> {
-    let identity = identity.into();
-    serde_json::Deserializer::from_slice(bytes)
-        .into_iter::<Value>()
-        .enumerate()
-        .map(|(index, value)| {
-            let value = value.map_err(|error| FormatError::Parse {
-                format: InputFormat::Json,
-                message: error.to_string(),
-            })?;
-            Ok(Document {
-                value,
-                identity: identity.clone(),
-                format: InputFormat::Json,
-                index: index as u64,
-            })
-        })
-        .collect()
+    decode_json_with_options(bytes, identity, DecodeOptions::default())
+}
+
+/// Decodes ordered JSON documents with explicit depth and token limits.
+///
+/// # Errors
+///
+/// Returns source I/O, JSON syntax/trailing-content, numeric-envelope, or
+/// resource-limit failures.
+pub fn decode_json_with_options(
+    bytes: &[u8],
+    identity: impl Into<String>,
+    options: DecodeOptions,
+) -> Result<Vec<Document>, FormatError> {
+    if bytes.len() > options.maximum_source_bytes {
+        return Err(FormatError::Resource("source-bytes"));
+    }
+    let mut source = JsonDocumentSource::with_decode_options(Cursor::new(bytes), identity, options);
+    let mut documents = Vec::new();
+    while let Some(document) = source.next_document()? {
+        documents.push(document);
+    }
+    Ok(documents)
+}
+
+/// Decodes all JSON Text Sequence records, returning the first malformed
+/// record as an input error.
+///
+/// # Errors
+///
+/// Returns source I/O, framing, or JSON syntax failures.
+pub fn decode_json_sequence(
+    bytes: &[u8],
+    identity: impl Into<String>,
+) -> Result<Vec<Document>, FormatError> {
+    decode_json_sequence_with_options(bytes, identity, DecodeOptions::default())
+}
+
+/// Decodes JSON Text Sequence records with explicit JSON resource limits.
+///
+/// # Errors
+///
+/// Returns source I/O, framing, JSON syntax, numeric-envelope, or
+/// resource-limit failures.
+pub fn decode_json_sequence_with_options(
+    bytes: &[u8],
+    identity: impl Into<String>,
+    options: DecodeOptions,
+) -> Result<Vec<Document>, FormatError> {
+    if bytes.len() > options.maximum_source_bytes {
+        return Err(FormatError::Resource("source-bytes"));
+    }
+    let json_options = JsonInputOptions {
+        maximum_depth: options.maximum_depth,
+        maximum_token_bytes: options.maximum_token_bytes,
+    };
+    let mut source = JsonSequenceDocumentSource::with_options_and_maximum_frame_bytes(
+        BufReader::new(bytes),
+        identity,
+        json_options,
+        options.maximum_frame_bytes,
+    );
+    let mut documents = Vec::new();
+    while let Some(record) = source.next_record()? {
+        documents.push(record?);
+    }
+    Ok(documents)
 }
 
 /// Decodes one JSON5 document into tq's ordered value model.
@@ -664,6 +1792,7 @@ pub fn decode_json5(
         identity,
         format: InputFormat::Json5,
         index: 0,
+        line_number: 1,
     }])
 }
 
@@ -704,6 +1833,7 @@ pub fn decode_yaml(
             identity: identity.clone(),
             format: InputFormat::Yaml,
             index: index as u64,
+            line_number: index as u64 + 1,
         });
     }
     Ok(documents)
@@ -912,15 +2042,66 @@ fn number<E: fmt::Display>(literal: E) -> Result<YamlRuntime, tq_core::NumberErr
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufReader, Read as _};
+    use std::io::{self, BufRead, BufReader, Cursor, Read};
 
+    use tq_core::Value;
     use tq_toon::DecoderConfig;
 
     use super::{
-        DecodeOptions, JsonLinesDocumentSource, decode_bytes, decode_json, decode_json_lines,
-        decode_json5, decode_toon_sequence, decode_yaml,
+        DecodeOptions, JsonDocumentSource, JsonLinesDocumentSource, JsonSequenceDocumentSource,
+        decode_bytes, decode_json, decode_json_lines, decode_json5, decode_toon_sequence,
+        decode_yaml,
     };
-    use crate::InputFormat;
+    use crate::{FormatError, InputFormat};
+
+    struct BoundedReader<'a> {
+        bytes: &'a [u8],
+        offset: usize,
+        reads: usize,
+        maximum_reads: usize,
+    }
+
+    impl<'a> BoundedReader<'a> {
+        fn new(bytes: &'a [u8], maximum_reads: usize) -> Self {
+            Self {
+                bytes,
+                offset: 0,
+                reads: 0,
+                maximum_reads,
+            }
+        }
+    }
+
+    impl Read for BoundedReader<'_> {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            if self.reads >= self.maximum_reads {
+                return Err(io::Error::other("bounded test reader was read past limit"));
+            }
+            self.reads = self.reads.saturating_add(1);
+            if self.offset == self.bytes.len() {
+                return Ok(0);
+            }
+            output[0] = self.bytes[self.offset];
+            self.offset += 1;
+            Ok(1)
+        }
+    }
+
+    impl BufRead for BoundedReader<'_> {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            if self.reads >= self.maximum_reads {
+                return Err(io::Error::other("bounded test reader was read past limit"));
+            }
+            Ok(self
+                .bytes
+                .get(self.offset..self.offset.saturating_add(1))
+                .unwrap_or(&[]))
+        }
+
+        fn consume(&mut self, amount: usize) {
+            self.offset = self.offset.saturating_add(amount).min(self.bytes.len());
+        }
+    }
 
     #[test]
     fn equivalent_formats_share_one_ordered_value_model() {
@@ -954,6 +2135,46 @@ mod tests {
         assert_eq!(documents[0].index, 0);
         assert_eq!(documents[1].value.to_string(), "[2,3]");
         assert_eq!(documents[1].index, 1);
+    }
+
+    #[test]
+    fn direct_json_source_preserves_nested_number_lexemes_and_limits() {
+        let mut source = JsonDocumentSource::new(
+            Cursor::new(br#"{"n":1E+3,"nested":[-0.0,9007199254740993]}"#),
+            "direct.json",
+        );
+        let document = source.next_document().unwrap().unwrap();
+        assert_eq!(
+            serde_json::to_string(&document.value).unwrap(),
+            r#"{"n":1E+3,"nested":[-0.0,9007199254740993]}"#
+        );
+        assert!(source.next_document().unwrap().is_none());
+
+        let oversized = format!("[{}]", "1".repeat(4097));
+        let mut source = JsonDocumentSource::new(Cursor::new(oversized), "limit.json");
+        assert!(source.next_document().is_err());
+    }
+
+    #[test]
+    fn json_documents_track_physical_end_lines() {
+        let documents = decode_json(b"\n\n1 2\n3\n", "lines.json").unwrap();
+        assert_eq!(
+            documents
+                .iter()
+                .map(|document| document.line_number)
+                .collect::<Vec<_>>(),
+            vec![3, 3, 4]
+        );
+
+        let documents = decode_json(b"[\n1\n]\n", "multiline.json").unwrap();
+        assert_eq!(documents[0].line_number, 3);
+    }
+
+    #[test]
+    fn json_document_source_is_send_when_its_reader_is_send() {
+        fn assert_send<T: Send>() {}
+
+        assert_send::<JsonDocumentSource<Cursor<&'static [u8]>>>();
     }
 
     #[test]
@@ -1138,8 +2359,16 @@ second \n line with "quotes""""}"#,
 
     #[test]
     fn json5_document_decodes_esdiag_saved_object_fixture() {
+        let fixture = tq_toon::decode_to_value(
+            include_bytes!("../../../tests/fixtures/esdiag-saved-object.toon").as_slice(),
+            tq_core::SourceId::new(0),
+            tq_toon::DecoderConfig::default(),
+        )
+        .unwrap()
+        .to_json()
+        .unwrap();
         let documents = decode_json5(
-            include_bytes!("../../../tests/fixtures/esdiag-saved-object.json"),
+            fixture["source_text"].as_str().unwrap().as_bytes(),
             "esdiag-saved-object.json",
             DecodeOptions::default(),
         )
@@ -1205,6 +2434,504 @@ second \n line with "quotes""""}"#,
     }
 
     #[test]
+    fn json_sequence_source_recovers_and_preserves_order() {
+        let input = b"\x1e1 2\n\x1ebad\n\x1e3\n";
+        let mut source = JsonSequenceDocumentSource::new(BufReader::new(&input[..]), "sequence");
+        let mut values = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            match record {
+                Ok(document) => values.push(document.value.to_string()),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        assert_eq!(values, ["1", "2", "3"]);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Invalid numeric literal at line 3, column 0"));
+    }
+
+    #[test]
+    fn json_sequence_rejects_adjacent_scalar_tokens_without_delimiter() {
+        for (input, expected) in [
+            (
+                b"\x1etruefalse\n\x1e4\n".as_slice(),
+                "Invalid literal at line 2, column 0",
+            ),
+            (
+                b"\x1e1true\n\x1e4\n".as_slice(),
+                "Invalid numeric literal at line 2, column 0",
+            ),
+        ] {
+            let mut source =
+                JsonSequenceDocumentSource::new(BufReader::with_capacity(1, input), "sequence");
+            let mut values = Vec::new();
+            let mut errors = Vec::new();
+            while let Some(record) = source.next_record().unwrap() {
+                match record {
+                    Ok(document) => values.push(document.value.to_string()),
+                    Err(error) => errors.push(error.to_string()),
+                }
+            }
+            assert_eq!(values, ["4"]);
+            assert_eq!(errors.len(), 1);
+            assert!(errors[0].contains(expected), "{}", errors[0]);
+        }
+    }
+
+    #[test]
+    fn json_sequence_uses_shared_nonfinite_scalar_grammar() {
+        let input = b"\x1eNaN\n\x1eInfinity\n\x1e-Infinity\n\x1e4\n";
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut values = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            values.push(record.unwrap().value);
+        }
+        assert_eq!(values.len(), 4);
+        assert!(matches!(
+            values[0],
+            Value::Number(ref number) if number.as_f64().is_nan()
+        ));
+        assert!(matches!(
+            values[1],
+            Value::Number(ref number) if number.as_f64().is_infinite() && number.as_f64().is_sign_positive()
+        ));
+        assert!(matches!(
+            values[2],
+            Value::Number(ref number) if number.as_f64().is_infinite() && number.as_f64().is_sign_negative()
+        ));
+        assert_eq!(values[3].to_string(), "4");
+    }
+
+    #[test]
+    fn json_sequence_marks_unterminated_nonfinite_and_extended_numeric_roots() {
+        let input = b"\x1eNaN\x1eInfinity\x1e-Infinity\x1e+1\x1e.1";
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut errors = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            if let Err(error) = record {
+                errors.push(error.to_string());
+            }
+        }
+        assert_eq!(errors.len(), 5);
+        assert!(
+            errors
+                .iter()
+                .all(|error| { error.contains("Potentially truncated top-level numeric value") })
+        );
+    }
+
+    #[test]
+    fn json_sequence_matches_jq_eof_and_record_boundary_numeric_positions() {
+        for (token, column) in [
+            ("NaN", 4),
+            ("Infinity", 9),
+            ("-Inf", 5),
+            ("+1", 3),
+            (".1", 3),
+        ] {
+            let input = format!("\x1e{token}");
+            let mut source = JsonSequenceDocumentSource::new(
+                BufReader::with_capacity(1, input.as_bytes()),
+                "sequence",
+            );
+            let error = source
+                .next_record()
+                .unwrap()
+                .unwrap()
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(&format!(
+                    "Potentially truncated top-level numeric value at EOF at line 1, column {column}"
+                )),
+                "{token}: {error}"
+            );
+            assert!(source.next_record().unwrap().is_none());
+        }
+
+        let mut source = JsonSequenceDocumentSource::new(
+            BufReader::with_capacity(1, b"\x1e123\x1e4\n".as_slice()),
+            "sequence",
+        );
+        let error = source
+            .next_record()
+            .unwrap()
+            .unwrap()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("Potentially truncated top-level numeric value at line 1, column 5"),
+            "{error}"
+        );
+        assert_eq!(
+            source
+                .next_record()
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .value
+                .to_string(),
+            "4"
+        );
+    }
+
+    #[test]
+    fn json_sequence_allows_punctuation_adjacent_roots() {
+        let input = b"\x1eNaN{}\n\x1e1{}\n\x1etrue{}\n";
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut values = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            values.push(record.unwrap().value);
+        }
+        assert_eq!(values.len(), 6);
+        assert!(matches!(values[0], Value::Number(ref number) if number.as_f64().is_nan()));
+        assert!(matches!(values[1], Value::Object(_)));
+        assert_eq!(values[2].to_string(), "1");
+        assert!(matches!(values[3], Value::Object(_)));
+        assert_eq!(values[4].to_string(), "true");
+        assert!(matches!(values[5], Value::Object(_)));
+    }
+
+    #[test]
+    fn json_sequence_resource_limit_is_terminal_and_typed() {
+        let input = b"\x1e123\x1e4\n";
+        let options = tq_core::JsonInputOptions {
+            maximum_depth: 256,
+            maximum_token_bytes: 2,
+        };
+        let mut source = JsonSequenceDocumentSource::with_options(
+            BufReader::with_capacity(1, &input[..]),
+            "sequence",
+            options,
+        );
+        let first = source.next_record().unwrap_err();
+        assert_eq!(
+            first.to_string(),
+            "input resource limit exceeded: token-bytes"
+        );
+        assert!(source.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn json_sequence_frame_limit_preserves_prior_frames_and_is_terminal() {
+        let input = b"\x1e1\n\x1e12345\n\x1e2\n";
+        let mut source = JsonSequenceDocumentSource::with_options_and_maximum_frame_bytes(
+            BufReader::with_capacity(1, &input[..]),
+            "sequence",
+            tq_core::JsonInputOptions::default(),
+            4,
+        );
+
+        let Some(Ok(document)) = source.next_record().unwrap() else {
+            panic!("expected the valid frame before the limit");
+        };
+        assert_eq!(document.value.to_string(), "1");
+        assert!(matches!(
+            source.next_record(),
+            Err(FormatError::Resource("frame-bytes"))
+        ));
+        assert!(source.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn json_sequence_frame_limit_counts_bytes_after_compaction() {
+        const FIRST_VALUE_BYTES: usize = 2 + 70 * 1024;
+
+        let mut input = Vec::with_capacity(FIRST_VALUE_BYTES + 16);
+        input.push(0x1e);
+        input.push(b'"');
+        input.extend(std::iter::repeat_n(b'a', 70 * 1024));
+        input.extend_from_slice(b"\"\n\"b\"\x1e2\n");
+
+        let mut source = JsonSequenceDocumentSource::with_options_and_maximum_frame_bytes(
+            BufReader::with_capacity(1, input.as_slice()),
+            "sequence",
+            tq_core::JsonInputOptions::default(),
+            FIRST_VALUE_BYTES + 3,
+        );
+        let Some(Ok(document)) = source.next_record().unwrap() else {
+            panic!("expected the value before compaction");
+        };
+        assert_eq!(document.index, 0);
+        assert!(matches!(
+            source.next_record(),
+            Err(FormatError::Resource("frame-bytes"))
+        ));
+        assert!(source.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn decode_json_sequence_with_options_forwards_frame_limit() {
+        let error = super::decode_json_sequence_with_options(
+            b"\x1e1234\x1e2\n",
+            "sequence",
+            DecodeOptions {
+                format: InputFormat::JsonSequence,
+                maximum_frame_bytes: 3,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, FormatError::Resource("frame-bytes")));
+    }
+
+    #[test]
+    fn json_sequence_enforces_depth_before_reading_an_unterminated_record() {
+        let reader = BufReader::with_capacity(1, BoundedReader::new(b"\x1e[[", 4));
+        let mut source = JsonSequenceDocumentSource::with_options(
+            reader,
+            "sequence",
+            tq_core::JsonInputOptions {
+                maximum_depth: 1,
+                maximum_token_bytes: 1024,
+            },
+        );
+        assert!(matches!(
+            source.next_record(),
+            Err(FormatError::Resource("depth"))
+        ));
+    }
+
+    #[test]
+    fn json_sequence_enforces_scalar_limit_before_reading_to_record_end() {
+        let reader = BufReader::with_capacity(1, BoundedReader::new(b"\x1e123456789", 5));
+        let mut source = JsonSequenceDocumentSource::with_options(
+            reader,
+            "sequence",
+            tq_core::JsonInputOptions {
+                maximum_depth: 256,
+                maximum_token_bytes: 3,
+            },
+        );
+        assert!(matches!(
+            source.next_record(),
+            Err(FormatError::Resource("token-bytes"))
+        ));
+    }
+
+    #[test]
+    fn json_sequence_enforces_nested_scalar_limit_before_record_end() {
+        let reader = BufReader::with_capacity(1, BoundedReader::new(b"\x1e[123456789", 6));
+        let mut source = JsonSequenceDocumentSource::with_options(
+            reader,
+            "sequence",
+            tq_core::JsonInputOptions {
+                maximum_depth: 1,
+                maximum_token_bytes: 3,
+            },
+        );
+        assert!(matches!(
+            source.next_record(),
+            Err(FormatError::Resource("token-bytes"))
+        ));
+    }
+
+    #[test]
+    fn json_sequence_rejects_non_json_whitespace_as_a_delimiter() {
+        for (input, expected) in [
+            (
+                b"\x1e1\x0c2\n\x1e3\n".as_slice(),
+                "Invalid numeric literal at line 2, column 0",
+            ),
+            (
+                b"\x1etrue\x0bfalse\n\x1e3\n".as_slice(),
+                "Invalid literal at line 2, column 0",
+            ),
+        ] {
+            let mut source =
+                JsonSequenceDocumentSource::new(BufReader::with_capacity(1, input), "sequence");
+            let mut values = Vec::new();
+            let mut errors = Vec::new();
+            while let Some(record) = source.next_record().unwrap() {
+                match record {
+                    Ok(document) => values.push(document.value.to_string()),
+                    Err(error) => errors.push(error.to_string()),
+                }
+            }
+            assert_eq!(values, ["3"]);
+            assert_eq!(errors.len(), 1);
+            assert!(errors[0].contains(expected), "{}", errors[0]);
+        }
+    }
+
+    #[test]
+    fn json_sequence_rejects_truncated_numeric_after_prior_value() {
+        let input = b"\x1e1\n2\x1e4\n";
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut values = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            match record {
+                Ok(document) => values.push(document.value.to_string()),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        assert_eq!(values, ["1", "4"]);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].contains("Potentially truncated top-level numeric value at line 2, column 2"),
+            "{}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn json_sequence_reports_jq_positions_for_structured_and_truncated_records() {
+        for (input, expected) in [
+            (
+                b"\x1e{\"x\":1}\n\x1e[bad]\n\x1e2\n".as_slice(),
+                "Invalid numeric literal at line 2, column 6",
+            ),
+            (
+                b"\x1e1\x0c2\n\x1e3\n".as_slice(),
+                "Invalid numeric literal at line 2, column 0",
+            ),
+        ] {
+            let mut source =
+                JsonSequenceDocumentSource::new(BufReader::with_capacity(1, input), "sequence");
+            let mut errors = Vec::new();
+            while let Some(record) = source.next_record().unwrap() {
+                if let Err(error) = record {
+                    errors.push(error.to_string());
+                }
+            }
+            assert_eq!(errors.len(), 1);
+            assert!(errors[0].contains(expected), "{}", errors[0]);
+        }
+    }
+
+    #[test]
+    fn json_sequence_reports_jq_structured_recovery_diagnostics() {
+        for (input, expected) in [
+            (
+                b"\x1e{\"a\":}\n\x1e2\n".as_slice(),
+                "Unmatched '}' at line 1, column 7 (need RS to resync)",
+            ),
+            (
+                b"\x1e[1,]\n\x1e2\n".as_slice(),
+                "Expected another array element at line 1, column 5 (need RS to resync)",
+            ),
+            (
+                b"\x1e{\"a\":1,}\n\x1e2\n".as_slice(),
+                "Expected another key-value pair at line 1, column 9 (need RS to resync)",
+            ),
+            (
+                b"\x1e{\"a\" 1}\n\x1e2\n".as_slice(),
+                "Expected separator between values at line 1, column 8 (need RS to resync)",
+            ),
+        ] {
+            let mut source =
+                JsonSequenceDocumentSource::new(BufReader::with_capacity(1, input), "sequence");
+            let mut values = Vec::new();
+            let mut errors = Vec::new();
+            while let Some(record) = source.next_record().unwrap() {
+                match record {
+                    Ok(document) => values.push(document.value.to_string()),
+                    Err(error) => errors.push(error.to_string()),
+                }
+            }
+            assert_eq!(values, ["2"]);
+            assert_eq!(errors, [format!("JsonSequence input rejected: {expected}")]);
+        }
+    }
+
+    #[test]
+    fn json_sequence_classifies_unknown_tokens_like_jq() {
+        let input = b"\x1e1\n\x1ebad\n\x1e2\n";
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut values = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            match record {
+                Ok(document) => values.push(document.value.to_string()),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        assert_eq!(values, ["1", "2"]);
+        assert_eq!(
+            errors,
+            [
+                "JsonSequence input rejected: Invalid numeric literal at line 3, column 0 (need RS to resync)"
+            ]
+        );
+    }
+
+    #[test]
+    fn json_sequence_tiny_buffer_matches_default_and_compacts_large_record() {
+        let mut input = b"\x1e{\"value\":\"".to_vec();
+        input.extend(std::iter::repeat_n(b'a', 70 * 1024));
+        input.extend_from_slice(b"\"}\n\x1e[1,2]\n3\n");
+
+        let collect = |reader| {
+            let mut source = JsonSequenceDocumentSource::new(reader, "sequence");
+            let mut documents = Vec::new();
+            while let Some(record) = source.next_record().unwrap() {
+                let document = record.unwrap();
+                documents.push((
+                    document.value.to_string(),
+                    document.index,
+                    document.line_number,
+                ));
+            }
+            documents
+        };
+        let default = collect(BufReader::new(&input[..]));
+        let tiny = collect(BufReader::with_capacity(1, &input[..]));
+
+        assert_eq!(tiny, default);
+        assert_eq!(tiny.len(), 3);
+        assert_eq!(tiny[0].1, 0);
+        assert_eq!(tiny[2].1, 2);
+    }
+
+    #[test]
+    fn json_sequence_compaction_preserves_physical_line_numbers() {
+        let mut input = Vec::from(*b"\x1e");
+        for _ in 0..40_000 {
+            input.extend_from_slice(b"0\n");
+        }
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut lines = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            lines.push(record.unwrap().line_number);
+        }
+        assert_eq!(lines.len(), 40_000);
+        assert_eq!(lines[32_767], 32_768);
+        assert_eq!(lines[32_768], 32_769);
+        assert_eq!(lines[39_999], 40_000);
+    }
+
+    #[test]
+    fn json_sequence_compaction_preserves_same_line_diagnostic_column() {
+        let mut input = Vec::from(*b"\x1e");
+        input.extend(std::iter::repeat_n(b' ', 70 * 1024));
+        input.extend_from_slice(b"[bad]\x1e2\n");
+        let mut source =
+            JsonSequenceDocumentSource::new(BufReader::with_capacity(1, &input[..]), "sequence");
+        let mut values = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(record) = source.next_record().unwrap() {
+            match record {
+                Ok(document) => values.push(document.value.to_string()),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        assert_eq!(values, ["2"]);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].contains("Invalid numeric literal at line 1, column 71686"),
+            "{}",
+            errors[0]
+        );
+    }
+
+    #[test]
     fn bounded_probe_is_observable_and_late_failures_do_not_fail_down() {
         let json = super::probe_format(br#"{"a":1}"#, 4).unwrap();
         assert_eq!(json.selected, InputFormat::Json);
@@ -1250,6 +2977,31 @@ second \n line with "quotes""""}"#,
                 "{format:?}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn fragmented_probe_distinguishes_root_toon_headers_from_json_arrays() {
+        for (source, selected) in [
+            (b"[2]: 1,2\n".as_slice(), InputFormat::Toon),
+            (b"[2]{a}:\n  1\n  2\n".as_slice(), InputFormat::Toon),
+            (b"[1,2]\n".as_slice(), InputFormat::Json),
+        ] {
+            let (report, mut replay) =
+                super::probe_reader(BufReader::with_capacity(1, source), 64).unwrap();
+            assert_eq!(report.selected, selected);
+            let mut recovered = Vec::new();
+            replay.read_to_end(&mut recovered).unwrap();
+            assert_eq!(recovered, source);
+        }
+    }
+
+    #[test]
+    fn auto_probe_selects_json_string_scalars_with_unicode_escapes() {
+        let report = super::probe_format(br#""\u03bc""#, 64).unwrap();
+        assert_eq!(report.selected, InputFormat::Json);
+        let documents =
+            super::decode_bytes(br#""\u03bc""#, "scalar.json", DecodeOptions::default()).unwrap();
+        assert_eq!(documents[0].value.to_string(), "\"μ\"");
     }
 
     #[test]

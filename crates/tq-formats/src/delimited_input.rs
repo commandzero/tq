@@ -78,6 +78,7 @@ impl<R: BufRead> DelimitedInput<R> {
             identity: self.identity.clone(),
             format: self.format,
             index: self.index,
+            line_number: 1,
         };
         self.index = self.index.saturating_add(1);
         Ok(Some(document))
