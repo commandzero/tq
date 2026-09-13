@@ -3,9 +3,9 @@
 use std::{borrow::Borrow, io::Write};
 
 use thiserror::Error;
-use tq_core::Value;
+use tq_core::{Value, presentation::ColorPalette};
 
-use crate::{WriterConfig, WriterError, write_value};
+use crate::{WriterConfig, WriterError, write_value_colored};
 
 /// Exactly-one output cardinality failure.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
@@ -35,7 +35,7 @@ pub enum SequenceError {
 ///
 /// Returns the first output I/O failure.
 pub fn write_sequence<W, I, V>(
-    mut writer: W,
+    writer: W,
     values: I,
     config: WriterConfig,
 ) -> Result<(), SequenceError>
@@ -44,9 +44,30 @@ where
     I: IntoIterator<Item = V>,
     V: Borrow<Value>,
 {
+    write_sequence_colored(writer, values, config, None)
+}
+
+/// Writes zero or more RS-prefix/LF-suffix canonical TOON records with an
+/// optional semantic palette.
+///
+/// # Errors
+///
+/// Returns the first framing or output I/O error.
+pub fn write_sequence_colored<W, I, V>(
+    mut writer: W,
+    values: I,
+    config: WriterConfig,
+    palette: Option<&ColorPalette>,
+) -> Result<(), SequenceError>
+where
+    W: Write,
+    I: IntoIterator<Item = V>,
+    V: Borrow<Value>,
+{
     for value in values {
         writer.write_all(b"\x1e")?;
-        write_value(&mut writer, value.borrow(), config).map_err(|WriterError::Io(error)| error)?;
+        write_value_colored(&mut writer, value.borrow(), config, palette)
+            .map_err(|WriterError::Io(error)| error)?;
         writer.write_all(b"\n")?;
     }
     Ok(())
@@ -61,9 +82,29 @@ where
 ///
 /// Returns a cardinality or output I/O failure.
 pub fn write_unframed<W, I, V>(
+    writer: W,
+    values: I,
+    config: WriterConfig,
+) -> Result<(), SequenceError>
+where
+    W: Write,
+    I: IntoIterator<Item = V>,
+    V: Borrow<Value>,
+{
+    write_unframed_colored(writer, values, config, None)
+}
+
+/// Writes exactly one canonical TOON document with an optional semantic
+/// palette after validating result cardinality.
+///
+/// # Errors
+///
+/// Returns a cardinality or output I/O failure.
+pub fn write_unframed_colored<W, I, V>(
     mut writer: W,
     values: I,
     config: WriterConfig,
+    palette: Option<&ColorPalette>,
 ) -> Result<(), SequenceError>
 where
     W: Write,
@@ -75,7 +116,8 @@ where
     if values.next().is_some() {
         return Err(CardinalityError::Multiple.into());
     }
-    write_value(&mut writer, first.borrow(), config).map_err(|WriterError::Io(error)| error)?;
+    write_value_colored(&mut writer, first.borrow(), config, palette)
+        .map_err(|WriterError::Io(error)| error)?;
     Ok(())
 }
 
@@ -83,9 +125,11 @@ where
 mod tests {
     use std::io::{self, Write};
 
-    use tq_core::Value;
+    use tq_core::{Value, presentation::ColorPalette};
 
-    use super::{CardinalityError, SequenceError, write_sequence, write_unframed};
+    use super::{
+        CardinalityError, SequenceError, write_sequence, write_sequence_colored, write_unframed,
+    };
     use crate::WriterConfig;
 
     #[test]
@@ -154,5 +198,57 @@ mod tests {
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    fn strip_sgr(bytes: &[u8]) -> Vec<u8> {
+        let mut output = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index..].starts_with(b"\x1b[") {
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'm' {
+                    index += 1;
+                }
+                assert!(index < bytes.len(), "unterminated SGR");
+                index += 1;
+            } else {
+                output.push(bytes[index]);
+                index += 1;
+            }
+        }
+        output
+    }
+
+    #[test]
+    fn colored_sequence_keeps_transport_boundaries_unstyled() {
+        let values = [Value::string("a,b"), Value::string("c,d")];
+        let palette = ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17");
+        let mut plain = Vec::new();
+        let mut colored = Vec::new();
+        write_sequence(&mut plain, values.iter(), WriterConfig::default()).unwrap();
+        write_sequence_colored(
+            &mut colored,
+            values.iter(),
+            WriterConfig::default(),
+            Some(&palette),
+        )
+        .unwrap();
+
+        assert_eq!(strip_sgr(&colored), plain);
+        assert!(
+            colored
+                .windows(b"\x1b[0m\x0a".len())
+                .any(|window| window == b"\x1b[0m\x0a")
+        );
+        assert!(
+            colored
+                .windows(b"\x0a\x1e".len())
+                .any(|window| window == b"\x0a\x1e")
+        );
+        assert!(
+            !colored
+                .windows(b"\x1b[0m\x1e".len())
+                .any(|window| window == b"\x1b[0m\x1e")
+        );
     }
 }

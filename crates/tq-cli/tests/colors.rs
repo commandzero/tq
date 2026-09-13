@@ -34,15 +34,16 @@ impl OutputWithStdin for Command {
 }
 
 #[test]
-fn forced_color_uses_the_jq_default_number_style() {
+fn forced_color_uses_the_tq_default_number_style() {
     let output = run(&["-n", "-C", "--output-format", "json", "1"], None, false);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"\x1b[0;39m1\x1b[0m\n");
+    assert_eq!(output.stdout, b"\x1b[0;35m1\x1b[0m\n");
 }
 
 #[test]
 fn jq_colors_controls_each_json_value_style() {
     let colors = "1;31:1;31:1;31:1;31:1;31:1;31:1;31:1;31";
+    assert_eq!(colors.split(':').count(), 8);
     let output = run(
         &["-n", "-C", "--output-format", "json", "1"],
         Some(colors),
@@ -55,6 +56,7 @@ fn jq_colors_controls_each_json_value_style() {
 #[test]
 fn seven_entry_jq_colors_uses_the_number_style_for_object_keys() {
     let colors = "1;31:1;32:1;33:1;34:1;35:1;36:1;37";
+    assert_eq!(colors.split(':').count(), 7);
     let output = run(
         &["-n", "-C", "-c", "--output-format", "json", "{\"z\":1}"],
         Some(colors),
@@ -63,21 +65,21 @@ fn seven_entry_jq_colors_uses_the_number_style_for_object_keys() {
     assert!(output.status.success());
     assert_eq!(
         output.stdout,
-        b"\x1b[1;37m{\x1b[0m\x1b[1;34m\"z\"\x1b[0m\x1b[1;37m:\x1b[0m\x1b[1;34m1\x1b[0m\x1b[1;37m}\x1b[0m\n"
+        b"\x1b[1;37m{\x1b[0m\x1b[1;37m\"\x1b[0m\x1b[1;34mz\x1b[0m\x1b[1;37m\"\x1b[0m\x1b[1;37m:\x1b[0m\x1b[1;34m1\x1b[0m\x1b[1;37m}\x1b[0m\n"
     );
 }
 
 #[test]
-fn empty_container_uses_one_colored_json_token() {
+fn empty_container_delimiters_use_structural_color() {
     let output = run(&["-n", "-C", "--output-format", "json", "[]"], None, false);
     assert!(output.status.success());
-    assert_eq!(output.stdout, b"\x1b[1;39m[]\x1b[0m\n");
+    assert_eq!(output.stdout, b"\x1b[0;90m[\x1b[0m\x1b[0;90m]\x1b[0m\n");
 }
 
 #[test]
 fn explicit_color_overrides_no_color_and_last_flag_wins() {
     let forced = run(&["-n", "-C", "--output-format", "json", "1"], None, true);
-    assert_eq!(forced.stdout, b"\x1b[0;39m1\x1b[0m\n");
+    assert_eq!(forced.stdout, b"\x1b[0;35m1\x1b[0m\n");
     let disabled = run(
         &["-n", "-C", "-M", "--output-format", "json", "1"],
         None,
@@ -89,7 +91,7 @@ fn explicit_color_overrides_no_color_and_last_flag_wins() {
         None,
         false,
     );
-    assert_eq!(reenabled.stdout, b"\x1b[0;39m1\x1b[0m\n");
+    assert_eq!(reenabled.stdout, b"\x1b[0;35m1\x1b[0m\n");
 }
 
 #[cfg(unix)]
@@ -131,9 +133,9 @@ fn auto_color_uses_a_posix_pty_when_stdout_is_a_terminal() {
     assert!(
         output
             .stdout
-            .windows(b"\x1b[0;90mnull\x1b[0m".len())
-            .any(|window| window == b"\x1b[0;90mnull\x1b[0m"),
-        "pty output did not preserve jq's null palette: {:?}",
+            .windows(b"\x1b[0;39mnull\x1b[0m".len())
+            .any(|window| window == b"\x1b[0;39mnull\x1b[0m"),
+        "pty output did not preserve tq's null palette: {:?}",
         output.stdout
     );
 }

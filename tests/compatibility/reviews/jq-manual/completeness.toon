@@ -312,7 +312,7 @@ clause_evidence[71]{clause_id,evidence_kind,evidence_ref}:
   streaming-leaves,focused-public-test,crates/tq-core/tests/user_pull_composition.rs::fromstream_uses_captured_value_and_filter_arguments
   streaming-leaves,focused-public-test,crates/tq-core/tests/user_pull_composition.rs::truncate_stream_uses_captured_value_and_filter_arguments
   streaming-leaves,focused-public-test,crates/tq-core/tests/user_builtin_composition.rs::tostream_composition_closes_nested_empty_containers_in_order
-  cli-colors,focused-public-test,crates/tq-cli/tests/colors.rs::forced_color_uses_the_jq_default_number_style
+  cli-colors,focused-public-test,crates/tq-cli/tests/colors.rs::forced_color_uses_the_tq_default_number_style
 coverage_notes[3]{id,reason,evidence}:
   call-witness,The signature matrix executes every source-linked name/arity through parse resolve compile and one bounded VM pull; it deliberately does not turn availability into a semantic match.,manual_signature_matrix.rs is the focused public witness
   semantic-output,Section ledgers and focused tests carry exact value ordering empty error flag and process assertions; rows above point to their owning source rather than duplicating verdicts.,manual-completeness is an index not a second verdict ledger

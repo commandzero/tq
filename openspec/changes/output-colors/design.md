@@ -6,7 +6,7 @@ See [proposal.md](proposal.md) for motivation and scope. The existing CLI resolv
 
 **Goals:** Give every output writer typed token styling, preserve byte-identical undecorated output, and keep color state bounded on document and streaming paths. Make terminal policy a caller decision so library writers remain deterministic.
 
-**Non-Goals:** New input/output formats, syntax changes, an interactive viewer, a theme-file loader, config discovery, a new RGB theme interface, or recoloring raw/proxy bytes. The eight-slot default and existing `JQ_COLORS` interface require no user configuration file.
+**Non-Goals:** New input/output formats, syntax changes, an interactive viewer, a theme-file loader, config discovery, a new RGB theme interface, or recoloring raw string/proxy bytes. The eight-slot default and existing `JQ_COLORS` interface require no user configuration file.
 
 ## Decisions
 
@@ -38,11 +38,15 @@ Treat native serialization and ANSI presentation as separate contracts. JSON, JS
 
 Close styles before handing control to raw/proxy output and at each complete result boundary. Emit no prefix until payload publication begins, preserving empty output and first-result validation failures. Reset at normal completion and make a best-effort reset after partial failures only when the sink and remaining byte allowance permit it. Do not replace the original error or retry a broken pipe.
 
+Raw-mode non-string results retain the existing compact JSON fallback, regardless of the native output selector. Reuse JSON token styling without changing raw/joined/NUL separators, ASCII behavior, or error classification. Raw string results continue to bypass the presentation sink.
+
 Retain existing writer-specific commitment guarantees: atomic writers stage and validate the complete record as before, incremental writers may already have exposed partial data on failure, and completed earlier records remain intact. Count ANSI bytes in actual output accounting. Reserve enough byte allowance for a span's normal close before opening it so a resource-limit failure does not require writing beyond the configured limit.
 
 ### Streaming and resource behavior
 
 Use constant-size current-style state plus the writer's existing bounded state. Stream long strings in styled chunks without collecting a result-sized string. Reuse the same presentation sink for document output and TOON event/transcode emission; enabling color alone must not force whole-document materialization.
+
+Decorate each semantic span independently, closing the style at the end of each bounded chunk. Offer the opening SGR, payload, and closing reset together to the output sink so byte-limit checks can reject the chunk before opening an unclosable style. Do not carry active styling between adjacent spans, even when their styles match. Adjacent-span merging is not required for this change.
 
 Apply output accounting after decoration. If publication stages styled bytes, account for them in spool storage too. Preserve exact plain output paths with no allocation per token when styling is disabled. Choose a suitable crate/module boundary during implementation that does not introduce a dependency cycle between native-format and TOON crates.
 
@@ -56,7 +60,7 @@ For all native formats and writer routes, verify that removing only generated st
 
 - ANSI changes bytes in explicitly colored streams. Automatic redirection stays plain, and docs explain `-M` and forced terminal presentation.
 - A missed writer route would leave inconsistent colors. Enumerate native writers, raw/non-string fallback, JSON event output, TOON tabular/folded output, and direct transcode in acceptance coverage.
-- Extra SGR increases output size and runtime. Merge adjacent compatible spans, retain a plain fast path, and measure representative document/transcode runs; colors do not grant extra resource allowance.
+- Per-span resets add SGR bytes and runtime while keeping style boundaries and limit handling explicit. Retain the plain fast path; colors do not grant extra resource allowance. The [measured overhead](../../../docs/output-colors-performance.md) is accepted for this change. The all-month corpus is larger than a typical terminal-color workload, so its higher time ratios do not require further optimization before acceptance.
 - Bright-black contrast varies by terminal theme. Preserve the supplied default and document terminal-palette dependence; do not invent adaptive RGB behavior.
 - Custom array/object styles make quote context visible. Specify and test immediate-container ownership and the root fallback; preserve the seven-slot key fallback even when its number style differs from the default key color.
 

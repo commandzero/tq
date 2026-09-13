@@ -2,12 +2,14 @@
 
 use std::{borrow::Borrow, io::Write};
 
-use serde::Serialize;
 use thiserror::Error;
-use tq_core::Value;
-use tq_toon::{SequenceError, WriterConfig, WriterError, write_value};
+use tq_core::{Value, presentation::ColorPalette};
+use tq_toon::{SequenceError, WriterConfig, WriterError};
 
 use crate::{NativeFormat, OutputFormat};
+
+/// Compatibility name retained for callers of the JSON-only color API.
+pub type JsonColorPalette = ColorPalette;
 
 /// TOON result framing choice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -55,10 +57,11 @@ pub struct OutputOptions {
     pub json_indent: JsonIndent,
     /// Escape non-ASCII JSON codepoints.
     pub ascii_json: bool,
-    /// Wrap JSON output in tq's deterministic ANSI color.
+    /// Compatibility storage for the former JSON-only color option. When true,
+    /// the resolved palette applies to every supported structured format.
     pub color_json: bool,
-    /// jq-compatible eight-slot ANSI palette for colored JSON.
-    pub color_palette: JsonColorPalette,
+    /// jq-compatible eight-slot ANSI palette for colored output.
+    pub color_palette: ColorPalette,
     /// Prefix this YAML value with an explicit document separator.
     pub yaml_document_start: bool,
     /// TOON framing mode.
@@ -79,7 +82,7 @@ impl Default for OutputOptions {
             json_indent: JsonIndent::default(),
             ascii_json: false,
             color_json: false,
-            color_palette: JsonColorPalette::default(),
+            color_palette: ColorPalette::default(),
             yaml_document_start: false,
             toon_framing: ToonFraming::Values,
             json_sequence: false,
@@ -88,58 +91,22 @@ impl Default for OutputOptions {
     }
 }
 
-/// ANSI styles used by jq's JSON colorizer.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JsonColorPalette {
-    styles: [String; 8],
-    key_style: usize,
-}
-
-impl Default for JsonColorPalette {
-    fn default() -> Self {
-        Self {
-            styles: std::array::from_fn(|index| {
-                [
-                    "0;90", "0;39", "0;39", "0;39", "0;32", "1;39", "1;39", "1;34",
-                ][index]
-                    .to_owned()
-            }),
-            key_style: 7,
-        }
-    }
-}
-
-impl JsonColorPalette {
-    /// Parses jq's colon-separated seven- or eight-style `JQ_COLORS` value.
+impl OutputOptions {
+    /// Selects semantic color presentation for every supported output format.
     #[must_use]
-    pub fn from_jq_colors(value: &str) -> Self {
-        let styles = value.split(':').collect::<Vec<_>>();
-        if !matches!(styles.len(), 7 | 8)
-            || styles.iter().any(|style| {
-                style.is_empty()
-                    || style
-                        .bytes()
-                        .any(|byte| byte != b';' && !byte.is_ascii_digit())
-            })
-        {
-            return Self::default();
-        }
-        let key_style = if styles.len() == 7 { 3 } else { 7 };
-        let fallback = styles.get(key_style).copied().unwrap_or_default();
-        Self {
-            styles: std::array::from_fn(|index| {
-                styles.get(index).copied().unwrap_or(fallback).to_string()
-            }),
-            key_style,
-        }
+    pub fn with_color(mut self, enabled: bool) -> Self {
+        self.color_json = enabled;
+        self
     }
 
-    fn style(&self, index: usize) -> &str {
-        &self.styles[index]
+    /// Returns whether semantic color presentation is enabled.
+    #[must_use]
+    pub const fn color_enabled(&self) -> bool {
+        self.color_json
     }
 
-    fn key_style(&self) -> &str {
-        self.style(self.key_style)
+    fn palette(&self) -> Option<&ColorPalette> {
+        self.color_enabled().then_some(&self.color_palette)
     }
 }
 
@@ -223,19 +190,11 @@ impl NativeFormat {
             OutputFormat::Json | OutputFormat::JsonSequence
         );
         let json_lines = options.format == OutputFormat::JsonLines;
-        if (!json
-            && (options.pretty_json
-                || options.color_json
-                || options.json_indent != JsonIndent::default()))
+        if (!json && (options.pretty_json || options.json_indent != JsonIndent::default()))
             || (!json && !json_lines && options.ascii_json)
         {
             return Err(OutputError::InvalidOptions(
                 "JSON controls are incompatible with the selected format",
-            ));
-        }
-        if options.format == OutputFormat::JsonSequence && options.color_json {
-            return Err(OutputError::InvalidOptions(
-                "JSON sequence output cannot use color controls",
             ));
         }
         if options.format != OutputFormat::Toon && options.toon_framing == ToonFraming::Unframed {
@@ -323,6 +282,7 @@ impl NativeOutputSequence {
                 value,
                 &OutputOptions {
                     yaml_document_start: true,
+                    color_json: false,
                     ..options.clone()
                 },
             )?;
@@ -349,6 +309,7 @@ impl NativeOutputSequence {
                     value,
                     options.strict_conversion,
                     options.delimited_limits,
+                    options.palette(),
                 )?;
         } else {
             write_document(writer, value, &options)?;
@@ -375,7 +336,7 @@ impl NativeOutputSequence {
                 .unframed
                 .take()
                 .ok_or(SequenceError::Cardinality(tq_toon::CardinalityError::Zero))?;
-            write_value(writer, &value, self.options.toon)
+            tq_toon::write_value_colored(writer, &value, self.options.toon, self.options.palette())
                 .map_err(|WriterError::Io(error)| OutputError::Io(error))?;
         }
         Ok(())
@@ -394,12 +355,12 @@ fn write_document(
         OutputFormat::Toon => match options.toon_framing {
             ToonFraming::Sequence => {
                 crate::rs_framing::write_frame(writer, |writer| {
-                    write_value(writer, value, options.toon)
+                    tq_toon::write_value_colored(writer, value, options.toon, options.palette())
                         .map_err(|WriterError::Io(error)| OutputError::Io(error))
                 })?;
             }
             ToonFraming::Values => {
-                write_value(&mut *writer, value, options.toon)
+                tq_toon::write_value_colored(&mut *writer, value, options.toon, options.palette())
                     .map_err(|WriterError::Io(error)| OutputError::Io(error))?;
                 writer.write_all(b"\n")?;
             }
@@ -414,7 +375,6 @@ fn write_document(
             if options.format == OutputFormat::JsonLines {
                 let mut options = options.clone();
                 options.pretty_json = false;
-                options.color_json = false;
                 write_json_document(writer, value, &options)?;
             } else {
                 write_json_document(writer, value, options)?;
@@ -423,9 +383,21 @@ fn write_document(
         }
         OutputFormat::Yaml => {
             if options.yaml_document_start {
-                writer.write_all(b"---\n")?;
+                crate::output_color::write_span_bounded(
+                    writer,
+                    options.palette(),
+                    tq_core::presentation::ColorRole::Object,
+                    b"---",
+                )?;
+                writer.write_all(b"\n")?;
             }
-            write_yaml_value(writer, value, 0)?;
+            crate::output_yaml::write_yaml_value(
+                writer,
+                value,
+                0,
+                tq_core::presentation::ColorRole::Object,
+                options.palette(),
+            )?;
             writer.write_all(b"\n")?;
         }
     }
@@ -437,36 +409,39 @@ fn write_json_document(
     value: &Value,
     options: &OutputOptions,
 ) -> Result<(), OutputError> {
+    let indentation = match options.json_indent {
+        JsonIndent::Spaces(count) => vec![b' '; usize::from(count)],
+        JsonIndent::Tabs => vec![b'\t'],
+    };
+    // Preserve the existing document publication boundary. The formatter
+    // writes semantic spans into this existing staging buffer; it never
+    // reparses a completed document or creates a second result-sized buffer.
     let mut encoded = Vec::new();
-    write_json_value(&mut encoded, value, options)?;
-    if options.ascii_json {
-        encoded = escape_non_ascii(&encoded);
-    }
-    if options.color_json {
-        writer.write_all(&colorize_json(&encoded, &options.color_palette))?;
-    } else {
-        writer.write_all(&encoded)?;
-    }
+    crate::output_json::write_json_value(
+        &mut encoded,
+        value,
+        options.pretty_json,
+        &indentation,
+        options.ascii_json,
+        options.palette(),
+    )?;
+    writer.write_all(&encoded)?;
     Ok(())
 }
 
-fn write_json_value(
+/// Writes the compact JSON fallback used for non-string raw-mode results.
+///
+/// This preserves the existing raw-mode encoding, adds no framing, and accepts
+/// the same invocation palette as the native output writers.
+///
+/// # Errors
+/// Returns serialization or output failures.
+pub fn write_raw_json_value(
     writer: &mut impl Write,
     value: &Value,
-    options: &OutputOptions,
+    palette: Option<&ColorPalette>,
 ) -> Result<(), serde_json::Error> {
-    if options.pretty_json {
-        let indentation = match options.json_indent {
-            JsonIndent::Spaces(count) => vec![b' '; usize::from(count)],
-            JsonIndent::Tabs => vec![b'\t'],
-        };
-        let formatter = serde_json::ser::PrettyFormatter::with_indent(&indentation);
-        value.serialize(&mut serde_json::Serializer::with_formatter(
-            writer, formatter,
-        ))
-    } else {
-        serde_json::to_writer(writer, value)
-    }
+    crate::output_json::write_json_value(writer, value, false, b"", false, palette)
 }
 
 /// Writes ordered results in the selected structured format.
@@ -501,204 +476,6 @@ where
         sequence.write_result(&mut writer, value.borrow())?;
     }
     sequence.finish(&mut writer)
-}
-
-fn colorize_json(encoded: &[u8], palette: &JsonColorPalette) -> Vec<u8> {
-    let mut colored = Vec::with_capacity(encoded.len().saturating_add(64));
-    let mut containers = Vec::new();
-    let mut index = 0;
-    while index < encoded.len() {
-        match encoded[index] {
-            b'{' => {
-                if encoded.get(index + 1) == Some(&b'}') {
-                    color_token(&mut colored, b"{}", palette.style(6));
-                    index += 2;
-                    continue;
-                }
-                color_token(&mut colored, b"{", palette.style(6));
-                containers.push(b'{');
-                index += 1;
-            }
-            b'}' => {
-                color_token(&mut colored, b"}", palette.style(6));
-                containers.pop();
-                index += 1;
-            }
-            b'[' => {
-                if encoded.get(index + 1) == Some(&b']') {
-                    color_token(&mut colored, b"[]", palette.style(5));
-                    index += 2;
-                    continue;
-                }
-                color_token(&mut colored, b"[", palette.style(5));
-                containers.push(b'[');
-                index += 1;
-            }
-            b']' => {
-                color_token(&mut colored, b"]", palette.style(5));
-                containers.pop();
-                index += 1;
-            }
-            b':' | b',' => {
-                let style = containers
-                    .last()
-                    .map_or(3, |container| if *container == b'{' { 6 } else { 5 });
-                color_token(&mut colored, &encoded[index..=index], palette.style(style));
-                index += 1;
-            }
-            b'"' => {
-                let end = json_string_end(encoded, index);
-                let is_key = encoded[end..]
-                    .iter()
-                    .copied()
-                    .find(|byte| !byte.is_ascii_whitespace())
-                    == Some(b':');
-                let style = if is_key {
-                    palette.key_style()
-                } else {
-                    palette.style(4)
-                };
-                color_token(&mut colored, &encoded[index..end], style);
-                index = end;
-            }
-            b'n' if encoded[index..].starts_with(b"null") => {
-                color_token(&mut colored, b"null", palette.style(0));
-                index += 4;
-            }
-            b'f' if encoded[index..].starts_with(b"false") => {
-                color_token(&mut colored, b"false", palette.style(1));
-                index += 5;
-            }
-            b't' if encoded[index..].starts_with(b"true") => {
-                color_token(&mut colored, b"true", palette.style(2));
-                index += 4;
-            }
-            byte if byte == b'-' || byte.is_ascii_digit() => {
-                let end = encoded[index..]
-                    .iter()
-                    .position(|byte| {
-                        !byte.is_ascii_digit() && !matches!(byte, b'-' | b'+' | b'.' | b'e' | b'E')
-                    })
-                    .map_or(encoded.len(), |offset| index + offset);
-                color_token(&mut colored, &encoded[index..end], palette.style(3));
-                index = end;
-            }
-            _ => {
-                colored.push(encoded[index]);
-                index += 1;
-            }
-        }
-    }
-    colored
-}
-
-fn json_string_end(encoded: &[u8], start: usize) -> usize {
-    let mut escaped = false;
-    for (offset, byte) in encoded[start + 1..].iter().copied().enumerate() {
-        if escaped {
-            escaped = false;
-        } else if byte == b'\\' {
-            escaped = true;
-        } else if byte == b'"' {
-            return start + offset + 2;
-        }
-    }
-    encoded.len()
-}
-
-fn color_token(output: &mut Vec<u8>, token: &[u8], style: &str) {
-    output.extend_from_slice(b"\x1b[");
-    output.extend_from_slice(style.as_bytes());
-    output.extend_from_slice(b"m");
-    output.extend_from_slice(token);
-    output.extend_from_slice(b"\x1b[0m");
-}
-
-fn write_yaml_value(
-    writer: &mut impl Write,
-    value: &Value,
-    indent: usize,
-) -> Result<(), OutputError> {
-    match value {
-        Value::Null => writer.write_all(b"null")?,
-        Value::Bool(value) => writer.write_all(if *value { b"true" } else { b"false" })?,
-        Value::Number(value) => writer.write_all(value.to_string().as_bytes())?,
-        Value::String(value) => write_yaml_string(writer, value)?,
-        Value::Array(values) if values.is_empty() => writer.write_all(b"[]")?,
-        Value::Object(values) if values.is_empty() => writer.write_all(b"{}")?,
-        Value::Array(values) => {
-            for (index, value) in values.iter().enumerate() {
-                if index > 0 {
-                    writer.write_all(b"\n")?;
-                }
-                write_indent(writer, indent)?;
-                writer.write_all(b"-")?;
-                if matches!(value, Value::Array(values) if !values.is_empty())
-                    || matches!(value, Value::Object(values) if !values.is_empty())
-                {
-                    writer.write_all(b"\n")?;
-                    write_yaml_value(writer, value, indent + 2)?;
-                } else {
-                    writer.write_all(b" ")?;
-                    write_yaml_value(writer, value, indent + 2)?;
-                }
-            }
-        }
-        Value::Object(values) => {
-            for (index, (key, value)) in values.iter().enumerate() {
-                if index > 0 {
-                    writer.write_all(b"\n")?;
-                }
-                write_indent(writer, indent)?;
-                write_yaml_string(writer, key)?;
-                writer.write_all(b":")?;
-                if matches!(value, Value::Array(values) if !values.is_empty())
-                    || matches!(value, Value::Object(values) if !values.is_empty())
-                {
-                    writer.write_all(b"\n")?;
-                    write_yaml_value(writer, value, indent + 2)?;
-                } else {
-                    writer.write_all(b" ")?;
-                    write_yaml_value(writer, value, indent + 2)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn write_yaml_string(writer: &mut impl Write, value: &str) -> Result<(), OutputError> {
-    let encoded = yaml_serde::to_string(value)?;
-    let encoded = encoded.strip_suffix('\n').unwrap_or(&encoded);
-    if encoded.contains('\n') {
-        serde_json::to_writer(writer, value)?;
-    } else {
-        writer.write_all(encoded.as_bytes())?;
-    }
-    Ok(())
-}
-
-fn write_indent(writer: &mut impl Write, indent: usize) -> Result<(), std::io::Error> {
-    for _ in 0..indent {
-        writer.write_all(b" ")?;
-    }
-    Ok(())
-}
-
-fn escape_non_ascii(encoded: &[u8]) -> Vec<u8> {
-    let text = std::str::from_utf8(encoded).expect("JSON serializer emits UTF-8");
-    let mut escaped = Vec::with_capacity(encoded.len());
-    for character in text.chars() {
-        if character.is_ascii() {
-            escaped.push(character as u8);
-            continue;
-        }
-        let mut units = [0_u16; 2];
-        for unit in character.encode_utf16(&mut units).iter() {
-            escaped.extend_from_slice(format!("\\u{unit:04x}").as_bytes());
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]

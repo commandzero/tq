@@ -121,11 +121,16 @@ Writers SHALL finish style spans before emitting RS, LF, or CR framing bytes and
 - **THEN** no styling-only output is published for that result
 
 ### Requirement: Raw and proxy bytes remain verbatim
-Raw string results under `-r`, `-j`, or `--raw-output0` SHALL bypass styling, even with `-C`. Non-string results that those modes serialize structurally SHALL use the selected format's palette. Proxy-on-error bytes SHALL pass through unchanged with no inserted styling. Query format operators such as `@json` and `@csv` SHALL remain string-producing operations; their contents SHALL NOT be reparsed to assign nested syntax colors.
+Raw string results under `-r`, `-j`, or `--raw-output0` SHALL bypass styling, even with `-C`. Non-string results that those modes serialize structurally SHALL use the shared invocation palette. Their existing compact JSON fallback encoding and raw/joined/NUL separators SHALL remain unchanged, regardless of the native output selector. Proxy-on-error bytes SHALL pass through unchanged with no inserted styling. Query format operators such as `@json` and `@csv` SHALL remain string-producing operations; their contents SHALL NOT be reparsed to assign nested syntax colors.
 
 #### Scenario: Raw formatted string
 - **WHEN** `-r -C` writes the string result of `@json`
 - **THEN** the raw bytes match the same invocation with `-M`, with no tq-generated escapes
+
+#### Scenario: Structured raw fallback
+- **WHEN** a raw, joined, or NUL-separated invocation emits a non-string result with color enabled
+- **THEN** the result retains its existing compact JSON fallback and separator bytes while using the shared palette
+- **AND** surrounding raw string results remain undecorated even if a different native output format is selected
 
 #### Scenario: Proxy between colored results
 - **WHEN** an unparseable source is proxied between accepted colored structured results

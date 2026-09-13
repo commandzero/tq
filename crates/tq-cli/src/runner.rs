@@ -179,8 +179,7 @@ pub fn run(mut command: Command) -> ExitStatus {
         let terminal = options.capability_policy.terminal && io::stdout().is_terminal();
         let no_color = options.capability_policy.environment
             && std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
-        let json_color = options.output_format == OutputFormat::Json;
-        options.color = if json_color && terminal && !no_color {
+        options.color = if terminal && !no_color {
             ColorMode::Always
         } else {
             ColorMode::Never
@@ -2319,6 +2318,7 @@ fn run_transcode_filter<R: Read, W: Write>(
         nesting: options.limits.depth,
     });
     let mut output_bytes = 0_u64;
+    let palette = (options.color == ColorMode::Always).then(|| color_palette(options));
 
     let (execution, documents, last_truthy) = match proof.commitment {
         TranscodeCommitment::DirectSequence | TranscodeCommitment::DirectValues => {
@@ -2332,6 +2332,9 @@ fn run_transcode_filter<R: Read, W: Write>(
                 commitment,
             )
             .with_document_limit(options.limits.results);
+            if let Some(palette) = &palette {
+                consumer = consumer.with_palette(palette.clone());
+            }
             if let Some(flag) = cancellation() {
                 consumer = consumer.with_cancellation(flag);
             }
@@ -2352,6 +2355,9 @@ fn run_transcode_filter<R: Read, W: Write>(
                 commitment,
             )
             .with_document_limit(options.limits.results);
+            if let Some(palette) = &palette {
+                consumer = consumer.with_palette(palette.clone());
+            }
             if let Some(flag) = cancellation() {
                 consumer = consumer.with_cancellation(flag);
             }
@@ -2366,7 +2372,7 @@ fn run_transcode_filter<R: Read, W: Write>(
                 let mut writer =
                     LimitedWriter::new(stdout, &mut output_bytes, options.limits.output_bytes);
                 publication
-                    .publish_single(&mut writer, documents)
+                    .publish_single_colored(&mut writer, documents, palette.as_ref())
                     .map_err(map_publication_error)
             });
             (result, documents, last_truthy)
@@ -5577,6 +5583,7 @@ struct ResultOutput<'a, W> {
     writer: &'a mut W,
     options: &'a RunOptions,
     native: NativeOutputSequence,
+    raw_palette: Option<JsonColorPalette>,
     capture: Option<RunTestCaptureHandle>,
     written: u64,
     emitted: u64,
@@ -5600,42 +5607,47 @@ impl<'a, W: Write> ResultOutput<'a, W> {
         options: &'a RunOptions,
         capture: Option<RunTestCaptureHandle>,
     ) -> Self {
+        let palette = color_palette(options);
         Self {
             writer,
             options,
             native: NativeOutputSequence::new(
                 NativeFormat::from_output(options.output_format)
-                    .select_output(OutputOptions {
-                        format: options.output_format,
-                        strict_conversion: options.strict_conversion,
-                        delimited_limits: tq_formats::DelimitedLimits {
-                            row_bytes: options.limits.line_bytes,
-                            field_bytes: options.limits.token_bytes,
-                            fields: options.limits.fields,
-                        },
-                        pretty_json: options.pretty_json
-                            && matches!(
+                    .select_output(
+                        OutputOptions {
+                            format: options.output_format,
+                            strict_conversion: options.strict_conversion,
+                            delimited_limits: tq_formats::DelimitedLimits {
+                                row_bytes: options.limits.line_bytes,
+                                field_bytes: options.limits.token_bytes,
+                                fields: options.limits.fields,
+                            },
+                            pretty_json: options.pretty_json
+                                && matches!(
+                                    options.output_format,
+                                    OutputFormat::Json | OutputFormat::JsonSequence
+                                ),
+                            json_indent: if matches!(
                                 options.output_format,
                                 OutputFormat::Json | OutputFormat::JsonSequence
-                            ),
-                        json_indent: if matches!(
-                            options.output_format,
-                            OutputFormat::Json | OutputFormat::JsonSequence
-                        ) {
-                            options.json_indent
-                        } else {
-                            tq_formats::JsonIndent::default()
-                        },
-                        ascii_json: options.ascii_output,
-                        color_json: options.color == ColorMode::Always,
-                        color_palette: color_palette(options),
-                        yaml_document_start: false,
-                        toon_framing: options.framing,
-                        json_sequence: options.json_sequence,
-                        toon: options.toon_writer,
-                    })
+                            ) {
+                                options.json_indent
+                            } else {
+                                tq_formats::JsonIndent::default()
+                            },
+                            ascii_json: options.ascii_output,
+                            color_json: false,
+                            color_palette: palette.clone(),
+                            yaml_document_start: false,
+                            toon_framing: options.framing,
+                            json_sequence: options.json_sequence,
+                            toon: options.toon_writer,
+                        }
+                        .with_color(options.color == ColorMode::Always),
+                    )
                     .expect("CLI output selection is validated"),
             ),
+            raw_palette: (options.color == ColorMode::Always).then_some(palette),
             capture,
             written: 0,
             emitted: 0,
@@ -5704,6 +5716,7 @@ impl<'a, W: Write> ResultOutput<'a, W> {
             std::slice::from_ref(value),
             self.options.join_output,
             self.options.raw_output0,
+            self.raw_palette.as_ref(),
         )?;
         if self.options.unbuffered {
             writer.flush()?;
@@ -6654,6 +6667,7 @@ fn write_raw(
     values: &[Value],
     join: bool,
     nul_separator: bool,
+    palette: Option<&JsonColorPalette>,
 ) -> Result<(), RunError> {
     for value in values {
         match value {
@@ -6665,7 +6679,7 @@ fn write_raw(
                 }
                 output.write_all(value.as_bytes())?;
             }
-            _ => serde_json::to_writer(&mut output, value)?,
+            _ => tq_formats::write_raw_json_value(&mut output, value, palette)?,
         }
         if nul_separator {
             output.write_all(b"\0")?;

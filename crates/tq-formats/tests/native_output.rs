@@ -147,6 +147,6 @@ fn selected_output_rejects_incompatible_controls_before_publication() {
                 color_json: true,
                 ..OutputOptions::default()
             })
-            .is_err()
+            .is_ok()
     );
 }

@@ -13,7 +13,10 @@ use std::{
 };
 
 use thiserror::Error;
-use tq_core::Value;
+use tq_core::{
+    Value,
+    presentation::{ColorPalette, ColorRole, write_span},
+};
 
 use crate::{ScalarToken, WriterConfig, replay, writer};
 
@@ -316,6 +319,23 @@ pub struct PublicationBuffer {
     published: bool,
 }
 
+struct PublicationProgress<'a, W> {
+    output: &'a mut W,
+    written: u64,
+}
+
+impl<W: Write> Write for PublicationProgress<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let count = self.output.write(bytes)?;
+        self.written = self.written.saturating_add(count as u64);
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.output.flush()
+    }
+}
+
 impl PublicationBuffer {
     /// Creates an empty atomic publication buffer.
     #[must_use]
@@ -365,35 +385,68 @@ impl PublicationBuffer {
         output: &mut W,
         result_count: u64,
     ) -> Result<(), PublicationError> {
+        self.publish_single_colored(output, result_count, None)
+    }
+
+    /// Publishes only after exactly-one-result validation, with palette-aware
+    /// recovery for a partial decorated sink write.
+    ///
+    /// The prepared bytes are already decorated. The palette is used only to
+    /// decide whether a best-effort terminal reset is appropriate after a
+    /// non-broken-pipe publication failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns cardinality, spool replay, or output failures.
+    pub fn publish_single_colored<W: Write>(
+        &mut self,
+        output: &mut W,
+        result_count: u64,
+        palette: Option<&ColorPalette>,
+    ) -> Result<(), PublicationError> {
         match result_count {
             0 => return Err(crate::CardinalityError::Zero.into()),
             1 => {}
             _ => return Err(crate::CardinalityError::Multiple.into()),
         }
-        self.publish(output)
+        self.publish_colored(output, palette)
     }
 
-    /// Publishes prepared bytes after the caller validates them.
-    pub(crate) fn publish<W: Write>(&mut self, output: &mut W) -> Result<(), PublicationError> {
+    pub(crate) fn publish_colored<W: Write>(
+        &mut self,
+        output: &mut W,
+        palette: Option<&ColorPalette>,
+    ) -> Result<(), PublicationError> {
         if self.published {
             return Err(SpoolError::Decode("publication buffer already committed").into());
         }
-        if let Some(spool) = &mut self.spool {
-            spool.file.flush()?;
-            spool.file.seek(SeekFrom::Start(0))?;
-            let mut copied = 0_u64;
-            let mut chunk = vec![0_u8; 64 * 1024];
-            loop {
-                let read = spool.file.read(&mut chunk)?;
-                if read == 0 {
-                    break;
+        let mut progress = PublicationProgress { output, written: 0 };
+        let result = (|| -> Result<(), PublicationError> {
+            if let Some(spool) = &mut self.spool {
+                spool.file.flush()?;
+                spool.file.seek(SeekFrom::Start(0))?;
+                let mut copied = 0_u64;
+                let mut chunk = vec![0_u8; 64 * 1024];
+                loop {
+                    let read = spool.file.read(&mut chunk)?;
+                    if read == 0 {
+                        break;
+                    }
+                    progress.write_all(&chunk[..read])?;
+                    copied = copied.saturating_add(read as u64);
                 }
-                output.write_all(&chunk[..read])?;
-                copied = copied.saturating_add(read as u64);
+                self.arena.replayed_spool(copied);
+            } else {
+                progress.write_all(&self.memory)?;
             }
-            self.arena.replayed_spool(copied);
-        } else {
-            output.write_all(&self.memory)?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let broken_pipe = matches!(&error, PublicationError::Io(error) if error.kind() == io::ErrorKind::BrokenPipe);
+            if palette.is_some() && progress.written != 0 && !broken_pipe {
+                let _ = progress.output.write_all(b"\x1b[0m");
+            }
+            return Err(error);
         }
         self.published = true;
         Ok(())
@@ -1141,66 +1194,128 @@ impl PreparedArray {
     /// Returns spool decode/read or output failures.
     pub fn write_to<W: Write>(
         &mut self,
-        mut output: W,
+        output: W,
         writer_config: WriterConfig,
     ) -> Result<(), SpoolError> {
+        self.write_to_colored(output, writer_config, None)
+    }
+
+    /// Replays the prepared array with optional semantic ANSI presentation.
+    ///
+    /// Styling is applied only during replay. Structural records, layout
+    /// metadata, and spool accounting remain independent of presentation.
+    ///
+    /// # Errors
+    ///
+    /// Returns spool, cancellation, decoding, or output failures.
+    #[allow(clippy::too_many_lines)]
+    pub fn write_to_colored<W: Write>(
+        &mut self,
+        mut output: W,
+        writer_config: WriterConfig,
+        palette: Option<&ColorPalette>,
+    ) -> Result<(), SpoolError> {
         let layout = self.layout.clone();
-        write!(
-            output,
-            "[{}{}]",
-            self.count,
-            delimiter_suffix(writer_config)
+        write_span(&mut output, palette, ColorRole::Array, b"[")?;
+        write_span(
+            &mut output,
+            palette,
+            ColorRole::Number,
+            self.count.to_string().as_bytes(),
         )?;
+        write_span(
+            &mut output,
+            palette,
+            ColorRole::Array,
+            delimiter_suffix(writer_config).as_bytes(),
+        )?;
+        write_span(&mut output, palette, ColorRole::Array, b"]")?;
         match layout {
-            Layout::Empty => output.write_all(b":")?,
+            Layout::Empty => write_span(&mut output, palette, ColorRole::Array, b":")?,
             Layout::Scalars => {
                 output.write_all(b": ")?;
                 let mut index = 0_usize;
                 self.for_each_record(|record| {
                     if index != 0 {
-                        write!(output, "{}", delimiter_character(writer_config))?;
+                        let mut bytes = [0_u8; 4];
+                        write_span(
+                            &mut output,
+                            palette,
+                            ColorRole::Array,
+                            delimiter_character(writer_config)
+                                .encode_utf8(&mut bytes)
+                                .as_bytes(),
+                        )?;
                     }
                     let value = replay::decode_scalar(record).map_err(SpoolError::Decode)?;
-                    output.write_all(
-                        writer::encode_array_scalar_token(value, writer_config).as_bytes(),
-                    )?;
+                    writer::write_scalar_token_colored(
+                        &mut output,
+                        value,
+                        writer_config,
+                        writer::ScalarContext::Array,
+                        palette,
+                    )
+                    .map_err(|error| match error {
+                        crate::WriterError::Io(error) => SpoolError::Io(error),
+                    })?;
                     index += 1;
                     Ok(())
                 })?;
             }
             Layout::Tabular(fields) => {
-                output.write_all(b"{")?;
+                write_span(&mut output, palette, ColorRole::Object, b"{")?;
                 for (index, field) in fields.iter().enumerate() {
                     if index != 0 {
-                        write!(output, "{}", delimiter_character(writer_config))?;
+                        let mut bytes = [0_u8; 4];
+                        write_span(
+                            &mut output,
+                            palette,
+                            ColorRole::Object,
+                            delimiter_character(writer_config)
+                                .encode_utf8(&mut bytes)
+                                .as_bytes(),
+                        )?;
                     }
-                    output.write_all(writer::render_key(field).as_bytes())?;
+                    writer::write_key(&mut output, field, palette).map_err(
+                        |error| match error {
+                            crate::WriterError::Io(error) => SpoolError::Io(error),
+                        },
+                    )?;
                 }
-                output.write_all(b"}:")?;
+                write_span(&mut output, palette, ColorRole::Object, b"}")?;
+                write_span(&mut output, palette, ColorRole::Object, b":")?;
                 self.for_each_value(|value| {
                     let Value::Object(object) = value else {
                         unreachable!("layout tracked during preparation")
                     };
                     output.write_all(b"\n")?;
                     output.write_all(" ".repeat(writer_config.indent_size).as_bytes())?;
-                    output.write_all(
-                        writer::encode_tabular_row(object, &fields, writer_config).as_bytes(),
-                    )?;
+                    writer::write_tabular_row_colored(
+                        &mut output,
+                        object,
+                        &fields,
+                        writer_config,
+                        palette,
+                    )
+                    .map_err(|error| match error {
+                        crate::WriterError::Io(error) => SpoolError::Io(error),
+                    })?;
                     Ok(())
                 })?;
             }
             Layout::Expanded => {
-                output.write_all(b":")?;
+                write_span(&mut output, palette, ColorRole::Array, b":")?;
                 self.for_each_value(|value| {
                     output.write_all(b"\n")?;
-                    let item = writer::encode_list_item(value, writer_config);
-                    for (line_index, line) in item.lines().enumerate() {
-                        if line_index != 0 {
-                            output.write_all(b"\n")?;
-                        }
-                        output.write_all(" ".repeat(writer_config.indent_size).as_bytes())?;
-                        output.write_all(line.as_bytes())?;
-                    }
+                    let mut indented = LineIndentWriter {
+                        output: &mut output,
+                        indentation: writer_config.indent_size,
+                        line_start: true,
+                    };
+                    writer::write_list_item_colored(&mut indented, value, writer_config, palette)
+                        .map_err(|error| match error {
+                        crate::WriterError::Io(error) => SpoolError::Io(error),
+                    })?;
                     Ok(())
                 })?;
             }
@@ -1284,6 +1399,40 @@ impl PreparedArray {
 
     fn check_cancelled(&self) -> Result<(), SpoolError> {
         check_cancelled(self.cancellation.as_deref())
+    }
+}
+
+struct LineIndentWriter<'a, W> {
+    output: &'a mut W,
+    indentation: usize,
+    line_start: bool,
+}
+
+impl<W: Write> Write for LineIndentWriter<'_, W> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let mut start = 0;
+        while start < buffer.len() {
+            if self.line_start {
+                for _ in 0..self.indentation {
+                    self.output.write_all(b" ")?;
+                }
+                self.line_start = false;
+            }
+            if let Some(relative) = buffer[start..].iter().position(|byte| *byte == b'\n') {
+                let end = start + relative + 1;
+                self.output.write_all(&buffer[start..end])?;
+                self.line_start = true;
+                start = end;
+            } else {
+                self.output.write_all(&buffer[start..])?;
+                break;
+            }
+        }
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.output.flush()
     }
 }
 
@@ -1594,20 +1743,39 @@ fn delimiter_character(config: WriterConfig) -> char {
 #[cfg(test)]
 mod tests {
     use std::{
-        io::Write as _,
+        io::{self, Write as _},
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
         },
     };
 
-    use tq_core::Value;
+    use tq_core::{Value, presentation::ColorPalette};
 
     use super::{
         ArrayPreparationConfig, PreparationArena, PreparationLimits, PreparedArray, PreparedObject,
         PublicationBuffer, PublicationError, SpoolError,
     };
     use crate::WriterConfig;
+
+    fn strip_sgr(bytes: &[u8]) -> Vec<u8> {
+        let mut output = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index..].starts_with(b"\x1b[") {
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'm' {
+                    index += 1;
+                }
+                assert!(index < bytes.len(), "unterminated SGR");
+                index += 1;
+            } else {
+                output.push(bytes[index]);
+                index += 1;
+            }
+        }
+        output
+    }
 
     #[test]
     fn threshold_transition_preserves_tabular_schema_and_cleans_up() {
@@ -1644,6 +1812,60 @@ mod tests {
         );
         drop(prepared);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn colored_prepared_replay_preserves_spooled_layouts() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = ArrayPreparationConfig {
+            memory_threshold_bytes: 1,
+            maximum_spool_bytes: 1024 * 1024,
+            spool_directory: directory.path().to_owned(),
+            allow_spool: true,
+        };
+        let palette = ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17");
+
+        let mut table = PreparedArray::new(config.clone());
+        table
+            .push(&serde_json::from_str::<Value>(r#"{"name":"a,b","count":1}"#).unwrap())
+            .unwrap();
+        table
+            .push(&serde_json::from_str::<Value>(r#"{"name":"c,d","count":2}"#).unwrap())
+            .unwrap();
+        let mut plain_table = Vec::new();
+        let mut colored_table = Vec::new();
+        table
+            .write_to(&mut plain_table, WriterConfig::default())
+            .unwrap();
+        table
+            .write_to_colored(&mut colored_table, WriterConfig::default(), Some(&palette))
+            .unwrap();
+        assert!(table.spooled());
+        assert_eq!(strip_sgr(&colored_table), plain_table);
+        assert!(
+            colored_table
+                .windows(b"\x1b[16m\"\x1b[0m".len())
+                .any(|window| window == b"\x1b[16m\"\x1b[0m")
+        );
+
+        let mut expanded = PreparedArray::new(config);
+        expanded
+            .push(&serde_json::from_str::<Value>(r#"{"name":"a,b"}"#).unwrap())
+            .unwrap();
+        expanded.push(&Value::Bool(true)).unwrap();
+        let mut plain_expanded = Vec::new();
+        let mut colored_expanded = Vec::new();
+        expanded
+            .write_to(&mut plain_expanded, WriterConfig::default())
+            .unwrap();
+        expanded
+            .write_to_colored(
+                &mut colored_expanded,
+                WriterConfig::default(),
+                Some(&palette),
+            )
+            .unwrap();
+        assert_eq!(strip_sgr(&colored_expanded), plain_expanded);
     }
 
     #[test]
@@ -1862,5 +2084,86 @@ mod tests {
         assert_eq!(arena.observations().spool_bytes_replayed, 6);
         drop(publication);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn colored_publication_attempts_reset_after_partial_non_broken_pipe() {
+        let mut publication = PublicationBuffer::new(
+            ArrayPreparationConfig::default(),
+            PreparationArena::new(PreparationLimits::default()),
+        );
+        publication.write_all(b"\x1b[31mvalue\x1b[0m").unwrap();
+        let palette = ColorPalette::default();
+        let mut sink = FailAfterPartial {
+            bytes: Vec::new(),
+            failed: false,
+        };
+
+        assert!(matches!(
+            publication.publish_single_colored(&mut sink, 1, Some(&palette)),
+            Err(PublicationError::Io(_))
+        ));
+        assert!(sink.bytes.ends_with(b"\x1b[0m"));
+    }
+
+    struct FailAfterPartial {
+        bytes: Vec<u8>,
+        failed: bool,
+    }
+
+    impl io::Write for FailAfterPartial {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if !self.failed {
+                if self.bytes.is_empty() {
+                    let count = bytes.len().min(3);
+                    self.bytes.extend_from_slice(&bytes[..count]);
+                    return Ok(count);
+                }
+                self.failed = true;
+                return Err(io::Error::other("injected partial failure"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn rejected_colored_publication_does_not_emit_a_styling_only_reset() {
+        struct RejectFirst {
+            calls: usize,
+        }
+        impl io::Write for RejectFirst {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.calls += 1;
+                if self.calls == 1 {
+                    Err(io::Error::other("rejected before publication"))
+                } else {
+                    Ok(bytes.len())
+                }
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        for memory_threshold_bytes in [0, 1024] {
+            let mut publication = PublicationBuffer::new(
+                ArrayPreparationConfig {
+                    memory_threshold_bytes,
+                    ..ArrayPreparationConfig::default()
+                },
+                PreparationArena::new(PreparationLimits::default()),
+            );
+            publication.write_all(b"\x1b[31mvalue\x1b[0m").unwrap();
+            let mut sink = RejectFirst { calls: 0 };
+            let error = publication
+                .publish_single_colored(&mut sink, 1, Some(&ColorPalette::default()))
+                .unwrap_err();
+            assert!(error.to_string().contains("rejected before publication"));
+            assert_eq!(sink.calls, 1, "no reset when no payload was published");
+        }
     }
 }

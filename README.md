@@ -61,6 +61,33 @@ Use `-o toon-seq` to request TOON framing without changing input selection.
 `--unframed` requires exactly one standalone document. `-r` writes raw strings
 and `-j` joins raw output.
 
+### Terminal colors
+
+All output formats use color automatically on a terminal and stay plain when
+redirected. `-C` forces color, `-M` disables it, and the last flag wins.
+`NO_COLOR` disables automatic color; `-C` overrides it. Raw strings and
+proxy-on-error bytes are never decorated. Non-string results in raw mode retain
+their compact JSON fallback and use the shared palette.
+
+The default uses cyan keys, green strings, magenta numbers, light-blue booleans,
+normal nulls, and light-black delimiters, separators, and enclosing quotes.
+JSON uses the same palette. Customize any output format with `JQ_COLORS`:
+
+```sh
+export JQ_COLORS='0;39:0;94:0;94:0;35:0;32:0;90:0;90:0;36'
+```
+
+Slots are null, false, true, numbers, strings, arrays, objects, and keys.
+The seven-slot form uses the number style for keys; invalid values fall back
+to the complete default. Unlike jq, enclosing quotes share structural colors:
+the array style inside arrays and the object style for object keys/values and
+standalone strings. Escaped quotes within content keep the string/key style.
+
+Colors are presentation, not a data-format compatibility promise. Forced-color
+streams contain ANSI escapes; use `-M` when a consumer needs plain format bytes.
+See the [output color measurements](docs/output-colors-performance.md) for
+the added time, memory, and output bytes on document and transcode paths.
+
 ## Streaming and memory
 
 `--stream` emits jq-compatible `[path,value]` records and container-end

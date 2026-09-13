@@ -3,7 +3,7 @@
 use std::{fs, io::Cursor, path::PathBuf};
 
 use serde_json::Value as JsonValue;
-use tq_core::{Number, SourceId, Span, Value};
+use tq_core::{Number, SourceId, Span, Value, presentation::ColorPalette};
 use tq_toon::{
     ArrayPreparationConfig, DecoderConfig, Delimiter, DuplicateKeyPolicy, Event, EventConsumer,
     KeyFolding, PathExpansion, PreparationArena, PreparationLimits, TranscodeCommitment,
@@ -148,4 +148,85 @@ fn lightweight_transcode_matches_dom_numeric_projection() {
         ),
         "0"
     );
+}
+
+fn strip_sgr(bytes: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"\x1b[") {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'm' {
+                index += 1;
+            }
+            assert!(index < bytes.len(), "unterminated SGR");
+            index += 1;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    output
+}
+
+fn transcode_object(commitment: TranscodeCommitment, palette: Option<ColorPalette>) -> Vec<u8> {
+    let span = Span::new(SourceId::new(1), 0, 1);
+    let mut transcode = TranscodeConsumer::new(
+        Vec::new(),
+        WriterConfig::default(),
+        ArrayPreparationConfig::default(),
+        PreparationArena::new(PreparationLimits::default()),
+        DuplicateKeyPolicy::Reject,
+        commitment,
+    );
+    if let Some(palette) = palette {
+        transcode = transcode.with_palette(palette);
+    }
+    transcode.consume(Event::DocumentStart { span }).unwrap();
+    transcode.consume(Event::ObjectStart { span }).unwrap();
+    transcode
+        .consume_text_key(span, "arr".to_owned(), false)
+        .unwrap();
+    transcode
+        .consume(Event::ArrayStart {
+            span,
+            declared_count: Some(1),
+        })
+        .unwrap();
+    transcode
+        .consume_text_string(span, "a,b".to_owned())
+        .unwrap();
+    transcode
+        .consume(Event::ArrayEnd {
+            span,
+            observed_count: 1,
+        })
+        .unwrap();
+    transcode
+        .consume_text_key(span, "count".to_owned(), false)
+        .unwrap();
+    transcode
+        .consume_number_literal(span, "2".to_owned())
+        .unwrap();
+    transcode.consume(Event::ObjectEnd { span }).unwrap();
+    transcode.consume(Event::DocumentEnd { span }).unwrap();
+    transcode.into_inner()
+}
+
+#[test]
+fn colored_transcode_direct_and_atomic_paths_strip_to_plain_bytes() {
+    let palette = ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17");
+    for commitment in [
+        TranscodeCommitment::DirectSequence,
+        TranscodeCommitment::DirectValues,
+        TranscodeCommitment::AtomicUnframed,
+    ] {
+        let plain = transcode_object(commitment, None);
+        let colored = transcode_object(commitment, Some(palette.clone()));
+        assert_eq!(strip_sgr(&colored), plain, "{commitment:?}");
+        if commitment != TranscodeCommitment::AtomicUnframed {
+            assert!(colored.ends_with(b"\n"), "{commitment:?}");
+            assert!(colored.ends_with(b"\x1b[0m\n"), "{commitment:?}");
+        }
+    }
 }

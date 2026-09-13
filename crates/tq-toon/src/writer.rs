@@ -1,12 +1,12 @@
 //! Canonical, ordered TOON v3 writer over tq's exact value model.
 
-use std::{
-    borrow::Cow,
-    io::{self, Write},
-};
+use std::io::{self, Write};
 
 use thiserror::Error;
-use tq_core::{Object, Value};
+use tq_core::{
+    Object, Value,
+    presentation::{ColorPalette, ColorRole, write_span},
+};
 
 use crate::ScalarToken;
 
@@ -107,22 +107,45 @@ pub fn write_value<W: Write>(
     value: &Value,
     config: WriterConfig,
 ) -> Result<(), WriterError> {
-    Encoder::new(&mut writer, config).encode(value)
+    write_value_colored(&mut writer, value, config, None)
 }
 
-struct Encoder<W> {
+/// Writes one standalone value with optional semantic ANSI presentation.
+///
+/// The palette is a presentation-only sink selection. None is the exact
+/// plain writer path.
+///
+/// # Errors
+///
+/// Returns the output sink's I/O error.
+pub fn write_value_colored<W: Write + ?Sized>(
+    writer: &mut W,
+    value: &Value,
+    config: WriterConfig,
+    palette: Option<&ColorPalette>,
+) -> Result<(), WriterError> {
+    Encoder::new(writer, config, palette).encode(value)
+}
+
+struct Encoder<'a, W> {
     config: WriterConfig,
     writer: W,
+    palette: Option<&'a ColorPalette>,
     wrote_line: bool,
 }
 
-impl<W: Write> Encoder<W> {
-    fn new(writer: W, config: WriterConfig) -> Self {
+impl<'a, W: Write> Encoder<'a, W> {
+    fn new(writer: W, config: WriterConfig, palette: Option<&'a ColorPalette>) -> Self {
         Self {
             config,
             writer,
+            palette,
             wrote_line: false,
         }
+    }
+
+    fn palette(&self) -> Option<&'a ColorPalette> {
+        self.palette
     }
 
     fn encode(&mut self, value: &Value) -> Result<(), WriterError> {
@@ -164,29 +187,29 @@ impl<W: Write> Encoder<W> {
             (key.to_owned(), value)
         };
         let folded_here = folded_key != key;
-        let key = Self::key(&folded_key);
         let logical_depth = depth + usize::from(prefix.is_some());
         match folded_value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
                 self.start_line(depth, prefix)?;
-                self.writer.write_all(key.as_bytes())?;
-                self.writer.write_all(b": ")?;
+                self.write_key(&folded_key)?;
+                self.write_structure(ColorRole::Object, b":")?;
+                self.writer.write_all(b" ")?;
                 self.write_scalar(folded_value, ScalarContext::Object)?;
             }
             Value::Object(object) => {
                 self.start_line(depth, prefix)?;
-                self.writer.write_all(key.as_bytes())?;
-                self.writer.write_all(b":")?;
+                self.write_key(&folded_key)?;
+                self.write_structure(ColorRole::Object, b":")?;
                 self.object(object, logical_depth + 1, allow_folding && !folded_here)?;
             }
             Value::Array(values) => {
-                self.array(Some(&key), values, depth, prefix, logical_depth + 1)?;
+                self.array(Some(&folded_key), values, depth, prefix, logical_depth + 1)?;
             }
         }
         Ok(())
     }
 
-    fn folded<'a>(&self, first: &str, value: &'a Value) -> (String, &'a Value) {
+    fn folded<'v>(&self, first: &str, value: &'v Value) -> (String, &'v Value) {
         if self.config.key_folding != KeyFolding::Safe
             || self.config.flatten_depth < 2
             || !identifier_segment(first)
@@ -227,22 +250,23 @@ impl<W: Write> Encoder<W> {
     ) -> Result<(), WriterError> {
         self.start_line(depth, prefix)?;
         if let Some(key) = key {
-            self.writer.write_all(key.as_bytes())?;
+            self.write_key(key)?;
         }
-        write!(
-            self.writer,
-            "[{}{}]",
-            values.len(),
-            self.config.delimiter.header_suffix()
+        self.write_structure(ColorRole::Array, b"[")?;
+        self.write_span(ColorRole::Number, values.len().to_string().as_bytes())?;
+        self.write_structure(
+            ColorRole::Array,
+            self.config.delimiter.header_suffix().as_bytes(),
         )?;
+        self.write_structure(ColorRole::Array, b"]")?;
 
         if values.iter().all(is_scalar) {
-            self.writer.write_all(b":")?;
+            self.write_structure(ColorRole::Array, b":")?;
             if !values.is_empty() {
                 self.writer.write_all(b" ")?;
                 for (index, value) in values.iter().enumerate() {
                     if index != 0 {
-                        write!(self.writer, "{}", self.config.delimiter.character())?;
+                        self.write_delimiter(ColorRole::Array)?;
                     }
                     self.write_scalar(value, ScalarContext::Array)?;
                 }
@@ -251,14 +275,15 @@ impl<W: Write> Encoder<W> {
         }
 
         if let Some(fields) = tabular_fields(values) {
-            self.writer.write_all(b"{")?;
+            self.write_structure(ColorRole::Object, b"{")?;
             for (index, field) in fields.iter().enumerate() {
                 if index != 0 {
-                    write!(self.writer, "{}", self.config.delimiter.character())?;
+                    self.write_delimiter(ColorRole::Object)?;
                 }
-                self.writer.write_all(Self::key(field).as_bytes())?;
+                self.write_key(field)?;
             }
-            self.writer.write_all(b"}:")?;
+            self.write_structure(ColorRole::Object, b"}")?;
+            self.write_structure(ColorRole::Object, b":")?;
             for value in values {
                 let Value::Object(object) = value else {
                     unreachable!("tabular eligibility checked")
@@ -266,20 +291,20 @@ impl<W: Write> Encoder<W> {
                 self.start_line(content_depth, None)?;
                 for (index, field) in fields.iter().enumerate() {
                     if index != 0 {
-                        write!(self.writer, "{}", self.config.delimiter.character())?;
+                        self.write_delimiter(ColorRole::Object)?;
                     }
-                    self.write_scalar(&object[*field], ScalarContext::Array)?;
+                    self.write_scalar(&object[*field], ScalarContext::Object)?;
                 }
             }
             return Ok(());
         }
 
-        self.writer.write_all(b":")?;
+        self.write_structure(ColorRole::Array, b":")?;
         for value in values {
             match value {
                 Value::Object(object) if object.is_empty() => {
                     self.start_line(content_depth, None)?;
-                    self.writer.write_all(b"-")?;
+                    self.write_structure(ColorRole::Array, b"-")?;
                 }
                 Value::Object(object) => {
                     let mut members = object.iter();
@@ -315,39 +340,71 @@ impl<W: Write> Encoder<W> {
             spaces -= count;
         }
         if let Some(prefix) = prefix {
-            self.writer.write_all(prefix.as_bytes())?;
+            if matches!(prefix, "-" | "- ") {
+                self.write_structure(ColorRole::Array, b"-")?;
+                if prefix == "- " {
+                    self.writer.write_all(b" ")?;
+                }
+            } else {
+                self.writer.write_all(prefix.as_bytes())?;
+            }
         }
         Ok(())
     }
 
-    fn key(key: &str) -> String {
-        if safe_key(key) {
-            key.to_owned()
-        } else {
-            quote(key)
-        }
-    }
-
-    fn scalar(&self, value: &Value, context: ScalarContext) -> String {
+    fn write_scalar(&mut self, value: &Value, context: ScalarContext) -> Result<(), WriterError> {
         match value {
-            Value::Null => "null".to_owned(),
-            Value::Bool(value) => value.to_string(),
-            Value::Number(value) => value.canonical_numeric(),
+            Value::Null => self.write_span(ColorRole::Null, b"null"),
+            Value::Bool(false) => self.write_span(ColorRole::False, b"false"),
+            Value::Bool(true) => self.write_span(ColorRole::True, b"true"),
+            Value::Number(value) => {
+                let rendered = value.canonical_numeric();
+                self.write_span(ColorRole::Number, rendered.as_bytes())
+            }
             Value::String(value) => {
                 if safe_string(value, self.config.delimiter, context) {
-                    value.to_string()
+                    self.write_span(ColorRole::String, value.as_bytes())
                 } else {
-                    quote(value)
+                    let palette = self.palette();
+                    write_quoted(
+                        &mut self.writer,
+                        value,
+                        structural_role(context),
+                        ColorRole::String,
+                        palette,
+                    )?;
+                    Ok(())
                 }
             }
             Value::Array(_) | Value::Object(_) => unreachable!("scalar context"),
         }
     }
 
-    fn write_scalar(&mut self, value: &Value, context: ScalarContext) -> Result<(), WriterError> {
-        self.writer
-            .write_all(self.scalar(value, context).as_bytes())?;
+    fn write_key(&mut self, key: &str) -> Result<(), WriterError> {
+        let palette = self.palette();
+        write_key(&mut self.writer, key, palette)
+    }
+
+    fn write_structure(&mut self, role: ColorRole, bytes: &[u8]) -> Result<(), WriterError> {
+        self.write_span(role, bytes)
+    }
+
+    fn write_span(&mut self, role: ColorRole, bytes: &[u8]) -> Result<(), WriterError> {
+        let palette = self.palette();
+        write_span(&mut self.writer, palette, role, bytes)?;
         Ok(())
+    }
+
+    fn write_delimiter(&mut self, role: ColorRole) -> Result<(), WriterError> {
+        let mut bytes = [0_u8; 4];
+        self.write_structure(
+            role,
+            self.config
+                .delimiter
+                .character()
+                .encode_utf8(&mut bytes)
+                .as_bytes(),
+        )
     }
 }
 
@@ -358,33 +415,83 @@ pub(crate) enum ScalarContext {
     Array,
 }
 
-pub(crate) fn render_scalar_token(
-    value: ScalarToken<'_>,
-    config: WriterConfig,
-    context: ScalarContext,
-) -> Cow<'_, str> {
-    match value {
-        ScalarToken::Null => Cow::Borrowed("null"),
-        ScalarToken::Bool(false) => Cow::Borrowed("false"),
-        ScalarToken::Bool(true) => Cow::Borrowed("true"),
-        ScalarToken::Number(value) => Cow::Borrowed(value),
-        ScalarToken::String(value) => {
-            if safe_string(value, config.delimiter, context) {
-                Cow::Borrowed(value)
-            } else {
-                Cow::Owned(quote(value))
-            }
-        }
+fn structural_role(context: ScalarContext) -> ColorRole {
+    match context {
+        ScalarContext::Array => ColorRole::Array,
+        ScalarContext::Root | ScalarContext::Object => ColorRole::Object,
     }
 }
 
-pub(crate) fn write_scalar_token(
-    mut output: impl Write,
+fn write_quoted<W: Write + ?Sized>(
+    writer: &mut W,
+    value: &str,
+    quote_role: ColorRole,
+    content_role: ColorRole,
+    palette: Option<&ColorPalette>,
+) -> io::Result<()> {
+    write_span(writer, palette, quote_role, b"\"")?;
+    let mut chunk = Vec::with_capacity(4096);
+    for character in value.chars() {
+        let mut encoded = [0_u8; 4];
+        let escaped = match character {
+            '"' => b"\\\"",
+            '\\' => b"\\\\",
+            '\n' => b"\\n",
+            '\r' => b"\\r",
+            '\t' => b"\\t",
+            _ => character.encode_utf8(&mut encoded).as_bytes(),
+        };
+        if chunk.len().saturating_add(escaped.len()) > 4096 {
+            write_span(writer, palette, content_role, &chunk)?;
+            chunk.clear();
+        }
+        chunk.extend_from_slice(escaped);
+    }
+    write_span(writer, palette, content_role, &chunk)?;
+    write_span(writer, palette, quote_role, b"\"")
+}
+
+pub(crate) fn write_key<W: Write + ?Sized>(
+    writer: &mut W,
+    key: &str,
+    palette: Option<&ColorPalette>,
+) -> Result<(), WriterError> {
+    if safe_key(key) {
+        write_span(writer, palette, ColorRole::Key, key.as_bytes())?;
+    } else {
+        write_quoted(writer, key, ColorRole::Object, ColorRole::Key, palette)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn write_scalar_token_colored(
+    output: &mut (impl Write + ?Sized),
     value: ScalarToken<'_>,
     config: WriterConfig,
     context: ScalarContext,
+    palette: Option<&ColorPalette>,
 ) -> Result<(), WriterError> {
-    output.write_all(render_scalar_token(value, config, context).as_bytes())?;
+    match value {
+        ScalarToken::Null => write_span(output, palette, ColorRole::Null, b"null")?,
+        ScalarToken::Bool(false) => write_span(output, palette, ColorRole::False, b"false")?,
+        ScalarToken::Bool(true) => write_span(output, palette, ColorRole::True, b"true")?,
+        ScalarToken::Number(value) => {
+            write_span(output, palette, ColorRole::Number, value.as_bytes())?;
+        }
+        ScalarToken::String(value) => {
+            if safe_string(value, config.delimiter, context) {
+                write_span(output, palette, ColorRole::String, value.as_bytes())?;
+            } else {
+                write_quoted(
+                    output,
+                    value,
+                    structural_role(context),
+                    ColorRole::String,
+                    palette,
+                )?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -446,23 +553,6 @@ fn looks_like_number(value: &str) -> bool {
         .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-fn quote(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 2);
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            _ => output.push(character),
-        }
-    }
-    output.push('"');
-    output
-}
-
 fn identifier_segment(value: &str) -> bool {
     let mut characters = value.chars();
     characters
@@ -471,76 +561,85 @@ fn identifier_segment(value: &str) -> bool {
         && characters.all(|character| character.is_alphanumeric() || character == '_')
 }
 
-pub(crate) fn encode_array_scalar_token(
-    value: ScalarToken<'_>,
-    config: WriterConfig,
-) -> Cow<'_, str> {
-    render_scalar_token(value, config, ScalarContext::Array)
-}
-
-pub(crate) fn encode_tabular_row(
+pub(crate) fn write_tabular_row_colored(
+    mut output: impl Write,
     object: &Object,
     fields: &[std::sync::Arc<str>],
     config: WriterConfig,
-) -> String {
-    let encoder = Encoder::new(io::sink(), config);
-    let delimiter = config.delimiter.character().to_string();
-    fields
-        .iter()
-        .map(|field| encoder.scalar(&object[field], ScalarContext::Array))
-        .collect::<Vec<_>>()
-        .join(&delimiter)
+    palette: Option<&ColorPalette>,
+) -> Result<(), WriterError> {
+    for (index, field) in fields.iter().enumerate() {
+        if index != 0 {
+            let mut bytes = [0_u8; 4];
+            write_span(
+                &mut output,
+                palette,
+                ColorRole::Object,
+                config
+                    .delimiter
+                    .character()
+                    .encode_utf8(&mut bytes)
+                    .as_bytes(),
+            )?;
+        }
+        let mut encoder = Encoder::new(&mut output, config, palette);
+        encoder.write_scalar(&object[field], ScalarContext::Object)?;
+    }
+    Ok(())
 }
 
-pub(crate) fn encode_list_item(value: &Value, config: WriterConfig) -> String {
-    let mut output = Vec::new();
-    {
-        let mut encoder = Encoder::new(&mut output, config);
-        match value {
-            Value::Object(object) if object.is_empty() => {
-                encoder
-                    .start_line(0, Some("-"))
-                    .expect("writing TOON to memory cannot fail");
+pub(crate) fn write_list_item_colored(
+    output: &mut (impl Write + ?Sized),
+    value: &Value,
+    config: WriterConfig,
+    palette: Option<&ColorPalette>,
+) -> Result<(), WriterError> {
+    let mut encoder = Encoder::new(output, config, palette);
+    match value {
+        Value::Object(object) if object.is_empty() => encoder.start_line(0, Some("-")),
+        Value::Object(object) => {
+            let mut members = object.iter();
+            let (first, value) = members.next().expect("non-empty object");
+            let allow_folding = encoder.fold_allowed(object, first, value);
+            encoder.member(first, value, 0, Some("- "), allow_folding)?;
+            for (key, value) in members {
+                let allow_folding = encoder.fold_allowed(object, key, value);
+                encoder.member(key, value, 1, None, allow_folding)?;
             }
-            Value::Object(object) => {
-                let mut members = object.iter();
-                let (first, value) = members.next().expect("non-empty object");
-                let allow_folding = encoder.fold_allowed(object, first, value);
-                encoder
-                    .member(first, value, 0, Some("- "), allow_folding)
-                    .expect("writing TOON to memory cannot fail");
-                for (key, value) in members {
-                    let allow_folding = encoder.fold_allowed(object, key, value);
-                    encoder
-                        .member(key, value, 1, None, allow_folding)
-                        .expect("writing TOON to memory cannot fail");
-                }
-            }
-            Value::Array(values) => encoder
-                .array(None, values, 0, Some("- "), 1)
-                .expect("writing TOON to memory cannot fail"),
-            _ => {
-                encoder
-                    .start_line(0, Some("- "))
-                    .expect("writing TOON to memory cannot fail");
-                encoder
-                    .write_scalar(value, ScalarContext::Array)
-                    .expect("writing TOON to memory cannot fail");
-            }
+            Ok(())
+        }
+        Value::Array(values) => encoder.array(None, values, 0, Some("- "), 1),
+        _ => {
+            encoder.start_line(0, Some("- "))?;
+            encoder.write_scalar(value, ScalarContext::Array)
         }
     }
-    String::from_utf8(output).expect("TOON output is UTF-8")
-}
-
-pub(crate) fn render_key(key: &str) -> String {
-    Encoder::<io::Sink>::key(key)
 }
 
 #[cfg(test)]
 mod tests {
-    use tq_core::Value;
+    use tq_core::{Value, presentation::ColorPalette};
 
-    use super::{Delimiter, WriterConfig, encode};
+    use super::{Delimiter, WriterConfig, encode, write_value_colored};
+
+    fn strip_sgr(bytes: &[u8]) -> Vec<u8> {
+        let mut output = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index..].starts_with(b"\x1b[") {
+                index += 2;
+                while index < bytes.len() && bytes[index] != b'm' {
+                    index += 1;
+                }
+                assert!(index < bytes.len(), "unterminated SGR");
+                index += 1;
+            } else {
+                output.push(bytes[index]);
+                index += 1;
+            }
+        }
+        output
+    }
 
     #[test]
     fn canonical_document_has_order_tabular_layout_and_no_newline() {
@@ -565,5 +664,94 @@ mod tests {
             ..WriterConfig::default()
         };
         assert_eq!(encode(&value, config), "v[2|]: a,b|\"c|d\"");
+    }
+
+    #[test]
+    fn colored_document_preserves_bytes_and_structural_quote_context() {
+        let value = Value::from_json(
+            serde_json::from_str(r#"{"arr":["a,b"],"quoted key":"x:y"}"#).unwrap(),
+        )
+        .unwrap();
+        let palette = ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17");
+        let mut colored = Vec::new();
+        write_value_colored(
+            &mut colored,
+            &value,
+            WriterConfig::default(),
+            Some(&palette),
+        )
+        .unwrap();
+
+        assert_eq!(
+            strip_sgr(&colored),
+            encode(&value, WriterConfig::default()).as_bytes()
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[17marr".len())
+                .any(|window| window == b"\x1b[17marr")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[15m[".len())
+                .any(|window| window == b"\x1b[15m[")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[13m1".len())
+                .any(|window| window == b"\x1b[13m1")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[15m\"\x1b[0m".len())
+                .any(|window| window == b"\x1b[15m\"\x1b[0m")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[16m\"\x1b[0m".len())
+                .any(|window| window == b"\x1b[16m\"\x1b[0m")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[14mx:y".len())
+                .any(|window| window == b"\x1b[14mx:y")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[17mquoted".len())
+                .any(|window| window == b"\x1b[17mquoted")
+        );
+    }
+
+    #[test]
+    fn colored_table_uses_object_context_for_field_values() {
+        let value = Value::from_json(
+            serde_json::from_str(r#"{"rows":[{"name":"a,b","count":1}]}"#).unwrap(),
+        )
+        .unwrap();
+        let palette = ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17");
+        let mut colored = Vec::new();
+        write_value_colored(
+            &mut colored,
+            &value,
+            WriterConfig::default(),
+            Some(&palette),
+        )
+        .unwrap();
+
+        assert_eq!(
+            strip_sgr(&colored),
+            encode(&value, WriterConfig::default()).as_bytes()
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[16m\"\x1b[0m".len())
+                .any(|window| window == b"\x1b[16m\"\x1b[0m")
+        );
+        assert!(
+            colored
+                .windows(b"\x1b[14ma,b".len())
+                .any(|window| window == b"\x1b[14ma,b")
+        );
     }
 }

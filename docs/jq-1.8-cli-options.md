@@ -23,7 +23,7 @@ otherwise.
 | `-j`, `--join-output` | supported | Raw output without separators. |
 | `-a`, `--ascii-output` | adapted | Escape non-ASCII JSON output; requires JSON output. |
 | `-S`, `--sort-keys` | supported | Recursively sort object keys before any structured encoding. |
-| `-C`, `--color-output` | adapted | Force ANSI colors only with JSON output; it does not switch TOON output to JSON, and `-C` without a JSON selector is rejected. |
+| `-C`, `--color-output` | adapted | Force the shared ANSI palette for any output format, honoring `JQ_COLORS`; enclosing quotes use structural styles. |
 | `-M`, `--monochrome-output` | supported | Disable ANSI output, including environment defaults. |
 | `--tab`, `--indent N` | adapted | Select JSON indentation; spaces also configure TOON indentation. YAML flow output is fixed. |
 | `--unbuffered` | supported | Flush after every complete output value/frame. |
@@ -60,10 +60,14 @@ new selectors, resource controls, and deferred formats.
 
 Library callers can disable environment, terminal, or filesystem access through
 `CapabilityPolicy`. The process CLI permits those integrations. Injectable test
-I/O never uses ambient color. The last `-C`/`-M` flag wins. `NO_COLOR` disables
-automatic color, while explicit `-C` overrides it. `JQ_COLORS` configures JSON
-styles, including seven-entry palettes that reuse the number style for keys. The per-source
-byte limit applies to every filter, input, and
+I/O never uses automatic terminal color. The last explicit `-C`/`-M` wins.
+`NO_COLOR` disables automatic color; `-C` overrides it. `JQ_COLORS` accepts
+seven/eight SGR entries for every output format, resolved once when environment
+access is permitted. Seven entries use the number style for keys. Invalid values
+fall back to tq's default, whose booleans are light blue and structure light black.
+Quotes follow their enclosing container's style, with the object entry for root
+strings. See [color presentation](compatibility.md#color-presentation).
+The per-source byte limit applies to every filter, input, and
 argument file. Diagnostics name the path but omit file contents and argument
 values.
 

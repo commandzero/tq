@@ -9,13 +9,13 @@ use std::{
 };
 
 use thiserror::Error;
-use tq_core::{Number, Object, Value};
+use tq_core::{Number, Object, Value, presentation::ColorPalette};
 
 use crate::{
     ArrayPreparationConfig, DuplicateKeyPolicy, Event, EventConsumer, PreparationArena,
     PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PreparedObject,
-    Scalar, ScalarToken, SpoolError, WriterConfig, WriterError, write_value,
-    writer::{self, ScalarContext, render_key},
+    Scalar, ScalarToken, SpoolError, WriterConfig, WriterError, write_value_colored,
+    writer::{self, ScalarContext},
 };
 
 /// Output commitment selected before structural decoding.
@@ -71,6 +71,7 @@ pub struct TranscodeConsumer<W> {
     last_truthy: Option<bool>,
     maximum_documents: u64,
     cancellation: Option<Arc<AtomicBool>>,
+    palette: Option<ColorPalette>,
 }
 
 struct StagedOutput<W> {
@@ -98,7 +99,7 @@ impl<W> StagedOutput<W> {
         Ok(())
     }
 
-    fn commit(&mut self) -> Result<(), TranscodeError>
+    fn commit(&mut self, palette: Option<&ColorPalette>) -> Result<(), TranscodeError>
     where
         W: Write,
     {
@@ -106,15 +107,15 @@ impl<W> StagedOutput<W> {
             .pending
             .take()
             .ok_or(TranscodeError::Structure("missing output publication"))?;
-        pending
-            .publish(&mut self.committed)
-            .map_err(|error| match error {
+        if let Err(error) = pending.publish_colored(&mut self.committed, palette) {
+            return Err(match error {
                 crate::PublicationError::Cardinality(_) => {
                     TranscodeError::Structure("invalid sequence publication cardinality")
                 }
                 crate::PublicationError::Spool(error) => TranscodeError::Spool(error),
                 crate::PublicationError::Io(error) => TranscodeError::Io(error),
-            })?;
+            });
+        }
         self.committed.flush().map_err(TranscodeError::Io)
     }
 
@@ -239,6 +240,7 @@ impl<W: Write> TranscodeConsumer<W> {
             last_truthy: None,
             maximum_documents: u64::MAX,
             cancellation: None,
+            palette: None,
         }
     }
 
@@ -271,6 +273,16 @@ impl<W: Write> TranscodeConsumer<W> {
     #[must_use]
     pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
         self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Applies an invocation-owned semantic palette to all TOON output paths.
+    ///
+    /// The palette is stored separately from Copy-compatible configuration so
+    /// plain callers and existing configuration literals remain unchanged.
+    #[must_use]
+    pub fn with_palette(mut self, palette: ColorPalette) -> Self {
+        self.palette = Some(palette);
         self
     }
 
@@ -426,7 +438,8 @@ impl<W: Write> TranscodeConsumer<W> {
                     .ok_or(TranscodeError::Structure("object value without a key"))?;
                 let index = self.frames.len() - 1;
                 self.prepare_direct_member_line(index)?;
-                self.output.write_all(render_key(&key).as_bytes())?;
+                let palette = self.palette.as_ref();
+                writer::write_key(&mut self.output, &key, palette)?;
                 if matches!(value, Value::Array(_)) {
                     // Canonical TOON joins an object key directly to an array header.
                 } else {
@@ -441,7 +454,7 @@ impl<W: Write> TranscodeConsumer<W> {
                     indentation: depth.saturating_mul(self.writer.indent_size),
                     line_start: false,
                 };
-                write_value(&mut indented, &value, self.writer)?;
+                write_value_colored(&mut indented, &value, self.writer, palette)?;
                 let Frame::DirectObject { wrote_member, .. } = &mut self.frames[index] else {
                     unreachable!()
                 };
@@ -481,7 +494,8 @@ impl<W: Write> TranscodeConsumer<W> {
             }
             None if !self.root_complete => {
                 self.current_truthy = Some(!matches!(value, Value::Null | Value::Bool(false)));
-                write_value(&mut self.output, &value, self.writer)?;
+                let palette = self.palette.as_ref();
+                write_value_colored(&mut self.output, &value, self.writer, palette)?;
                 self.root_complete = true;
             }
             None => return Err(TranscodeError::Structure("multiple roots in one document")),
@@ -497,7 +511,8 @@ impl<W: Write> TranscodeConsumer<W> {
                     .ok_or(TranscodeError::Structure("object value without a key"))?;
                 let index = self.frames.len() - 1;
                 self.prepare_direct_member_line(index)?;
-                self.output.write_all(render_key(&key).as_bytes())?;
+                let palette = self.palette.as_ref();
+                writer::write_key(&mut self.output, &key, palette)?;
                 self.output.write_all(b": ")?;
                 let depth = match &self.frames[index] {
                     Frame::DirectObject { depth, .. } => *depth,
@@ -508,7 +523,14 @@ impl<W: Write> TranscodeConsumer<W> {
                     indentation: depth.saturating_mul(self.writer.indent_size),
                     line_start: false,
                 };
-                writer::write_scalar_token(&mut indented, value, self.writer, ScalarContext::Root)?;
+                let palette = self.palette.as_ref();
+                writer::write_scalar_token_colored(
+                    &mut indented,
+                    value,
+                    self.writer,
+                    ScalarContext::Object,
+                    palette,
+                )?;
                 let Frame::DirectObject { wrote_member, .. } = &mut self.frames[index] else {
                     unreachable!()
                 };
@@ -522,11 +544,12 @@ impl<W: Write> TranscodeConsumer<W> {
                     value,
                     ScalarToken::Null | ScalarToken::Bool(false)
                 ));
-                writer::write_scalar_token(
+                writer::write_scalar_token_colored(
                     &mut self.output,
                     value,
                     self.writer,
                     ScalarContext::Root,
+                    self.palette.as_ref(),
                 )?;
                 self.root_complete = true;
             }
@@ -560,7 +583,8 @@ impl<W: Write> TranscodeConsumer<W> {
                                     "nested object without direct parent",
                                 ))?;
                         self.prepare_direct_member_line(parent)?;
-                        self.output.write_all(render_key(&key).as_bytes())?;
+                        let palette = self.palette.as_ref();
+                        writer::write_key(&mut self.output, &key, palette)?;
                         self.output.write_all(b":")?;
                         let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent]
                         else {
@@ -589,8 +613,13 @@ impl<W: Write> TranscodeConsumer<W> {
                     }
                     let mut member = Object::new();
                     member.insert(Arc::from(key), value.clone());
-                    write_value(&mut self.output, &Value::object(member), self.writer)
-                        .map_err(|WriterError::Io(error)| SpoolError::Io(error))?;
+                    write_value_colored(
+                        &mut self.output,
+                        &Value::object(member),
+                        self.writer,
+                        self.palette.as_ref(),
+                    )
+                    .map_err(|WriterError::Io(error)| SpoolError::Io(error))?;
                     wrote_member = true;
                     Ok(())
                 })?;
@@ -622,7 +651,7 @@ impl<W: Write> TranscodeConsumer<W> {
             .ok_or(TranscodeError::Structure("array end without start"))?;
         match frame {
             Frame::RootArray { mut array, .. } => {
-                array.write_to(&mut self.output, self.writer)?;
+                array.write_to_colored(&mut self.output, self.writer, self.palette.as_ref())?;
                 self.root_complete = true;
             }
             Frame::DirectArray {
@@ -637,13 +666,14 @@ impl<W: Write> TranscodeConsumer<W> {
                     .checked_sub(1)
                     .ok_or(TranscodeError::Structure("nested array without parent"))?;
                 self.prepare_direct_member_line(parent)?;
-                self.output.write_all(render_key(&parent_key).as_bytes())?;
+                let palette = self.palette.as_ref();
+                writer::write_key(&mut self.output, &parent_key, palette)?;
                 let mut indented = IndentingWriter {
                     output: &mut self.output,
                     indentation: depth.saturating_mul(self.writer.indent_size),
                     line_start: false,
                 };
-                array.write_to(&mut indented, self.writer)?;
+                array.write_to_colored(&mut indented, self.writer, self.palette.as_ref())?;
                 let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
                     return Err(TranscodeError::Structure(
                         "nested array parent is not direct",
@@ -680,7 +710,8 @@ impl<W: Write> TranscodeConsumer<W> {
                 .checked_sub(1)
                 .ok_or(TranscodeError::Structure("nested object without parent"))?;
             self.prepare_direct_member_line(parent)?;
-            self.output.write_all(render_key(key).as_bytes())?;
+            let palette = self.palette.as_ref();
+            writer::write_key(&mut self.output, key, palette)?;
             self.output.write_all(b":")?;
             let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
                 return Err(TranscodeError::Structure(
@@ -770,7 +801,7 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
                 }
                 if self.commitment != TranscodeCommitment::AtomicUnframed {
                     self.output.write_all(b"\n")?;
-                    self.output.commit()?;
+                    self.output.commit(self.palette.as_ref())?;
                 }
                 self.document_active = false;
                 self.documents = self.documents.saturating_add(1);
