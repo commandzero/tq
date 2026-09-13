@@ -19,7 +19,7 @@ answer:
   body_html: "<p>Use <a href=\"https://jqlang.github.io/jq/manual/#convert-to-from-json\" rel=\"noreferrer\"><code>fromjson</code></a>.</p>\n<p>It parses a string to its appropriate json value.  <code>tojson</code> (and <code>@json</code>) goes the other way around and takes a json value and converts it to a string.</p>\n<p>So you could do this:</p>\n<pre><code>.response.text | fromjson.title\n</code></pre>\n"
 benchmark:
   input_format: json
-  query: .response.text
+  query: ".response.text | fromjson | .title"
   input:
     requestType: POST
     response:

@@ -19,7 +19,7 @@ answer:
   body_html: "<p>If your input is a stream of objects, then unless your jq has <code>inputs</code>, the objects must be &quot;slurped&quot;, e.g. using the -s command-line option, in order to combine them.</p>\n<p>Thus one way to combine objects in the input stream is to use:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -s add\n</code></pre>\n<p>For the second problem, creating an array:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -s .\n</code></pre>\n<p>There are of course other alternatives, but these are simple and do not require the most recent version of jq. With jq 1.5 and later, you can use 'inputs', e.g. <code>jq -n '[inputs]'</code></p>\n<h2>Efficient solution</h2>\n<p>For the first problem (reduction), rather than slurping (whether via the -s option, or using <code>[inputs]</code>), it would be more efficient to use <code>reduce</code> with <code>inputs</code> and the -n command-line option.  For example, to combine the stream of objects into a single object:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq -n 'reduce inputs as $in (null; . + $in)'\n</code></pre>\n<p>Equivalently, without <code>--null-input</code>:</p>\n<pre class=\"lang-bash prettyprint-override\"><code>jq 'reduce inputs as $in (.; . + $in)'\n</code></pre>\n"
 benchmark:
   input_format: json
-  query: map(.a)
+  query: add
   input[2]:
     - a: green
       b: white
