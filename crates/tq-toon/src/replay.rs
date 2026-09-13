@@ -71,9 +71,12 @@ fn encode_into(value: &Value, output: &mut Vec<u8>) {
         Value::Null => output.push(NULL),
         Value::Bool(false) => output.push(FALSE),
         Value::Bool(true) => output.push(TRUE),
+        // Replay prepares output, so apply the same non-finite projection as
+        // the writer before storing a finite numeric token.
+        Value::Number(value) if value.as_f64().is_nan() => output.push(NULL),
         Value::Number(value) => {
             output.push(NUMBER);
-            write_bytes(value.to_string().as_bytes(), output);
+            write_bytes(value.canonical_numeric().as_bytes(), output);
         }
         Value::String(value) => {
             output.push(STRING);

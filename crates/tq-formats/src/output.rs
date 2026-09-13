@@ -12,10 +12,12 @@ use crate::{NativeFormat, OutputFormat};
 /// TOON result framing choice.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ToonFraming {
-    /// RS-prefix/LF-suffix TOON Text Sequence, including for one result.
-    #[default]
+    /// RS-prefix/LF-suffix TOON Text Sequence selected explicitly.
     Sequence,
-    /// Exactly one standalone TOON document.
+    /// LF-terminated canonical values without record separators.
+    #[default]
+    Values,
+    /// Exactly one standalone TOON document, selected explicitly.
     Unframed,
 }
 
@@ -35,7 +37,7 @@ impl Default for JsonIndent {
 }
 
 /// Structured output controls.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent wire-format controls are assembled after CLI validation"
@@ -55,10 +57,14 @@ pub struct OutputOptions {
     pub ascii_json: bool,
     /// Wrap JSON output in tq's deterministic ANSI color.
     pub color_json: bool,
+    /// jq-compatible eight-slot ANSI palette for colored JSON.
+    pub color_palette: JsonColorPalette,
     /// Prefix this YAML value with an explicit document separator.
     pub yaml_document_start: bool,
     /// TOON framing mode.
     pub toon_framing: ToonFraming,
+    /// Prefix JSON results with ASCII RS for JSON Text Sequence output.
+    pub json_sequence: bool,
     /// Canonical TOON options.
     pub toon: WriterConfig,
 }
@@ -73,10 +79,67 @@ impl Default for OutputOptions {
             json_indent: JsonIndent::default(),
             ascii_json: false,
             color_json: false,
+            color_palette: JsonColorPalette::default(),
             yaml_document_start: false,
-            toon_framing: ToonFraming::Sequence,
+            toon_framing: ToonFraming::Values,
+            json_sequence: false,
             toon: WriterConfig::default(),
         }
+    }
+}
+
+/// ANSI styles used by jq's JSON colorizer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct JsonColorPalette {
+    styles: [String; 8],
+    key_style: usize,
+}
+
+impl Default for JsonColorPalette {
+    fn default() -> Self {
+        Self {
+            styles: std::array::from_fn(|index| {
+                [
+                    "0;90", "0;39", "0;39", "0;39", "0;32", "1;39", "1;39", "1;34",
+                ][index]
+                    .to_owned()
+            }),
+            key_style: 7,
+        }
+    }
+}
+
+impl JsonColorPalette {
+    /// Parses jq's colon-separated seven- or eight-style `JQ_COLORS` value.
+    #[must_use]
+    pub fn from_jq_colors(value: &str) -> Self {
+        let styles = value.split(':').collect::<Vec<_>>();
+        if !matches!(styles.len(), 7 | 8)
+            || styles.iter().any(|style| {
+                style.is_empty()
+                    || style
+                        .bytes()
+                        .any(|byte| byte != b';' && !byte.is_ascii_digit())
+            })
+        {
+            return Self::default();
+        }
+        let key_style = if styles.len() == 7 { 3 } else { 7 };
+        let fallback = styles.get(key_style).copied().unwrap_or_default();
+        Self {
+            styles: std::array::from_fn(|index| {
+                styles.get(index).copied().unwrap_or(fallback).to_string()
+            }),
+            key_style,
+        }
+    }
+
+    fn style(&self, index: usize) -> &str {
+        &self.styles[index]
+    }
+
+    fn key_style(&self) -> &str {
+        self.style(self.key_style)
     }
 }
 
@@ -133,7 +196,7 @@ impl OutputError {
 }
 
 /// An output format whose directional capabilities have been checked.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct SelectedOutput {
     options: OutputOptions,
 }
@@ -151,6 +214,9 @@ impl NativeFormat {
             .ok_or(OutputError::UnsupportedFormat(self.descriptor().name))?;
         if self == Self::ToonSequence && options.toon_framing == ToonFraming::Unframed {
             return Err(OutputError::InvalidOptions("toon-seq cannot be unframed"));
+        }
+        if self == Self::ToonSequence {
+            options.toon_framing = ToonFraming::Sequence;
         }
         let json = matches!(
             options.format,
@@ -183,10 +249,8 @@ impl NativeFormat {
             ));
         }
         let mut compatible_toon = WriterConfig::default();
-        if json {
-            if let JsonIndent::Spaces(count) = options.json_indent {
-                compatible_toon.indent_size = usize::from(count);
-            }
+        if json && let JsonIndent::Spaces(count) = options.json_indent {
+            compatible_toon.indent_size = usize::from(count);
         }
         if options.format != OutputFormat::Toon
             && options.toon != WriterConfig::default()
@@ -212,7 +276,7 @@ pub struct NativeOutputSequence {
 impl NativeOutputSequence {
     /// Starts a sequence without writing any bytes.
     #[must_use]
-    pub const fn new(selection: SelectedOutput) -> Self {
+    pub fn new(selection: SelectedOutput) -> Self {
         Self {
             options: selection.options,
             count: 0,
@@ -248,7 +312,7 @@ impl NativeOutputSequence {
             self.active = true;
             return Ok(());
         }
-        let mut options = self.options;
+        let mut options = self.options.clone();
         options.yaml_document_start |= self.count > 0;
         if options.strict_conversion && options.format == OutputFormat::Yaml {
             let mut encoded = Vec::new();
@@ -257,9 +321,9 @@ impl NativeOutputSequence {
             write_document(
                 &mut encoded,
                 value,
-                OutputOptions {
+                &OutputOptions {
                     yaml_document_start: true,
-                    ..options
+                    ..options.clone()
                 },
             )?;
             let decoded =
@@ -287,7 +351,7 @@ impl NativeOutputSequence {
                     options.delimited_limits,
                 )?;
         } else {
-            write_document(writer, value, options)?;
+            write_document(writer, value, &options)?;
         }
         self.count = self.count.saturating_add(1);
         self.active = true;
@@ -321,30 +385,40 @@ impl NativeOutputSequence {
 fn write_document(
     writer: &mut impl Write,
     value: &Value,
-    options: OutputOptions,
+    options: &OutputOptions,
 ) -> Result<(), OutputError> {
     match options.format {
         OutputFormat::Csv | OutputFormat::Tsv => {
             unreachable!("delimited output requires its command-scoped row shape")
         }
-        OutputFormat::Toon => {
-            crate::rs_framing::write_frame(writer, |writer| {
-                write_value(writer, value, options.toon)
-                    .map_err(|WriterError::Io(error)| OutputError::Io(error))
-            })?;
-        }
+        OutputFormat::Toon => match options.toon_framing {
+            ToonFraming::Sequence => {
+                crate::rs_framing::write_frame(writer, |writer| {
+                    write_value(writer, value, options.toon)
+                        .map_err(|WriterError::Io(error)| OutputError::Io(error))
+                })?;
+            }
+            ToonFraming::Values => {
+                write_value(&mut *writer, value, options.toon)
+                    .map_err(|WriterError::Io(error)| OutputError::Io(error))?;
+                writer.write_all(b"\n")?;
+            }
+            ToonFraming::Unframed => unreachable!("unframed TOON is buffered by the sequence"),
+        },
         OutputFormat::JsonSequence => {
             crate::rs_framing::write_frame(writer, |writer| {
                 write_json_document(writer, value, options)
             })?;
         }
         OutputFormat::Json | OutputFormat::JsonLines => {
-            let mut options = options;
             if options.format == OutputFormat::JsonLines {
+                let mut options = options.clone();
                 options.pretty_json = false;
                 options.color_json = false;
+                write_json_document(writer, value, &options)?;
+            } else {
+                write_json_document(writer, value, options)?;
             }
-            write_json_document(writer, value, options)?;
             writer.write_all(b"\n")?;
         }
         OutputFormat::Yaml => {
@@ -361,20 +435,17 @@ fn write_document(
 fn write_json_document(
     writer: &mut impl Write,
     value: &Value,
-    options: OutputOptions,
+    options: &OutputOptions,
 ) -> Result<(), OutputError> {
-    if options.color_json {
-        writer.write_all(b"\x1b[36m")?;
-    }
+    let mut encoded = Vec::new();
+    write_json_value(&mut encoded, value, options)?;
     if options.ascii_json {
-        let mut encoded = Vec::new();
-        write_json_value(&mut encoded, value, options)?;
-        writer.write_all(&escape_non_ascii(&encoded))?;
-    } else {
-        write_json_value(writer, value, options)?;
+        encoded = escape_non_ascii(&encoded);
     }
     if options.color_json {
-        writer.write_all(b"\x1b[0m")?;
+        writer.write_all(&colorize_json(&encoded, &options.color_palette))?;
+    } else {
+        writer.write_all(&encoded)?;
     }
     Ok(())
 }
@@ -382,7 +453,7 @@ fn write_json_document(
 fn write_json_value(
     writer: &mut impl Write,
     value: &Value,
-    options: OutputOptions,
+    options: &OutputOptions,
 ) -> Result<(), serde_json::Error> {
     if options.pretty_json {
         let indentation = match options.json_indent {
@@ -398,11 +469,18 @@ fn write_json_value(
     }
 }
 
-/// Writes an iterator of Results through one native output sequence.
+/// Writes ordered results in the selected structured format.
+///
+/// JSON emits one jq-compatible JSON text plus LF per result. TOON defaults to
+/// LF-terminated values and supports explicit text-sequence framing.
 ///
 /// # Errors
 ///
-/// Returns format selection, cardinality, encoding, or I/O failures.
+/// Returns serialization, framing/cardinality, or output I/O failures.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the public writer API owns options for the selected output operation"
+)]
 pub fn write_results<W, I, V>(
     mut writer: W,
     values: I,
@@ -413,12 +491,127 @@ where
     I: IntoIterator<Item = V>,
     V: Borrow<Value>,
 {
+    let mut options = options;
+    if options.json_sequence && options.format == OutputFormat::Json {
+        options.format = OutputFormat::JsonSequence;
+    }
     let selection = NativeFormat::from_output(options.format).select_output(options)?;
     let mut sequence = NativeOutputSequence::new(selection);
     for value in values {
         sequence.write_result(&mut writer, value.borrow())?;
     }
     sequence.finish(&mut writer)
+}
+
+fn colorize_json(encoded: &[u8], palette: &JsonColorPalette) -> Vec<u8> {
+    let mut colored = Vec::with_capacity(encoded.len().saturating_add(64));
+    let mut containers = Vec::new();
+    let mut index = 0;
+    while index < encoded.len() {
+        match encoded[index] {
+            b'{' => {
+                if encoded.get(index + 1) == Some(&b'}') {
+                    color_token(&mut colored, b"{}", palette.style(6));
+                    index += 2;
+                    continue;
+                }
+                color_token(&mut colored, b"{", palette.style(6));
+                containers.push(b'{');
+                index += 1;
+            }
+            b'}' => {
+                color_token(&mut colored, b"}", palette.style(6));
+                containers.pop();
+                index += 1;
+            }
+            b'[' => {
+                if encoded.get(index + 1) == Some(&b']') {
+                    color_token(&mut colored, b"[]", palette.style(5));
+                    index += 2;
+                    continue;
+                }
+                color_token(&mut colored, b"[", palette.style(5));
+                containers.push(b'[');
+                index += 1;
+            }
+            b']' => {
+                color_token(&mut colored, b"]", palette.style(5));
+                containers.pop();
+                index += 1;
+            }
+            b':' | b',' => {
+                let style = containers
+                    .last()
+                    .map_or(3, |container| if *container == b'{' { 6 } else { 5 });
+                color_token(&mut colored, &encoded[index..=index], palette.style(style));
+                index += 1;
+            }
+            b'"' => {
+                let end = json_string_end(encoded, index);
+                let is_key = encoded[end..]
+                    .iter()
+                    .copied()
+                    .find(|byte| !byte.is_ascii_whitespace())
+                    == Some(b':');
+                let style = if is_key {
+                    palette.key_style()
+                } else {
+                    palette.style(4)
+                };
+                color_token(&mut colored, &encoded[index..end], style);
+                index = end;
+            }
+            b'n' if encoded[index..].starts_with(b"null") => {
+                color_token(&mut colored, b"null", palette.style(0));
+                index += 4;
+            }
+            b'f' if encoded[index..].starts_with(b"false") => {
+                color_token(&mut colored, b"false", palette.style(1));
+                index += 5;
+            }
+            b't' if encoded[index..].starts_with(b"true") => {
+                color_token(&mut colored, b"true", palette.style(2));
+                index += 4;
+            }
+            byte if byte == b'-' || byte.is_ascii_digit() => {
+                let end = encoded[index..]
+                    .iter()
+                    .position(|byte| {
+                        !byte.is_ascii_digit() && !matches!(byte, b'-' | b'+' | b'.' | b'e' | b'E')
+                    })
+                    .map_or(encoded.len(), |offset| index + offset);
+                color_token(&mut colored, &encoded[index..end], palette.style(3));
+                index = end;
+            }
+            _ => {
+                colored.push(encoded[index]);
+                index += 1;
+            }
+        }
+    }
+    colored
+}
+
+fn json_string_end(encoded: &[u8], start: usize) -> usize {
+    let mut escaped = false;
+    for (offset, byte) in encoded[start + 1..].iter().copied().enumerate() {
+        if escaped {
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            return start + offset + 2;
+        }
+    }
+    encoded.len()
+}
+
+fn color_token(output: &mut Vec<u8>, token: &[u8], style: &str) {
+    output.extend_from_slice(b"\x1b[");
+    output.extend_from_slice(style.as_bytes());
+    output.extend_from_slice(b"m");
+    output.extend_from_slice(token);
+    output.extend_from_slice(b"\x1b[0m");
 }
 
 fn write_yaml_value(
@@ -510,13 +703,29 @@ fn escape_non_ascii(encoded: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use tq_core::Value;
+    use serde::{Serialize, Serializer};
+    use tq_core::{Number, Object, Value};
 
-    use super::{OutputOptions, ToonFraming, write_results};
-    use crate::OutputFormat;
+    use super::{NativeOutputSequence, OutputOptions, ToonFraming, write_results};
+    use crate::{NativeFormat, OutputFormat};
 
     #[test]
-    fn json_preserves_exact_literals_and_toon_defaults_to_sequence() {
+    fn explicit_native_toon_sequence_overrides_the_values_default() {
+        let selection = NativeFormat::ToonSequence
+            .select_output(OutputOptions::default())
+            .unwrap();
+        let mut sequence = NativeOutputSequence::new(selection);
+        let mut output = Vec::new();
+        sequence.write_result(&mut output, &Value::Null).unwrap();
+        sequence
+            .write_result(&mut output, &Value::Bool(true))
+            .unwrap();
+        sequence.finish(&mut output).unwrap();
+        assert_eq!(output, b"\x1enull\n\x1etrue\n");
+    }
+
+    #[test]
+    fn json_preserves_exact_literals_and_toon_defaults_to_lf() {
         let value: Value = serde_json::from_str(r#"{"n":9007199254740993}"#).unwrap();
         let mut json = Vec::new();
         write_results(
@@ -536,7 +745,117 @@ mod tests {
 
         let mut toon = Vec::new();
         write_results(&mut toon, [&value], OutputOptions::default()).unwrap();
-        assert_eq!(toon, b"\x1en: 9007199254740993\n");
+        assert_eq!(toon, b"n: 9007199254740993\n");
+
+        let mut sequence = Vec::new();
+        write_results(
+            &mut sequence,
+            [&value],
+            OutputOptions {
+                toon_framing: ToonFraming::Sequence,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(sequence, b"\x1en: 9007199254740993\n");
+    }
+
+    #[test]
+    fn json_output_uses_jq_negative_zero_spelling_without_rewriting_strings() {
+        let value = Value::array(vec![
+            Value::Number(Number::parse("-0.0").unwrap()),
+            Value::Number(Number::parse("0.0").unwrap()),
+            Value::Number(Number::from_runtime_f64(-0.0)),
+            Value::Number(Number::parse("100e-2").unwrap()),
+            Value::Number(Number::parse("1E+3").unwrap()),
+            Value::string("-0.0"),
+        ]);
+        let mut compact = Vec::new();
+        write_results(
+            &mut compact,
+            [&value],
+            OutputOptions {
+                format: OutputFormat::Json,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(compact, b"[-0.0,0.0,-0,1.00,1E+3,\"-0.0\"]\n");
+
+        let mut pretty = Vec::new();
+        write_results(
+            &mut pretty,
+            [&value],
+            OutputOptions {
+                format: OutputFormat::Json,
+                pretty_json: true,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            pretty,
+            b"[\n  -0.0,\n  0.0,\n  -0,\n  1.00,\n  1E+3,\n  \"-0.0\"\n]\n"
+        );
+
+        let mut lines = Vec::new();
+        write_results(
+            &mut lines,
+            [&value],
+            OutputOptions {
+                format: OutputFormat::JsonLines,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(lines, b"[-0.0,0.0,-0,1.00,1E+3,\"-0.0\"]\n");
+    }
+
+    #[test]
+    fn json_output_keeps_literal_numbers_around_nonfinite_values() {
+        let mut object = Object::new();
+        object.insert("z".into(), Value::Number(Number::parse("1.000").unwrap()));
+        object.insert("a".into(), Value::Number(Number::parse("100e-2").unwrap()));
+        let value = Value::array(vec![
+            Value::Number(Number::from_runtime_f64(f64::NAN)),
+            Value::Number(Number::from_runtime_f64(f64::INFINITY)),
+            Value::object(object),
+        ]);
+        let mut output = Vec::new();
+        write_results(
+            &mut output,
+            [&value],
+            OutputOptions {
+                format: OutputFormat::Json,
+                ..OutputOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            output,
+            b"[null,1.7976931348623157e+308,{\"z\":1.000,\"a\":1.00}]\n"
+        );
+    }
+
+    #[test]
+    fn raw_value_preserves_tokens_through_generic_json_serializer() {
+        use serde_json::value::RawValue;
+
+        struct GenericRaw;
+
+        impl Serialize for GenericRaw {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let raw = RawValue::from_string("1E+3".to_owned()).unwrap();
+                raw.serialize(serializer)
+            }
+        }
+
+        let raw = RawValue::from_string("1E+3".to_owned()).unwrap();
+        assert_eq!(serde_json::to_vec(&raw).unwrap(), b"1E+3");
+        assert_eq!(serde_json::to_vec(&GenericRaw).unwrap(), b"1E+3");
     }
 
     #[test]

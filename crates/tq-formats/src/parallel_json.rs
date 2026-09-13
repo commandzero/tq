@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    io::{self, BufRead, Read},
+    io::{self, BufRead, Cursor, Read},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use tq_core::{Number, PathComponent};
+use tq_core::{JsonInput, JsonInputOptions, PathComponent, Value};
 
 use crate::{
     FormatError, InputFormat, SelectedStreamObservations, StreamOptions, StreamRecord,
@@ -416,15 +416,29 @@ fn translate_worker_error(error: FormatError, source: BatchSource) -> FormatErro
 }
 
 fn translate_json_position(message: &str, source: BatchSource) -> String {
-    let Some((prefix, position)) = message.rsplit_once(" at line ") else {
-        return message.to_owned();
-    };
-    let Some((line, column)) = position.split_once(" column ") else {
-        return message.to_owned();
-    };
-    let (Ok(line), Ok(column)) = (line.parse::<usize>(), column.parse::<usize>()) else {
-        return message.to_owned();
-    };
+    let (prefix, line, column, detail) =
+        if let Some((prefix, position)) = message.rsplit_once(", line ") {
+            let Some((line, position)) = position.split_once(", column ") else {
+                return message.to_owned();
+            };
+            let Some((column, detail)) = position.split_once(": ") else {
+                return message.to_owned();
+            };
+            let (Ok(line), Ok(column)) = (line.parse::<usize>(), column.parse::<usize>()) else {
+                return message.to_owned();
+            };
+            (prefix, line, column, detail)
+        } else if let Some((prefix, position)) = message.rsplit_once(" at line ") {
+            let Some((line, column)) = position.split_once(" column ") else {
+                return message.to_owned();
+            };
+            let (Ok(line), Ok(column)) = (line.parse::<usize>(), column.parse::<usize>()) else {
+                return message.to_owned();
+            };
+            (prefix, line, column, "")
+        } else {
+            return message.to_owned();
+        };
     let (line, column) = if line == 1 {
         (
             source.line,
@@ -435,10 +449,25 @@ fn translate_json_position(message: &str, source: BatchSource) -> String {
     } else {
         (source.line.saturating_add(line - 1), column)
     };
-    let _absolute_byte = source
-        .byte_offset
-        .saturating_add(u64::try_from(column).unwrap_or(u64::MAX));
-    format!("{prefix} at line {line} column {column}")
+    let prefix =
+        if let Some((head, local_byte)) = prefix.rsplit_once(" at byte ") {
+            let Ok(local_byte) = local_byte.parse::<u64>() else {
+                return message.to_owned();
+            };
+            format!(
+                "{head} at byte {}",
+                source.byte_offset.saturating_add(local_byte.saturating_sub(
+                    u64::try_from(source.synthetic_prefix_bytes).unwrap_or(u64::MAX),
+                ))
+            )
+        } else {
+            prefix.to_owned()
+        };
+    if detail.is_empty() {
+        format!("{prefix} at line {line} column {column}")
+    } else {
+        format!("{prefix}, line {line}, column {column}: {detail}")
+    }
 }
 
 /// Frames one statically selected array and decodes its element batches on the
@@ -481,6 +510,7 @@ struct Framer<'a, R> {
     reader: &'a mut R,
     options: StreamOptions,
     capture: Option<Vec<u8>>,
+    capture_limit: usize,
     byte_offset: u64,
     line: usize,
     column: usize,
@@ -498,6 +528,7 @@ impl<'a, R: BufRead> Framer<'a, R> {
             reader,
             options,
             capture: None,
+            capture_limit: usize::MAX,
             byte_offset: 0,
             line: 1,
             column: 1,
@@ -515,6 +546,11 @@ impl<'a, R: BufRead> Framer<'a, R> {
     where
         F: FnMut(Option<usize>, Vec<u8>, BatchSource) -> Result<(), FormatError>,
     {
+        // A captured selected value or worker batch must fit in the same
+        // retained-byte budget enforced by the scheduler. Check before
+        // extending the capture buffer so a single oversized element cannot
+        // allocate without bound while being framed.
+        self.capture_limit = parallel.in_flight_bytes.max(1);
         self.check_cancellation()?;
         self.parse_prefix_value(prefix, prefix, 0, parallel, submit)?;
         self.finish_document()
@@ -619,7 +655,7 @@ impl<'a, R: BufRead> Framer<'a, R> {
             self.capture = Some(Vec::new());
             self.scan_value(depth)?;
             let value = self.capture.take().expect("target capture is active");
-            let (wrapper, synthetic_prefix_bytes) = wrap_selected_value(prefix, value)?;
+            let (wrapper, synthetic_prefix_bytes) = wrap_selected_value(prefix, value);
             return submit(
                 None,
                 wrapper,
@@ -762,10 +798,20 @@ impl<'a, R: BufRead> Framer<'a, R> {
                 self.check_container_depth(depth)?;
                 self.scan_array(depth)
             }
-            Some(b't') => self.scan_literal(b"true"),
-            Some(b'f') => self.scan_literal(b"false"),
-            Some(b'n') => self.scan_literal(b"null"),
-            Some(b'-' | b'0'..=b'9') => self.scan_number(),
+            Some(
+                b't'
+                | b'f'
+                | b'n'
+                | b'-'
+                | b'0'..=b'9'
+                | b'+'
+                | b'N'
+                | b'I'
+                | b'i'
+                | b's'
+                | b'S'
+                | b'.',
+            ) => self.scan_word(),
             Some(_) => Err(parse_error("expected value")),
             None => Err(parse_error("EOF while parsing a value")),
         }
@@ -823,11 +869,15 @@ impl<'a, R: BufRead> Framer<'a, R> {
         self.scan_string()?;
         let bytes = self.capture.take().expect("string capture is active");
         self.capture = prior;
-        let decoded: String = serde_json::from_slice(&bytes).map_err(|error| json_error(&error))?;
-        if decoded.len() > self.options.maximum_token_bytes {
-            return Err(parse_error("input resource limit exceeded: token-bytes"));
+        let value = parse_json_fragment(
+            &bytes,
+            self.options.maximum_depth,
+            self.options.maximum_token_bytes,
+        )?;
+        match value {
+            Value::String(value) => Ok(value.to_string()),
+            _ => Err(parse_error("expected JSON string key")),
         }
-        Ok(decoded)
     }
 
     fn scan_string(&mut self) -> Result<(), FormatError> {
@@ -835,6 +885,12 @@ impl<'a, R: BufRead> Framer<'a, R> {
         if validate_token {
             self.capture = Some(Vec::new());
         }
+        let mut raw_bytes = 1usize;
+        let raw_limit = self
+            .options
+            .maximum_token_bytes
+            .saturating_mul(6)
+            .saturating_add(2);
         self.expect(b'"')?;
         loop {
             let available = self.reader.fill_buf()?;
@@ -846,30 +902,50 @@ impl<'a, R: BufRead> Framer<'a, R> {
                 .position(|byte| *byte == b'"' || *byte == b'\\' || *byte < 0x20)
                 .unwrap_or(available.len());
             if used > 0 {
+                raw_bytes = raw_bytes.saturating_add(used);
+                if raw_bytes > raw_limit {
+                    return Err(resource_error("token-bytes"));
+                }
                 self.consume_slice(used)?;
                 continue;
             }
             match self.peek()? {
                 Some(b'"') => {
+                    raw_bytes = raw_bytes.saturating_add(1);
+                    if raw_bytes > raw_limit {
+                        return Err(resource_error("token-bytes"));
+                    }
                     self.consume_slice(1)?;
                     if validate_token {
                         let bytes = self.capture.take().expect("string capture is active");
-                        let decoded: String =
-                            serde_json::from_slice(&bytes).map_err(|error| json_error(&error))?;
-                        if decoded.len() > self.options.maximum_token_bytes {
-                            return Err(parse_error("input resource limit exceeded: token-bytes"));
-                        }
+                        parse_json_fragment(
+                            &bytes,
+                            self.options.maximum_depth,
+                            self.options.maximum_token_bytes,
+                        )?;
                     }
                     return Ok(());
                 }
                 Some(b'\\') => {
+                    raw_bytes = raw_bytes.saturating_add(1);
+                    if raw_bytes > raw_limit {
+                        return Err(resource_error("token-bytes"));
+                    }
                     self.consume_slice(1)?;
                     let escape = self.take()?.ok_or_else(|| parse_error("EOF in escape"))?;
+                    raw_bytes = raw_bytes.saturating_add(1);
+                    if raw_bytes > raw_limit {
+                        return Err(parse_error("input resource limit exceeded: token-bytes"));
+                    }
                     if escape == b'u' {
                         for _ in 0..4 {
                             let digit = self
                                 .take()?
                                 .ok_or_else(|| parse_error("EOF in unicode escape"))?;
+                            raw_bytes = raw_bytes.saturating_add(1);
+                            if raw_bytes > raw_limit {
+                                return Err(resource_error("token-bytes"));
+                            }
                             if !digit.is_ascii_hexdigit() {
                                 return Err(parse_error("invalid unicode escape"));
                             }
@@ -887,31 +963,54 @@ impl<'a, R: BufRead> Framer<'a, R> {
         }
     }
 
-    fn scan_literal(&mut self, literal: &[u8]) -> Result<(), FormatError> {
-        for expected in literal {
-            if self.take()? != Some(*expected) {
-                return Err(parse_error("invalid literal"));
-            }
+    fn scan_word(&mut self) -> Result<(), FormatError> {
+        // Skipped scalars still go through the shared parser. Keep their
+        // validation copy bounded by the configured token budget, with the
+        // small exception needed to recognize the three unlimited JSON
+        // keywords. A malformed prefix such as `truex` must not stay exempt.
+        let validate_token = self.capture.is_none();
+        if validate_token {
+            self.capture = Some(Vec::new());
         }
-        Ok(())
-    }
-
-    fn scan_number(&mut self) -> Result<(), FormatError> {
-        let mut bytes = Vec::new();
+        let mut prefix = [0_u8; 5];
+        let mut prefix_len = 0usize;
+        let mut token_bytes = 0usize;
         while let Some(byte) = self.peek()? {
-            if byte.is_ascii_digit() || matches!(byte, b'-' | b'+' | b'.' | b'e' | b'E') {
-                bytes.push(byte);
-                self.consume_slice(1)?;
-            } else {
+            if matches!(
+                byte,
+                b' ' | b'\n' | b'\r' | b'\t' | b',' | b']' | b'}' | b'[' | b'{' | b':' | b'"'
+            ) {
                 break;
             }
-        }
-        if self.capture.is_none() {
-            if bytes.len() > self.options.maximum_token_bytes {
-                return Err(parse_error("input resource limit exceeded: token-bytes"));
+            token_bytes = token_bytes.saturating_add(1);
+            if prefix_len < prefix.len() {
+                prefix[prefix_len] = byte;
+                prefix_len += 1;
             }
-            let literal = std::str::from_utf8(&bytes).map_err(|_| parse_error("invalid number"))?;
-            Number::validate_literal(literal).map_err(|error| parse_error(error.to_string()))?;
+            self.consume_slice(1)?;
+
+            if token_bytes >= prefix.len()
+                && !is_exempt_word(&prefix[..prefix_len], token_bytes)
+                && token_bytes > self.options.maximum_token_bytes
+            {
+                return Err(resource_error("token-bytes"));
+            }
+        }
+        if token_bytes == 0 {
+            return Err(parse_error("expected value"));
+        }
+        if !is_exempt_word(&prefix[..prefix_len], token_bytes)
+            && token_bytes > self.options.maximum_token_bytes
+        {
+            return Err(resource_error("token-bytes"));
+        }
+        if validate_token {
+            let bytes = self.capture.take().expect("scalar capture is active");
+            parse_json_fragment(
+                &bytes,
+                self.options.maximum_depth,
+                self.options.maximum_token_bytes,
+            )?;
         }
         Ok(())
     }
@@ -969,6 +1068,9 @@ impl<'a, R: BufRead> Framer<'a, R> {
             return Err(parse_error("internal JSON framing boundary error"));
         }
         if let Some(capture) = self.capture.as_mut() {
+            if capture.len().saturating_add(length) > self.capture_limit {
+                return Err(resource_error("parallel-decode-in-flight-bytes"));
+            }
             capture.extend_from_slice(&available[..length]);
         }
         let consumed = &available[..length];
@@ -1006,21 +1108,21 @@ impl<'a, R: BufRead> Framer<'a, R> {
     }
 }
 
-fn wrap_selected_value(
-    prefix: &[PathComponent],
-    mut value: Vec<u8>,
-) -> Result<(Vec<u8>, usize), FormatError> {
+fn is_exempt_word(prefix: &[u8], token_bytes: usize) -> bool {
+    matches!(
+        (prefix, token_bytes),
+        (b"true" | b"null", 4) | (b"false", 5)
+    )
+}
+
+fn wrap_selected_value(prefix: &[PathComponent], mut value: Vec<u8>) -> (Vec<u8>, usize) {
     let mut value_offset = 0usize;
     for component in prefix.iter().rev() {
         let mut wrapper = Vec::new();
         match component {
             PathComponent::Key(key) => {
                 wrapper.push(b'{');
-                wrapper.extend_from_slice(
-                    serde_json::to_string(key.as_ref())
-                        .map_err(|error| json_error(&error))?
-                        .as_bytes(),
-                );
+                wrapper.extend_from_slice(Value::string(key.as_ref()).to_string().as_bytes());
                 wrapper.push(b':');
             }
             PathComponent::Index(index) => {
@@ -1038,7 +1140,44 @@ fn wrap_selected_value(
         });
         value = wrapper;
     }
-    Ok((value, value_offset))
+    (value, value_offset)
+}
+
+fn parse_json_fragment(
+    bytes: &[u8],
+    maximum_depth: usize,
+    maximum_token_bytes: usize,
+) -> Result<Value, FormatError> {
+    let mut input = JsonInput::new(
+        Cursor::new(bytes),
+        JsonInputOptions {
+            maximum_depth,
+            maximum_token_bytes,
+        },
+    );
+    let mut checkpoint = || Ok(());
+    let value = input
+        .next_value(&mut checkpoint)
+        .map_err(format_json_input_error)?
+        .ok_or_else(|| parse_error("expected value"))?;
+    input
+        .check_end(&mut checkpoint)
+        .map_err(format_json_input_error)?;
+    Ok(value)
+}
+
+fn format_json_input_error(error: tq_core::JsonInputError) -> FormatError {
+    match error {
+        tq_core::JsonInputError::Limit { limit, .. } => resource_error(match limit {
+            tq_core::JsonLimit::TokenBytes => "token-bytes",
+            tq_core::JsonLimit::Depth => "depth",
+        }),
+        error => parse_error(error.to_string()),
+    }
+}
+
+fn resource_error(resource: &'static str) -> FormatError {
+    FormatError::Resource(resource)
 }
 
 fn parse_error(message: impl Into<String>) -> FormatError {
@@ -1046,10 +1185,6 @@ fn parse_error(message: impl Into<String>) -> FormatError {
         format: InputFormat::Json,
         message: message.into(),
     }
-}
-
-fn json_error(error: &serde_json::Error) -> FormatError {
-    parse_error(error.to_string())
 }
 
 fn cancelled_error() -> FormatError {
@@ -1068,7 +1203,7 @@ mod tests {
 
     use tq_core::PathComponent;
 
-    use crate::stream_json_selected_records;
+    use crate::{FormatError, stream_json_selected_records};
 
     use super::{
         BatchOutcome, CancellationReader, Completion, ParallelJsonOptions, Scheduler,
@@ -1081,6 +1216,16 @@ mod tests {
             Some(vec![
                 PathComponent::Key(Arc::from("properties")),
                 PathComponent::Key(Arc::from("release")),
+            ]),
+        )
+    }
+
+    fn short_selection() -> StreamSelection {
+        StreamSelection::new(
+            vec![PathComponent::Key(Arc::from("f"))],
+            Some(vec![
+                PathComponent::Key(Arc::from("p")),
+                PathComponent::Key(Arc::from("r")),
             ]),
         )
     }
@@ -1223,12 +1368,37 @@ mod tests {
     }
 
     #[test]
-    fn parallel_worker_enforces_the_numeric_envelope() {
+    fn parallel_worker_matches_serial_for_large_but_admitted_exponents() {
         let input = br#"{"features":[{"properties":{"release":1e1000001}}]}"#;
+        let admitted_serial = serial(input, StreamOptions::default());
+        let admitted_parallel = parallel(input, StreamOptions::default());
+        assert!(admitted_serial.1);
+        assert_eq!(admitted_parallel, admitted_serial);
+
+        let limited = StreamOptions {
+            maximum_token_bytes: 8,
+            ..StreamOptions::default()
+        };
+        let limited_serial = serial(input, limited);
+        let limited_parallel = parallel(input, limited);
+        assert!(
+            !limited_serial.1,
+            "the explicit token envelope must reject the exponent"
+        );
+        assert_eq!(limited_parallel, limited_serial);
+    }
+
+    #[test]
+    fn parallel_worker_rejects_exponents_beyond_the_default_numeric_envelope() {
+        let input = br#"{"features":[{"properties":{"release":1e2000000001}}]}"#;
         let serial = serial(input, StreamOptions::default());
         let parallel = parallel(input, StreamOptions::default());
-        assert!(!serial.1);
-        assert_eq!(parallel, serial);
+        assert!(!serial.1, "serial decoding accepted the oversized exponent");
+        assert!(
+            !parallel.1,
+            "parallel decoding accepted the oversized exponent"
+        );
+        assert_eq!(parallel.0, serial.0);
     }
 
     #[test]
@@ -1261,6 +1431,107 @@ mod tests {
             assert!(!serial.1);
             assert!(!parallel.1);
         }
+    }
+
+    #[test]
+    fn parallel_selected_and_skipped_tokens_share_json_limits() {
+        let cases = [
+            (br#"{"o":"long","f":[{"p":{"r":1}}]}"#.as_slice(), 3),
+            (br#"{"o":"ok","f":[{"p":{"r":"long"}}]}"#.as_slice(), 3),
+            (br#"{"o":"\u0061\u0062","f":[{"p":{"r":1}}]}"#.as_slice(), 1),
+            (
+                br#"{"o":"o","f":[{"p":{"r":"\u0061\u0062"}}]}"#.as_slice(),
+                1,
+            ),
+        ];
+        for (input, maximum_token_bytes) in cases {
+            let options = StreamOptions {
+                maximum_token_bytes,
+                ..StreamOptions::default()
+            };
+            let serial = serial_with_selection(input, options, short_selection());
+            let parallel = parallel_with_selection(input, options, short_selection());
+            assert!(
+                !serial.1,
+                "the input must exceed the selected or skipped limit"
+            );
+            assert!(!parallel.1, "parallel framing must reject the same input");
+            assert_eq!(parallel, serial);
+        }
+
+        let options = StreamOptions {
+            maximum_token_bytes: 1,
+            ..StreamOptions::default()
+        };
+        let input = br#"{"o":"o","f":[{"p":{"r":1}}]}"#;
+        assert_eq!(
+            parallel_with_selection(input, options, short_selection()),
+            serial_with_selection(input, options, short_selection())
+        );
+    }
+
+    #[test]
+    fn parallel_skipped_scalar_validation_is_bounded_and_keyword_exact() {
+        let input = br"[trueeeeeeeeeeeee,[]]";
+        let limited = StreamOptions {
+            maximum_token_bytes: 0,
+            ..StreamOptions::default()
+        };
+        let result = stream_json_selected_records_parallel(
+            BufReader::with_capacity(1, input.as_slice()),
+            limited,
+            StreamSelection::new(vec![PathComponent::Index(1)], None),
+            ParallelJsonOptions::default(),
+            None,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(matches!(result, FormatError::Resource("token-bytes")));
+
+        let input = br"[true,[]]";
+        let mut records = Vec::new();
+        let result = stream_json_selected_records_parallel(
+            BufReader::with_capacity(1, input.as_slice()),
+            limited,
+            StreamSelection::new(
+                vec![
+                    PathComponent::Index(1),
+                    PathComponent::Key(Arc::from("missing")),
+                ],
+                None,
+            ),
+            ParallelJsonOptions::default(),
+            None,
+            |record| {
+                records.push(record);
+                Ok(())
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "true remains exempt when the budget is zero"
+        );
+    }
+
+    #[test]
+    fn parallel_capture_limit_is_enforced_before_batch_growth() {
+        let input = br#"{"features":[{"properties":{"release":"long-value"}}]}"#;
+        let result = stream_json_selected_records_parallel(
+            BufReader::with_capacity(1, input.as_slice()),
+            StreamOptions::default(),
+            selection(),
+            ParallelJsonOptions {
+                in_flight_bytes: 4,
+                ..ParallelJsonOptions::default()
+            },
+            None,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            result,
+            FormatError::Resource("parallel-decode-in-flight-bytes")
+        ));
     }
 
     #[test]
