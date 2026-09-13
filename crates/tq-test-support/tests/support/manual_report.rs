@@ -224,7 +224,7 @@ fn identity_fixture(contract: TqContract) -> &'static str {
         TqContract::Version => "tq 0.1.0 (TOON v3; jq target 1.8.x; synthetic)\n",
         TqContract::BuildConfiguration => "target=synthetic\nformats=toon\njq-target=1.8.x\n",
         TqContract::Help => concat!(
-            "tq - jq-compatible queries over TOON\nUsage: tq\n",
+            "tq - jq-compatible queries over toon, yaml, json, json5, jsonl, toon-seq, json-seq, csv, tsv\nUsage: tq\n",
             "-i, --input-format FORMAT\n-o, --output-format FORMAT\n",
             "-n, --null-input\n-R, --raw-input\n-s, --slurp\n",
             "-c, --compact-output\n-r, --raw-output\n--raw-output0\n",
@@ -237,8 +237,8 @@ fn identity_fixture(contract: TqContract) -> &'static str {
             "--slurpfile NAME FILE\n--rawfile NAME FILE\n--args\n--jsonargs\n",
             "-e, --exit-status\n-b, --binary\n-V, --version\n",
             "--build-configuration\n--run-tests [FILE]\n-h, --help\n",
-            "Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq\n",
-            "-o, --output-format toon|yaml|json|jsonl\nselect TOON\nemit compact JSON\n",
+            "Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq|csv|tsv\n",
+            "-o, --output-format toon|yaml|json|jsonl|toon-seq|json-seq|csv|tsv\nselect TOON\nemit compact JSON\n",
         ),
     }
 }
