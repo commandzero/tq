@@ -1,6 +1,6 @@
 schema_version: 2
 section: Builtin operators and functions
-source: /Users/reno/Development/commandzero/tq-benchmarks/jq-manual/builtin-operators-and-functions.md
+source: jq-manual/builtin-operators-and-functions.md
 examples[175]{id,source_line,heading,kind,query,input,disposition,reason,execution_status,execution_reason,case_id}:
   table-001,36,"Addition: `+`",table,.a + 1,"{\"a\": 7}",new,"",match,jq/tq JSON semantic observations match,manual-bof-table-001
   table-002,42,"Addition: `+`",table,.a + .b,"{\"a\": [1,2], \"b\": [3,4]}",new,"",match,jq/tq JSON semantic observations match,manual-bof-table-002
