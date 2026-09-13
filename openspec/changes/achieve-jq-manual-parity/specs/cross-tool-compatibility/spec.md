@@ -72,7 +72,16 @@ Reference-text errors SHALL be recorded as provenance separately from a case's e
 - **THEN** tq must match that invalid-arity contract and separately execute the valid `/0` witness, with the source correction recorded independently
 
 ### Requirement: Reproducible platform and resource scope
-The parity campaign SHALL run on every advertised supported operating-system/architecture combination with a pinned jq build, matched C math environment, locale, timezone, environment variables, filesystem fixtures, and recorded resource limits. It SHALL cover POSIX shell, PowerShell and cmd invocation forms where applicable, Windows binary/newline behavior, terminal color detection, and observable unbuffered writes. An unavailable required platform check SHALL be unverified and SHALL block an unqualified cross-platform compatibility claim. Defined platform-conditional errors SHALL be tested against the reference rather than skipped.
+The parity campaign SHALL run on every advertised supported
+operating-system/architecture combination with an available runner, subject to
+the explicit native-Windows deferral below, with a pinned jq build, matched C
+math environment, locale, timezone, environment variables, filesystem
+fixtures, and recorded resource limits. It SHALL cover POSIX shell, PowerShell
+and cmd invocation forms where applicable, Windows binary/newline behavior,
+terminal color detection, and observable unbuffered writes. An unavailable
+required platform check SHALL be unverified and SHALL block an unqualified
+cross-platform compatibility claim. Defined platform-conditional errors SHALL
+be tested against the reference rather than skipped.
 
 Native Windows verification is explicitly deferred for this change until a runner is available. Windows test definitions SHALL remain intact, and Windows SHALL remain unverified without contributing passing executions or accepted disparities. macOS and Linux verification remain completion requirements. This scoped deferral SHALL NOT permit a Windows or unqualified cross-platform compatibility claim, and SHALL NOT waive failed cases on verified targets.
 

@@ -1,20 +1,22 @@
 ## MODIFIED Requirements
 
 ### Requirement: TOON Text Sequence framing
-Explicit TOON sequence output requested with `-o toon-seq`, or with `--seq` without a JSON output selector, SHALL encode every result
+Explicit TOON sequence output requested with `-o toon-seq` (or
+`--output-format toon-seq`), or with `--seq` when TOON output is selected (the
+default or `-o toon`/`--output-format toon`), SHALL encode every result
 as ASCII RS (`0x1e`), followed by one canonical TOON document, followed by LF.
 Sequence framing SHALL be distinct from the bytes of a standalone TOON document.
 
 #### Scenario: Emit multiple results
-- **WHEN** a filter emits two multiline objects with `--seq`
+- **WHEN** a filter emits two multiline objects with `--seq` using default TOON output or `-o toon`/`--output-format toon`
 - **THEN** the output contains two independently parseable RS-framed records in emission order
 
 #### Scenario: Emit zero results
-- **WHEN** a filter emits no values with `--seq`
+- **WHEN** a filter emits no values with `--seq` using default TOON output or `-o toon`/`--output-format toon`
 - **THEN** the structured sequence output is empty
 
 #### Scenario: Emit one result
-- **WHEN** a filter emits one structured value with `--seq`
+- **WHEN** a filter emits one structured value with `--seq` using default TOON output or `-o toon`/`--output-format toon`
 - **THEN** the output contains exactly one RS-framed record
 
 ### Requirement: Default TOON result output

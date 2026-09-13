@@ -138,7 +138,16 @@ When `--input-format` is absent, tq SHALL select `.jsonl` and `.ndjson` file pat
 - **THEN** tq reports that format's parse error and does not reinterpret the source with another parser
 
 ### Requirement: Structured and raw output modes
-Structured TOON output SHALL emit zero or more canonical values, each followed by LF, without RS by default. Explicit `--seq` or `--output-format toon-seq` SHALL select TOON Text Sequence framing; `--seq` additionally selects JSON sequence input. `--unframed` SHALL require exactly one result. `-r/--raw-output` SHALL write strings without structured quoting, and `-j/--join-output` SHALL suppress raw-output separators as defined by jq-compatible cases.
+Structured TOON output SHALL emit zero or more canonical values, each followed
+by LF, without RS by default. Explicit `--output-format toon-seq` SHALL select
+TOON Text Sequence framing without changing input selection. `--seq` SHALL
+additionally select JSON sequence input and, when structured output is default
+or explicit TOON (`--output-format toon`), TOON Text Sequence output; when
+structured output is JSON (`--output-format json` or `-c`), JSON Text Sequence
+output. Other explicit native structured output formats SHALL retain their
+native framing. `--unframed` SHALL require exactly one result. `-r/--raw-output`
+SHALL write strings without structured quoting, and `-j/--join-output` SHALL
+suppress raw-output separators as defined by jq-compatible cases.
 
 #### Scenario: Raw string
 - **WHEN** `-r '.name'` emits a string

@@ -36,14 +36,30 @@ Resolve output options before opening input, with default TOON distinct from exp
 
 | Invocation | Structured output |
 | --- | --- |
-| `tq '.'` | Standalone TOON document |
+| `tq '.'` | LF-terminated canonical TOON values (standalone output) |
 | `tq -o json '.'` | Pretty JSON |
 | `tq -c '.'` | Compact JSON |
 | `tq -c -o json '.'` | Compact JSON |
 | `tq -o toon -c '.'` | Usage error before input |
-| `tq --seq -c '.'` | Compact JSON sequence |
+| `tq --seq '.'` | RS-framed TOON Text Sequence |
+| `tq --seq -o json '.'` | RS-framed JSON Text Sequence |
+| `tq --seq -c '.'` | Compact RS-framed JSON Text Sequence |
 
-Explicit TOON with `-c` is an order-independent conflict. This avoids silently overriding an explicit native-format request. Explicit JSON Lines remains compatible with compact output under its existing constraints. Raw/join flags retain jq semantics. Other flags do not implicitly select JSON. Input selection remains independent. Default TOON emits zero or more canonical values, each followed by LF without RS. Filter keywords and result counts never select framing. `--seq` explicitly selects JSON Text Sequence input and RS-framed TOON sequence output by default; `--seq -o json` matches jq JSON sequence output, and `-o toon-seq` selects only TOON output framing; `--unframed` alone requires exactly one standalone document. Default output preserves completed results when evaluation later fails. The comparison campaign uses independently captured JSON results to resolve TOON value boundaries, verifies each decoded value, and requires every stdout byte to be consumed.
+Explicit TOON with `-c` is an order-independent conflict. This avoids silently
+overriding an explicit native-format request. Explicit JSON Lines remains
+compatible with compact output under its existing constraints. Raw/join flags
+retain jq semantics. Other flags do not implicitly select JSON. Input
+selection remains independent. Default TOON emits zero or more canonical
+values, each followed by LF without RS. Filter keywords and result counts never
+select framing. `--seq` selects JSON Text Sequence input. With default or
+explicit TOON output (`-o toon`), it emits RS-framed TOON Text Sequence; with
+`-o json` or `-c`, it emits RS-framed JSON Text Sequence. Other explicit native
+output formats retain their native framing. `-o toon-seq` selects only TOON
+output framing and does not change input selection. `--unframed` alone requires
+exactly one standalone document. Default output preserves completed results
+when evaluation later fails. The comparison campaign uses independently
+captured JSON results to resolve TOON value boundaries, verifies each decoded
+value, and requires every stdout byte to be consumed.
 
 ### Repair shared language semantics before adding wrappers
 
