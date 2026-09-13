@@ -22,6 +22,7 @@ None. Extend the existing language, CLI, and compatibility contracts.
 
 ### Modified Capabilities
 
+- `toon-stream-io`: LF-terminated default TOON result output, explicit TOON sequence framing, and completed-result preservation.
 - `cross-tool-compatibility`: Frozen manual inventory, exact failure ownership, independent source-reference corrections, strict parity gate, and platform evidence.
 - `tq-cli`: Compact JSON selection, ordered JSON input consumption, stream recovery, runtime I/O, and help/identity contracts.
 - `extended-jq-cli-parity`: jq color configuration, sequence and test-runner options, and CLI-versus-library capability behavior.
