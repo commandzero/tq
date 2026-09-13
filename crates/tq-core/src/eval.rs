@@ -2,7 +2,8 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
+    io,
     rc::Rc,
     sync::{
         Arc,
@@ -19,12 +20,20 @@ use rayon::{
 };
 
 use crate::{
-    Bytecode, InputCursor, Number, Object, Path, PathComponent, Value, VmError, VmLimits,
-    VmObservations,
+    BuiltinRegistry, Bytecode, InputCursor, JsonInput, JsonInputError, JsonInputOptions, Number,
+    Object, Path, PathComponent, Value, VmError, VmLimits, VmObservations,
     ast::{AssignmentOperator, BinaryOperator, ParameterKind, UnaryOperator},
-    bytecode::{InterpolationOperand, KeyOperand, Operation},
-    format, stdlib,
+    bytecode::{BindingPatternOperand, InterpolationOperand, KeyOperand, Operation},
+    collection, format, math, parse_jq_number, stdlib, string_compat,
+    vm::EffectState,
 };
+
+mod generator;
+mod iterate;
+mod path;
+mod path_builtin;
+mod scalar;
+mod sql;
 
 pub(crate) const AMBIENT_ENVIRONMENT: &str = "__tq_ambient_environment";
 pub(crate) const AMBIENT_PLATFORM: &str = "__tq_ambient_platform";
@@ -32,8 +41,345 @@ pub(crate) const INPUT_FILENAME: &str = "__tq_input_filename";
 pub(crate) const INPUT_LINE_NUMBER: &str = "__tq_input_line_number";
 
 type Environment = BTreeMap<Arc<str>, Value>;
+type OriginEnvironment = BTreeMap<Arc<str>, OriginToken>;
 type Outcomes = Vec<Result<Value, VmError>>;
 type UserFrames = Arc<[UserFrame]>;
+
+/// Runtime identity for a value derived from an input document.
+///
+/// This is deliberately separate from `Value`: equal scalars from different
+/// evaluation branches are not the same input, and pointer identity is not
+/// available for scalar values. A child path makes repeated field/index
+/// selection stable while constructed/literal values receive fresh roots.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct OriginToken {
+    root: u64,
+    path: Path,
+}
+
+impl OriginToken {
+    fn child_bounded(
+        &self,
+        component: PathComponent,
+        limits: VmLimits,
+        charge: &mut impl FnMut() -> Result<(), VmError>,
+    ) -> Result<Self, VmError> {
+        if self.path.components().len() >= limits.path_stack {
+            return Err(resource("path-stack"));
+        }
+        charge()?;
+        let mut components = Vec::new();
+        components
+            .try_reserve_exact(self.path.components().len().saturating_add(1))
+            .map_err(|_| resource("path-stack"))?;
+        for _ in 0..self.path.components().len().saturating_add(1) {
+            charge()?;
+        }
+        components.extend_from_slice(self.path.components());
+        components.push(component);
+        Ok(Self {
+            root: self.root,
+            path: Path::new(components),
+        })
+    }
+}
+
+fn origin_at_path_bounded(
+    origin: Option<&OriginToken>,
+    path: &Path,
+    limits: VmLimits,
+    charge: &mut impl FnMut() -> Result<(), VmError>,
+) -> Result<Option<OriginToken>, VmError> {
+    let Some(origin) = origin else {
+        return Ok(None);
+    };
+    let total = origin
+        .path
+        .components()
+        .len()
+        .checked_add(path.components().len())
+        .ok_or_else(|| resource("path-stack"))?;
+    if total > limits.path_stack {
+        return Err(resource("path-stack"));
+    }
+    let mut components = Vec::new();
+    components
+        .try_reserve_exact(total)
+        .map_err(|_| resource("path-stack"))?;
+    for _ in 0..total {
+        charge()?;
+    }
+    components.extend_from_slice(origin.path.components());
+    components.extend_from_slice(path.components());
+    Ok(Some(OriginToken {
+        root: origin.root,
+        path: Path::new(components),
+    }))
+}
+
+fn record_pattern_origin(
+    bytecode: &Bytecode,
+    pattern: &BindingPatternOperand,
+    origin: Option<OriginToken>,
+    origins: &mut OriginEnvironment,
+    limits: VmLimits,
+    charge: &mut impl FnMut() -> Result<(), VmError>,
+) -> Result<(), VmError> {
+    match pattern {
+        BindingPatternOperand::Variable(index) => {
+            if let Some(name) = bytecode.string(*index) {
+                if let Some(origin) = origin {
+                    origins.insert(Arc::clone(name), origin);
+                } else {
+                    origins.remove(name);
+                }
+            }
+        }
+        BindingPatternOperand::Array(patterns) => {
+            for (index, pattern) in patterns.iter().enumerate() {
+                let child = match origin.as_ref() {
+                    Some(token) => {
+                        Some(token.child_bounded(PathComponent::Index(index), limits, charge)?)
+                    }
+                    None => None,
+                };
+                record_pattern_origin(bytecode, pattern, child, origins, limits, charge)?;
+            }
+        }
+        BindingPatternOperand::Object(fields) => {
+            for (key, pattern) in fields {
+                let child = match (bytecode.string(*key), origin.as_ref()) {
+                    (Some(key), Some(token)) => Some(token.child_bounded(
+                        PathComponent::Key(Arc::clone(key)),
+                        limits,
+                        charge,
+                    )?),
+                    _ => None,
+                };
+                record_pattern_origin(bytecode, pattern, child, origins, limits, charge)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn record_pattern_aliases(
+    bytecode: &Bytecode,
+    pattern: &BindingPatternOperand,
+    path: &Path,
+    origin: Option<&OriginToken>,
+    aliases: &mut PathAliases,
+    limits: VmLimits,
+    charge: &mut impl FnMut() -> Result<(), VmError>,
+) -> Result<(), VmError> {
+    match pattern {
+        BindingPatternOperand::Variable(index) => {
+            if let Some(name) = bytecode.string(*index)
+                && let Some(origin) = origin
+            {
+                aliases.insert(
+                    Arc::clone(name),
+                    PathAlias {
+                        path: path.clone(),
+                        origin: origin.clone(),
+                    },
+                );
+            }
+        }
+        BindingPatternOperand::Array(patterns) => {
+            for (index, pattern) in patterns.iter().enumerate() {
+                let child_path =
+                    path_with_component_bounded(path, PathComponent::Index(index), limits, charge)?;
+                let child_origin = match origin {
+                    Some(token) => {
+                        Some(token.child_bounded(PathComponent::Index(index), limits, charge)?)
+                    }
+                    None => None,
+                };
+                record_pattern_aliases(
+                    bytecode,
+                    pattern,
+                    &child_path,
+                    child_origin.as_ref(),
+                    aliases,
+                    limits,
+                    charge,
+                )?;
+            }
+        }
+        BindingPatternOperand::Object(fields) => {
+            for (key, pattern) in fields {
+                let Some(key) = bytecode.string(*key) else {
+                    continue;
+                };
+                let component = PathComponent::Key(Arc::clone(key));
+                let child_path =
+                    path_with_component_bounded(path, component.clone(), limits, charge)?;
+                let child_origin = match origin {
+                    Some(token) => Some(token.child_bounded(component, limits, charge)?),
+                    None => None,
+                };
+                record_pattern_aliases(
+                    bytecode,
+                    pattern,
+                    &child_path,
+                    child_origin.as_ref(),
+                    aliases,
+                    limits,
+                    charge,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn path_with_component_bounded(
+    path: &Path,
+    component: PathComponent,
+    limits: VmLimits,
+    charge: &mut impl FnMut() -> Result<(), VmError>,
+) -> Result<Path, VmError> {
+    let total = path
+        .components()
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| resource("path-stack"))?;
+    if total > limits.path_stack {
+        return Err(resource("path-stack"));
+    }
+    let mut components = Vec::new();
+    components
+        .try_reserve_exact(total)
+        .map_err(|_| resource("path-stack"))?;
+    for _ in 0..total {
+        charge()?;
+    }
+    components.extend_from_slice(path.components());
+    components.push(component);
+    Ok(Path::new(components))
+}
+
+fn alias_path_for_input(alias: &PathAlias, input_origin: &OriginToken) -> Path {
+    let input_components = input_origin.path.components();
+    let alias_components = alias.path.components();
+    if alias_components.starts_with(input_components) {
+        Path::new(alias_components[input_components.len()..].to_vec())
+    } else {
+        Path::root()
+    }
+}
+
+fn relative_alias_path(
+    input_origin: Option<&OriginToken>,
+    value_origin: &OriginToken,
+    limits: VmLimits,
+    charge: &mut impl FnMut() -> Result<(), VmError>,
+) -> Result<Path, VmError> {
+    let Some(input_origin) = input_origin else {
+        return Ok(Path::root());
+    };
+    let input_components = input_origin.path.components();
+    let value_components = value_origin.path.components();
+    if input_origin.root == value_origin.root && value_components.starts_with(input_components) {
+        let relative = &value_components[input_components.len()..];
+        if relative.len() > limits.path_stack {
+            return Err(resource("path-stack"));
+        }
+        let mut components = Vec::new();
+        components
+            .try_reserve_exact(relative.len())
+            .map_err(|_| resource("path-stack"))?;
+        for component in relative {
+            charge()?;
+            components.push(component.clone());
+        }
+        Ok(Path::new(components))
+    } else {
+        Ok(Path::root())
+    }
+}
+
+fn fresh_origin(next_root: &mut u64) -> Result<OriginToken, VmError> {
+    let root = *next_root;
+    *next_root = next_root
+        .checked_add(1)
+        .ok_or_else(|| resource("origin-token"))?;
+    Ok(OriginToken {
+        root,
+        path: Path::root(),
+    })
+}
+
+fn charge_managed_step(
+    observations: &mut VmObservations,
+    limits: VmLimits,
+    cancellation: Option<&AtomicBool>,
+    stop: &AtomicBool,
+) -> Result<(), VmError> {
+    if stop.load(Ordering::Relaxed) || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+    {
+        return Err(VmError::Interrupted);
+    }
+    if observations.steps >= limits.steps {
+        return Err(resource("vm-steps"));
+    }
+    observations.steps += 1;
+    Ok(())
+}
+
+fn getpath_managed(
+    input: &Value,
+    path: &[PathComponent],
+    limits: VmLimits,
+    observations: &mut VmObservations,
+    cancellation: Option<&AtomicBool>,
+    stop: &AtomicBool,
+) -> Result<Value, VmError> {
+    let mut charge = || charge_managed_step(observations, limits, cancellation, stop);
+    path::getpath_bounded(input, path, limits, &mut charge)
+}
+
+#[derive(Clone, Default)]
+struct LexicalEnvironment {
+    values: Environment,
+    origins: OriginEnvironment,
+}
+
+impl LexicalEnvironment {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn from_values(values: Environment) -> Self {
+        Self {
+            values,
+            origins: OriginEnvironment::new(),
+        }
+    }
+}
+
+impl std::ops::Deref for LexicalEnvironment {
+    type Target = Environment;
+
+    fn deref(&self) -> &Self::Target {
+        &self.values
+    }
+}
+
+impl std::ops::DerefMut for LexicalEnvironment {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.values
+    }
+}
+
+#[derive(Clone)]
+struct PathAlias {
+    path: Path,
+    origin: OriginToken,
+}
+
+type PathAliases = BTreeMap<Arc<str>, PathAlias>;
 
 // Below this size, thread-pool startup and scheduling cost more than the work.
 const PARALLEL_SORT_THRESHOLD: usize = 16 * 1024;
@@ -42,7 +388,7 @@ const PARALLEL_REDUCTION_THRESHOLD: usize = 64 * 1024;
 #[derive(Clone)]
 struct FilterArgument {
     node: u32,
-    environment: Arc<Environment>,
+    environment: Arc<LexicalEnvironment>,
     frames: UserFrames,
 }
 
@@ -64,6 +410,7 @@ pub(crate) fn evaluate_stream(
     cancellation: Option<&AtomicBool>,
     stop: &AtomicBool,
     input_cursor: Option<&InputCursor>,
+    effects: &Arc<EffectState>,
     mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
 ) -> VmObservations {
     if bytecode.managed_tree_execution() {
@@ -74,6 +421,8 @@ pub(crate) fn evaluate_stream(
             limits,
             cancellation,
             stop,
+            input_cursor,
+            effects,
             emit,
         );
     }
@@ -84,6 +433,7 @@ pub(crate) fn evaluate_stream(
         cancellation,
         stop,
         input_cursor,
+        effects: Arc::clone(effects),
     };
     evaluator.emit_node(bytecode.root(), input, variables, 0, &mut |result| {
         let mut observations = evaluator.observations.get();
@@ -102,13 +452,14 @@ enum GeneratorContinuation {
     Iterate,
     Pipe {
         node: u32,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
     },
     BinaryLeft {
         operator: BinaryOperator,
         right: u32,
         input: Value,
-        environment: Arc<Environment>,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
     },
     BinaryRight {
         operator: BinaryOperator,
@@ -125,7 +476,14 @@ enum GeneratorContinuation {
         values: Rc<RefCell<Object>>,
         accepted: Rc<Cell<bool>>,
     },
-    Select(Value),
+    IgnoreError,
+    HaltError {
+        input: Value,
+    },
+    Select {
+        input: Value,
+        origin: Option<OriginToken>,
+    },
     HasArgument {
         input: Value,
         container_from_result: bool,
@@ -133,28 +491,286 @@ enum GeneratorContinuation {
     SortKeyItem(Rc<RefCell<Vec<Value>>>),
     AlternativeItem(Rc<Cell<bool>>),
     Bind {
-        name: Arc<str>,
+        pattern: BindingPatternOperand,
         body: u32,
         input: Value,
-        environment: Arc<Environment>,
+        input_origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        origin: Option<OriginToken>,
     },
+    BindAlternatives {
+        patterns: Arc<[BindingPatternOperand]>,
+        body: u32,
+        input: Value,
+        environment: Arc<LexicalEnvironment>,
+    },
+    BindAlternativeBody {
+        boundary: u64,
+        patterns: Arc<[BindingPatternOperand]>,
+        next: usize,
+        body: u32,
+        value: Value,
+        input: Value,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PullConsumer {
+        state: Rc<RefCell<PullConsumerState>>,
+    },
+    PredicateItem {
+        state: Rc<RefCell<PullConsumerState>>,
+        condition: Option<u32>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    PredicateCondition {
+        state: Rc<RefCell<PullConsumerState>>,
+    },
+    PullCount {
+        kind: PullConsumerKind,
+        input: Value,
+        origin: Option<OriginToken>,
+        generator: Option<u32>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    FromStreamItem(Rc<RefCell<generator::FromStreamState>>),
+    TruncateStreamItem {
+        count: Value,
+    },
+    AddItem(Rc<RefCell<AddState>>),
+    DebugItem,
+    FromEntries,
     Conditional {
         branches: Arc<[(u32, u32)]>,
         next: usize,
         alternative: u32,
         input: Value,
-        environment: Arc<Environment>,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
     },
     AccessIndex {
         node: u32,
-        environment: Arc<Environment>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
     },
-    ApplyIndex(Value),
-    OptionalBoundary,
+    SliceBase {
+        start: Option<u32>,
+        end: Option<u32>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    SliceStart {
+        base: Value,
+        end: Option<u32>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    SliceEnd {
+        base: Value,
+        start: Option<f64>,
+        origin: Option<OriginToken>,
+    },
+    ApplyIndex {
+        base: Value,
+        origin: Option<OriginToken>,
+    },
+    ObjectKey {
+        entries: Arc<[crate::bytecode::ObjectOperand]>,
+        next: usize,
+        object: Object,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    ObjectValue {
+        entries: Arc<[crate::bytecode::ObjectOperand]>,
+        next: usize,
+        object: Object,
+        key: Arc<str>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    FoldInitial {
+        generator: u32,
+        pattern: BindingPatternOperand,
+        update: u32,
+        extract: Option<u32>,
+        emit_each_update: bool,
+        input: Value,
+        environment: Arc<LexicalEnvironment>,
+    },
+    FoldItem {
+        state: Rc<RefCell<FoldState>>,
+        pattern: BindingPatternOperand,
+        update: u32,
+        extract: Option<u32>,
+        emit_each_update: bool,
+        environment: Arc<LexicalEnvironment>,
+    },
+    FoldUpdate {
+        state: Rc<RefCell<FoldState>>,
+        extract: Option<u32>,
+        emit_each_update: bool,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathField(Arc<str>),
+    PathIndex {
+        node: u32,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathIndexValue {
+        path: Path,
+        target: Value,
+    },
+    PathIterate {
+        input: Value,
+    },
+    PathPipe {
+        node: u32,
+        input: Value,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathJoin(Path),
+    PathSelect(Path),
+    PathOrigin,
+    PathGetPath {
+        base: Path,
+        input: Value,
+    },
+    PathCollect {
+        boundary: u64,
+        paths: Rc<RefCell<path_builtin::PathAccumulator>>,
+    },
+    FreshOrigin,
+    PathFilter {
+        root: Value,
+        filter: u32,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    PathFilterResult(Path),
+    PathConditional {
+        branches: Arc<[(u32, u32)]>,
+        next: usize,
+        alternative: u32,
+        input: Value,
+        origin: Option<OriginToken>,
+        prefix: Path,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathCatch {
+        boundary: u64,
+        node: Option<u32>,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathBindAlternatives {
+        boundary: u64,
+        patterns: Arc<[BindingPatternOperand]>,
+        body: u32,
+        input: Value,
+        prefix: Path,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathBindAlternativeBody {
+        boundary: u64,
+        patterns: Arc<[BindingPatternOperand]>,
+        next: usize,
+        body: u32,
+        value: Value,
+        input: Value,
+        prefix: Path,
+        environment: Arc<LexicalEnvironment>,
+    },
+    PathAliases(Arc<PathAliases>),
+    PathBind {
+        pattern: BindingPatternOperand,
+        body: u32,
+        input: Value,
+        input_origin: Option<OriginToken>,
+        prefix: Path,
+        environment: Arc<LexicalEnvironment>,
+        entered_from_path: bool,
+    },
+    PathBindValue {
+        pattern: BindingPatternOperand,
+        body: u32,
+        input: Value,
+        input_origin: Option<OriginToken>,
+        prefix: Path,
+        environment: Arc<LexicalEnvironment>,
+        entered_from_path: bool,
+    },
+    PathSliceBase {
+        start: Option<u32>,
+        end: Option<u32>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    PathSliceStart {
+        path: Path,
+        target: Value,
+        end: Option<u32>,
+        assignment: Option<Rc<RefCell<AssignmentState>>>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    PathSliceEnd {
+        path: Path,
+        target: Value,
+        start: Option<f64>,
+        assignment: Option<Rc<RefCell<AssignmentState>>>,
+    },
+    PathUserReturn {
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    PathUserArgument {
+        symbol: u32,
+        arguments: Arc<[u32]>,
+        next: usize,
+        input: Value,
+        input_origin: Option<OriginToken>,
+        prefix: Path,
+        caller_environment: Arc<LexicalEnvironment>,
+        caller_frames: UserFrames,
+        filters: Vec<Option<FilterArgument>>,
+        bindings: LexicalEnvironment,
+        from_path: bool,
+    },
+    AssignmentPath(Rc<RefCell<AssignmentState>>),
+    AssignmentRhs(Rc<RefCell<AssignmentState>>),
+    AssignmentUpdateRhs {
+        state: Rc<RefCell<AssignmentState>>,
+        target: AssignmentTarget,
+        old: Value,
+        next: usize,
+        boundary: u64,
+        accepted: Rc<Cell<bool>>,
+    },
+    OptionalBoundary {
+        boundary: u64,
+    },
     Catch {
         boundary: u64,
         node: Option<u32>,
-        environment: Arc<Environment>,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
     },
     Label(u32),
     Interpolate {
@@ -163,20 +779,99 @@ enum GeneratorContinuation {
         slot: usize,
         pieces: Vec<Option<Arc<str>>>,
         input: Value,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
     },
     UserArgument {
         symbol: u32,
         arguments: Arc<[u32]>,
         next: usize,
         input: Value,
-        caller_environment: Arc<Environment>,
+        caller_environment: Arc<LexicalEnvironment>,
         caller_frames: UserFrames,
         filters: Vec<Option<FilterArgument>>,
-        bindings: Environment,
+        bindings: LexicalEnvironment,
+        input_origin: Option<OriginToken>,
+    },
+    BuiltinArguments {
+        name: Arc<str>,
+        arguments: Arc<[u32]>,
+        order: Arc<[usize]>,
+        next: usize,
+        values: Vec<Option<Value>>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    SqlInRight {
+        boundary: u64,
+        state: Rc<RefCell<SqlInState>>,
+        source: u32,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    SqlInLeft {
+        boundary: u64,
+        state: Rc<RefCell<SqlInState>>,
+        needle: Value,
+    },
+    SqlIndexRow {
+        boundary: u64,
+        state: Rc<RefCell<SqlIndexState>>,
+        key: u32,
+    },
+    SqlIndexKey {
+        boundary: u64,
+        state: Rc<RefCell<SqlIndexState>>,
+        row: Value,
+    },
+    SqlJoinIndex {
+        boundary: u64,
+        key: u32,
+        stream: Option<u32>,
+        join: Option<u32>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    SqlJoinRow {
+        boundary: u64,
+        index: Value,
+        key: u32,
+        join: Option<u32>,
+        state: Option<Rc<RefCell<SqlJoinState>>>,
+    },
+    SqlJoinKey {
+        boundary: u64,
+        index: Value,
+        row: Value,
+        join: Option<u32>,
+        state: Option<Rc<RefCell<SqlJoinState>>>,
+    },
+    SqlJoinCallback {
+        boundary: u64,
+    },
+    RegexArguments {
+        name: Arc<str>,
+        arguments: Arc<[u32]>,
+        order: Arc<[usize]>,
+        next: usize,
+        values: Vec<Option<Value>>,
+        replacement: Option<u32>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    RegexReplacementItem {
+        name: Arc<str>,
+        state: Rc<RefCell<stdlib::RegexSubstitutionState>>,
     },
     ReturnUser {
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
     },
     Raise,
@@ -184,7 +879,8 @@ enum GeneratorContinuation {
         filter: u32,
         condition: Option<u32>,
         depth: usize,
-        environment: Arc<Environment>,
+        structural: bool,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
     },
     RecurseCondition {
@@ -192,13 +888,30 @@ enum GeneratorContinuation {
         filter: u32,
         condition: u32,
         depth: usize,
-        environment: Arc<Environment>,
+        structural: bool,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
     },
+    LoopCondition {
+        condition: u32,
+        update: u32,
+        input: Value,
+        until: bool,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    LoopUpdate {
+        condition: u32,
+        update: u32,
+        until: bool,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+    },
+    RepeatItem,
     LimitCount {
         expression: u32,
         input: Value,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
     },
     LimitItem {
@@ -211,23 +924,145 @@ enum GeneratorContinuation {
 struct GeneratorWork {
     node: u32,
     input: Value,
-    environment: Arc<Environment>,
+    origin: Option<OriginToken>,
+    environment: Arc<LexicalEnvironment>,
     frames: UserFrames,
     continuations: Vec<GeneratorContinuation>,
 }
 
+fn regex_error_work(
+    bytecode: &Bytecode,
+    environment: &Arc<LexicalEnvironment>,
+    frames: &UserFrames,
+    continuations: &[GeneratorContinuation],
+    error: VmError,
+) -> (GeneratorWork, Option<Result<Value, VmError>>) {
+    (
+        GeneratorWork {
+            node: bytecode.root(),
+            input: Value::Null,
+            origin: None,
+            environment: Arc::clone(environment),
+            frames: Arc::clone(frames),
+            continuations: continuations.to_vec(),
+        },
+        Some(Err(error)),
+    )
+}
+
 enum GeneratorTask {
     Eval(GeneratorWork),
+    InvokeBuiltin {
+        name: Arc<str>,
+        arguments: Vec<Value>,
+        source_arity: usize,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    InvokeRegex {
+        name: Arc<str>,
+        arguments: Vec<Value>,
+        replacement: Option<u32>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    RegexCursor {
+        cursor: Rc<RefCell<stdlib::RegexCursor>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    RegexSplitCursor {
+        cursor: Rc<RefCell<stdlib::RegexCursor>>,
+        input: Arc<str>,
+        copied: usize,
+        emitted_tail: bool,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    RegexSubstitution {
+        name: Arc<str>,
+        state: Rc<RefCell<stdlib::RegexSubstitutionState>>,
+        replacement: u32,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    RegexReplacementFinish {
+        name: Arc<str>,
+        state: Rc<RefCell<stdlib::RegexSubstitutionState>>,
+        replacement: u32,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishBuiltinArguments {
+        name: Arc<str>,
+        source_arity: usize,
+        values: Rc<RefCell<Vec<Value>>>,
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    SqlInFinish {
+        boundary: u64,
+        state: Rc<RefCell<SqlInState>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    SqlIndexFinish {
+        boundary: u64,
+        state: Rc<RefCell<SqlIndexState>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    SqlJoinFinish {
+        boundary: u64,
+        state: Rc<RefCell<SqlJoinState>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    BuiltinGenerator {
+        state: generator::GeneratorState,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
     Iterate {
         values: Arc<[Value]>,
         next: usize,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    IterateCursor {
+        cursor: iterate::ContainerCursor,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    InputValues {
+        cursor: InputCursor,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
     FinishArray {
         values: Rc<RefCell<Vec<Value>>>,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -237,7 +1072,7 @@ enum GeneratorTask {
         argument: u32,
         values: Rc<RefCell<Vec<Value>>>,
         first_only: bool,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -246,7 +1081,7 @@ enum GeneratorTask {
         next: usize,
         argument: u32,
         values: Rc<RefCell<Object>>,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -254,29 +1089,126 @@ enum GeneratorTask {
         values: Arc<[Value]>,
         next: usize,
         argument: u32,
-        keyed_values: Rc<RefCell<Vec<(Value, Value)>>>,
-        unique: bool,
-        environment: Arc<Environment>,
+        keyed_values: Rc<RefCell<Vec<ManagedKeyedValue>>>,
+        mode: KeyedCollectionMode,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
     FinishSortKey {
         input: Value,
+        origin: Option<OriginToken>,
         keys: Rc<RefCell<Vec<Value>>>,
-        keyed_values: Rc<RefCell<Vec<(Value, Value)>>>,
+        keyed_values: Rc<RefCell<Vec<ManagedKeyedValue>>>,
         continuations: Vec<GeneratorContinuation>,
     },
     FinishAlternative {
         matched: Rc<Cell<bool>>,
         right: u32,
         input: Value,
-        environment: Arc<Environment>,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishPullConsumer {
+        state: Rc<RefCell<PullConsumerState>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishAdd {
+        state: Rc<RefCell<AddState>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishDebug {
+        input: Value,
+        origin: Option<OriginToken>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FoldGenerator {
+        generator: u32,
+        pattern: BindingPatternOperand,
+        update: u32,
+        extract: Option<u32>,
+        emit_each_update: bool,
+        state: Rc<RefCell<FoldState>>,
+        input: Value,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishFold {
+        state: Rc<RefCell<FoldState>>,
+        emit_final: bool,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    PathEval(PathWork),
+    PathChildren {
+        value: Value,
+        path: Path,
+        next: usize,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    PathTraverse {
+        cursor: PathTraversalCursor,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishPathCollection {
+        boundary: u64,
+        kind: PathCollectionKind,
+        input: Value,
+        paths: Rc<RefCell<path_builtin::PathAccumulator>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    PathSlice {
+        path: Path,
+        start: usize,
+        end: usize,
+        next: usize,
+        assignment: Option<Rc<RefCell<AssignmentState>>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    FinishAssignmentPaths {
+        state: Rc<RefCell<AssignmentState>>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    AssignmentUpdate {
+        state: Rc<RefCell<AssignmentState>>,
+        next: usize,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    AssignmentUpdateContinue {
+        state: Rc<RefCell<AssignmentState>>,
+        next: usize,
+        boundary: u64,
+        accepted: Rc<Cell<bool>>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
     Traverse {
         cursor: TraversalCursor,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -285,7 +1217,7 @@ enum GeneratorTask {
         filter: Option<u32>,
         condition: Option<u32>,
         depth: usize,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -293,7 +1225,7 @@ enum GeneratorTask {
         input: Value,
         next: usize,
         depth: usize,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -302,7 +1234,14 @@ enum GeneratorTask {
         filter: Option<u32>,
         condition: Option<u32>,
         depth: usize,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
+        frames: UserFrames,
+        continuations: Vec<GeneratorContinuation>,
+    },
+    Repeat {
+        expression: u32,
+        input: Value,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -310,7 +1249,7 @@ enum GeneratorTask {
         input: Value,
         callback: u32,
         depth: usize,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -320,7 +1259,7 @@ enum GeneratorTask {
         callback: u32,
         depth: usize,
         values: Rc<RefCell<Vec<Value>>>,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
@@ -330,10 +1269,205 @@ enum GeneratorTask {
         callback: u32,
         depth: usize,
         values: Rc<RefCell<Object>>,
-        environment: Arc<Environment>,
+        environment: Arc<LexicalEnvironment>,
         frames: UserFrames,
         continuations: Vec<GeneratorContinuation>,
     },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PullConsumerKind {
+    First,
+    Last,
+    IsEmpty,
+    Any,
+    All,
+    Nth,
+    Skip,
+}
+
+struct PullConsumerState {
+    boundary: u64,
+    kind: PullConsumerKind,
+    seen: bool,
+    latest: Option<Value>,
+    latest_origin: Option<OriginToken>,
+    decision: Option<bool>,
+    remaining: usize,
+}
+
+#[derive(Clone, Copy)]
+enum KeyedCollectionMode {
+    Sort,
+    Unique,
+    Group,
+    Min,
+    Max,
+}
+
+struct ManagedKeyedValue {
+    key: Value,
+    value: Value,
+    origin: Option<OriginToken>,
+}
+
+struct FoldState {
+    accumulator: Value,
+}
+
+struct AddState {
+    accumulator: Option<Value>,
+}
+
+struct SqlInState {
+    matched: bool,
+}
+
+struct SqlIndexState {
+    builder: Option<sql::SqlIndexBuilder>,
+}
+
+struct SqlJoinState {
+    collector: Option<sql::SqlPairCollector>,
+}
+
+#[derive(Clone)]
+struct PathWork {
+    node: u32,
+    input: Value,
+    origin: Option<OriginToken>,
+    prefix: Path,
+    environment: Arc<LexicalEnvironment>,
+    frames: UserFrames,
+    continuations: Vec<GeneratorContinuation>,
+}
+
+#[derive(Clone)]
+struct PathTraversalFrame {
+    value: Value,
+    path: Path,
+    emitted: bool,
+    next_child: usize,
+}
+
+#[derive(Clone)]
+struct PathTraversalCursor {
+    frames: Vec<PathTraversalFrame>,
+}
+
+impl PathTraversalCursor {
+    fn new(value: Value, path: Path) -> Self {
+        Self {
+            frames: vec![PathTraversalFrame {
+                value,
+                path,
+                emitted: false,
+                next_child: 0,
+            }],
+        }
+    }
+
+    fn without_root(value: Value) -> Self {
+        Self {
+            frames: vec![PathTraversalFrame {
+                value,
+                path: Path::root(),
+                emitted: true,
+                next_child: 0,
+            }],
+        }
+    }
+
+    fn next(
+        &mut self,
+        depth_limit: usize,
+        charge: &mut impl FnMut() -> Result<(), VmError>,
+    ) -> Result<Option<Path>, VmError> {
+        loop {
+            charge()?;
+            let Some(frame) = self.frames.last_mut() else {
+                return Ok(None);
+            };
+            if !frame.emitted {
+                frame.emitted = true;
+                return Ok(Some(frame.path.clone()));
+            }
+            let next_child = frame.next_child;
+            let child = match &frame.value {
+                Value::Array(values) => values
+                    .get(next_child)
+                    .cloned()
+                    .map(|child| (PathComponent::Index(next_child), child)),
+                Value::Object(values) => values
+                    .get_index(next_child)
+                    .map(|(key, child)| (PathComponent::Key(Arc::clone(key)), child.clone())),
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
+            };
+            let Some((component, child)) = child else {
+                self.frames.pop();
+                continue;
+            };
+            frame.next_child = frame.next_child.saturating_add(1);
+            let parent_path = frame.path.clone();
+            let total = parent_path
+                .components()
+                .len()
+                .checked_add(1)
+                .ok_or_else(|| resource("path-stack"))?;
+            if total > depth_limit {
+                return Err(resource("path-stack"));
+            }
+            let mut components = Vec::new();
+            components
+                .try_reserve_exact(total)
+                .map_err(|_| resource("path-stack"))?;
+            for _ in 0..total {
+                charge()?;
+            }
+            components.extend_from_slice(parent_path.components());
+            components.push(component);
+            self.frames
+                .try_reserve(1)
+                .map_err(|_| resource("path-stack"))?;
+            let path = Path::new(components);
+            self.frames.push(PathTraversalFrame {
+                value: child,
+                path,
+                emitted: false,
+                next_child: 0,
+            });
+        }
+    }
+
+    fn depth(&self) -> usize {
+        self.frames.len().saturating_sub(1)
+    }
+}
+
+#[derive(Clone)]
+enum AssignmentTarget {
+    Path(Path),
+    Slice {
+        path: Path,
+        start: usize,
+        end: usize,
+    },
+}
+
+struct AssignmentState {
+    operator: AssignmentOperator,
+    value_node: u32,
+    input: Value,
+    targets: Vec<AssignmentTarget>,
+    target_origins: Vec<Option<OriginToken>>,
+    document: Value,
+    deletions: path_builtin::PathAccumulator,
+}
+
+#[derive(Clone, Copy)]
+enum PathCollectionKind {
+    Delete,
+    Pick,
 }
 
 fn task_owned_by_label(task: &GeneratorTask, label: u32) -> bool {
@@ -351,10 +1485,40 @@ fn task_has_continuation(
 }
 
 fn task_owned_by_catch(task: &GeneratorTask, boundary: u64) -> bool {
-    task_has_continuation(
-        task,
-        |continuation| matches!(continuation, GeneratorContinuation::Catch { boundary: candidate, .. } if *candidate == boundary),
-    )
+    task_has_continuation(task, |continuation| {
+        matches!(
+            continuation,
+            GeneratorContinuation::Catch { boundary: candidate, .. }
+                | GeneratorContinuation::PathCatch { boundary: candidate, .. }
+                if *candidate == boundary
+        )
+    })
+}
+
+fn task_owned_by_optional(task: &GeneratorTask, boundary: u64) -> bool {
+    task_has_continuation(task, |continuation| {
+        matches!(
+            continuation,
+            GeneratorContinuation::OptionalBoundary { boundary: candidate }
+                if *candidate == boundary
+        )
+    })
+}
+
+fn task_owned_by_bind_alternative(task: &GeneratorTask, boundary: u64) -> bool {
+    task_has_continuation(task, |continuation| {
+        matches!(
+            continuation,
+            GeneratorContinuation::BindAlternativeBody {
+                boundary: candidate,
+                ..
+            }
+            | GeneratorContinuation::PathBindAlternativeBody {
+                boundary: candidate,
+                ..
+            } if *candidate == boundary
+        )
+    })
 }
 
 fn task_owned_by_limit(task: &GeneratorTask, boundary: u64) -> bool {
@@ -364,1091 +1528,1214 @@ fn task_owned_by_limit(task: &GeneratorTask, boundary: u64) -> bool {
     )
 }
 
+fn task_owned_by_pull_consumer(task: &GeneratorTask, boundary: u64) -> bool {
+    match task {
+        GeneratorTask::FinishPullConsumer { state, .. } => state.borrow().boundary == boundary,
+        _ => task_has_continuation(task, |continuation| {
+            matches!(
+                continuation,
+                GeneratorContinuation::PullConsumer { state }
+                    | GeneratorContinuation::PredicateItem { state, .. }
+                    | GeneratorContinuation::PredicateCondition { state }
+                    if state.borrow().boundary == boundary
+            )
+        }),
+    }
+}
+
+fn task_owned_by_pull_consumer_work(task: &GeneratorTask, boundary: u64) -> bool {
+    !matches!(task, GeneratorTask::FinishPullConsumer { .. })
+        && task_owned_by_pull_consumer(task, boundary)
+}
+
+fn task_owned_by_sql(task: &GeneratorTask, boundary: u64) -> bool {
+    match task {
+        GeneratorTask::SqlInFinish {
+            boundary: candidate,
+            ..
+        }
+        | GeneratorTask::SqlIndexFinish {
+            boundary: candidate,
+            ..
+        }
+        | GeneratorTask::SqlJoinFinish {
+            boundary: candidate,
+            ..
+        } => *candidate == boundary,
+        _ => task_has_continuation(task, |continuation| {
+            matches!(
+                continuation,
+                GeneratorContinuation::SqlInRight {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlInLeft {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlIndexRow {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlIndexKey {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlJoinIndex {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlJoinRow {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlJoinKey {
+                    boundary: candidate,
+                    ..
+                }
+                | GeneratorContinuation::SqlJoinCallback {
+                    boundary: candidate,
+                }
+                if *candidate == boundary
+            )
+        }),
+    }
+}
+
+fn task_owned_by_assignment_rhs(task: &GeneratorTask, boundary: u64) -> bool {
+    task_has_continuation(task, |continuation| {
+        matches!(
+            continuation,
+            GeneratorContinuation::AssignmentUpdateRhs {
+                boundary: candidate,
+                ..
+            } if *candidate == boundary
+        )
+    })
+}
+
+fn task_owned_by_assignment_boundary(task: &GeneratorTask, boundary: u64) -> bool {
+    matches!(
+        task,
+        GeneratorTask::AssignmentUpdateContinue {
+            boundary: candidate,
+            ..
+        } if *candidate == boundary
+    ) || task_owned_by_assignment_rhs(task, boundary)
+}
+
+fn task_owned_by_path_collection(task: &GeneratorTask, boundary: u64) -> bool {
+    matches!(
+        task,
+        GeneratorTask::FinishPathCollection {
+            boundary: candidate,
+            ..
+        } if *candidate == boundary
+    ) || task_has_continuation(task, |continuation| {
+        matches!(
+            continuation,
+            GeneratorContinuation::PathCollect {
+                boundary: candidate,
+                ..
+            } if *candidate == boundary
+        )
+    })
+}
+
 fn task_continuations(task: &GeneratorTask) -> &[GeneratorContinuation] {
     match task {
         GeneratorTask::Eval(work) => &work.continuations,
-        GeneratorTask::Iterate { continuations, .. }
+        GeneratorTask::InvokeBuiltin { continuations, .. }
+        | GeneratorTask::InvokeRegex { continuations, .. }
+        | GeneratorTask::RegexCursor { continuations, .. }
+        | GeneratorTask::RegexSplitCursor { continuations, .. }
+        | GeneratorTask::RegexSubstitution { continuations, .. }
+        | GeneratorTask::RegexReplacementFinish { continuations, .. }
+        | GeneratorTask::FinishBuiltinArguments { continuations, .. }
+        | GeneratorTask::SqlInFinish { continuations, .. }
+        | GeneratorTask::SqlIndexFinish { continuations, .. }
+        | GeneratorTask::SqlJoinFinish { continuations, .. }
+        | GeneratorTask::BuiltinGenerator { continuations, .. }
+        | GeneratorTask::Iterate { continuations, .. }
+        | GeneratorTask::IterateCursor { continuations, .. }
+        | GeneratorTask::InputValues { continuations, .. }
         | GeneratorTask::FinishArray { continuations, .. }
         | GeneratorTask::MapArray { continuations, .. }
         | GeneratorTask::MapObject { continuations, .. }
         | GeneratorTask::CollectSortKeys { continuations, .. }
         | GeneratorTask::FinishSortKey { continuations, .. }
         | GeneratorTask::FinishAlternative { continuations, .. }
+        | GeneratorTask::FinishPullConsumer { continuations, .. }
+        | GeneratorTask::FinishAdd { continuations, .. }
+        | GeneratorTask::FinishDebug { continuations, .. }
+        | GeneratorTask::FoldGenerator { continuations, .. }
+        | GeneratorTask::FinishFold { continuations, .. }
+        | GeneratorTask::PathEval(PathWork { continuations, .. })
+        | GeneratorTask::PathChildren { continuations, .. }
+        | GeneratorTask::PathTraverse { continuations, .. }
+        | GeneratorTask::FinishPathCollection { continuations, .. }
+        | GeneratorTask::PathSlice { continuations, .. }
+        | GeneratorTask::FinishAssignmentPaths { continuations, .. }
+        | GeneratorTask::AssignmentUpdate { continuations, .. }
+        | GeneratorTask::AssignmentUpdateContinue { continuations, .. }
         | GeneratorTask::Traverse { continuations, .. }
         | GeneratorTask::RecurseExpand { continuations, .. }
         | GeneratorTask::RecurseChildren { continuations, .. }
         | GeneratorTask::RecurseValue { continuations, .. }
+        | GeneratorTask::Repeat { continuations, .. }
         | GeneratorTask::WalkValue { continuations, .. }
         | GeneratorTask::WalkArray { continuations, .. }
         | GeneratorTask::WalkObject { continuations, .. } => continuations,
     }
 }
 
-enum InterpolationWork {
-    Expand {
-        next: usize,
-        pieces: Vec<Option<Arc<str>>>,
-    },
-    Error(VmError),
-}
-
-#[derive(Clone)]
-struct TraversalCursor {
-    frames: Vec<TraversalFrame>,
-}
-
-#[derive(Clone)]
-struct TraversalFrame {
-    value: Value,
-    emitted: bool,
-    next_child: usize,
-}
-
-impl TraversalCursor {
-    fn new(value: Value) -> Self {
-        Self {
-            frames: vec![TraversalFrame {
-                value,
-                emitted: false,
-                next_child: 0,
-            }],
-        }
-    }
-
-    fn next(&mut self, depth_limit: usize) -> Result<Option<Value>, VmError> {
-        loop {
-            let Some(frame) = self.frames.last_mut() else {
-                return Ok(None);
+#[allow(
+    clippy::too_many_arguments,
+    reason = "SQL scheduling carries the caller context needed by every callback phase"
+)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "SQL call scheduling keeps the right-to-left callback phases together"
+)]
+fn schedule_sql_call(
+    name: &str,
+    arguments: &[u32],
+    input: Value,
+    origin: Option<OriginToken>,
+    environment: Arc<LexicalEnvironment>,
+    frames: UserFrames,
+    continuations: Vec<GeneratorContinuation>,
+    limits: VmLimits,
+    next_boundary: &mut u64,
+    pending: &mut Vec<GeneratorTask>,
+) -> Option<Result<Value, VmError>> {
+    let boundary = *next_boundary;
+    *next_boundary = next_boundary.saturating_add(1);
+    match name {
+        "IN" => {
+            let Some(source) = arguments.first().copied() else {
+                return Some(Err(invalid("IN argument missing")));
             };
-            if !frame.emitted {
-                frame.emitted = true;
-                return Ok(Some(frame.value.clone()));
+            if arguments.len() > 2 {
+                return Some(Err(invalid("IN accepts at most two arguments")));
             }
-            let child = match &frame.value {
-                Value::Array(values) => values.get(frame.next_child).cloned(),
-                Value::Object(values) => values
-                    .get_index(frame.next_child)
-                    .map(|(_, value)| value.clone()),
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
-            };
-            if let Some(child) = child {
-                frame.next_child = frame.next_child.saturating_add(1);
-                if self.frames.len() >= depth_limit {
-                    return Err(resource("path-stack"));
-                }
-                self.frames.push(TraversalFrame {
-                    value: child,
-                    emitted: false,
-                    next_child: 0,
+            let state = Rc::new(RefCell::new(SqlInState { matched: false }));
+            pending.push(GeneratorTask::SqlInFinish {
+                boundary,
+                state: Rc::clone(&state),
+                environment: Arc::clone(&environment),
+                frames: Arc::clone(&frames),
+                continuations: continuations.clone(),
+            });
+            let mut next_continuations = continuations;
+            if let Some(needle) = arguments.get(1).copied() {
+                next_continuations.push(GeneratorContinuation::SqlInRight {
+                    boundary,
+                    state,
+                    source,
+                    input: input.clone(),
+                    origin: origin.clone(),
+                    environment: Arc::clone(&environment),
+                    frames: Arc::clone(&frames),
+                });
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node: needle,
+                    input,
+                    origin,
+                    environment,
+                    frames,
+                    continuations: next_continuations,
+                }));
+            } else {
+                next_continuations.push(GeneratorContinuation::SqlInLeft {
+                    boundary,
+                    state,
+                    needle: input.clone(),
+                });
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node: source,
+                    input,
+                    origin,
+                    environment,
+                    frames,
+                    continuations: next_continuations,
+                }));
+            }
+            None
+        }
+        "INDEX" => {
+            if !(1..=2).contains(&arguments.len()) {
+                return Some(Err(invalid("INDEX expects one or two arguments")));
+            }
+            let key = *arguments.last().expect("INDEX arity was checked");
+            let cursor =
+                (arguments.len() == 1).then(|| iterate::ContainerCursor::new(input.clone()));
+            if cursor.as_ref().is_some_and(|cursor| !cursor.is_container()) {
+                return Some(Err(runtime(format!("Cannot iterate over {input}"))));
+            }
+            let state = Rc::new(RefCell::new(SqlIndexState {
+                builder: Some(sql::SqlIndexBuilder::new(limits)),
+            }));
+            pending.push(GeneratorTask::SqlIndexFinish {
+                boundary,
+                state: Rc::clone(&state),
+                environment: Arc::clone(&environment),
+                frames: Arc::clone(&frames),
+                continuations: continuations.clone(),
+            });
+            let mut next_continuations = continuations;
+            next_continuations.push(GeneratorContinuation::SqlIndexRow {
+                boundary,
+                state,
+                key,
+            });
+            if let Some(cursor) = cursor {
+                pending.push(GeneratorTask::IterateCursor {
+                    cursor,
+                    origin,
+                    environment,
+                    frames,
+                    continuations: next_continuations,
                 });
             } else {
-                self.frames.pop();
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node: arguments[0],
+                    input,
+                    origin,
+                    environment,
+                    frames,
+                    continuations: next_continuations,
+                }));
             }
+            None
         }
-    }
-
-    fn depth(&self) -> usize {
-        self.frames.len()
-    }
-}
-
-fn recursive_child(value: &Value, index: usize) -> Option<Value> {
-    match value {
-        Value::Array(values) => values.get(index).cloned(),
-        Value::Object(values) => values.get_index(index).map(|(_, value)| value.clone()),
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
-    }
-}
-
-fn managed_subset_gap(bytecode: &Bytecode) -> Option<crate::Span> {
-    let mut pending = vec![bytecode.root()];
-    let mut seen = vec![false; bytecode.instructions().len()];
-    while let Some(node) = pending.pop() {
-        let Some(instruction) = bytecode.instructions().get(node as usize) else {
-            return bytecode
-                .instructions()
-                .first()
-                .map(|instruction| instruction.span);
-        };
-        if std::mem::replace(&mut seen[node as usize], true) {
-            continue;
+        "JOIN" => {
+            if !(2..=4).contains(&arguments.len()) {
+                return Some(Err(invalid("JOIN expects two to four arguments")));
+            }
+            let key = if arguments.len() == 2 {
+                arguments[1]
+            } else {
+                arguments[2]
+            };
+            let stream = arguments.get(1).copied().filter(|_| arguments.len() >= 3);
+            let join = arguments.get(3).copied();
+            let index_input = input.clone();
+            let index_environment = Arc::clone(&environment);
+            let index_frames = Arc::clone(&frames);
+            let mut next_continuations = continuations;
+            next_continuations.push(GeneratorContinuation::SqlJoinIndex {
+                boundary,
+                key,
+                stream,
+                join,
+                input,
+                origin: origin.clone(),
+                environment,
+                frames,
+            });
+            pending.push(GeneratorTask::Eval(GeneratorWork {
+                node: arguments[0],
+                input: index_input,
+                origin,
+                environment: index_environment,
+                frames: index_frames,
+                continuations: next_continuations,
+            }));
+            None
         }
-        if !managed_operation_supported(bytecode, &instruction.operation) {
-            return Some(instruction.span);
-        }
-        let Some(children) = operation_children(bytecode, &instruction.operation) else {
-            return Some(instruction.span);
-        };
-        pending.extend(children);
-    }
-    None
-}
-
-pub(crate) fn user_execution_gap(bytecode: &Bytecode) -> Option<crate::Span> {
-    reachable_user_call(bytecode).then(|| managed_subset_gap(bytecode))?
-}
-
-pub(crate) fn managed_execution(bytecode: &Bytecode) -> bool {
-    managed_subset_gap(bytecode).is_none()
-}
-
-fn reachable_user_call(bytecode: &Bytecode) -> bool {
-    let mut pending = vec![bytecode.root()];
-    let mut seen = vec![false; bytecode.instructions().len()];
-    while let Some(node) = pending.pop() {
-        let Some(instruction) = bytecode.instructions().get(node as usize) else {
-            continue;
-        };
-        if std::mem::replace(&mut seen[node as usize], true) {
-            continue;
-        }
-        if matches!(instruction.operation, Operation::UserCall { .. }) {
-            return true;
-        }
-        if let Some(children) = operation_children(bytecode, &instruction.operation) {
-            pending.extend(children);
-        }
-    }
-    false
-}
-
-fn managed_operation_supported(bytecode: &Bytecode, operation: &Operation) -> bool {
-    match operation {
-        Operation::Identity
-        | Operation::Literal(_)
-        | Operation::Variable(_)
-        | Operation::Empty
-        | Operation::RecursiveDescent
-        | Operation::Label { .. }
-        | Operation::Break(_)
-        | Operation::ParameterCall { .. }
-        | Operation::AccessField { .. }
-        | Operation::Iterate(_)
-        | Operation::Optional(_)
-        | Operation::Array(_)
-        | Operation::Unary { .. }
-        | Operation::AccessIndex { .. }
-        | Operation::Pipe { .. }
-        | Operation::Comma { .. }
-        | Operation::Binary { .. }
-        | Operation::Conditional { .. }
-        | Operation::Bind { .. }
-        | Operation::UserCall { .. }
-        | Operation::TryCatch { .. }
-        | Operation::Interpolation(_) => true,
-        Operation::Call { name, arguments } => bytecode.string(*name).is_some_and(|name| {
-            (name.as_ref() == "empty" && arguments.is_empty())
-                || (name.as_ref() == "error" && arguments.len() <= 1)
-                || (matches!(
-                    name.as_ref(),
-                    "map"
-                        | "map_values"
-                        | "select"
-                        | "sort_by"
-                        | "unique_by"
-                        | "has"
-                        | "in"
-                        | "walk"
-                ) && arguments.len() == 1)
-                || (name.as_ref() == "limit" && arguments.len() == 2)
-                || (name.as_ref() == "recurse" && arguments.len() <= 2)
-                || (arguments.is_empty()
-                    && matches!(
-                        name.as_ref(),
-                        "arrays"
-                            | "add"
-                            | "booleans"
-                            | "keys"
-                            | "keys_unsorted"
-                            | "length"
-                            | "iterables"
-                            | "max"
-                            | "min"
-                            | "modulemeta"
-                            | "nulls"
-                            | "numbers"
-                            | "objects"
-                            | "scalars"
-                            | "strings"
-                            | "tonumber"
-                            | "values"
-                            | "reverse"
-                            | "sort"
-                            | "tostring"
-                            | "type"
-                            | "unique"
-                            | "utf8bytelength"
-                            | "@base64"
-                            | "@base64d"
-                            | "@csv"
-                            | "@html"
-                            | "@json"
-                            | "@sh"
-                            | "@text"
-                            | "@tsv"
-                            | "@uri"
-                    ))
-        }),
-        _ => false,
+        _ => Some(Err(invalid("unsupported SQL builtin"))),
     }
 }
 
 #[allow(
-    clippy::too_many_lines,
-    reason = "the child-edge table exhaustively covers bytecode operations"
+    clippy::too_many_arguments,
+    reason = "object construction carries each branch's bounded continuation state explicitly"
 )]
-fn operation_children(bytecode: &Bytecode, operation: &Operation) -> Option<Vec<u32>> {
-    let mut children = Vec::new();
-    match operation {
-        Operation::AccessField { base, .. }
-        | Operation::Iterate(base)
-        | Operation::Optional(base)
-        | Operation::Array(base)
-        | Operation::Unary { child: base, .. } => children.push(*base),
-        Operation::Label { body, .. } => children.push(*body),
-        Operation::AccessIndex { base, index } => children.extend([*base, *index]),
-        Operation::Slice { base, start, end } => {
-            children.push(*base);
-            children.extend([*start, *end].into_iter().flatten());
-        }
-        Operation::Pipe { left, right }
-        | Operation::Comma { left, right }
-        | Operation::Binary { left, right, .. } => children.extend([*left, *right]),
-        Operation::Object(entries) => {
-            for entry in entries {
-                if let KeyOperand::Computed(key) = entry.key {
-                    children.push(key);
-                }
-                children.push(entry.value);
-            }
-        }
-        Operation::Conditional {
-            branches,
-            alternative,
-        } => {
-            for (condition, body) in branches {
-                children.extend([*condition, *body]);
-            }
-            children.push(*alternative);
-        }
-        Operation::Bind { value, body, .. } => children.extend([*value, *body]),
-        Operation::UserCall { symbol, arguments } => {
-            children.extend(arguments.iter().copied());
-            children.push(bytecode.functions().get(*symbol as usize)?.body);
-        }
-        Operation::Reduce {
-            generator,
-            initial,
-            update,
-            ..
-        } => children.extend([*generator, *initial, *update]),
-        Operation::Foreach {
-            generator,
-            initial,
-            update,
-            extract,
-            ..
-        } => children.extend([*generator, *initial, *update, *extract]),
-        Operation::Call { arguments, .. } => children.extend(arguments.iter().copied()),
-        Operation::TryCatch { expression, catch } => {
-            children.push(*expression);
-            children.extend(catch.iter().copied());
-        }
-        Operation::Interpolation(segments) => {
-            children.extend(segments.iter().filter_map(|segment| match segment {
-                InterpolationOperand::Literal(_) => None,
-                InterpolationOperand::Expression(expression) => Some(*expression),
+fn schedule_object_entry(
+    bytecode: &Bytecode,
+    entries: &Arc<[crate::bytecode::ObjectOperand]>,
+    next: usize,
+    object: Object,
+    input: Value,
+    origin: Option<OriginToken>,
+    environment: Arc<LexicalEnvironment>,
+    frames: UserFrames,
+    mut continuations: Vec<GeneratorContinuation>,
+    pending: &mut Vec<GeneratorTask>,
+) -> Option<Result<Value, VmError>> {
+    let Some(entry) = entries.get(next) else {
+        return Some(Ok(Value::object(object)));
+    };
+    match &entry.key {
+        KeyOperand::Static(index) => {
+            let Some(key) = bytecode.string(*index) else {
+                return Some(Err(invalid("object key string missing after validation")));
+            };
+            continuations.push(GeneratorContinuation::ObjectValue {
+                entries: Arc::clone(entries),
+                next: next.saturating_add(1),
+                object,
+                key: Arc::clone(key),
+                input: input.clone(),
+                origin: origin.clone(),
+                environment: Arc::clone(&environment),
+                frames: Arc::clone(&frames),
+            });
+            pending.push(GeneratorTask::Eval(GeneratorWork {
+                node: entry.value,
+                input,
+                origin,
+                environment,
+                frames,
+                continuations,
             }));
         }
-        Operation::Assignment { path, value, .. } => children.extend([*path, *value]),
-        Operation::LoadInput
-        | Operation::LoadConstant(_)
-        | Operation::Duplicate
-        | Operation::Pop
-        | Operation::Jump(_)
-        | Operation::Branch { .. }
-        | Operation::Fork(_)
-        | Operation::Backtrack
-        | Operation::Return
-        | Operation::Raise(_)
-        | Operation::Catch(_)
-        | Operation::EndCatch
-        | Operation::Identity
-        | Operation::Literal(_)
-        | Operation::Variable(_)
-        | Operation::Empty
-        | Operation::RecursiveDescent
-        | Operation::Break(_)
-        | Operation::ParameterCall { .. } => {}
+        KeyOperand::Computed(node) => {
+            continuations.push(GeneratorContinuation::ObjectKey {
+                entries: Arc::clone(entries),
+                next,
+                object,
+                input: input.clone(),
+                origin: origin.clone(),
+                environment: Arc::clone(&environment),
+                frames: Arc::clone(&frames),
+            });
+            pending.push(GeneratorTask::Eval(GeneratorWork {
+                node: *node,
+                input,
+                origin,
+                environment,
+                frames,
+                continuations,
+            }));
+        }
     }
-    Some(children)
+    None
+}
+
+fn current_path_aliases(continuations: &[GeneratorContinuation]) -> PathAliases {
+    continuations
+        .iter()
+        .rev()
+        .find_map(|continuation| match continuation {
+            GeneratorContinuation::PathAliases(aliases) => Some(aliases.as_ref().clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+fn path_bind_candidate(bytecode: &Bytecode, node: u32) -> bool {
+    fn visit(
+        bytecode: &Bytecode,
+        node: u32,
+        memo: &mut BTreeMap<u32, bool>,
+        active: &mut BTreeSet<u32>,
+    ) -> bool {
+        if let Some(candidate) = memo.get(&node) {
+            return *candidate;
+        }
+        if !active.insert(node) {
+            return false;
+        }
+        let result = match bytecode.instructions().get(node as usize) {
+            Some(instruction) => match &instruction.operation {
+                Operation::Identity
+                | Operation::RecursiveDescent
+                | Operation::Variable(_)
+                | Operation::ParameterCall { .. } => true,
+                Operation::AccessField { base, .. }
+                | Operation::Iterate(base)
+                | Operation::Optional(base) => visit(bytecode, *base, memo, active),
+                Operation::AccessIndex { base, .. } | Operation::Slice { base, .. } => {
+                    visit(bytecode, *base, memo, active)
+                }
+                Operation::Pipe { left, right } => {
+                    visit(bytecode, *left, memo, active) && visit(bytecode, *right, memo, active)
+                }
+                Operation::Comma { left, right } => {
+                    visit(bytecode, *left, memo, active) || visit(bytecode, *right, memo, active)
+                }
+                Operation::Conditional {
+                    branches,
+                    alternative,
+                } => {
+                    branches
+                        .iter()
+                        .any(|(_, body)| visit(bytecode, *body, memo, active))
+                        || visit(bytecode, *alternative, memo, active)
+                }
+                Operation::TryCatch { expression, catch } => {
+                    visit(bytecode, *expression, memo, active)
+                        || catch.is_some_and(|catch| visit(bytecode, catch, memo, active))
+                }
+                Operation::Bind { body, .. } | Operation::BindAlternatives { body, .. } => {
+                    visit(bytecode, *body, memo, active)
+                }
+                Operation::UserCall { symbol, .. } => bytecode
+                    .functions()
+                    .get(*symbol as usize)
+                    .is_some_and(|function| visit(bytecode, function.body, memo, active)),
+                Operation::Call { name, .. } => bytecode
+                    .string(*name)
+                    .is_some_and(|name| name.as_ref() == "select"),
+                _ => false,
+            },
+            None => false,
+        };
+        active.remove(&node);
+        memo.insert(node, result);
+        result
+    }
+
+    visit(bytecode, node, &mut BTreeMap::new(), &mut BTreeSet::new())
+}
+
+fn path_candidate_with_aliases(
+    bytecode: &Bytecode,
+    node: u32,
+    continuations: &[GeneratorContinuation],
+) -> bool {
+    match bytecode
+        .instructions()
+        .get(node as usize)
+        .map(|instruction| &instruction.operation)
+    {
+        Some(Operation::Variable(index)) => bytecode
+            .string(*index)
+            .is_some_and(|name| current_path_aliases(continuations).contains_key(name)),
+        _ => path_bind_candidate(bytecode, node),
+    }
+}
+
+fn clear_path_aliases(
+    bytecode: &Bytecode,
+    pattern: &BindingPatternOperand,
+    aliases: &mut PathAliases,
+) {
+    match pattern {
+        BindingPatternOperand::Variable(index) => {
+            if let Some(name) = bytecode.string(*index) {
+                aliases.remove(name);
+            }
+        }
+        BindingPatternOperand::Array(patterns) => {
+            for pattern in patterns {
+                clear_path_aliases(bytecode, pattern, aliases);
+            }
+        }
+        BindingPatternOperand::Object(fields) => {
+            for (_, pattern) in fields {
+                clear_path_aliases(bytecode, pattern, aliases);
+            }
+        }
+    }
 }
 
 #[allow(
     clippy::too_many_arguments,
     clippy::too_many_lines,
-    reason = "the explicit generator loop keeps fork and continuation state in one auditable place"
+    reason = "path traversal keeps the selected root and managed continuation state explicit"
 )]
-fn evaluate_generator_stream(
+fn schedule_path_eval(
     bytecode: &Bytecode,
-    input: &Value,
-    variables: &Environment,
+    work: PathWork,
+    pending: &mut Vec<GeneratorTask>,
+    next_boundary: &mut u64,
+) -> Option<Result<Value, VmError>> {
+    let operation = match bytecode.instructions().get(work.node as usize) {
+        Some(instruction) => instruction.operation.clone(),
+        None => return Some(Err(invalid("path instruction missing"))),
+    };
+    match operation {
+        Operation::Identity => Some(Ok(path_value(&work.prefix))),
+        Operation::Variable(index) => {
+            let Some(name) = bytecode.string(index) else {
+                return Some(Err(invalid("string missing after validation")));
+            };
+            if !work.environment.contains_key(name) {
+                return Some(Err(runtime(format!("variable ${name} has no value"))));
+            }
+            let aliases = current_path_aliases(&work.continuations);
+            if let Some(alias) = aliases.get(name) {
+                if work.origin.as_ref() == Some(&alias.origin) {
+                    let path = work
+                        .origin
+                        .as_ref()
+                        .map_or_else(Path::root, |origin| alias_path_for_input(alias, origin));
+                    return Some(Ok(path_value(&path)));
+                }
+                return Some(Err(runtime(
+                    "assignment left side is not a path".to_owned(),
+                )));
+            }
+            pending.push(GeneratorTask::Eval(GeneratorWork {
+                node: work.node,
+                input: work.input,
+                origin: work.origin.clone(),
+                environment: work.environment,
+                frames: work.frames,
+                continuations: work.continuations,
+            }));
+            None
+        }
+        Operation::AccessField { base, key } => {
+            let key = match bytecode.string(key) {
+                Some(key) => Arc::clone(key),
+                None => return Some(Err(invalid("path field missing after validation"))),
+            };
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathField(key));
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: base,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::AccessIndex { base, index } => {
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathIndex {
+                node: index,
+                input: work.input.clone(),
+                origin: work.origin.clone(),
+                environment: Arc::clone(&work.environment),
+            });
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: base,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::Slice { base, start, end } => {
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathSliceBase {
+                start,
+                end,
+                input: work.input.clone(),
+                origin: work.origin.clone(),
+                environment: Arc::clone(&work.environment),
+                frames: Arc::clone(&work.frames),
+            });
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: base,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::Iterate(base) => {
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathIterate {
+                input: work.input.clone(),
+            });
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: base,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::RecursiveDescent => {
+            pending.push(GeneratorTask::PathTraverse {
+                cursor: PathTraversalCursor::new(work.input, work.prefix),
+                environment: work.environment,
+                frames: work.frames,
+                continuations: work.continuations,
+            });
+            None
+        }
+        Operation::Pipe { left, right } => {
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathPipe {
+                node: right,
+                input: work.input.clone(),
+                environment: Arc::clone(&work.environment),
+            });
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: left,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::Comma { left, right } => {
+            let right_task = if path_candidate_with_aliases(bytecode, right, &work.continuations) {
+                GeneratorTask::PathEval(PathWork {
+                    node: right,
+                    input: work.input.clone(),
+                    origin: work.origin.clone(),
+                    prefix: work.prefix.clone(),
+                    environment: Arc::clone(&work.environment),
+                    frames: Arc::clone(&work.frames),
+                    continuations: work.continuations.clone(),
+                })
+            } else {
+                GeneratorTask::Eval(GeneratorWork {
+                    node: right,
+                    input: work.input.clone(),
+                    origin: work.origin.clone(),
+                    environment: Arc::clone(&work.environment),
+                    frames: Arc::clone(&work.frames),
+                    continuations: work.continuations.clone(),
+                })
+            };
+            let left_task = if path_candidate_with_aliases(bytecode, left, &work.continuations) {
+                GeneratorTask::PathEval(PathWork {
+                    node: left,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    prefix: work.prefix,
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations: work.continuations,
+                })
+            } else {
+                GeneratorTask::Eval(GeneratorWork {
+                    node: left,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations: work.continuations,
+                })
+            };
+            pending.push(right_task);
+            pending.push(left_task);
+            None
+        }
+        Operation::Optional(child) => {
+            let boundary = *next_boundary;
+            *next_boundary = next_boundary.saturating_add(1);
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::OptionalBoundary { boundary });
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: child,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::Conditional {
+            branches,
+            alternative,
+        } => {
+            let Some(condition) = branches.first().map(|(condition, _)| *condition) else {
+                return Some(Err(invalid("conditional has no alternative")));
+            };
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathConditional {
+                branches: Arc::from(branches),
+                next: 0,
+                alternative,
+                input: work.input.clone(),
+                origin: work.origin.clone(),
+                prefix: work.prefix.clone(),
+                environment: Arc::clone(&work.environment),
+            });
+            pending.push(GeneratorTask::Eval(GeneratorWork {
+                node: condition,
+                input: work.input,
+                origin: work.origin.clone(),
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::TryCatch { expression, catch } => {
+            let boundary = *next_boundary;
+            *next_boundary = next_boundary.saturating_add(1);
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathCatch {
+                boundary,
+                node: catch,
+                origin: work.origin.clone(),
+                environment: Arc::clone(&work.environment),
+            });
+            let task = if path_candidate_with_aliases(bytecode, expression, &continuations) {
+                GeneratorTask::PathEval(PathWork {
+                    node: expression,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    prefix: work.prefix,
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations,
+                })
+            } else {
+                GeneratorTask::Eval(GeneratorWork {
+                    node: expression,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations,
+                })
+            };
+            pending.push(task);
+            None
+        }
+        Operation::ParameterCall {
+            function,
+            parameter,
+        } => {
+            let argument = work
+                .frames
+                .iter()
+                .rev()
+                .find(|frame| frame.symbol == function)
+                .and_then(|frame| frame.filters.get(parameter as usize))
+                .and_then(Clone::clone);
+            let Some(argument) = argument else {
+                return Some(Err(invalid(
+                    "filter parameter missing from active user frame",
+                )));
+            };
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathUserReturn {
+                environment: Arc::clone(&work.environment),
+                frames: Arc::clone(&work.frames),
+            });
+            if path_candidate_with_aliases(bytecode, argument.node, &continuations) {
+                pending.push(GeneratorTask::PathEval(PathWork {
+                    node: argument.node,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    prefix: work.prefix,
+                    environment: argument.environment,
+                    frames: argument.frames,
+                    continuations,
+                }));
+            } else {
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node: argument.node,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    environment: argument.environment,
+                    frames: argument.frames,
+                    continuations,
+                }));
+            }
+            None
+        }
+        Operation::BindAlternatives {
+            value,
+            patterns,
+            body,
+        } => {
+            if !path_bind_candidate(bytecode, body) {
+                return Some(Err(VmError::Unsupported {
+                    operation: "path bind alternatives body".into(),
+                }));
+            }
+            let boundary = *next_boundary;
+            *next_boundary = next_boundary.saturating_add(1);
+            let patterns: Arc<[BindingPatternOperand]> = Arc::from(patterns);
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathBindAlternatives {
+                boundary,
+                patterns,
+                body,
+                input: work.input.clone(),
+                prefix: work.prefix.clone(),
+                environment: Arc::clone(&work.environment),
+            });
+            if path_candidate_with_aliases(bytecode, value, &continuations) {
+                pending.push(GeneratorTask::PathEval(PathWork {
+                    node: value,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    prefix: work.prefix,
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations,
+                }));
+            } else {
+                pending.push(GeneratorTask::Eval(GeneratorWork {
+                    node: value,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations,
+                }));
+            }
+            None
+        }
+        Operation::Bind {
+            value,
+            pattern,
+            body,
+        } => {
+            if path_candidate_with_aliases(bytecode, value, &work.continuations) {
+                let mut continuations = work.continuations;
+                continuations.push(GeneratorContinuation::PathBind {
+                    pattern,
+                    body,
+                    input: work.input.clone(),
+                    input_origin: work.origin.clone(),
+                    prefix: work.prefix.clone(),
+                    environment: Arc::clone(&work.environment),
+                    entered_from_path: true,
+                });
+                pending.push(GeneratorTask::PathEval(PathWork {
+                    node: value,
+                    input: work.input,
+                    origin: work.origin.clone(),
+                    prefix: work.prefix,
+                    environment: work.environment,
+                    frames: work.frames,
+                    continuations,
+                }));
+                return None;
+            }
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathBindValue {
+                pattern,
+                body,
+                input: work.input.clone(),
+                input_origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: Arc::clone(&work.environment),
+                entered_from_path: true,
+            });
+            pending.push(GeneratorTask::Eval(GeneratorWork {
+                node: value,
+                input: work.input,
+                origin: work.origin.clone(),
+                environment: work.environment,
+                frames: work.frames,
+                continuations,
+            }));
+            None
+        }
+        Operation::UserCall { symbol, arguments } => {
+            let Some(function) = bytecode.functions().get(symbol as usize) else {
+                return Some(Err(invalid("user function missing after validation")));
+            };
+            if arguments.len() != function.parameters.len() {
+                return Some(Err(invalid("user function arity changed after validation")));
+            }
+            let filters = arguments
+                .iter()
+                .zip(&function.parameters)
+                .map(|(node, parameter)| {
+                    (parameter.kind == ParameterKind::Filter).then(|| FilterArgument {
+                        node: *node,
+                        environment: Arc::clone(&work.environment),
+                        frames: Arc::clone(&work.frames),
+                    })
+                })
+                .collect::<Vec<_>>();
+            if let Some(next) = function
+                .parameters
+                .iter()
+                .position(|parameter| parameter.kind == ParameterKind::Value)
+            {
+                let arguments: Arc<[u32]> = Arc::from(arguments);
+                let from_path =
+                    path_candidate_with_aliases(bytecode, arguments[next], &work.continuations);
+                let mut continuations = work.continuations;
+                continuations.push(GeneratorContinuation::PathUserArgument {
+                    symbol,
+                    arguments: Arc::clone(&arguments),
+                    next,
+                    input: work.input.clone(),
+                    input_origin: work.origin.clone(),
+                    prefix: work.prefix.clone(),
+                    caller_environment: Arc::clone(&work.environment),
+                    caller_frames: Arc::clone(&work.frames),
+                    filters,
+                    bindings: LexicalEnvironment::new(),
+                    from_path,
+                });
+                if from_path {
+                    pending.push(GeneratorTask::PathEval(PathWork {
+                        node: arguments[next],
+                        input: work.input,
+                        origin: work.origin.clone(),
+                        prefix: work.prefix,
+                        environment: work.environment,
+                        frames: work.frames,
+                        continuations,
+                    }));
+                } else {
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: arguments[next],
+                        input: work.input,
+                        origin: work.origin.clone(),
+                        environment: work.environment,
+                        frames: work.frames,
+                        continuations,
+                    }));
+                }
+                return None;
+            }
+            let mut frames = work.frames.to_vec();
+            frames.push(UserFrame { symbol, filters });
+            let mut continuations = work.continuations;
+            continuations.push(GeneratorContinuation::PathUserReturn {
+                environment: Arc::clone(&work.environment),
+                frames: Arc::clone(&work.frames),
+            });
+            pending.push(GeneratorTask::PathEval(PathWork {
+                node: function.body,
+                input: work.input,
+                origin: work.origin.clone(),
+                prefix: work.prefix,
+                environment: work.environment,
+                frames: frames.into(),
+                continuations,
+            }));
+            None
+        }
+        Operation::Call { name, arguments } => {
+            let Some(name) = bytecode.string(name) else {
+                return Some(Err(invalid("path call name missing after validation")));
+            };
+            match name.as_ref() {
+                "getpath" => {
+                    let Some(argument) = arguments.first() else {
+                        return Some(Err(invalid("getpath argument missing")));
+                    };
+                    if arguments.len() != 1 {
+                        return Some(Err(invalid("getpath arity")));
+                    }
+                    let selected = match getpath(&work.input, work.prefix.components()) {
+                        Ok(value) => value,
+                        Err(error) => return Some(Err(error)),
+                    };
+                    let mut continuations = work.continuations;
+                    continuations.push(GeneratorContinuation::PathGetPath {
+                        base: work.prefix,
+                        input: selected.clone(),
+                    });
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: *argument,
+                        input: selected,
+                        origin: None,
+                        environment: work.environment,
+                        frames: work.frames,
+                        continuations,
+                    }));
+                    None
+                }
+                "select" => {
+                    let Some(argument) = arguments.first() else {
+                        return Some(Err(invalid("select argument missing")));
+                    };
+                    let selected = match getpath(&work.input, work.prefix.components()) {
+                        Ok(value) => value,
+                        Err(error) => return Some(Err(error)),
+                    };
+                    let mut continuations = work.continuations;
+                    continuations.push(GeneratorContinuation::PathSelect(work.prefix));
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: *argument,
+                        input: selected,
+                        origin: None,
+                        environment: work.environment,
+                        frames: work.frames,
+                        continuations,
+                    }));
+                    None
+                }
+                "error" => {
+                    let Some(argument) = arguments.first() else {
+                        return Some(Err(raised(work.input)));
+                    };
+                    let selected = match getpath(&work.input, work.prefix.components()) {
+                        Ok(value) => value,
+                        Err(error) => return Some(Err(error)),
+                    };
+                    let mut continuations = work.continuations;
+                    continuations.push(GeneratorContinuation::Raise);
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: *argument,
+                        input: selected,
+                        origin: None,
+                        environment: work.environment,
+                        frames: work.frames,
+                        continuations,
+                    }));
+                    None
+                }
+                _ => Some(Err(runtime(
+                    "assignment left side is not a path".to_owned(),
+                ))),
+            }
+        }
+        _ => Some(Err(runtime(
+            "assignment left side is not a path".to_owned(),
+        ))),
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "slice path scheduling carries the shared managed continuation state"
+)]
+fn schedule_path_slice(
+    path: Path,
+    target: Value,
+    start: Option<f64>,
+    end: Option<f64>,
+    assignment: Option<Rc<RefCell<AssignmentState>>>,
+    environment: Arc<LexicalEnvironment>,
+    frames: UserFrames,
+    continuations: Vec<GeneratorContinuation>,
+    pending: &mut Vec<GeneratorTask>,
+) -> Option<Result<Value, VmError>> {
+    let Value::Array(values) = target else {
+        return if matches!(target, Value::Null) {
+            None
+        } else {
+            Some(Err(type_error("slice", &target)))
+        };
+    };
+    let (start, end) = slice_bounds(values.len(), start, end);
+    if start < end || assignment.is_some() {
+        pending.push(GeneratorTask::PathSlice {
+            path,
+            start,
+            end,
+            next: start,
+            assignment,
+            environment,
+            frames,
+            continuations,
+        });
+    }
+    None
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "alternative binding scheduling carries the generator state needed for retry"
+)]
+fn schedule_bind_alternative(
+    bytecode: &Bytecode,
+    patterns: Arc<[BindingPatternOperand]>,
+    mut next: usize,
+    value: Value,
+    input: Value,
+    environment: Arc<LexicalEnvironment>,
+    body: u32,
+    frames: UserFrames,
+    mut continuations: Vec<GeneratorContinuation>,
+    boundary: u64,
+    pending: &mut Vec<GeneratorTask>,
     limits: VmLimits,
     cancellation: Option<&AtomicBool>,
     stop: &AtomicBool,
-    mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
-) -> VmObservations {
-    let environment = Arc::new(variables.clone());
-    let mut pending = vec![GeneratorTask::Eval(GeneratorWork {
-        node: bytecode.root(),
-        input: input.clone(),
-        environment,
-        frames: Arc::from([]),
-        continuations: Vec::new(),
-    })];
-    let mut observations = VmObservations::default();
-    let mut next_boundary = 0_u64;
-
-    while let Some(task) = pending.pop() {
-        if stop.load(Ordering::Relaxed)
-            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-        {
-            let _ = emit(Err(VmError::Interrupted), observations);
-            break;
-        }
-        if observations.steps >= limits.steps {
-            let _ = emit(Err(resource("vm-steps")), observations);
-            break;
-        }
-        observations.steps += 1;
-        let (mut work, delivered) = match task {
-            GeneratorTask::Eval(work) => (work, None),
-            GeneratorTask::Iterate {
-                values,
-                next,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let Some(value) = values.get(next).cloned() else {
-                    continue;
-                };
-                if next + 1 < values.len() {
-                    pending.push(GeneratorTask::Iterate {
-                        values,
-                        next: next + 1,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                }
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(value)),
-                )
+    observations: &mut VmObservations,
+    path_mode: bool,
+    prefix: Path,
+) -> Result<(), VmError> {
+    while let Some(pattern) = patterns.get(next) {
+        let mut nested = environment.as_ref().clone();
+        initialize_pattern_variables(bytecode, &patterns, &mut nested)?;
+        let pattern_depth = continuations.len();
+        let mut charge = |depth| {
+            if stop.load(Ordering::Relaxed)
+                || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                return Err(VmError::Interrupted);
             }
-            GeneratorTask::FinishArray {
-                values,
-                environment,
-                frames,
-                continuations,
-            } => (
-                GeneratorWork {
-                    node: bytecode.root(),
-                    input: Value::Null,
-                    environment,
-                    frames,
-                    continuations,
-                },
-                Some(Ok(Value::array(values.take()))),
-            ),
-            GeneratorTask::MapArray {
-                inputs,
-                next,
-                argument,
-                values,
-                first_only,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some(value) = inputs.get(next) {
-                    pending.push(GeneratorTask::MapArray {
-                        inputs: Arc::clone(&inputs),
-                        next: next + 1,
-                        argument,
-                        values: Rc::clone(&values),
-                        first_only,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut callback_continuations = continuations;
-                    callback_continuations.push(if first_only {
-                        GeneratorContinuation::ArrayUpdateItem {
-                            values,
-                            accepted: Rc::new(Cell::new(false)),
-                        }
-                    } else {
-                        GeneratorContinuation::ArrayItem(values)
-                    });
-                    (
-                        GeneratorWork {
-                            node: argument,
-                            input: value.clone(),
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
-                    (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Ok(Value::array(values.take()))),
-                    )
-                }
+            if depth >= limits.call_stack {
+                return Err(resource("call-stack"));
             }
-            GeneratorTask::MapObject {
-                entries,
-                next,
-                argument,
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some((key, value)) = entries.get(next) {
-                    pending.push(GeneratorTask::MapObject {
-                        entries: Arc::clone(&entries),
-                        next: next + 1,
-                        argument,
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut callback_continuations = continuations;
-                    callback_continuations.push(GeneratorContinuation::ObjectItem {
-                        key: Arc::clone(key),
-                        values,
-                        accepted: Rc::new(Cell::new(false)),
-                    });
-                    (
-                        GeneratorWork {
-                            node: argument,
-                            input: value.clone(),
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
-                    let output = std::mem::take(&mut *values.borrow_mut());
-                    (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Ok(Value::object(output))),
-                    )
-                }
+            if observations.steps >= limits.steps {
+                return Err(resource("vm-steps"));
             }
-            GeneratorTask::CollectSortKeys {
-                values,
-                next,
-                argument,
-                keyed_values,
-                unique,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some(value) = values.get(next) {
-                    pending.push(GeneratorTask::CollectSortKeys {
-                        values: Arc::clone(&values),
-                        next: next + 1,
-                        argument,
-                        keyed_values: Rc::clone(&keyed_values),
-                        unique,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let keys = Rc::new(RefCell::new(Vec::new()));
-                    pending.push(GeneratorTask::FinishSortKey {
-                        input: value.clone(),
-                        keys: Rc::clone(&keys),
-                        keyed_values,
-                        continuations: continuations.clone(),
-                    });
-                    let mut callback_continuations = continuations;
-                    callback_continuations
-                        .push(GeneratorContinuation::SortKeyItem(Rc::clone(&keys)));
-                    (
-                        GeneratorWork {
-                            node: argument,
-                            input: value.clone(),
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
-                    let mut keyed_values = std::mem::take(&mut *keyed_values.borrow_mut());
-                    sort_by_cached_key(&mut keyed_values);
-                    if unique {
-                        keyed_values.dedup_by(|left, right| left.0 == right.0);
-                    }
-                    let output = keyed_values
-                        .into_iter()
-                        .map(|(_, value)| value)
-                        .collect::<Vec<_>>();
-                    (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Ok(Value::array(output))),
-                    )
-                }
-            }
-            GeneratorTask::FinishSortKey {
-                input,
-                keys,
-                keyed_values,
-                continuations: _,
-            } => {
-                let keys = std::mem::take(&mut *keys.borrow_mut());
-                keyed_values.borrow_mut().push((Value::array(keys), input));
-                continue;
-            }
-            GeneratorTask::FinishAlternative {
-                matched,
-                right,
-                input,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if matched.get() {
-                    continue;
-                }
-                (
-                    GeneratorWork {
-                        node: right,
-                        input,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    None,
-                )
-            }
-            GeneratorTask::Traverse {
-                mut cursor,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if cursor.depth() > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
-                }
-                observations.path_stack_high_water =
-                    observations.path_stack_high_water.max(cursor.depth());
-                match cursor.next(limits.path_stack) {
-                    Ok(Some(value)) => {
-                        if pending.len() >= limits.fork_stack {
-                            let _ = emit(Err(resource("fork-stack")), observations);
-                            break;
-                        }
-                        pending.push(GeneratorTask::Traverse {
-                            cursor,
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
-                        (
-                            GeneratorWork {
-                                node: bytecode.root(),
-                                input: Value::Null,
-                                environment,
-                                frames,
-                                continuations,
-                            },
-                            Some(Ok(value)),
-                        )
-                    }
-                    Ok(None) => continue,
-                    Err(error) => {
-                        let _ = emit(Err(error), observations);
-                        break;
-                    }
-                }
-            }
-            GeneratorTask::RecurseExpand {
-                input,
-                filter,
-                condition,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if depth > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
-                }
-                observations.path_stack_high_water = observations.path_stack_high_water.max(depth);
-                if let Some(filter) = filter {
-                    let mut callback_continuations = continuations;
-                    callback_continuations.push(GeneratorContinuation::RecurseChild {
-                        filter,
-                        condition,
-                        depth,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                    });
-                    (
-                        GeneratorWork {
-                            node: filter,
-                            input,
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
-                    pending.push(GeneratorTask::RecurseChildren {
-                        input,
-                        next: 0,
-                        depth,
-                        environment,
-                        frames,
-                        continuations,
-                    });
-                    continue;
-                }
-            }
-            GeneratorTask::RecurseChildren {
-                input,
-                next,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let Some(child) = recursive_child(&input, next) else {
-                    continue;
-                };
-                pending.push(GeneratorTask::RecurseChildren {
-                    input,
-                    next: next.saturating_add(1),
-                    depth,
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                pending.push(GeneratorTask::RecurseValue {
-                    value: child,
-                    filter: None,
-                    condition: None,
-                    depth: depth.saturating_add(1),
-                    environment,
-                    frames,
-                    continuations,
-                });
-                continue;
-            }
-            GeneratorTask::RecurseValue {
-                value,
-                filter,
-                condition,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if depth > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
-                }
-                pending.push(GeneratorTask::RecurseExpand {
-                    input: value.clone(),
-                    filter,
-                    condition,
-                    depth,
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(value)),
-                )
-            }
-            GeneratorTask::WalkValue {
-                input,
-                callback,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if depth > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
-                }
-                observations.path_stack_high_water = observations.path_stack_high_water.max(depth);
-                match input {
-                    Value::Array(values) => {
-                        pending.push(GeneratorTask::WalkArray {
-                            inputs: values,
-                            next: 0,
-                            callback,
-                            depth,
-                            values: Rc::new(RefCell::new(Vec::new())),
-                            environment,
-                            frames,
-                            continuations,
-                        });
-                        continue;
-                    }
-                    Value::Object(values) => {
-                        let entries = values
-                            .iter()
-                            .map(|(key, value)| (Arc::clone(key), value.clone()))
-                            .collect::<Vec<_>>();
-                        pending.push(GeneratorTask::WalkObject {
-                            entries: Arc::from(entries),
-                            next: 0,
-                            callback,
-                            depth,
-                            values: Rc::new(RefCell::new(Object::new())),
-                            environment,
-                            frames,
-                            continuations,
-                        });
-                        continue;
-                    }
-                    input => (
-                        GeneratorWork {
-                            node: callback,
-                            input,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        None,
-                    ),
-                }
-            }
-            GeneratorTask::WalkArray {
-                inputs,
-                next,
-                callback,
-                depth,
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some(value) = inputs.get(next).cloned() {
-                    pending.push(GeneratorTask::WalkArray {
-                        inputs,
-                        next: next + 1,
-                        callback,
-                        depth,
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut child_continuations = continuations;
-                    child_continuations.push(GeneratorContinuation::ArrayItem(values));
-                    pending.push(GeneratorTask::WalkValue {
-                        input: value,
-                        callback,
-                        depth: depth.saturating_add(1),
-                        environment,
-                        frames,
-                        continuations: child_continuations,
-                    });
-                    continue;
-                }
-                (
-                    GeneratorWork {
-                        node: callback,
-                        input: Value::array(values.take()),
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    None,
-                )
-            }
-            GeneratorTask::WalkObject {
-                entries,
-                next,
-                callback,
-                depth,
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some((key, value)) = entries.get(next).cloned() {
-                    pending.push(GeneratorTask::WalkObject {
-                        entries,
-                        next: next + 1,
-                        callback,
-                        depth,
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut child_continuations = continuations;
-                    child_continuations.push(GeneratorContinuation::ObjectItem {
-                        key,
-                        values,
-                        accepted: Rc::new(Cell::new(false)),
-                    });
-                    pending.push(GeneratorTask::WalkValue {
-                        input: value,
-                        callback,
-                        depth: depth.saturating_add(1),
-                        environment,
-                        frames,
-                        continuations: child_continuations,
-                    });
-                    continue;
-                }
-                let rebuilt = std::mem::take(&mut *values.borrow_mut());
-                (
-                    GeneratorWork {
-                        node: callback,
-                        input: Value::object(rebuilt),
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    None,
-                )
-            }
+            observations.steps += 1;
+            observations.call_stack_high_water = observations.call_stack_high_water.max(depth + 1);
+            Ok(())
         };
-        observations.value_stack_high_water = observations.value_stack_high_water.max(1);
-        observations.fork_stack_high_water = observations.fork_stack_high_water.max(pending.len());
-        observations.call_stack_high_water = observations
-            .call_stack_high_water
-            .max(work.continuations.len().saturating_add(1));
-        if work.continuations.len() >= limits.call_stack {
-            let _ = emit(Err(resource("call-stack")), observations);
-            break;
-        }
-        if pending.len() >= limits.fork_stack {
-            let _ = emit(Err(resource("fork-stack")), observations);
-            break;
-        }
-
-        let value = if let Some(result) = delivered {
-            Some(result)
-        } else {
-            let Some(instruction) = bytecode.instructions().get(work.node as usize) else {
-                let _ = emit(
-                    Err(invalid("tree instruction missing after validation")),
-                    observations,
-                );
-                break;
-            };
-            match &instruction.operation {
-                Operation::Identity => Some(Ok(work.input)),
-                Operation::Literal(index) => Some(
-                    bytecode
-                        .constants()
-                        .get(*index as usize)
-                        .cloned()
-                        .ok_or_else(|| invalid("literal missing after validation")),
-                ),
-                Operation::Variable(index) => Some(
-                    bytecode
-                        .string(*index)
-                        .ok_or_else(|| invalid("string missing after validation"))
-                        .and_then(|name| variable_value(&work.environment, name)),
-                ),
-                Operation::Empty => None,
-                Operation::RecursiveDescent => {
-                    pending.push(GeneratorTask::Traverse {
-                        cursor: TraversalCursor::new(work.input.clone()),
-                        environment: Arc::clone(&work.environment),
-                        frames: Arc::clone(&work.frames),
-                        continuations: work.continuations.clone(),
+        match bind_pattern(
+            bytecode,
+            pattern,
+            &value,
+            &mut nested,
+            pattern_depth,
+            &mut charge,
+        ) {
+            Ok(()) => {
+                let body_input = input.clone();
+                if path_mode {
+                    continuations.push(GeneratorContinuation::PathBindAlternativeBody {
+                        boundary,
+                        patterns,
+                        next: next.saturating_add(1),
+                        body,
+                        value,
+                        input,
+                        prefix: prefix.clone(),
+                        environment,
                     });
-                    None
-                }
-                Operation::Interpolation(segments) => {
-                    let expression_count = segments
-                        .iter()
-                        .filter(|segment| matches!(segment, InterpolationOperand::Expression(_)))
-                        .count();
-                    if expression_count >= limits.call_stack {
-                        Some(Err(resource("call-stack")))
-                    } else {
-                        let segments = Arc::from(segments.clone());
-                        match interpolation_pieces(&segments, bytecode, limits.output_bytes) {
-                            Ok(pieces) => schedule_interpolation(
-                                &segments,
-                                segments.len(),
-                                pieces,
-                                work.input.clone(),
-                                Arc::clone(&work.environment),
-                                Arc::clone(&work.frames),
-                                work.continuations.clone(),
-                                bytecode,
-                                limits.output_bytes,
-                                &mut pending,
-                            ),
-                            Err(error) => Some(Err(error)),
-                        }
-                    }
-                }
-                Operation::AccessField { base, key } => match bytecode.string(*key) {
-                    Some(key) => {
-                        work.continuations
-                            .push(GeneratorContinuation::AccessField(Arc::clone(key)));
-                        work.node = *base;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
-                    }
-                    None => Some(Err(invalid("string missing after validation"))),
-                },
-                Operation::AccessIndex { base, index } => {
-                    work.continuations.push(GeneratorContinuation::AccessIndex {
-                        node: *index,
-                        environment: Arc::clone(&work.environment),
+                    pending.push(GeneratorTask::PathEval(PathWork {
+                        node: body,
+                        input: body_input,
+                        origin: None,
+                        prefix,
+                        environment: Arc::new(nested),
+                        frames,
+                        continuations,
+                    }));
+                } else {
+                    continuations.push(GeneratorContinuation::BindAlternativeBody {
+                        boundary,
+                        patterns,
+                        next: next.saturating_add(1),
+                        body,
+                        value,
+                        input,
+                        environment,
                     });
-                    work.node = *base;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: body,
+                        input: body_input,
+                        origin: None,
+                        environment: Arc::new(nested),
+                        frames,
+                        continuations,
+                    }));
                 }
-                Operation::Iterate(base) => {
-                    work.continuations.push(GeneratorContinuation::Iterate);
-                    work.node = *base;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                return Ok(());
+            }
+            Err(error) => {
+                if !is_pattern_mismatch(&error) {
+                    return Err(error);
                 }
-                Operation::Optional(child) => {
-                    work.continuations
-                        .push(GeneratorContinuation::OptionalBoundary);
-                    work.node = *child;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
-                }
-                Operation::Pipe { left, right } => {
-                    work.continuations.push(GeneratorContinuation::Pipe {
-                        node: *right,
-                        environment: Arc::clone(&work.environment),
-                    });
-                    work.node = *left;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
-                }
-                Operation::Comma { left, right } => {
-                    if pending.len().saturating_add(2) > limits.fork_stack {
-                        Some(Err(resource("fork-stack")))
-                    } else {
-                        let right_work = GeneratorWork {
-                            node: *right,
-                            input: work.input.clone(),
-                            environment: Arc::clone(&work.environment),
-                            frames: Arc::clone(&work.frames),
-                            continuations: work.continuations.clone(),
-                        };
-                        work.node = *left;
-                        pending.push(GeneratorTask::Eval(right_work));
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        observations.fork_stack_high_water =
-                            observations.fork_stack_high_water.max(pending.len());
-                        None
-                    }
-                }
-                Operation::Array(child) => {
-                    let values = Rc::new(RefCell::new(Vec::new()));
-                    pending.push(GeneratorTask::FinishArray {
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&work.environment),
-                        frames: Arc::clone(&work.frames),
-                        continuations: work.continuations.clone(),
-                    });
-                    work.continuations
-                        .push(GeneratorContinuation::ArrayItem(values));
-                    work.node = *child;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
-                }
-                Operation::Unary { operator, child } => {
-                    work.continuations
-                        .push(GeneratorContinuation::Unary(*operator));
-                    work.node = *child;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
-                }
-                Operation::Binary {
-                    operator,
-                    left,
-                    right,
-                } => {
-                    if *operator == BinaryOperator::Alternative {
-                        let matched = Rc::new(Cell::new(false));
-                        pending.push(GeneratorTask::FinishAlternative {
-                            matched: Rc::clone(&matched),
-                            right: *right,
-                            input: work.input.clone(),
-                            environment: Arc::clone(&work.environment),
-                            frames: Arc::clone(&work.frames),
-                            continuations: work.continuations.clone(),
-                        });
-                        work.continuations
-                            .push(GeneratorContinuation::AlternativeItem(matched));
-                    } else {
-                        work.continuations.push(GeneratorContinuation::BinaryLeft {
-                            operator: *operator,
-                            right: *right,
-                            input: work.input.clone(),
-                            environment: Arc::clone(&work.environment),
-                        });
-                    }
-                    work.node = *left;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                next = next.saturating_add(1);
+                if next >= patterns.len() {
+                    return Err(error);
                 }
                 Operation::Bind { value, name, body } => match bytecode.string(*name) {
                     Some(name) => {
