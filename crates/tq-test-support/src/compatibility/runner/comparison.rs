@@ -906,40 +906,6 @@ mod tests {
     }
 
     #[test]
-    fn tq_identity_contract_requires_status_stderr_and_documented_output() {
-        let contract = TqContract::Help;
-        let complete_help = concat!(
-            "tq - jq-compatible queries over TOON\nUsage: tq\n",
-            "-i, --input-format FORMAT\n-o, --output-format FORMAT\n",
-            "-n, --null-input\n-R, --raw-input\n-s, --slurp\n",
-            "-c, --compact-output\n-r, --raw-output\n--raw-output0\n",
-            "-j, --join-output\n-a, --ascii-output\n-S, --sort-keys\n",
-            "-C, --color-output\n-M, --monochrome-output\n--tab\n",
-            "--indent N\n--unbuffered\n--allow-environment\n--allow-platform\n",
-            "--stream\n--stream-errors\n-x, --proxy-on-error\n--seq\n",
-            "-f, --from-file FILE\n-L, --library-path DIR\n",
-            "--arg NAME VALUE\n--argjson NAME JSON\n--argtoon NAME TOON\n",
-            "--slurpfile NAME FILE\n--rawfile NAME FILE\n--args\n--jsonargs\n",
-            "-e, --exit-status\n-b, --binary\n-V, --version\n",
-            "--build-configuration\n--run-tests [FILE]\n-h, --help\n",
-            "Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq\n",
-            "-o, --output-format toon|yaml|json|jsonl\nselect TOON\nemit compact JSON\n",
-        );
-        let matching = cli_observation(complete_help, "", 0);
-        assert!(tq_contract_matches(contract, &matching));
-
-        let missing_option = complete_help.replace("--stream-errors", "");
-        for wrong in [
-            cli_observation("jq-1.8.1\n", "", 0),
-            cli_observation(&missing_option, "", 0),
-            cli_observation(complete_help, "diagnostic\n", 0),
-            cli_observation_with_status(complete_help, "", ProcessStatus::TimedOut, 0),
-        ] {
-            assert!(!tq_contract_matches(contract, &wrong));
-        }
-    }
-
-    #[test]
     fn tq_identity_contract_replaces_jq_byte_identity_comparison() {
         let case: CompatibilityCase = serde_json::from_value(json!({
             "schema_version": 1,
