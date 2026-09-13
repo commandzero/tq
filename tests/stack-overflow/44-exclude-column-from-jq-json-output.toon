@@ -19,7 +19,8 @@ answer:
   body_html: "<p>If you just want to delete the timestamps you can use the <code>del()</code> function:</p>\n\n<pre><code>jq 'del(.[].timestamp)' input.json\n</code></pre>\n\n<hr>\n\n<p>However to achieve the desired output, I would not use the <code>del()</code> function. Since you know which fields should appear in output, you can simply populate an array with <code>group</code> and <code>id</code> and then use the <code>join()</code> function:</p>\n\n<pre><code>jq -r '.[]|[.group,.uid]|join(\",\")' input.json\n</code></pre>\n\n<p><code>-r</code> stands for <em>raw ouput</em>. <code>jq</code> will not print quotes around the values.</p>\n\n<p>Output:</p>\n\n<pre class=\"lang-none prettyprint-override\"><code>employees,elgalu\nemployees,mike\nservices,pacts\n</code></pre>\n"
 benchmark:
   input_format: json
-  query: ".[].group"
-  input[2]{timestamp,group,uid}:
+  query: "del(.[].timestamp)"
+  input[3]{timestamp,group,uid}:
     1448369447295,employees,elgalu
-    1448369447296,services,pacts
+    1448369447296,employees,mike
+    1448369786667,services,pacts
