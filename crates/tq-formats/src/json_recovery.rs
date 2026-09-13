@@ -36,10 +36,17 @@ pub(crate) struct JsonRecoveryDecoder<R> {
     retain_documents: bool,
     events: VecDeque<Event>,
     document_started: bool,
+    line: u64,
+    document_line: u64,
 }
 
 impl<R: Read> JsonRecoveryDecoder<R> {
-    pub(crate) fn new(reader: R, maximum_depth: usize, maximum_token_bytes: usize) -> Self {
+    pub(crate) fn new_with_line(
+        reader: R,
+        maximum_depth: usize,
+        maximum_token_bytes: usize,
+        line: u64,
+    ) -> Self {
         Self {
             reader,
             containers: Vec::new(),
@@ -52,6 +59,8 @@ impl<R: Read> JsonRecoveryDecoder<R> {
             retain_documents: true,
             events: VecDeque::new(),
             document_started: false,
+            line,
+            document_line: line,
         }
     }
 
@@ -126,6 +135,15 @@ impl<R: Read> JsonRecoveryDecoder<R> {
         self.ended
     }
 
+    pub(crate) const fn document_line(&self) -> u64 {
+        self.document_line
+    }
+
+    fn complete_document_at(&mut self, value: &Value, line: u64) {
+        self.document_line = line;
+        self.complete_document(value);
+    }
+
     fn advance(&mut self) -> Result<Option<Value>, FormatError> {
         while !self.ended {
             let mut byte = [0];
@@ -143,11 +161,15 @@ impl<R: Read> JsonRecoveryDecoder<R> {
                 }
                 let completed = self.pending.take();
                 if let Some(value) = &completed {
-                    self.complete_document(value);
+                    self.complete_document_at(value, self.line);
                 }
                 return Ok(completed);
             }
             let byte = byte[0];
+            let byte_line = self.line;
+            if byte == b'\n' {
+                self.line = self.line.saturating_add(1);
+            }
             match self.lexical {
                 LexicalState::Escape => {
                     self.append(byte)?;
@@ -161,7 +183,7 @@ impl<R: Read> JsonRecoveryDecoder<R> {
                         if self.containers.is_empty() {
                             let completed = self.pending.take();
                             if let Some(value) = &completed {
-                                self.complete_document(value);
+                                self.complete_document_at(value, byte_line);
                             }
                             return Ok(completed);
                         }
@@ -181,7 +203,7 @@ impl<R: Read> JsonRecoveryDecoder<R> {
                         None
                     };
                     if let Some(value) = &completed {
-                        self.complete_document(value);
+                        self.complete_document_at(value, byte_line);
                     }
                     if byte == b'"' {
                         self.append(byte)?;
@@ -195,7 +217,7 @@ impl<R: Read> JsonRecoveryDecoder<R> {
                     if self.containers.is_empty() && self.pending.is_some() {
                         let completed = self.pending.take();
                         if let Some(value) = &completed {
-                            self.complete_document(value);
+                            self.complete_document_at(value, byte_line);
                         }
                         return Ok(completed);
                     }
@@ -340,10 +362,10 @@ impl<R: Read> JsonRecoveryDecoder<R> {
                         return Err(parse_error("Objects must consist of key:value pairs"));
                     }
                     self.insert(value)?;
-                } else if let Some(Container::Object { count, .. }) = self.containers.last() {
-                    if *count != 0 {
-                        return Err(parse_error("Expected another key-value pair"));
-                    }
+                } else if let Some(Container::Object { count, .. }) = self.containers.last()
+                    && *count != 0
+                {
+                    return Err(parse_error("Expected another key-value pair"));
                 }
                 let Some(Container::Object { values, .. }) = self.containers.pop() else {
                     return Err(parse_error("Unmatched '}'"));
