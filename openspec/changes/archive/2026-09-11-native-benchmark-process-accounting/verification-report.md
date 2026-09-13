@@ -42,9 +42,10 @@ accuracy guarantee. CPU/RSS and self-regression tolerances are unchanged.
 - Smoke JSON corpus identities now record the actual launch path. A focused
   regression test covers relative seed metadata. The original smoke reports
   retain three automated unavailable rows; the
-  [supplemental smoke review](smoke-regression-review.md) verifies matching
-  inputs and contracts and evaluates all nine tq rows without changing samples.
-  No smoke wall-time or RSS increase exceeds 20%.
+  [supplemental smoke review](smoke-regression-review.md) accepts six
+  automatically comparable pairs and manually validates three pairs whose raw
+  comparison status remains unavailable, for nine accepted smoke pairs without
+  changing samples. No smoke wall-time or RSS increase exceeds 20%.
 - Final standards review found no hard violations and two non-blocking
   maintenance suggestions. Final spec review found no remaining implementation
   blocker. Issue #30 acceptance commands explicitly pin both regression
@@ -116,8 +117,11 @@ Both hosts used the frozen hour/day/week/month corpus and `release-benchmark`
 builds. Host specifications and collector identities are in
 [worker-proof.md](worker-proof.md).
 
-The Linux baseline/candidate gate and supplemental smoke review accept 419
-comparable tq pairs with no wall-time or peak-RSS disclosure above 20%.
+The Linux baseline/candidate gate accepts 410 comparable standard pairs. The
+supplemental smoke review accepts six automatically comparable pairs and
+manually validates three pairs whose retained raw reports remain automated
+`unavailable`, for nine accepted smoke pairs and 419 accepted comparisons
+total, with no wall-time or peak-RSS disclosure above 20%.
 The 13 unsupported/resource-limited standard rows remain unavailable, not
 passing regression comparisons. Public comparison Results remain Linux-only.
 macOS supplies native verification evidence, not a cross-OS ranking or a
