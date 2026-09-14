@@ -6,7 +6,7 @@ use tq_core::{Object, Value};
 
 use crate::{
     DecodeOptions, Document, FormatError, InputFormat,
-    delimited_framing::{DelimitedError, DelimitedFramer, Field},
+    delimited_framing::{DelimitedError, DelimitedFramer, DelimitedRow},
 };
 
 pub(crate) struct DelimitedInput<R> {
@@ -40,9 +40,10 @@ impl<R: BufRead> DelimitedInput<R> {
 
     pub(crate) fn next_document(&mut self) -> Result<Option<Document>, FormatError> {
         if self.header.is_none() {
-            let Some(fields) = self.next_row()? else {
+            let Some(row) = self.next_row()? else {
                 return Ok(None);
             };
+            let fields = row.fields;
             let mut seen = BTreeSet::new();
             let mut header = Vec::with_capacity(fields.len());
             for field in fields {
@@ -54,9 +55,10 @@ impl<R: BufRead> DelimitedInput<R> {
             }
             self.header = Some(header);
         }
-        let Some(fields) = self.next_row()? else {
+        let Some(row) = self.next_row()? else {
             return Ok(None);
         };
+        let fields = row.fields;
         let header = self.header.as_ref().expect("header was established");
         if fields.len() > header.len() {
             return Err(self.profile_error("row has more fields than its header"));
@@ -78,13 +80,13 @@ impl<R: BufRead> DelimitedInput<R> {
             identity: self.identity.clone(),
             format: self.format,
             index: self.index,
-            line_number: 1,
+            line_number: row.line_number,
         };
         self.index = self.index.saturating_add(1);
         Ok(Some(document))
     }
 
-    fn next_row(&mut self) -> Result<Option<Vec<Field>>, FormatError> {
+    fn next_row(&mut self) -> Result<Option<DelimitedRow>, FormatError> {
         self.rows.next_row().map_err(|error| match error {
             DelimitedError::Io(error) => FormatError::Io(error),
             DelimitedError::Resource(resource) => FormatError::Resource(resource),
