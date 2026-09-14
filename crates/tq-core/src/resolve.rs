@@ -1524,6 +1524,11 @@ pub fn resolve(
 ) -> Result<Query<Resolved>, Box<Diagnostic>> {
     query.set_resolve_options(options.clone());
     let mut loader = ModuleLoader::new_with_source(options, query.source())?;
+    for source in query.sources() {
+        loader
+            .sources
+            .insert(source.id(), SourceMetadata::from_source(source));
+    }
     let expanded = loader.expand(query.ast().clone())?;
     *query.ast_mut() = expanded;
     query.set_modules(loader.module_info());
