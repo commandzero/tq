@@ -939,6 +939,58 @@ fn proxy_on_error_does_not_mask_resource_or_runtime_errors() {
 }
 
 #[test]
+fn proxy_auto_json_preserves_decoder_resource_limits() {
+    for (arguments, input, resource) in [
+        (
+            ["-x", "--max-depth", "1", "-o", "json", "."],
+            &b"[[0]]"[..],
+            "depth",
+        ),
+        (
+            ["-x", "--max-token-bytes", "3", "-o", "json", "."],
+            &b"\"long\""[..],
+            "token-bytes",
+        ),
+    ] {
+        let output = tq(&arguments, input);
+        assert_eq!(output.code, 5);
+        assert_eq!(output.stdout, [] as [u8; 0]);
+        assert!(String::from_utf8_lossy(&output.stderr).contains(resource));
+    }
+    let admitted = tq(
+        &[
+            "-x",
+            "--max-depth",
+            "1",
+            "--max-token-bytes",
+            "3",
+            "-c",
+            ".",
+        ],
+        b"[123]",
+    );
+    assert_eq!(admitted.code, 0);
+    assert_eq!(admitted.stdout, b"[123]\n");
+    assert_eq!(admitted.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn delimited_input_line_number_follows_physical_rows() {
+    let output = tq(
+        &[
+            "-i",
+            "csv",
+            "-c",
+            "[input_line_number, (inputs | input_line_number)]",
+        ],
+        b"name,age\r\n\"a\nb\",1\r\nc,2\r\n",
+    );
+    assert_eq!(output.code, 0);
+    assert_eq!(output.stdout, b"[2,4]\n");
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
 fn generated_help_and_build_configuration_are_stdout_only() {
     for arguments in [&["--help"][..], &["--build-configuration"][..]] {
         let output = tq(arguments, b"");
@@ -1047,6 +1099,35 @@ fn run_tests_executes_stdin_test_files_and_reports_failures() {
         String::from_utf8_lossy(&environment.stderr)
     );
     assert!(String::from_utf8_lossy(&environment.stdout).contains("1 of 1 tests passed"));
+}
+
+#[test]
+fn embedded_run_tests_rejects_file_paths_but_accepts_injected_stdin() {
+    let directory = tempdir().expect("run-tests directory creates");
+    let path = directory.path().join("tests.jq");
+    fs::write(&path, b".\nnull\nnull\n\n").expect("run-tests file writes");
+
+    let command = tq_cli::parse_args(["--run-tests", path.to_str().unwrap()])
+        .expect("run-tests file arguments parse");
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let error = tq_cli::run_with_io(command, &mut b"".as_slice(), &mut stdout, &mut stderr)
+        .expect_err("embedded run-tests must not open a filesystem path");
+    assert_eq!(error.status(), tq_cli::ExitStatus::Usage);
+    assert_eq!(
+        error.to_string(),
+        "incompatible options: run-tests file access is disabled for embedded execution"
+    );
+    assert_eq!(stdout, [] as [u8; 0]);
+    assert_eq!(stderr, [] as [u8; 0]);
+
+    let command = tq_cli::parse_args(["--run-tests"]).expect("run-tests stdin arguments parse");
+    let mut input = b".\nnull\nnull\n\n".as_slice();
+    let status = tq_cli::run_with_io(command, &mut input, &mut stdout, &mut stderr)
+        .expect("embedded run-tests stdin remains available");
+    assert_eq!(status, tq_cli::ExitStatus::Success);
+    assert!(String::from_utf8_lossy(&stdout).contains("1 of 1 tests passed"));
+    assert_eq!(stderr, [] as [u8; 0]);
 }
 
 #[test]

@@ -8,6 +8,12 @@ pub(crate) struct Field {
     pub(crate) quoted: bool,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct DelimitedRow {
+    pub(crate) fields: Vec<Field>,
+    pub(crate) line_number: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DelimitedError {
     #[error("{0}")]
@@ -31,6 +37,7 @@ pub(crate) struct DelimitedFramer<R> {
     maximum_row_bytes: usize,
     maximum_field_bytes: usize,
     maximum_fields: usize,
+    line: u64,
 }
 
 impl<R: BufRead> DelimitedFramer<R> {
@@ -47,10 +54,12 @@ impl<R: BufRead> DelimitedFramer<R> {
             maximum_row_bytes,
             maximum_field_bytes,
             maximum_fields,
+            line: 1,
         }
     }
 
-    pub(crate) fn next_row(&mut self) -> Result<Option<Vec<Field>>, DelimitedError> {
+    pub(crate) fn next_row(&mut self) -> Result<Option<DelimitedRow>, DelimitedError> {
+        let line_number = self.line;
         let mut fields = Vec::new();
         let mut field = Vec::new();
         let mut state = FieldState::Start;
@@ -65,7 +74,10 @@ impl<R: BufRead> DelimitedFramer<R> {
                     return Ok(None);
                 }
                 self.finish_field(&mut fields, field, quoted)?;
-                return Ok(Some(fields));
+                return Ok(Some(DelimitedRow {
+                    fields,
+                    line_number,
+                }));
             };
             self.reader.consume(1);
             row_bytes += 1;
@@ -77,6 +89,11 @@ impl<R: BufRead> DelimitedFramer<R> {
                     state = FieldState::AfterQuote;
                 } else {
                     self.append(&mut field, byte)?;
+                    if byte == b'\n'
+                        || (byte == b'\r' && self.reader.fill_buf()?.first() != Some(&b'\n'))
+                    {
+                        self.line = self.line.saturating_add(1);
+                    }
                 }
                 continue;
             }
@@ -95,10 +112,14 @@ impl<R: BufRead> DelimitedFramer<R> {
                         return Err(DelimitedError::Resource("row-bytes"));
                     }
                 }
+                self.line = self.line.saturating_add(1);
                 if !fields.is_empty() || !field.is_empty() || quoted {
                     self.finish_field(&mut fields, field, quoted)?;
                 }
-                return Ok(Some(fields));
+                return Ok(Some(DelimitedRow {
+                    fields,
+                    line_number,
+                }));
             } else if matches!(state, FieldState::AfterQuote) {
                 return Err(DelimitedError::Syntax(
                     "expected delimiter or row ending after closing quote",
@@ -187,7 +208,7 @@ mod tests {
                     2,
                 );
                 assert_eq!(
-                    scanner.next_row().unwrap().unwrap(),
+                    scanner.next_row().unwrap().unwrap().fields,
                     vec![
                         Field {
                             text: "a".into(),
@@ -200,7 +221,7 @@ mod tests {
                     ]
                 );
                 assert_eq!(
-                    scanner.next_row().unwrap().unwrap(),
+                    scanner.next_row().unwrap().unwrap().fields,
                     vec![
                         Field {
                             text: "one\ntwo".into(),
@@ -214,6 +235,27 @@ mod tests {
                 );
                 assert!(scanner.next_row().unwrap().is_none());
             }
+        }
+    }
+
+    #[test]
+    fn delimited_framing_reports_physical_lines_across_tiny_chunks() {
+        let bytes = b"header\r\n\"a\r\nb\",1\r\n\"c\rd\",2\r\nlast,3";
+        for capacity in 1..=4 {
+            let mut scanner = DelimitedFramer::new(
+                BufReader::with_capacity(capacity, bytes.as_slice()),
+                b',',
+                64,
+                16,
+                2,
+            );
+            for expected_line in [1_u64, 2, 4, 6] {
+                assert_eq!(
+                    scanner.next_row().unwrap().unwrap().line_number,
+                    expected_line
+                );
+            }
+            assert!(scanner.next_row().unwrap().is_none());
         }
     }
 }
