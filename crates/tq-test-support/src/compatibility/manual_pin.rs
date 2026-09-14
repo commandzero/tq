@@ -139,6 +139,7 @@ pub fn validate_manual_source_checkout(
     pin: &ManualReferencePin,
     root: &Path,
 ) -> Result<(), ManualPinError> {
+    let root = root.canonicalize()?;
     for section in &pin.sections {
         let path = Path::new(&section.file);
         if path
@@ -147,7 +148,14 @@ pub fn validate_manual_source_checkout(
         {
             return Err(drift("source pin path must be relative and confined"));
         }
-        let bytes = fs::read(root.join(path))?;
+        let resolved = root.join(path).canonicalize()?;
+        if !resolved.starts_with(&root) {
+            return Err(drift(format!(
+                "source document escapes checkout: {}",
+                section.file
+            )));
+        }
+        let bytes = fs::read(resolved)?;
         if encode_hex(&Sha256::digest(&bytes)) != section.sha256 {
             return Err(drift(format!("source document changed: {}", section.file)));
         }
@@ -248,4 +256,38 @@ pub fn validate_pinned_manual_coverage(
 
 fn drift(message: impl Into<String>) -> ManualPinError {
     ManualPinError::Drift(message.into())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{fs, os::unix::fs::symlink};
+
+    use sha2::{Digest, Sha256};
+
+    use super::{ManualReferencePin, ManualSourcePin, encode_hex, validate_manual_source_checkout};
+
+    #[test]
+    fn source_checkout_rejects_a_symlink_that_escapes_the_root() {
+        let root = tempfile::tempdir().expect("checkout root");
+        let outside = tempfile::tempdir().expect("outside directory");
+        let source = b"historical manual source\n";
+        let outside_path = outside.path().join("source.md");
+        fs::write(&outside_path, source).expect("write outside source");
+        symlink(&outside_path, root.path().join("source.md")).expect("create source symlink");
+        let pin = ManualReferencePin {
+            schema_version: 1,
+            source_inventory_sha256: String::new(),
+            sections: vec![ManualSourcePin {
+                section: "introduction".to_owned(),
+                file: "source.md".to_owned(),
+                sha256: encode_hex(&Sha256::digest(source)),
+            }],
+            baseline_cases: Vec::new(),
+            references: Vec::new(),
+        };
+
+        let error = validate_manual_source_checkout(&pin, root.path())
+            .expect_err("source pins must stay inside the canonical checkout root");
+        assert!(error.to_string().contains("escapes checkout"));
+    }
 }

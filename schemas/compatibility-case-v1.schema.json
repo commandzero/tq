@@ -152,6 +152,16 @@
         "error_class": {
           "type": "string",
           "minLength": 1
+        },
+        "compare_stderr": {
+          "type": "boolean"
+        },
+        "tq_contract": {
+          "enum": [
+            "version",
+            "build-configuration",
+            "help"
+          ]
         }
       }
     }
@@ -172,6 +182,22 @@
         },
         "supported": {
           "type": "boolean"
+        },
+        "trailing_args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "omit_query": {
+          "type": "boolean"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "env_paths": {
+          "type": "object",
+          "description": "Existing repository-relative paths resolved for the child environment; cannot overlap env keys.",
+          "additionalProperties": { "type": "string", "minLength": 1 }
         },
         "note": {
           "type": "string"
