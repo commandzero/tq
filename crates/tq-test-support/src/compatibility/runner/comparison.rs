@@ -509,6 +509,7 @@ fn case_verdict(
             && successful_observation(reference)
             && completed
             && tq_contract_matches(*contract, actual)
+            && (!case.expected.compare_stderr || reference.stderr_hex == actual.stderr_hex)
         {
             (
                 "match",
@@ -938,9 +939,59 @@ mod tests {
             "failure"
         );
 
+        let failed_actual = cli_observation("tq 0.1.0 (jq target 1.8.x)\n", "", 1);
+        assert_eq!(
+            case_verdict(&case, &reference, &failed_actual, &[]).0,
+            "failure"
+        );
+
         let wrong_identity = cli_observation("jq-1.8.1\n", "", 0);
         assert_eq!(
             case_verdict(&case, &reference, &wrong_identity, &[]).0,
+            "failure"
+        );
+    }
+
+    #[test]
+    fn tq_identity_contract_honors_requested_stderr_comparison() {
+        let case: CompatibilityCase = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "manual.invoking.version",
+            "title": "Version option invocation",
+            "classification": "jq-target",
+            "capabilities": ["manual.identity"],
+            "status": "mvp",
+            "fixture": {"format": "none", "inline": ""},
+            "query": "",
+            "adapters": {
+                "jq": {"supported": true},
+                "tq": {"supported": true, "args": ["--version"], "omit_query": true}
+            },
+            "invocation_mode": "null-input",
+            "expected": {
+                "contract": "raw-bytes",
+                "baseline": "required",
+                "compare_stderr": true,
+                "tq_contract": "version"
+            }
+        }))
+        .expect("identity contract case should deserialize");
+
+        let reference = cli_observation("jq-1.8.1\n", "warning: reference diagnostic\n", 0);
+        let matching = cli_observation(
+            "tq 0.1.0 (jq target 1.8.x)\n",
+            "warning: reference diagnostic\n",
+            0,
+        );
+        assert_eq!(case_verdict(&case, &reference, &matching, &[]).0, "match");
+
+        let mismatched = cli_observation(
+            "tq 0.1.0 (jq target 1.8.x)\n",
+            "warning: different diagnostic\n",
+            0,
+        );
+        assert_eq!(
+            case_verdict(&case, &reference, &mismatched, &[]).0,
             "failure"
         );
     }

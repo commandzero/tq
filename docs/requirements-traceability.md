@@ -1,3 +1,10 @@
+---
+type: Report
+title: MVP requirements traceability
+description: Historical MVP scenario inventory and executable evidence mapping.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+---
+
 # Requirements traceability
 
 This index covers the eight `build-tq-mvp` capability specifications. The
