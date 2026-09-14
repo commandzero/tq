@@ -11,7 +11,10 @@ use super::super::{
     apply_reviewed_disparities, case_fingerprint, discover_tool, manual_verdict_counts,
     read_manual_review_case_ids, tq_contract_matches,
 };
-use super::{ExecutionFixture, OutputMode, execute, fixture_bytes, semantic_diffs, skipped};
+use super::{
+    ExecutionFixture, OutputMode, execute, fixture_bytes, output_mode_for_args, semantic_diffs,
+    sequence_flag_for_args, skipped,
+};
 
 /// Runs the manual's referenced cases with explicit JSON and TOON output.
 ///
@@ -154,16 +157,31 @@ fn compare_case(
         ContractKind::ResultSequence | ContractKind::Error
     );
     let reference = observe(case, &case.adapters.jq, jq, root, timeout, false, false)?;
+    let authored_mode = output_mode_for_args(&case.adapters.tq.args, structured);
+    let authored_sequence = authored_mode.json_sequence || authored_mode.toon_sequence;
+    let authored_sequence_flag = sequence_flag_for_args(&case.adapters.tq.args);
     let mut json_adapter = case.adapters.tq.clone();
     if structured {
-        force_output_format_args(&mut json_adapter.args, "json");
+        let format = if authored_mode.json_lines {
+            "jsonl"
+        } else if authored_sequence && !authored_sequence_flag {
+            "json-seq"
+        } else {
+            "json"
+        };
+        force_output_format_args(&mut json_adapter.args, format);
     }
     let actual = observe(case, &json_adapter, tq, root, timeout, structured, false)?;
     let mut toon_sequence = false;
     let toon = if structured {
         let mut adapter = case.adapters.tq.clone();
-        toon_sequence = adapter.args.iter().any(|argument| argument == "--seq");
-        force_output_format_args(&mut adapter.args, "toon");
+        let format = if authored_sequence && !authored_sequence_flag {
+            "toon-seq"
+        } else {
+            "toon"
+        };
+        force_output_format_args(&mut adapter.args, format);
+        toon_sequence = output_mode_for_args(&adapter.args, true).toon_sequence;
         Some(observe_toon(
             case,
             &adapter,
@@ -247,14 +265,27 @@ fn observe_toon(
     if toon_sequence {
         return Ok(observed);
     }
-    if json_output.state == ObservationState::Executed
-        && observed
-            .stdout_hex
-            .as_deref()
-            .and_then(decode_hex)
-            .is_some_and(|bytes| {
+    let toon_unframed = output_mode_for_args(&adapter.args, true).toon_unframed;
+    let output_matches = observed
+        .stdout_hex
+        .as_deref()
+        .and_then(decode_hex)
+        .is_some_and(|bytes| {
+            if toon_unframed {
+                super::super::normalization::toon_unframed_value_match(&bytes, &json_output.results)
+            } else {
                 super::super::normalization::toon_values_match(&bytes, &json_output.results)
-            })
+            }
+        });
+    let matching_empty_failure = toon_unframed
+        && json_output.results.is_empty()
+        && json_output.exit_code.is_some_and(|code| code != 0)
+        && json_output.stdout_hex.as_deref() == Some("")
+        && observed.stdout_hex.as_deref() == Some("")
+        && observed.process_status == json_output.process_status
+        && observed.exit_code == json_output.exit_code
+        && observed.error_class == json_output.error_class;
+    if json_output.state == ObservationState::Executed && (output_matches || matching_empty_failure)
     {
         observed.results.clone_from(&json_output.results);
         observed.state = ObservationState::Executed;
@@ -294,7 +325,7 @@ fn observe_toon(
 /// Adapter arguments are the options before the query. Values consumed by
 /// other options and the `--` positional boundary remain untouched, so an
 /// option-looking value cannot be rewritten accidentally.
-fn force_output_format_args(args: &mut Vec<String>, format: &str) {
+pub(super) fn force_output_format_args(args: &mut Vec<String>, format: &str) {
     let expanded_args = expand_short_comparison_options(args);
     let mut normalized = Vec::with_capacity(expanded_args.len() + 2);
     let mut found = false;
@@ -306,6 +337,10 @@ fn force_output_format_args(args: &mut Vec<String>, format: &str) {
             break;
         }
         if matches!(argument.as_str(), "-c" | "--compact-output") {
+            index += 1;
+            continue;
+        }
+        if argument == "--unframed" && !matches!(format, "toon" | "toon-seq") {
             index += 1;
             continue;
         }
@@ -347,7 +382,7 @@ fn force_output_format_args(args: &mut Vec<String>, format: &str) {
 /// Expands the short-option clusters that can contain output or compact
 /// controls, matching the CLI's value-option boundary. Unknown clusters stay
 /// intact and are left for the target tool to validate.
-fn expand_short_comparison_options(args: &[String]) -> Vec<String> {
+pub(super) fn expand_short_comparison_options(args: &[String]) -> Vec<String> {
     let mut expanded = Vec::with_capacity(args.len());
     let mut index = 0;
     while index < args.len() {
@@ -388,7 +423,12 @@ fn expand_short_comparison_option(argument: &str) -> Option<Vec<String>> {
             expanded.push(format!("-{short}"));
             let value_start = offset + short.len_utf8();
             if value_start < body.len() {
-                expanded.push(body[value_start..].to_owned());
+                expanded.push(
+                    body[value_start..]
+                        .strip_prefix('=')
+                        .unwrap_or(&body[value_start..])
+                        .to_owned(),
+                );
             }
             return Some(expanded);
         }
@@ -459,6 +499,7 @@ fn option_value_arity(argument: &str) -> usize {
             | "--decode-in-flight-batches"
             | "--decode-in-flight-bytes"
             | "--max-spool-bytes"
+            | "--run-tests"
     ))
 }
 
@@ -576,7 +617,11 @@ fn observe(
         },
         OutputMode {
             json_output,
+            json_lines: json_output && output_mode_for_args(&adapter.args, true).json_lines,
+            json_sequence: json_output && output_mode_for_args(&adapter.args, true).json_sequence,
+            toon_output: false,
             toon_sequence,
+            toon_unframed: false,
         },
     )
 }
