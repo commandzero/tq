@@ -94,6 +94,30 @@ fn reference_identity_is_path_independent_but_not_version_or_binary_independent(
 }
 
 #[test]
+fn linux_reference_uses_the_reviewed_static_official_release() {
+    let pin = pin();
+    let reference = pin
+        .references
+        .iter()
+        .find(|reference| reference.target == "x86_64-linux")
+        .expect("reviewed Linux reference");
+    assert_eq!(reference.version, "jq-1.8.1");
+    assert_eq!(reference.bytes, 2_255_816);
+    assert_eq!(
+        reference.sha256,
+        "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d"
+    );
+    assert_eq!(
+        reference.build_configuration,
+        "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+    );
+    assert_eq!(
+        reference.runtime_libraries,
+        [] as [tq_test_support::corpus::ArtifactIdentity; 0]
+    );
+}
+
+#[test]
 fn missing_host_reference_evidence_blocks_the_release_claim() {
     let mut pin = pin();
     let target = tq_test_support::compatibility::manual_host_target();

@@ -70,25 +70,29 @@ results, such as `debug` and `stderr`.
 
 ### JSON equivalence and output size
 
-Use the [jq manual report](../../docs/tests/jq-manual/index.md) for the current
-compatibility verdicts, per-example outputs, and tokenizer counts. Generate full
+The [jq manual report](../../docs/tests/jq-manual/index.md) preserves a historical
+capture of compatibility verdicts, per-example outputs, and tokenizer counts.
+It is not a current-head completion report. Generate fresh full
 TOON evidence under ignored `target/` storage to retain executable identities,
 actual stdout, process outcomes, and reasons without committing campaign dumps.
 
 ```sh
 TQ_JQ=target/reference-build/jq/jq TQ_BIN=target/debug/tq \
   target/debug/tq-manual-compare \
-    --markdown-dir docs/tests/jq-manual \
+    --markdown-dir target/jq-manual-review \
     target/manual-comparison.toon | tq -x
 ```
 
 This separate command writes the TOON evidence and one Markdown token report per
-case collection under `docs/tests/jq-manual`. The index shows unique-case
+case collection under `target/jq-manual-review`. The index shows unique-case
 totals; section pages can share cases referenced by more than one collection.
 Use `--render-only` with the saved TOON evidence to regenerate pages without
 running the reference tools. Human-readable source reviews are in
 [docs/tests/jq-manual](../../docs/tests/jq-manual/index.md); their machine-readable
 collections are in `reviews/jq-manual`.
+Only promote reviewed campaign results to `docs/tests/jq-manual`; retain the
+historical labels until current executable identities and completion gates
+have been verified.
 
 `reviews/` stores versioned test metadata, not campaign output: source-to-case
 mappings, reference pins, approved disparity expectations, and small historical
@@ -120,6 +124,14 @@ and the jq binary and build configuration for each verified host. The command
 rejects changed or unverified reference builds before executing cases. Reference
 installation paths are not pinned. Passing this gate alone
 does not establish complete manual compatibility.
+
+Release jobs use the official jq 1.8.1 `jq-linux-amd64` and
+`jq-macos-arm64` artifacts with checked-in SHA-256 pins. The Linux artifact
+is statically linked, so it does not require the former Red Hat runtime
+libraries on the hosted Ubuntu runner. Explicit artifact overrides must still
+pass both download-digest and executable/build-identity checks. A reference
+change does not renew disparity approvals: compare fresh observations and
+review each difference before updating an approval.
 
 Ordinary fixture runs do not need the companion repository. To audit its source
 files against the pins too, add `--source-root /path/to/tq-benchmarks`. Changed or
