@@ -2,16 +2,23 @@
 
 #![cfg(unix)]
 
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, time::Duration};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::PathBuf,
+    thread,
+    time::{Duration, Instant},
+};
 
 use serde_json::json;
 use tq_test_support::{
     benchmark::{
         BenchmarkAdapter, BenchmarkCase, BenchmarkCorpusIdentity, BenchmarkInvocation,
-        BenchmarkLimits, BenchmarkOutcome, BenchmarkSampling, BenchmarkTool, ComparisonFamily,
-        CorrectnessObservation, CorrectnessPayload, DatasetFamily, DatasetSelector, DatasetTier,
-        ExecutionClass, InputFormat, OutputContract, OutputContractKind, normalize_correctness_run,
-        run_correctness_limit_probe, run_gated_row, semantic_digest,
+        BenchmarkLimits, BenchmarkOutcome, BenchmarkRunnerError, BenchmarkSampling, BenchmarkTool,
+        ComparisonFamily, CorrectnessObservation, CorrectnessPayload, DatasetFamily,
+        DatasetSelector, DatasetTier, ExecutionClass, InputFormat, MeasureError, OutputContract,
+        OutputContractKind, normalize_correctness_run, run_correctness_limit_probe, run_gated_row,
+        semantic_digest,
     },
     compatibility::{ProcessStatus, ToolKind},
     corpus::ArtifactIdentity,
@@ -36,6 +43,88 @@ fn incorrect_candidate_never_receives_timing_samples() {
 }
 
 #[test]
+fn colored_json_gate_requires_sgr_and_matching_json_before_timing() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let reference_script = script(
+        directory.path(),
+        "color-reference",
+        "printf '\\033[31m1\\033[0m\\n'",
+    );
+    let reference_invocation = invocation(reference_script);
+    let reference = normalize_correctness_run(
+        &reference_invocation,
+        ToolKind::Jq,
+        OutputContractKind::ColoredSemanticSequence,
+    )
+    .expect("colored reference");
+
+    let candidate_script = script(
+        directory.path(),
+        "color-candidate",
+        "printf '\\033[32m1\\033[0m\\n'",
+    );
+    let mut color_case = case();
+    color_case.output_contract.kind = OutputContractKind::ColoredSemanticSequence;
+    let row = run_gated_row(
+        &color_case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(candidate_script),
+        &reference,
+    )
+    .expect("colored gated row");
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+
+    let wrong_json = script(
+        directory.path(),
+        "color-wrong-json",
+        "printf '\\033[32m2\\033[0m\\n'",
+    );
+    let row = run_gated_row(
+        &color_case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(wrong_json),
+        &reference,
+    )
+    .expect("wrong colored row");
+    assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+    assert!(row.samples.is_empty());
+
+    let no_color = script(directory.path(), "color-missing", "printf '1\\n'");
+    let row = run_gated_row(
+        &color_case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(no_color),
+        &reference,
+    )
+    .expect("missing colored row");
+    assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+    assert!(row.samples.is_empty());
+
+    let malformed = script(
+        directory.path(),
+        "color-malformed",
+        "printf '\\033[3x1\\033[0m\\n'",
+    );
+    let row = run_gated_row(
+        &color_case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(malformed),
+        &reference,
+    )
+    .expect("malformed colored row");
+    assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+    assert!(row.samples.is_empty());
+}
+
+#[test]
 fn correct_candidate_runs_warmup_and_requested_samples() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let executable = script(directory.path(), "correct", "printf '1\\n'");
@@ -50,7 +139,79 @@ fn correct_candidate_runs_warmup_and_requested_samples() {
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::Timed);
     assert_eq!(row.samples.len(), 3);
+    assert!(row.samples.iter().all(|sample| {
+        sample
+            .measurement_protocol
+            .as_ref()
+            .is_some_and(|protocol| protocol.worker.is_some())
+    }));
     assert!(row.summary.is_some());
+}
+
+#[test]
+fn rss_limited_rows_keep_timing_and_enforcement_repetitions_separate() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "correct-limited", "printf '1\\n'");
+    let mut invocation = invocation(executable);
+    invocation.rss_limit = Some(128 * 1024 * 1024);
+    let mut case = case();
+    case.limits.rss_bytes = invocation.rss_limit;
+    let row = run_gated_row(
+        &case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+        &reference(),
+    )
+    .expect("limited gated row");
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+    assert_eq!(row.samples.len(), 3);
+    assert!(row.samples.iter().all(|sample| {
+        sample
+            .measurement_protocol
+            .as_ref()
+            .is_some_and(|protocol| protocol.rss_poll_interval_micros.is_none())
+    }));
+    let stored = serde_json::to_value(&row).unwrap();
+    let instrumented = stored["instrumented_samples"]
+        .as_array()
+        .expect("separate enforcement samples");
+    assert_eq!(instrumented.len(), 3);
+    assert!(
+        instrumented
+            .iter()
+            .all(|sample| sample["measurement_protocol"]["rss_poll_interval_micros"] == 25_000)
+    );
+    assert!(
+        instrumented
+            .iter()
+            .all(|sample| sample["measurement_protocol"]["worker"].is_object())
+    );
+    assert_eq!(row.summary.as_ref().unwrap().wall_time_micros.samples, 3);
+}
+
+#[test]
+fn failed_sampled_enforcement_is_not_reported_as_a_timing_repetition() {
+    let directory = tempfile::tempdir().unwrap();
+    let executable = script(directory.path(), "over-limit", "printf '1\\n'");
+    let mut invocation = invocation(executable);
+    invocation.rss_limit = Some(1);
+    let mut case = case();
+    case.limits.rss_bytes = Some(1);
+    let row = run_gated_row(
+        &case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+        &reference(),
+    )
+    .unwrap();
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert!(row.samples.is_empty());
+    assert_eq!(row.instrumented_samples.len(), 1);
+    assert!(row.summary.is_none());
 }
 
 #[test]
@@ -68,14 +229,22 @@ fn signaled_correctness_candidate_is_not_misclassified_as_incorrect() {
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::OomOrSignal);
     assert_eq!(row.samples.len(), 1);
-    assert!(row.summary.is_some());
+    assert!(row.summary.is_none());
 }
 
 #[test]
 fn oversized_correctness_output_becomes_a_bounded_resource_row() {
     let directory = tempfile::tempdir().expect("temporary directory");
-    let executable = script(directory.path(), "oversized", "head -c 40000000 /dev/zero");
+    let descendant_pid = directory.path().join("descendant.pid");
+    let executable = script(
+        directory.path(),
+        "oversized",
+        // Keep a descendant holding both pipe descriptors after the producer
+        // reaches the bound; cleanup must not wait for descendant EOF.
+        "sleep 30 &\necho $! > descendant.pid\nhead -c 40000000 /dev/zero",
+    );
     let mut invocation = invocation(executable);
+    invocation.current_dir = Some(directory.path().to_path_buf());
     invocation.output_limit = 64 * 1024 * 1024;
     let row = run_correctness_limit_probe(
         &case(),
@@ -89,7 +258,46 @@ fn oversized_correctness_output_becomes_a_bounded_resource_row() {
     assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
     assert_eq!(row.limits.output_bytes, 32 * 1024 * 1024);
     assert_eq!(row.samples.len(), 1);
-    assert!(row.summary.is_some());
+    assert!(row.summary.is_none());
+
+    let descendant_pid = fs::read_to_string(descendant_pid)
+        .expect("descendant PID artifact")
+        .trim()
+        .parse()
+        .expect("numeric descendant PID");
+    wait_until_gone(descendant_pid);
+}
+
+#[test]
+fn correctness_output_limit_removes_capture_files() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(
+        directory.path(),
+        "oversized-correctness",
+        "head -c 2048 /dev/zero",
+    );
+    let mut invocation = invocation(executable);
+    invocation.output_limit = 1024;
+
+    let error = normalize_correctness_run(
+        &invocation,
+        ToolKind::Jq,
+        OutputContractKind::SemanticSequence,
+    )
+    .expect_err("output limit must be reported");
+    let BenchmarkRunnerError::CorrectnessOutputLimit { stdout, stderr, .. } = error else {
+        panic!("expected bounded correctness output error");
+    };
+    assert!(
+        !stdout.exists(),
+        "stdout capture leaked: {}",
+        stdout.display()
+    );
+    assert!(
+        !stderr.exists(),
+        "stderr capture leaked: {}",
+        stderr.display()
+    );
 }
 
 #[test]
@@ -111,8 +319,10 @@ fn semantic_digest_matches_json_and_toon_without_retaining_result_sequences() {
         OutputContractKind::SemanticSequence,
     )
     .expect("JSON semantic digest");
+    let mut toon_invocation = invocation(toon);
+    toon_invocation.args = vec!["--seq".to_owned()];
     let candidate = normalize_correctness_run(
-        &invocation(toon),
+        &toon_invocation,
         ToolKind::Tq,
         OutputContractKind::SemanticSequence,
     )
@@ -125,6 +335,362 @@ fn semantic_digest_matches_json_and_toon_without_retaining_result_sequences() {
     ));
 }
 
+#[test]
+fn semantic_witness_limit_becomes_a_resource_row_before_sampling() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(
+        directory.path(),
+        "many-tiny-values",
+        "yes 1 | head -n 220000",
+    );
+    let mut invocation = invocation(executable);
+    invocation.output_limit = 32 * 1024 * 1024;
+    let row = run_gated_row(
+        &case(),
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+        &reference(),
+    )
+    .expect("bounded witness row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert!(row.samples.is_empty());
+    assert!(
+        row.diagnostic
+            .as_deref()
+            .is_some_and(|diagnostic| diagnostic.contains("semantic witness"))
+    );
+}
+
+#[test]
+fn default_toon_values_are_normalized_without_sequence_framing() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let toon = script(directory.path(), "toon-values", "printf 'a: 1\\n2\\n'");
+    let row = run_gated_row(
+        &case(),
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(toon),
+        &reference_values(&[json!({"a": 1}), json!(2)]),
+    )
+    .expect("gated row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+}
+
+#[test]
+fn default_toon_values_preserve_adjacent_same_shaped_objects() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let toon = script(
+        directory.path(),
+        "adjacent-objects",
+        "printf 'a: 1\\na: 2\\n'",
+    );
+    let row = run_gated_row(
+        &case(),
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(toon),
+        &reference_values(&[json!({"a": 1}), json!({"a": 2})]),
+    )
+    .expect("adjacent object row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+}
+
+#[test]
+fn default_toon_value_without_terminal_lf_is_reported_as_unnormalized() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let toon = script(directory.path(), "missing-terminal-lf", "printf 'a: 1'");
+    let row = run_gated_row(
+        &case(),
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(toon),
+        &reference_values(&[json!({"a": 1})]),
+    )
+    .expect("missing terminal LF row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+    assert!(
+        row.diagnostic
+            .as_deref()
+            .is_some_and(|diagnostic| diagnostic.contains("terminal LF"))
+    );
+}
+
+#[test]
+fn default_toon_value_with_trailing_extra_bytes_is_rejected() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let toon = script(directory.path(), "trailing-bytes", "printf 'a: 1\\n2\\n'");
+    let row = run_gated_row(
+        &case(),
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(toon),
+        &reference_values(&[json!({"a": 1})]),
+    )
+    .expect("trailing bytes row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+    assert!(row.diagnostic.is_some());
+}
+
+#[test]
+fn malformed_default_toon_multi_result_stream_is_rejected_with_bounded_fallback() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let toon = script(
+        directory.path(),
+        "malformed-multi-result",
+        "printf '0\\n0\\n0\\n'",
+    );
+    let row = run_gated_row(
+        &case(),
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(toon),
+        &reference_values(&[json!(1), json!(2)]),
+    )
+    .expect("malformed multi-result row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+    assert!(row.diagnostic.is_some());
+}
+
+#[test]
+fn large_first_toon_composite_and_following_scalar_use_linear_boundary_hint() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let items = (0..5_000)
+        .map(|index| json!({"id": index, "nested": {"value": index}}))
+        .collect::<Vec<_>>();
+    let first = json!({"items": items});
+    let toon_value = tq_core::Value::from_json(first.clone()).expect("TOON value");
+    let mut output = tq_toon::encode(&toon_value, tq_toon::WriterConfig::default());
+    output.push('\n');
+    output.push_str("2\n");
+    fs::write(directory.path().join("large-toon.output"), output).expect("TOON output");
+    let executable = script(directory.path(), "large-toon", "cat \"$0.output\"");
+    let mut large_case = case();
+    large_case.limits.output_bytes = 1024 * 1024;
+    large_case.sampling = BenchmarkSampling {
+        warmups: 0,
+        small: 1,
+        medium: 1,
+        large: 1,
+    };
+    let mut large_invocation = invocation(executable);
+    large_invocation.output_limit = 1024 * 1024;
+    let row = run_gated_row(
+        &large_case,
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &large_invocation,
+        &reference_values(&[first, json!(2)]),
+    )
+    .expect("large composite row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+}
+
+#[test]
+fn explicit_toon_sequence_and_json_output_are_normalized_from_arguments() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let sequence = script(
+        directory.path(),
+        "toon-sequence-values",
+        "printf '\\036a: 1\\n\\0362\\n'",
+    );
+    let mut sequence_invocation = invocation(sequence);
+    sequence_invocation.args = vec!["--seq".to_owned()];
+    let sequence_row = run_gated_row(
+        &case(),
+        &tq_adapter(sequence_invocation.args.clone()),
+        &corpus(),
+        DatasetTier::Startup,
+        &sequence_invocation,
+        &reference_values(&[json!({"a": 1}), json!(2)]),
+    )
+    .expect("sequence gated row");
+    assert_eq!(sequence_row.outcome, BenchmarkOutcome::Timed);
+
+    let json_output = script(
+        directory.path(),
+        "json-output-values",
+        "printf '%s\\n' '{\"a\":1}' '2'",
+    );
+    let fixture_output = std::process::Command::new(&json_output)
+        .output()
+        .expect("JSON fixture output");
+    assert!(fixture_output.status.success());
+    assert_eq!(fixture_output.stdout, b"{\"a\":1}\n2\n");
+    let mut json_invocation = invocation(json_output);
+    json_invocation.args = vec!["--output-format".to_owned(), "json".to_owned()];
+    let json_row = run_gated_row(
+        &case(),
+        &tq_adapter(json_invocation.args.clone()),
+        &corpus(),
+        DatasetTier::Startup,
+        &json_invocation,
+        &reference_values(&[json!({"a": 1}), json!(2)]),
+    )
+    .expect("JSON gated row");
+    assert_eq!(json_row.outcome, BenchmarkOutcome::Timed);
+}
+
+#[test]
+fn resource_failure_is_not_misclassified_as_incorrect() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(
+        directory.path(),
+        "resource-limit",
+        "printf 'tq: VM resource limit exceeded: vm-steps\\n' >&2; exit 5",
+    );
+    let row = run_gated_row(
+        &case(),
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(executable),
+        &reference(),
+    )
+    .expect("resource row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert!(
+        row.diagnostic
+            .as_deref()
+            .is_some_and(|diagnostic| diagnostic.contains("Resource") && diagnostic.contains('5'))
+    );
+}
+
+#[test]
+fn successful_empty_selection_is_timed_without_first_output_latency() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "empty-selection", "true");
+    let mut empty_case = case();
+    empty_case.measure_first_result = true;
+    let row = run_gated_row(
+        &empty_case,
+        &tq_adapter(Vec::new()),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(executable),
+        &reference_values(&[]),
+    )
+    .expect("empty selection row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+    assert_eq!(row.samples.len(), 3);
+    assert!(
+        row.summary
+            .is_some_and(|summary| summary.first_result_micros.is_none())
+    );
+}
+
+#[test]
+fn nonzero_exit_after_correctness_never_becomes_a_valid_timing() {
+    for warmups in [0, 1] {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let executable = script(
+            directory.path(),
+            "flaky-status",
+            "if test -f invoked; then printf '1\\n'; exit 3; fi\n: > invoked\nprintf '1\\n'",
+        );
+        let mut invocation = invocation(executable);
+        invocation.current_dir = Some(directory.path().to_owned());
+        let mut case = case();
+        case.sampling.warmups = warmups;
+        let row = run_gated_row(
+            &case,
+            &adapter(),
+            &corpus(),
+            DatasetTier::Startup,
+            &invocation,
+            &reference(),
+        )
+        .expect("gated row");
+        assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
+        assert!(row.summary.is_none());
+    }
+}
+
+#[test]
+fn capture_limit_on_candidate_is_a_resource_failure() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "capture-limit", "head -c 40000 /dev/zero");
+    let row = run_gated_row(
+        &case(),
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(executable),
+        &reference(),
+    )
+    .expect("gated capture limit");
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert!(row.summary.is_none());
+    assert!(row.diagnostic.is_some_and(|reason| reason.contains("1024")));
+}
+
+#[test]
+fn capture_limit_on_reference_keeps_successful_probe_unverified() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "small-probe", "printf '1\\n'");
+    let row = run_correctness_limit_probe(
+        &case(),
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation(executable),
+    )
+    .expect("reference-limited probe");
+    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
+    assert!(row.summary.is_none());
+    assert!(
+        row.diagnostic
+            .is_some_and(|reason| reason.contains("reference"))
+    );
+}
+
+#[test]
+fn candidate_measurement_infrastructure_failure_aborts_before_gate_decision() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "missing-rss", "printf '1\\n'");
+    let mut measured = invocation(executable);
+    measured.current_dir = Some(directory.path().join("does-not-exist"));
+    let result = run_gated_row(
+        &case(),
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &measured,
+        &reference(),
+    );
+    let Err(BenchmarkRunnerError::Measure(MeasureError::Collection {
+        source,
+        stdout_path,
+        stderr_path,
+        ..
+    })) = result
+    else {
+        panic!("missing working directory must abort as a collection failure");
+    };
+    assert!(matches!(source.as_ref(), MeasureError::Io(_)));
+    assert!(source.to_string().contains("isolated worker target failed"));
+    assert!(stdout_path.exists());
+    assert!(stderr_path.exists());
+    let _ = fs::remove_file(stdout_path);
+    let _ = fs::remove_file(stderr_path);
+}
+
 fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {
     let path = directory.join(name);
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("script");
@@ -134,13 +700,41 @@ fn script(directory: &std::path::Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
+#[cfg(target_os = "linux")]
+fn pid_is_alive(pid: i32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|stat| stat.split_whitespace().nth(2)?.chars().next())
+        .is_some_and(|state| state != 'Z')
+}
+
+#[cfg(target_os = "macos")]
+fn pid_is_alive(pid: i32) -> bool {
+    use libproc::{bsd_info::BSDInfo, proc_pid::pidinfo};
+
+    pidinfo::<BSDInfo>(pid, 1).is_ok_and(|info| info.pbi_status != nix::libc::SZOMB)
+}
+
+fn wait_until_gone(pid: i32) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pid_is_alive(pid) {
+        assert!(
+            Instant::now() < deadline,
+            "descendant process {pid} remained alive after bounded cleanup"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn invocation(executable: PathBuf) -> BenchmarkInvocation {
     BenchmarkInvocation {
+        cancellation: None,
         executable,
         args: Vec::new(),
         stdin: Vec::new(),
         current_dir: None,
-        timeout: Duration::from_secs(2),
+        // Process startup under instrumented CI is not the behavior under test.
+        timeout: Duration::from_secs(20),
         output_limit: 1024,
         rss_limit: None,
         retain_output: false,
@@ -165,7 +759,7 @@ fn case() -> BenchmarkCase {
             medium: 3,
             large: 3,
         },
-        timeout_seconds: 2,
+        timeout_seconds: 20,
         limits: BenchmarkLimits {
             output_bytes: 1024,
             rss_bytes: None,
@@ -184,9 +778,34 @@ fn adapter() -> BenchmarkAdapter {
         tool: BenchmarkTool::Jq,
         input_format: InputFormat::Json,
         applicable: true,
+        unsupported_reason: None,
         args: Vec::new(),
         query: None,
         comparison_families: vec![ComparisonFamily::SameFormat],
+    }
+}
+
+fn tq_adapter(args: Vec<String>) -> BenchmarkAdapter {
+    BenchmarkAdapter {
+        id: "tq-json".to_owned(),
+        tool: BenchmarkTool::Tq,
+        input_format: InputFormat::Json,
+        applicable: true,
+        unsupported_reason: None,
+        args,
+        query: None,
+        comparison_families: vec![ComparisonFamily::SameFormat],
+    }
+}
+
+fn reference_values(values: &[serde_json::Value]) -> CorrectnessObservation {
+    CorrectnessObservation {
+        payload: CorrectnessPayload::SemanticSequence(
+            semantic_digest(values).expect("semantic digest"),
+        ),
+        process_status: ProcessStatus::Exited,
+        exit_code: Some(0),
+        error_class: None,
     }
 }
 

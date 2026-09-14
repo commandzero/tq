@@ -1,3 +1,10 @@
+---
+type: Report
+title: jq regex, date, and platform compatibility
+description: Safe-library behavior, resource limits, and ambient capability controls.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+---
+
 # jq regex, date, and platform compatibility
 
 ## Reviewed baseline

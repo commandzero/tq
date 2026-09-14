@@ -111,15 +111,15 @@ fn help_contract_rejects_missing_generated_header() {
 }
 
 #[test]
-fn help_contract_keeps_status_and_stderr_checks() {
+fn help_contract_requires_success_and_leaves_stderr_to_case_comparison() {
     let help = current_help();
     let mut nonzero = observation(&help);
     nonzero.exit_code = Some(1);
     assert!(!tq_contract_matches(TqContract::Help, &nonzero));
 
-    let mut failed = observation(&help);
-    failed.stderr_hex = Some(encode_hex(b"diagnostic\n"));
-    assert!(!tq_contract_matches(TqContract::Help, &failed));
+    let mut diagnostic = observation(&help);
+    diagnostic.stderr_hex = Some(encode_hex(b"diagnostic\n"));
+    assert!(tq_contract_matches(TqContract::Help, &diagnostic));
 
     let mut timed_out = observation(&help);
     timed_out.process_status = Some(ProcessStatus::TimedOut);

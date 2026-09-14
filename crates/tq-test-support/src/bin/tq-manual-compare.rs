@@ -288,7 +288,7 @@ fn write_markdown_sections(
             .expect("report metadata");
             format!("{metadata}# jq manual: {name} token comparison\n")
         });
-        let generated = generated_results(section, name)?;
+        let generated = generated_results(section, name, destination, reviews)?;
         fs::write(path, replace_generated(&document, name, &generated)?)?;
     }
 
@@ -324,19 +324,90 @@ fn write_markdown_sections(
     Ok(())
 }
 
-fn generated_results(report: &Value, section: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn generated_results(
+    report: &Value,
+    section: &str,
+    destination: &std::path::Path,
+    reviews: &std::path::Path,
+) -> Result<String, Box<dyn std::error::Error>> {
     let mut markdown = render(report)?;
     let results_start = markdown
         .find("## Results\n")
         .ok_or("missing results heading")?;
     markdown.drain(..results_start);
     markdown = nest_generated_results(&markdown);
+    let collection = relative_markdown_link(destination, &reviews.join(format!("{section}.toon")))?;
     Ok(format!(
-        "## Results\n\n[Case collection](../../../tests/compatibility/reviews/jq-manual/{section}.toon)\n\n{}",
+        "## Results\n\n[Case collection]({collection})\n\n{}",
         markdown
             .strip_prefix("## Results\n")
             .ok_or("generated results missing heading")?,
     ))
+}
+
+fn relative_markdown_link(
+    from_directory: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let from = fs::canonicalize(from_directory)?;
+    let target = fs::canonicalize(target)?;
+    let from_components = from.components().collect::<Vec<_>>();
+    let target_components = target.components().collect::<Vec<_>>();
+    let common = from_components
+        .iter()
+        .zip(&target_components)
+        .take_while(|(from, target)| from == target)
+        .count();
+
+    if common == 0 {
+        return Ok(markdown_path(&target));
+    }
+
+    let mut relative = PathBuf::new();
+    for _ in from_components.iter().skip(common) {
+        relative.push("..");
+    }
+    for component in target_components.iter().skip(common) {
+        relative.push(component.as_os_str());
+    }
+    Ok(markdown_path(&relative))
+}
+
+fn markdown_path(path: &std::path::Path) -> String {
+    let path = {
+        #[cfg(windows)]
+        {
+            path.to_string_lossy().replace('\\', "/")
+        }
+        #[cfg(not(windows))]
+        {
+            path.to_string_lossy().into_owned()
+        }
+    };
+    let mut escaped = String::with_capacity(path.len());
+    for character in path.chars() {
+        match character {
+            '%' => escaped.push_str("%25"),
+            '#' => escaped.push_str("%23"),
+            '?' => escaped.push_str("%3F"),
+            ' ' => escaped.push_str("%20"),
+            '\t' => escaped.push_str("%09"),
+            '\n' => escaped.push_str("%0A"),
+            '\r' => escaped.push_str("%0D"),
+            '(' => escaped.push_str("%28"),
+            ')' => escaped.push_str("%29"),
+            '<' => escaped.push_str("%3C"),
+            '>' => escaped.push_str("%3E"),
+            '\\' => escaped.push_str("%5C"),
+            character if character.is_whitespace() => {
+                for byte in character.to_string().as_bytes() {
+                    write!(escaped, "%{byte:02X}").expect("write URL escape");
+                }
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn nest_generated_results(markdown: &str) -> String {
@@ -756,6 +827,16 @@ mod tests {
         assert!(sample.contains("### sample.raw"));
         assert!(sample.contains("1\n"));
         assert!(sample.contains("raw\n"));
+        let collection_link = sample
+            .lines()
+            .find_map(|line| line.strip_prefix("[Case collection]("))
+            .and_then(|line| line.strip_suffix(')'))
+            .expect("case collection link");
+        assert_eq!(
+            std::fs::canonicalize(output.path().join(collection_link)).unwrap(),
+            std::fs::canonicalize(reviews.path().join("sample.toon")).unwrap(),
+            "the case collection link must resolve from an arbitrary markdown directory"
+        );
 
         let index = String::from_utf8_lossy(first.get("index.md").unwrap());
         assert!(index.starts_with("# authored index\n\n"));
@@ -818,6 +899,30 @@ mod tests {
             assert!(rendered.contains(&format!("{count} case{suffix}.")));
             assert!(rendered.contains(&format!("{count} eligible example{suffix}.")));
         }
+    }
+
+    #[test]
+    fn markdown_paths_escape_url_delimiters_and_spaces() {
+        assert_eq!(
+            super::markdown_path(std::path::Path::new("../reviews # ? space.toon")),
+            "../reviews%20%23%20%3F%20space.toon"
+        );
+    }
+
+    #[test]
+    fn relative_markdown_links_escape_special_directory_names() {
+        let root = tempfile::tempdir().unwrap();
+        let output = root.path().join("markdown # space");
+        let reviews = root.path().join("reviews # space");
+        std::fs::create_dir_all(&output).unwrap();
+        std::fs::create_dir_all(&reviews).unwrap();
+        let target = reviews.join("sample # ?.toon");
+        std::fs::write(&target, "fixture").unwrap();
+
+        assert_eq!(
+            super::relative_markdown_link(&output, &target).unwrap(),
+            "../reviews%20%23%20space/sample%20%23%20%3F.toon"
+        );
     }
 
     fn tiny_report() -> serde_json::Value {

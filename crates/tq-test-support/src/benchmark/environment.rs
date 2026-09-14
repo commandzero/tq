@@ -47,7 +47,7 @@ pub fn collect_environment(compiler_profile: &str) -> EnvironmentManifest {
         cpu_model: platform_text("machdep.cpu.brand_string")
             .or_else(|| linux_cpu_field("model name")),
         memory_bytes: platform_number("hw.memsize").or_else(linux_memory_bytes),
-        filesystem: command_output("df", &["-T", "."]),
+        filesystem: filesystem_identity(),
         power_settings: command_output("pmset", &["-g", "custom"]),
         compiler_profile: compiler_profile.to_owned(),
         machine_identity: String::new(),
@@ -62,6 +62,34 @@ fn command_output(command: &str, args: &[&str]) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+fn filesystem_identity() -> Option<String> {
+    // Capacity and free space vary between repetitions; they are not volume identity.
+    #[cfg(target_os = "linux")]
+    let args = ["-PT", "."];
+    #[cfg(not(target_os = "linux"))]
+    let args = ["-P", "."];
+    stable_filesystem(&command_output("df", &args)?, cfg!(target_os = "linux"))
+}
+
+fn stable_filesystem(output: &str, includes_type: bool) -> Option<String> {
+    let fields = output
+        .lines()
+        .nth(1)?
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let device = fields.first()?;
+    let mount_index = if includes_type { 6 } else { 5 };
+    let mount = fields.get(mount_index..)?.join(" ");
+    if mount.is_empty() {
+        return None;
+    }
+    if includes_type {
+        Some(format!("{device} {} {mount}", fields.get(1)?))
+    } else {
+        Some(format!("{device} {mount}"))
+    }
 }
 
 fn platform_text(key: &str) -> Option<String> {
@@ -110,4 +138,23 @@ fn identity(manifest: &EnvironmentManifest) -> String {
             write!(hex, "{byte:02x}").expect("write digest to string");
             hex
         })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn filesystem_identity_ignores_changing_free_space() {
+        let first = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n/dev/root ext4 100 10 90 10% /\n";
+        let second = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n/dev/root ext4 100 20 80 20% /\n";
+        assert_eq!(
+            super::stable_filesystem(first, true),
+            super::stable_filesystem(second, true)
+        );
+        assert_eq!(
+            super::stable_filesystem(first, true).as_deref(),
+            Some("/dev/root ext4 /")
+        );
+        assert_eq!(super::stable_filesystem("Filesystem blocks Used Available Capacity Mounted on\n/dev/disk 100 10 90 10% /Volumes/Bench Data\n", false).as_deref(), Some("/dev/disk /Volumes/Bench Data"));
+        assert_eq!(super::stable_filesystem("bad output", false), None);
+    }
 }
