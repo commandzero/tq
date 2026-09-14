@@ -1,3 +1,10 @@
+---
+type: Report
+title: Format compatibility
+description: Input and output format support in jq, yq, and tq.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+---
+
 # Format compatibility
 
 This table compares native document input and output. It does not count formats
