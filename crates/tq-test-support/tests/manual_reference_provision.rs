@@ -63,22 +63,31 @@ mod unix {
         command.output().expect("run reference download helper")
     }
 
+    struct CurlObservation<'a> {
+        argv: &'a Path,
+        config: &'a Path,
+        environment: &'a Path,
+    }
+
     fn run_signed_url_download(
         script: &Path,
         source: &Path,
         output_path: &Path,
         curl: &Path,
+        url: &str,
+        expected_digest: &str,
+        observation: &CurlObservation<'_>,
     ) -> std::process::Output {
         let mut command = Command::new("sh");
         command
             .arg(script)
-            .env(
-                "TQ_REFERENCE_JQ_URL",
-                "https://example.invalid/jq?token=super-secret",
-            )
-            .env("TQ_REFERENCE_JQ_SHA256", "00".repeat(32))
+            .env("TQ_REFERENCE_JQ_URL", url)
+            .env("TQ_REFERENCE_JQ_SHA256", expected_digest)
             .env("TQ_REFERENCE_JQ_OUTPUT", output_path)
             .env("SOURCE", source)
+            .env("CURL_ARGV_LOG", observation.argv)
+            .env("CURL_CONFIG_LOG", observation.config)
+            .env("CURL_ENVIRONMENT_LOG", observation.environment)
             .env(
                 "PATH",
                 format!("{}:/usr/bin:/bin", curl.parent().unwrap().display()),
@@ -182,11 +191,14 @@ mod unix {
         let source = directory.path().join("source-jq");
         let curl = directory.path().join("curl");
         let output_path = directory.path().join("target/jq");
+        let argv_log = directory.path().join("curl.argv");
+        let config_log = directory.path().join("curl.config");
+        let environment_log = directory.path().join("curl.environment");
         let bytes = b"#!/bin/sh\nexit 0\n";
         fs::write(&source, bytes).expect("reference artifact writes");
         fs::write(
             &curl,
-            b"#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\ncp \"$SOURCE\" \"$output\"\n",
+            b"#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > \"$CURL_ARGV_LOG\"\nif [ -n \"${TQ_REFERENCE_JQ_URL:-}\" ]; then printf '%s' \"$TQ_REFERENCE_JQ_URL\" > \"$CURL_ENVIRONMENT_LOG\"; else : > \"$CURL_ENVIRONMENT_LOG\"; fi\ncat > \"$CURL_CONFIG_LOG\"\noutput=\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = -o ]; then output=$2; shift 2; else shift; fi\ndone\ncp \"$SOURCE\" \"$output\"\n",
         )
         .expect("curl stub writes");
         fs::set_permissions(&curl, fs::Permissions::from_mode(0o755))
@@ -196,12 +208,122 @@ mod unix {
             &source,
             &output_path,
             &curl,
+            "https://example.invalid/jq?token=super\"secret\\path",
+            &"00".repeat(32),
+            &CurlObservation {
+                argv: &argv_log,
+                config: &config_log,
+                environment: &environment_log,
+            },
         );
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("downloaded jq artifact SHA-256 mismatch"));
-        assert!(!stderr.contains("super-secret"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for rendered in [&stdout, &stderr] {
+            assert!(!rendered.contains("example.invalid"));
+            assert!(!rendered.contains("token="));
+            assert!(!rendered.contains("super\"secret"));
+            assert!(!rendered.contains("\\path"));
+        }
         assert!(!output_path.exists());
+        let argv = fs::read_to_string(argv_log).expect("fake curl argv log");
+        assert!(argv.contains("--config"));
+        assert!(!argv.contains("example.invalid"));
+        assert!(!argv.contains("token="));
+        assert!(!argv.contains("super\"secret"));
+        assert!(!argv.contains("\\path"));
+        let config = fs::read_to_string(config_log).expect("fake curl config log");
+        assert!(
+            config
+                .as_bytes()
+                .eq(b"url = \"https://example.invalid/jq?token=super\\\"secret\\\\path\"\n")
+        );
+        assert_eq!(
+            fs::read_to_string(environment_log)
+                .expect("fake curl environment log")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn signed_artifact_url_failure_is_not_echoed() {
+        let directory = tempfile::tempdir().expect("reference fixture directory");
+        let curl = directory.path().join("curl");
+        let output_path = directory.path().join("target/jq");
+        let observation_log = directory.path().join("curl.log");
+        fs::write(
+            &curl,
+            b"#!/bin/sh\nset -eu\ncat >/dev/null\nprintf '%s\\n' 'curl failure https://dummy.invalid/jq?token=dummy-token' >&2\nexit 22\n",
+        )
+        .expect("curl stub writes");
+        fs::set_permissions(&curl, fs::Permissions::from_mode(0o755))
+            .expect("curl stub permissions");
+        let output = run_signed_url_download(
+            &root().join("scripts/reference-jq-provision.sh"),
+            directory.path(),
+            &output_path,
+            &curl,
+            "https://example.invalid/jq?token=input-secret",
+            &"00".repeat(32),
+            &CurlObservation {
+                argv: &observation_log,
+                config: &observation_log,
+                environment: &observation_log,
+            },
+        );
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("cannot download pinned jq artifact: curl failed"));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let markers = [
+            "dummy.invalid",
+            "dummy-token",
+            "example.invalid",
+            "input-secret",
+            "token=",
+        ];
+        for rendered in [&stdout, &stderr] {
+            assert!(markers.iter().all(|marker| !rendered.contains(marker)));
+        }
+        assert!(!output_path.exists());
+    }
+
+    #[test]
+    fn signed_artifact_url_rejects_newline_config_injection() {
+        let directory = tempfile::tempdir().expect("reference fixture directory");
+        let source = directory.path().join("source-jq");
+        let curl = directory.path().join("curl");
+        let output_path = directory.path().join("target/jq");
+        let argv_log = directory.path().join("curl.argv");
+        let config_log = directory.path().join("curl.config");
+        let bytes = b"#!/bin/sh\nexit 0\n";
+        fs::write(&source, bytes).expect("reference artifact writes");
+        fs::write(&curl, b"#!/bin/sh\nexit 99\n").expect("curl stub writes");
+        fs::set_permissions(&curl, fs::Permissions::from_mode(0o755))
+            .expect("curl stub permissions");
+
+        for separator in ["\n", "\r"] {
+            let output = run_signed_url_download(
+                &root().join("scripts/reference-jq-provision.sh"),
+                &source,
+                &output_path,
+                &curl,
+                &format!("https://example.invalid/jq?token=good{separator}url = \\\"evil\\\""),
+                &digest(bytes),
+                &CurlObservation {
+                    argv: &argv_log,
+                    config: &config_log,
+                    environment: &config_log,
+                },
+            );
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("newline"));
+            assert!(!output_path.exists());
+            assert!(!argv_log.exists());
+            assert!(!config_log.exists());
+        }
     }
 
     #[test]
