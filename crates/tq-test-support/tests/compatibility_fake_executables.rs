@@ -12,8 +12,9 @@ use std::{
 };
 
 use tq_test_support::compatibility::{
-    CampaignProfile, CompatibilityCatalog, ErrorClass, ExecutableConfig, Invocation, ProcessStatus,
-    ToolKind, normalize_jq, normalize_raw, run_campaign, run_process,
+    CampaignProfile, CompatibilityCase, CompatibilityCatalog, ErrorClass, ExecutableConfig,
+    FixtureFormat, Invocation, InvocationMode, ProcessStatus, ToolKind, normalize_jq,
+    normalize_raw, run_campaign, run_process,
 };
 use tq_test_support::corpus::ArtifactIdentity;
 
@@ -337,16 +338,41 @@ fn manual_comparison_preserves_original_json_sequence_framing() {
         "encoder",
         r#"
 if [ "$1" = --version ]; then printf 'fake-1\n'; exit 0; fi
-if [ "$ROLE" = jq ]; then printf '1\n'; exit 0; fi
-if [ "$1" != -o ]; then exit 90; fi
-case "$2" in
-json) printf '1\n';;
-toon) printf '\0361\n';;
+if [ "$ROLE" = jq ]; then
+    sequence=false
+    for argument in "$@"; do
+        if [ "$argument" = --seq ]; then sequence=true; fi
+    done
+    if [ "$sequence" = true ]; then printf '\0361\n'; else printf '1\n'; fi
+    exit 0
+fi
+format=
+previous=
+sequence=false
+for argument in "$@"; do
+    if [ "$FORBID_SEQ" = true ] && [ "$argument" = --seq ]; then exit 92; fi
+    if [ "$previous" = output ]; then format="$argument"; previous=; fi
+    if [ "$argument" = -o ] || [ "$argument" = --output-format ]; then previous=output; fi
+    case "$argument" in
+        -o=*) format="${argument#-o=}";;
+        --output-format=*) format="${argument#*=}";;
+        -o?*) format="${argument#-o}";;
+    esac
+    if [ "$argument" = --seq ]; then sequence=true; fi
+done
+case "$format" in
+json|json-seq)
+    if [ "$sequence" = true ] || [ "$format" = json-seq ]; then printf '\0361\n'; else printf '1\n'; fi
+    ;;
+toon)
+    if [ "$sequence" = true ]; then printf '\0361\n'; else printf '1\n'; fi
+    ;;
+toon-seq) printf '\0361\n';;
 *) exit 91;;
 esac
 "#,
     );
-    let case = serde_json::from_value(serde_json::json!({
+    let case: CompatibilityCase = serde_json::from_value(serde_json::json!({
         "schema_version": 1,
         "id": "manual.test-original-sequence",
         "title": "Original JSON sequence adapter",
@@ -358,14 +384,23 @@ esac
         "invocation_mode": "null-input",
         "expected": {"contract": "result-sequence", "baseline": "required"},
         "adapters": {
-            "jq": {"supported": true, "env": {"ROLE": "jq"}},
+            "jq": {"supported": true, "args": ["--seq"], "env": {"ROLE": "jq"}},
             "tq": {"supported": true, "args": ["--seq"], "env": {"ROLE": "tq"}}
         }
     }))
     .unwrap();
+    let mut explicit_toon_sequence = case.clone();
+    explicit_toon_sequence.id = "manual.test-original-toon-sequence".to_owned();
+    explicit_toon_sequence.fixture.format = FixtureFormat::Json;
+    explicit_toon_sequence.fixture.inline = Some("1\n".to_owned());
+    explicit_toon_sequence.invocation_mode = InvocationMode::Stdin;
+    explicit_toon_sequence.adapters.jq.args.clear();
+    let tq_adapter = &mut explicit_toon_sequence.adapters.tq;
+    tq_adapter.args = vec!["-o".into(), "toon-sequence".into()];
+    tq_adapter.env.insert("FORBID_SEQ".into(), "true".into());
     let report = tq_test_support::compatibility::compare_manual(
         &CompatibilityCatalog {
-            cases: vec![case],
+            cases: vec![case, explicit_toon_sequence],
             identity: ArtifactIdentity {
                 path: "fake".into(),
                 bytes: 0,
@@ -386,6 +421,14 @@ esac
     assert_eq!(row["toon_contract_match"], true);
     assert!(row.get("tokens").is_none());
     assert_eq!(report["summary"]["size_samples"], 0);
+    let explicit_row = report["cases"]
+        .as_array()
+        .expect("comparison rows")
+        .iter()
+        .find(|row| row["id"] == "manual.test-original-toon-sequence")
+        .expect("explicit sequence comparison row");
+    assert_eq!(explicit_row["toon_sequence"], true);
+    assert_eq!(explicit_row["toon_contract_match"], true);
 }
 
 type ComparisonFixture = (
