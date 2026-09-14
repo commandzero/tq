@@ -1,0 +1,53 @@
+[2]:
+  - schema_version: 1
+    id: native.raw-slurp-multiple-sources
+    title: Raw slurp concatenates stdin and a following file
+    classification: cli
+    capabilities[2]: cli.raw-input,cli.slurp
+    status: mvp
+    fixture:
+      format: raw
+      inline: "first\n"
+    query: .
+    adapters:
+      jq:
+        supported: true
+        args[3]: -R,-s,-c
+        trailing_args[2]: -,tests/compatibility/fixtures/raw-slurp-tail.txt
+      yq:
+        supported: false
+        note: yq has no jq-compatible raw slurp mode.
+      tq:
+        supported: true
+        args[3]: -R,-s,-c
+        trailing_args[2]: -,tests/compatibility/fixtures/raw-slurp-tail.txt
+    invocation_mode: stdin
+    expected:
+      contract: raw-bytes
+      baseline: required
+  - schema_version: 1
+    id: native.raw-slurp-null-input-multiple-sources
+    title: Null-input cursor exposes one concatenated raw slurp value
+    classification: cli
+    capabilities[3]: cli.raw-input,cli.slurp,cli.input-source
+    status: mvp
+    fixture:
+      format: raw
+      inline: "first\n"
+    query: "[inputs]"
+    adapters:
+      jq:
+        supported: true
+        args[4]: -R,-s,-n,-c
+        trailing_args[2]: -,tests/compatibility/fixtures/raw-slurp-tail.txt
+      yq:
+        supported: false
+        note: yq has no jq-compatible raw slurp mode.
+      tq:
+        supported: true
+        args[4]: -R,-s,-n,-c
+        trailing_args[2]: -,tests/compatibility/fixtures/raw-slurp-tail.txt
+    invocation_mode: stdin
+    expected:
+      contract: raw-bytes
+      baseline: required
