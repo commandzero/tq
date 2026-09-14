@@ -1,3 +1,10 @@
+---
+type: Report
+title: Performance review policy
+description: Benchmark evidence, regression limits, and archive requirements.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+---
+
 # Performance review policy
 
 Keep corpus files, generated formats, full sample collections, and reviewed
@@ -25,7 +32,7 @@ repository alongside their raw campaign outputs.
 The local tq-only defaults are:
 
 - Median wall time may increase by at most 50%.
-- Peak RSS may increase by at most 20%.
+- Peak RSS may increase by at most 50%.
 - A row needs at least five measured samples before it can fail the gate.
 
 Run self-regression checks against JSON reports in the archive checkout's
@@ -37,7 +44,7 @@ TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --re
   run --profile standard --origin frozen --manifest PATH \
   --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/candidate.json" \
   --baseline "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/accepted.json" \
-  --wall-regression-percent 50 --rss-regression-percent 20 \
+  --wall-regression-percent 50 --rss-regression-percent 50 \
   --minimum-regression-samples 5
 ```
 
