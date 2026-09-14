@@ -1,6 +1,6 @@
 //! Recursive-descent jq MVP parser with explicit precedence.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use crate::{
     Diagnostic, DiagnosticClass, Label, Number, Parsed, Query, SourceFile, SourceId, Span, Value,
@@ -56,7 +56,11 @@ pub fn parse_with_startup(
     let mut startup = parse_source(&startup_source)?;
     crate::resolve::replace_location_variables(&mut startup, startup_name, startup_text);
     let ast = prepend_startup(startup, query)?;
-    Ok(Query::from_ast(source, ast))
+    Ok(Query::from_ast_with_sources(
+        source,
+        ast,
+        BTreeMap::from([(startup_source.id(), startup_source)]),
+    ))
 }
 
 fn parse_named(name: &str, text: &str) -> Result<Query<Parsed>, Box<Diagnostic>> {
@@ -1258,7 +1262,57 @@ const fn filter_terminator(kind: &TokenKind) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_bytes};
+    use super::{parse, parse_bytes, parse_with_startup};
+    use crate::{ResolveOptions, SourceId, analyze, resolve};
+
+    #[test]
+    fn startup_and_query_sources_survive_query_phase_transitions() {
+        let parsed = parse_with_startup("query.jq", b".\n", "startup.jq", b"def startup: .;\n")
+            .expect("startup and query parse");
+        assert_eq!(parsed.source().id(), SourceId::new(0));
+        assert_eq!(parsed.source().text(), ".\n");
+        assert_eq!(
+            parsed
+                .source_by_id(SourceId::new(1))
+                .expect("startup source")
+                .text(),
+            "def startup: .;\n"
+        );
+
+        let resolved = resolve(parsed, &ResolveOptions::default()).expect("resolve startup");
+        assert_eq!(resolved.source().name(), "query.jq");
+        assert_eq!(
+            resolved
+                .source_by_id(SourceId::new(1))
+                .expect("startup source after resolve")
+                .name(),
+            "startup.jq"
+        );
+        let analyzed = analyze(resolved);
+        assert_eq!(
+            analyzed
+                .source_by_id(SourceId::new(1))
+                .expect("startup source after analysis")
+                .text(),
+            "def startup: .;\n"
+        );
+    }
+
+    #[test]
+    fn startup_resolution_diagnostics_keep_their_startup_source_id() {
+        let parsed = parse_with_startup("query.jq", b".", "startup.jq", b"def broken: $missing;\n")
+            .expect("startup parse");
+        let retained = parsed.clone();
+        let error =
+            resolve(parsed, &ResolveOptions::default()).expect_err("unknown startup variable");
+        let label = error.labels.first().expect("diagnostic source label");
+        assert_eq!(label.span.source, SourceId::new(1));
+        let source = retained
+            .source_by_id(label.span.source)
+            .expect("startup diagnostic source");
+        assert_eq!(source.name(), "startup.jq");
+        assert!(source.render_context(label.span, 80).contains("$missing"));
+    }
 
     #[test]
     fn precedence_and_associativity_are_stable() {
