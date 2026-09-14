@@ -1,3 +1,10 @@
+---
+type: Report
+title: jq compatibility
+description: Supported jq behavior and the manual compatibility evidence policy.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+---
+
 # jq compatibility
 
 `tq` follows jq 1.8.x semantics for the features it supports. That includes

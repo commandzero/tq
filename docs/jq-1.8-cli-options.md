@@ -1,3 +1,10 @@
+---
+type: Report
+title: jq 1.8.x CLI option inventory
+description: jq command-line options, tq behavior, and intentional output differences.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+---
+
 # jq 1.8.x CLI option inventory
 
 This table records which jq command-line options `tq` accepts. It comes from jq

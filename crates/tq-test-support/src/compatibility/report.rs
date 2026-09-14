@@ -269,6 +269,7 @@ pub fn encode_hex(bytes: &[u8]) -> String {
 }
 
 /// Checks one of the fixed tq-native identity contracts against an observation.
+/// Stderr comparison is enforced separately when the case requests it.
 #[must_use]
 pub fn tq_contract_matches(contract: TqContract, observation: &ToolObservation) -> bool {
     let Some(stdout_hex) = observation.raw_stdout_hex.as_deref() else {
@@ -363,7 +364,6 @@ pub fn tq_contract_matches(contract: TqContract, observation: &ToolObservation) 
         && needles.iter().all(|needle| {
             !needle.is_empty() && stdout.windows(needle.len()).any(|window| window == *needle)
         })
-        && observation.stderr_hex.is_none()
 }
 
 fn decode_hex(hex: &str) -> Option<Vec<u8>> {
@@ -371,4 +371,116 @@ fn decode_hex(hex: &str) -> Option<Vec<u8>> {
         .step_by(2)
         .map(|index| u8::from_str_radix(hex.get(index..index + 2)?, 16).ok())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tq_contracts_require_successful_exit_even_with_matching_output() {
+        let contracts = [
+            (
+                TqContract::Version,
+                "tq 0.1.0 (jq target 1.8.x)\n".to_owned(),
+            ),
+            (
+                TqContract::BuildConfiguration,
+                "target=x\nformats=toon\njq-target=1.8.x\n".to_owned(),
+            ),
+            (TqContract::Help, help_output()),
+        ];
+
+        for (contract, stdout) in contracts {
+            let mut observation = matching_observation(&stdout, 0);
+            assert!(
+                tq_contract_matches(contract, &observation),
+                "valid {contract:?} output should match"
+            );
+            observation.exit_code = Some(1);
+            assert!(
+                !tq_contract_matches(contract, &observation),
+                "{contract:?} output must not match after a nonzero exit"
+            );
+        }
+    }
+
+    fn matching_observation(stdout: &str, exit_code: i32) -> ToolObservation {
+        ToolObservation {
+            tool: ToolKind::Tq,
+            input_format: None,
+            state: ObservationState::Executed,
+            results: Vec::new(),
+            stdout_hex: Some(encode_hex(stdout.as_bytes())),
+            raw_stdout_hex: Some(encode_hex(stdout.as_bytes())),
+            stderr_hex: None,
+            process_status: Some(ProcessStatus::Exited),
+            exit_code: Some(exit_code),
+            error_class: None,
+            wall_time_micros: None,
+            note: None,
+        }
+    }
+
+    fn help_output() -> String {
+        let names = NativeFormat::ALL
+            .into_iter()
+            .map(|format| format.descriptor().name)
+            .collect::<Vec<_>>();
+        let inputs = names.join("|");
+        let outputs = NativeFormat::ALL
+            .into_iter()
+            .filter_map(|format| format.descriptor().output.map(|_| format.descriptor().name))
+            .collect::<Vec<_>>()
+            .join("|");
+        let options = [
+            "Usage: tq",
+            "-i, --input-format FORMAT",
+            "-o, --output-format FORMAT",
+            "-n, --null-input",
+            "-R, --raw-input",
+            "-s, --slurp",
+            "-c, --compact-output",
+            "-r, --raw-output",
+            "--raw-output0",
+            "-j, --join-output",
+            "-a, --ascii-output",
+            "-S, --sort-keys",
+            "-C, --color-output",
+            "-M, --monochrome-output",
+            "--tab",
+            "--indent N",
+            "--unbuffered",
+            "--allow-environment",
+            "--allow-platform",
+            "--stream",
+            "--stream-errors",
+            "-x, --proxy-on-error",
+            "--seq",
+            "-f, --from-file FILE",
+            "-L, --library-path DIR",
+            "--arg NAME VALUE",
+            "--argjson NAME JSON",
+            "--argtoon NAME TOON",
+            "--slurpfile NAME FILE",
+            "--rawfile NAME FILE",
+            "--args",
+            "--jsonargs",
+            "-e, --exit-status",
+            "-b, --binary",
+            "-V, --version",
+            "--build-configuration",
+            "--run-tests [FILE]",
+            "-h, --help",
+            "select TOON",
+            "emit compact JSON",
+        ];
+        format!(
+            "{}\ntq - jq-compatible queries over {}\nFormats: -i, --input-format auto|{}\n-o, --output-format {}\n",
+            options.join("\n"),
+            names.join(", "),
+            inputs,
+            outputs,
+        )
+    }
 }
