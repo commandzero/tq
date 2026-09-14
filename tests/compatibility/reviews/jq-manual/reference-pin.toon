@@ -542,12 +542,6 @@ references[2]:
     build_configuration: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
   - target: x86_64-linux
     version: jq-1.8.1
-    bytes: 36200
-    sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
-    build_configuration: "--build=x86_64-redhat-linux-gnu --host=x86_64-redhat-linux-gnu --program-prefix= --disable-dependency-tracking --prefix=/usr --exec-prefix=/usr --bindir=/usr/bin --sbindir=/usr/bin --sysconfdir=/etc --datadir=/usr/share --includedir=/usr/include --libdir=/usr/lib64 --libexecdir=/usr/libexec --localstatedir=/var --runstatedir=/run --sharedstatedir=/var/lib --mandir=/usr/share/man --infodir=/usr/share/info --disable-static build_alias=x86_64-redhat-linux-gnu host_alias=x86_64-redhat-linux-gnu CC=gcc 'CFLAGS=-O2 -flto=auto -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS -specs=/usr/lib/rpm/redhat/redhat-hardened-cc1 -fstack-protector-strong -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -m64 -march=x86-64 -mtune=generic -fasynchronous-unwind-tables -fstack-clash-protection -fcf-protection -mtls-dialect=gnu2 -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer  ' 'LDFLAGS=-Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld -specs=/usr/lib/rpm/redhat/redhat-hardened-ld-errors -specs=/usr/lib/rpm/redhat/redhat-annobin-cc1  -Wl,--build-id=sha1 -specs=/usr/lib/rpm/redhat/redhat-package-notes  ' LT_SYS_LIBRARY_PATH=/usr/lib64:"
-    runtime_libraries[5]{path,bytes,sha256}:
-      /usr/lib64/libjq.so.1.0.4,349216,5de9294d71f67b22f56889348dc424c45ae2167065d5e766eea30ff8d3b011ce
-      /usr/lib64/libonig.so.5.5.0,627416,73a1423e3d1c5f8d1f076376cbbfcf8e4f9dbb2a683121bdfd9353eb714ab7f9
-      /usr/lib64/libc.so.6,2482096,01cccbe278d898add05282986a9346d4dda4b3d2b84bc496f9c04c66016528db
-      /usr/lib64/libm.so.6,1153848,6f7365a58fc0778dbc8869d70cdd4822ab93d879c29e84bb491d447961735e56
-      /usr/lib64/ld-linux-x86-64.so.2,1002568,f0949392f14253241540dfeb152f5bd3cbd75f8a3e4f8d3fabc286a2daa27a68
+    bytes: 2255816
+    sha256: 020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d
+    build_configuration: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
