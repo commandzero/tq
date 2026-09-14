@@ -3,7 +3,7 @@
 use std::{
     fs,
     io::Write,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -32,6 +32,49 @@ fn tq(arguments: &[&str], stdin: &[u8]) -> Outcome {
         .write_all(stdin)
         .expect("write stdin");
     let output = child.wait_with_output().expect("wait for tq");
+    Outcome {
+        code: output.status.code().expect("ordinary exit"),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    }
+}
+
+fn tq_bounded(arguments: &[&str], stdin: &[u8]) -> Outcome {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tq"))
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tq");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(stdin)
+        .expect("write stdin");
+    wait_for_tq_bounded(child)
+}
+
+fn wait_for_tq_bounded(mut child: Child) -> Outcome {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if child.try_wait().expect("poll tq").is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let output = child
+                .wait_with_output()
+                .expect("collect timed-out tq output");
+            panic!(
+                "tq did not exit within the bounded test deadline; stdout={:?}, stderr={:?}",
+                output.stdout, output.stderr
+            );
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().expect("collect tq output");
     Outcome {
         code: output.status.code().expect("ordinary exit"),
         stdout: output.stdout,
@@ -277,6 +320,120 @@ fn raw_input_null_mode_uses_the_shared_cursor() {
 }
 
 #[test]
+fn raw_slurp_concatenates_files_and_keeps_last_source_metadata() {
+    let directory = tempdir().expect("temporary source directory");
+    let first = directory.path().join("first.txt");
+    let second = directory.path().join("second.txt");
+    fs::write(&first, b"alpha\n").expect("first source write");
+    fs::write(&second, b"beta\ngamma\n").expect("second source write");
+
+    let output = tq(
+        &[
+            "-R",
+            "-s",
+            "-ojson",
+            "-c",
+            "[., input_filename, input_line_number]",
+            first.to_str().expect("first path"),
+            second.to_str().expect("second path"),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected = serde_json::to_vec(&serde_json::json!([
+        "alpha\nbeta\ngamma\n",
+        second.to_str().expect("second path"),
+        2,
+    ]))
+    .expect("expected JSON");
+    assert_eq!(output.stdout, [expected.as_slice(), b"\n"].concat());
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn raw_slurp_null_mode_exposes_one_concatenated_cursor_value() {
+    let directory = tempdir().expect("temporary source directory");
+    let first = directory.path().join("first.txt");
+    let second = directory.path().join("second.txt");
+    fs::write(&first, b"alpha\n").expect("first source write");
+    fs::write(&second, b"beta\n").expect("second source write");
+
+    let output = tq(
+        &[
+            "-R",
+            "-s",
+            "-n",
+            "-ojson",
+            "-c",
+            "[., input, inputs]",
+            first.to_str().expect("first path"),
+            second.to_str().expect("second path"),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let expected = serde_json::to_vec(&serde_json::json!([
+        serde_json::Value::Null,
+        "alpha\nbeta\n",
+    ]))
+    .expect("expected JSON");
+    assert_eq!(output.stdout, [expected.as_slice(), b"\n"].concat());
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn raw_slurp_line_number_counts_newlines_not_unterminated_text() {
+    for (input, expected) in [
+        (b"".as_slice(), b"0\n".as_slice()),
+        (b"abc", b"0\n"),
+        (b"abc\n", b"1\n"),
+        (b"a\nb", b"1\n"),
+        (b"a\nb\n", b"2\n"),
+    ] {
+        let output = tq_bounded(&["-R", "-s", "-c", "input_line_number"], input);
+        assert_eq!(output.code, 0, "{input:?}");
+        assert_eq!(output.stdout, expected, "{input:?}");
+        assert_eq!(output.stderr, [] as [u8; 0]);
+    }
+}
+
+#[test]
+fn raw_slurp_applies_input_bytes_limit_to_the_aggregate() {
+    let directory = tempdir().expect("temporary source directory");
+    let first = directory.path().join("first.txt");
+    let second = directory.path().join("second.txt");
+    fs::write(&first, b"ab").expect("first source write");
+    fs::write(&second, b"cd").expect("second source write");
+
+    let output = tq(
+        &[
+            "-R",
+            "-s",
+            "-ojson",
+            "--max-input-bytes",
+            "3",
+            ".",
+            first.to_str().expect("first path"),
+            second.to_str().expect("second path"),
+        ],
+        b"",
+    );
+    assert_eq!(output.code, 5);
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("input-bytes"));
+}
+
+#[test]
 fn slurp_null_mode_exposes_one_shared_array_input() {
     let output = tq(&["-sn", "-ijson", "-ojsonl", "[input,inputs]"], b"1 2\n");
     assert_eq!(
@@ -313,6 +470,287 @@ fn remaining_files_share_order_and_source_metadata() {
     );
     let expected = format!("[\"{}\",3,2,\"{}\",1]\n", first.display(), second.display());
     assert_eq!(output.stdout, expected.as_bytes());
+}
+
+#[test]
+fn proxy_on_error_keeps_malformed_files_in_the_shared_input_cursor_order() {
+    let directory = tempdir().expect("temporary directory");
+    let first = directory.path().join("first.json");
+    let rejected = directory.path().join("rejected.json");
+    let last = directory.path().join("last.json");
+    fs::write(&first, b"{\"id\":1}\n").expect("first input");
+    let rejected_bytes = b"\xffnot-json\0\n";
+    fs::write(&rejected, rejected_bytes).expect("rejected input");
+    fs::write(&last, b"{\"id\":3}\n").expect("last input");
+
+    let output = tq(
+        &[
+            "-nx",
+            "-ijson",
+            "-ojsonl",
+            "inputs | .id",
+            first.to_str().expect("first path"),
+            rejected.to_str().expect("rejected path"),
+            last.to_str().expect("last path"),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"1\n\xffnot-json\0\n3\n");
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn proxy_on_error_input_and_inputs_share_values_without_double_consumption() {
+    let directory = tempdir().expect("temporary directory");
+    let first = directory.path().join("first.json");
+    let rejected = directory.path().join("rejected.json");
+    let last = directory.path().join("last.json");
+    fs::write(&first, b"{\"id\":1}\n").expect("first input");
+    fs::write(&rejected, b"not-json\n").expect("rejected input");
+    fs::write(&last, b"{\"id\":3}\n").expect("last input");
+
+    let output = tq(
+        &[
+            "-nx",
+            "-ijson",
+            "-ojsonl",
+            "[input.id, [inputs | .id]]",
+            first.to_str().expect("first path"),
+            rejected.to_str().expect("rejected path"),
+            last.to_str().expect("last path"),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"not-json\n[1,[3]]\n");
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn proxy_on_error_null_input_preserves_rejected_source_before_later_inputs() {
+    let directory = tempdir().expect("temporary directory");
+    let first = directory.path().join("first.json");
+    let rejected = directory.path().join("rejected.json");
+    let last = directory.path().join("last.json");
+    fs::write(&first, b"{\"id\":1}\n").expect("first input");
+    let rejected_bytes = b"\xffnot-json\0\n";
+    fs::write(&rejected, rejected_bytes).expect("rejected input");
+    fs::write(&last, b"{\"id\":3}\n").expect("last input");
+
+    let output = tq_bounded(
+        &[
+            "-nx",
+            "-ijson",
+            "-ojsonl",
+            "[inputs]",
+            first.to_str().expect("first path"),
+            rejected.to_str().expect("rejected path"),
+            last.to_str().expect("last path"),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"\xffnot-json\0\n[{\"id\":1},{\"id\":3}]\n");
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn proxy_on_error_shared_input_resource_limits_are_not_proxied() {
+    let output = tq(
+        &[
+            "-nx",
+            "-ijson",
+            "-ojsonl",
+            "--max-input-bytes",
+            "4",
+            "[inputs]",
+        ],
+        b"invalid",
+    );
+    assert_eq!(output.code, 5);
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("input-bytes"));
+}
+
+#[test]
+fn proxy_on_error_flushes_adjacent_rejected_sources_at_cursor_eof() {
+    let directory = tempdir().expect("temporary directory");
+    let first = directory.path().join("first.json");
+    let second = directory.path().join("second.json");
+    fs::write(&first, b"first-invalid\n").expect("first input");
+    fs::write(&second, b"second-invalid\n").expect("second input");
+
+    let output = tq(
+        &[
+            "-nx",
+            "-ijson",
+            "-ojsonl",
+            "[inputs]",
+            first.to_str().expect("first path"),
+            second.to_str().expect("second path"),
+        ],
+        b"",
+    );
+    assert_eq!(
+        output.code,
+        0,
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"first-invalid\nsecond-invalid\n[]\n");
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn proxy_on_error_non_null_outer_cursor_publishes_each_rejected_source() {
+    let directory = tempdir().expect("temporary directory");
+    let valid = directory.path().join("valid.json");
+    let leading = directory.path().join("leading.json");
+    let trailing = directory.path().join("trailing.json");
+    fs::write(&valid, b"{\"id\":2}\n").expect("valid input");
+    fs::write(&leading, b"leading-invalid\n").expect("leading input");
+    fs::write(&trailing, b"trailing-invalid\n").expect("trailing input");
+
+    let leading_output = tq_bounded(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            "inputs | .id",
+            leading.to_str().expect("leading path"),
+            valid.to_str().expect("valid path"),
+        ],
+        b"",
+    );
+    assert_eq!(leading_output.code, 0);
+    assert_eq!(leading_output.stdout, b"leading-invalid\n");
+    assert_eq!(leading_output.stderr, [] as [u8; 0]);
+
+    let all_rejected_output = tq_bounded(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            "inputs | .id",
+            leading.to_str().expect("leading path"),
+            trailing.to_str().expect("trailing path"),
+        ],
+        b"",
+    );
+    assert_eq!(all_rejected_output.code, 0);
+    assert_eq!(
+        all_rejected_output.stdout,
+        b"leading-invalid\ntrailing-invalid\n"
+    );
+    assert_eq!(all_rejected_output.stderr, [] as [u8; 0]);
+
+    let trailing_output = tq_bounded(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            "inputs | .id",
+            valid.to_str().expect("valid path"),
+            trailing.to_str().expect("trailing path"),
+        ],
+        b"",
+    );
+    assert_eq!(trailing_output.code, 0);
+    assert_eq!(trailing_output.stdout, b"trailing-invalid\n");
+    assert_eq!(trailing_output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn proxy_on_error_non_null_cursor_preserves_prior_output_before_late_failures() {
+    let directory = tempdir().expect("temporary directory");
+    let valid = directory.path().join("valid.json");
+    let oversized = directory.path().join("oversized.json");
+    let missing = directory.path().join("missing.json");
+    fs::write(&valid, b"{\"id\":2}\n{\"id\":4}\n").expect("valid input");
+    fs::write(&oversized, b"123456789\n").expect("oversized input");
+
+    let late_io = tq_bounded(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            "inputs | .id",
+            valid.to_str().expect("valid path"),
+            missing.to_str().expect("missing path"),
+        ],
+        b"",
+    );
+    assert_eq!(late_io.code, 5);
+    assert_eq!(late_io.stdout, b"4\n");
+    assert!(String::from_utf8_lossy(&late_io.stderr).contains("missing.json"));
+
+    fs::write(&valid, b"2\n3\n").expect("small valid input");
+    let late_resource = tq_bounded(
+        &[
+            "-x",
+            "-ijson",
+            "-ojsonl",
+            "--max-input-bytes",
+            "4",
+            "inputs",
+            valid.to_str().expect("valid path"),
+            oversized.to_str().expect("oversized path"),
+        ],
+        b"",
+    );
+    assert_eq!(late_resource.code, 5);
+    assert_eq!(late_resource.stdout, b"3\n");
+    assert!(String::from_utf8_lossy(&late_resource.stderr).contains("input-bytes"));
+}
+
+#[test]
+fn proxy_on_error_unbuffered_output_failure_tears_down_the_proxy_handoff() {
+    let directory = tempdir().expect("temporary directory");
+    let valid = directory.path().join("valid.json");
+    let rejected = directory.path().join("rejected.json");
+    fs::write(&valid, b"{\"id\":2}\n").expect("valid input");
+    fs::write(&rejected, b"rejected-source\n").expect("rejected input");
+
+    let child = Command::new(env!("CARGO_BIN_EXE_tq"))
+        .args([
+            "-nx",
+            "--unbuffered",
+            "-ijson",
+            "-ojsonl",
+            "--max-output-bytes",
+            "3",
+            "inputs | .id",
+            valid.to_str().expect("valid path"),
+            rejected.to_str().expect("rejected path"),
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn tq with open trailing stdin");
+    // Keep stdin open: an output failure must stop the cursor before it tries
+    // to read the next source, which would block waiting for EOF.
+    let output = wait_for_tq_bounded(child);
+    assert_eq!(output.code, 5);
+    assert_eq!(output.stdout, b"2\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("output-bytes"));
 }
 
 #[test]
