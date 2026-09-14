@@ -275,6 +275,37 @@ pub fn toon_values_match(stdout: &[u8], expected: &[Value]) -> bool {
     start == stdout.len()
 }
 
+/// Matches one unframed TOON document against the companion JSON value.
+///
+/// Unlike a normal TOON stream, an unframed document has no required trailing
+/// LF. The encoder also represents one empty object with zero bytes, so that
+/// representation is accepted only when the companion proves exactly one
+/// empty-object result.
+#[must_use]
+pub(crate) fn toon_unframed_value_match(stdout: &[u8], expected: &[Value]) -> bool {
+    if expected.len() != 1 {
+        return false;
+    }
+    if stdout.is_empty() {
+        return expected[0] == serde_json::json!({});
+    }
+    tq_formats::decode_toon(
+        stdout,
+        "<tq-unframed-result>",
+        tq_toon::DecoderConfig::default(),
+    )
+    .is_ok_and(|documents| {
+        documents.len() == 1
+            && documents[0]
+                .value
+                .to_json()
+                .ok()
+                .map(canonicalize_numbers)
+                .as_ref()
+                == Some(&expected[0])
+    })
+}
+
 /// Preserves exact stdout bytes for a raw-output contract.
 #[must_use]
 pub fn normalize_raw(tool: ToolKind, outcome: &ProcessOutcome) -> NormalizedObservation {
@@ -404,7 +435,10 @@ fn observation(
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessOutcome, ProcessStatus, normalize_toon_document, normalize_toon_sequence};
+    use super::{
+        ProcessOutcome, ProcessStatus, normalize_toon_document, normalize_toon_sequence,
+        toon_unframed_value_match,
+    };
 
     #[test]
     fn ordinary_toon_results_use_expected_boundaries_and_preserve_all_bytes() {
@@ -420,6 +454,19 @@ mod tests {
             b"0\n1e3\n",
             &[serde_json::json!(0), serde_json::json!(1000)]
         ));
+    }
+
+    #[test]
+    fn unframed_toon_matching_requires_one_value_and_allows_no_lf() {
+        assert!(toon_unframed_value_match(b"1", &[serde_json::json!(1)]));
+        assert!(toon_unframed_value_match(b"", &[serde_json::json!({})]));
+        assert!(!toon_unframed_value_match(b"", &[]));
+        assert!(!toon_unframed_value_match(
+            b"1",
+            &[serde_json::json!(1), serde_json::json!(2)]
+        ));
+        assert!(!toon_unframed_value_match(b"1\n2", &[serde_json::json!(1)]));
+        assert!(!super::toon_values_match(b"1", &[serde_json::json!(1)]));
     }
 
     #[test]
