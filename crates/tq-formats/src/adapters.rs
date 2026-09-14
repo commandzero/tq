@@ -1201,7 +1201,7 @@ pub fn decode_bytes(
             match report.selected {
                 InputFormat::Toon => decode_toon(bytes, identity, options.toon),
                 InputFormat::Yaml => decode_yaml(bytes, identity),
-                InputFormat::Json => decode_json(bytes, identity),
+                InputFormat::Json => decode_json_with_options(bytes, identity, options),
                 InputFormat::JsonSequence => decode_bytes(
                     bytes,
                     identity,

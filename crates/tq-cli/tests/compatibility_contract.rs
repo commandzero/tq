@@ -13,7 +13,7 @@ fn current_help() -> Vec<u8> {
         .output()
         .expect("run tq --help");
     assert!(output.status.success());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
     output.stdout
 }
 
