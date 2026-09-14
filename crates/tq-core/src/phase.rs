@@ -1,6 +1,6 @@
 //! Sealed typestate query lifecycle and mode-safe plans.
 
-use std::{marker::PhantomData, sync::Arc};
+use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 use serde::Serialize;
 
@@ -310,6 +310,7 @@ pub struct ModuleInfo {
 #[derive(Clone, Debug)]
 struct QueryInner {
     source: SourceFile,
+    auxiliary_sources: BTreeMap<crate::SourceId, SourceFile>,
     ast: Arc<Expr>,
     analysis: Analysis,
     modules: Vec<ModuleInfo>,
@@ -325,9 +326,18 @@ pub struct Query<P: QueryPhase> {
 
 impl Query<Parsed> {
     pub(crate) fn from_ast(source: SourceFile, ast: Expr) -> Self {
+        Self::from_ast_with_sources(source, ast, BTreeMap::new())
+    }
+
+    pub(crate) fn from_ast_with_sources(
+        source: SourceFile,
+        ast: Expr,
+        sources: BTreeMap<crate::SourceId, SourceFile>,
+    ) -> Self {
         Self {
             inner: Arc::new(QueryInner {
                 source,
+                auxiliary_sources: sources,
                 ast: Arc::new(ast),
                 analysis: Analysis::default(),
                 modules: Vec::new(),
@@ -372,6 +382,20 @@ impl<P: QueryPhase> Query<P> {
     #[must_use]
     pub fn source(&self) -> &SourceFile {
         &self.inner.source
+    }
+
+    /// Looks up a retained query source by its invocation-local identity.
+    #[must_use]
+    pub fn source_by_id(&self, id: crate::SourceId) -> Option<&SourceFile> {
+        if id == self.inner.source.id() {
+            Some(&self.inner.source)
+        } else {
+            self.inner.auxiliary_sources.get(&id)
+        }
+    }
+
+    pub(crate) fn sources(&self) -> impl Iterator<Item = &SourceFile> {
+        std::iter::once(&self.inner.source).chain(self.inner.auxiliary_sources.values())
     }
 
     /// Capabilities known at this phase.
