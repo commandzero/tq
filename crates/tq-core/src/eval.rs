@@ -12355,24 +12355,24 @@ impl Evaluator<'_> {
             "INDEX" => self.sql_index(arguments, input, environment, depth),
             "JOIN" => self.sql_join(arguments, input, environment, depth),
             "contains" => self.argument_values(arguments, input, environment, depth, 0, |needle| {
-                collection::contains(input, needle, &|| self.enter(depth))
+                collection::contains(input, needle, self.limits, &|| self.enter(depth))
             }),
             "inside" => {
                 self.argument_values(arguments, input, environment, depth, 0, |container| {
-                    collection::inside(input, container, &|| self.enter(depth))
+                    collection::inside(input, container, self.limits, &|| self.enter(depth))
                 })
             }
             "combinations" => self.combinations(arguments, input, environment, depth),
             "transpose" => self.transpose(input, depth),
             "bsearch" => self.bsearch(arguments, input, environment, depth),
             "indices" => self.argument_values(arguments, input, environment, depth, 0, |needle| {
-                collection::indices(input, needle, &|| self.enter(depth))
+                collection::indices(input, needle, self.limits, &|| self.enter(depth))
             }),
             "index" => self.argument_values(arguments, input, environment, depth, 0, |needle| {
-                collection::index(input, needle, false, &|| self.enter(depth))
+                collection::index(input, needle, false, self.limits, &|| self.enter(depth))
             }),
             "rindex" => self.argument_values(arguments, input, environment, depth, 0, |needle| {
-                collection::index(input, needle, true, &|| self.enter(depth))
+                collection::index(input, needle, true, self.limits, &|| self.enter(depth))
             }),
             "arrays" => selector(input, matches!(input, Value::Array(_))),
             "booleans" => selector(input, matches!(input, Value::Bool(_))),

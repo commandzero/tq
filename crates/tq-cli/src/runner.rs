@@ -307,6 +307,11 @@ enum LiveVmMessage {
     },
 }
 
+struct ProxyHandoff {
+    bytes: Vec<u8>,
+    acknowledged: Option<SyncSender<()>>,
+}
+
 /// Runs a parsed command with injectable stdio for compatibility tests.
 ///
 /// # Errors
@@ -463,6 +468,11 @@ fn run_tests<R: Read, W: Write, E: Write>(
     _stderr: &mut E,
     process_ambient: bool,
 ) -> Result<ExitStatus, RunError> {
+    if path.is_some_and(|path| path != Path::new("-")) && !process_ambient {
+        return Err(RunError::Cli(CliError::Incompatible(
+            "run-tests file access is disabled for embedded execution".to_owned(),
+        )));
+    }
     let bytes = if let Some(path) = path.filter(|path| *path != Path::new("-")) {
         read_limited(
             open_path(path)?,
@@ -1585,6 +1595,15 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
     let mut runtime_error_reported = false;
     let mut deferred_input_diagnostics = Vec::new();
     let continue_document_roots = !options.null_input && !options.slurp;
+    let live_proxy_mode = analysis.capabilities.whole_input
+        && !options.slurp
+        && !options.raw_input
+        && options.proxy_on_error
+        && !options.stream;
+    let (proxy_sender, proxy_receiver) = sync_channel::<ProxyHandoff>(0);
+    let mut proxy_receiver = Some(proxy_receiver);
+    let top_level_pull = Arc::new(AtomicBool::new(false));
+    let top_level_proxy = Arc::new(Mutex::new(None::<ProxyHandoff>));
     {
         let mut evaluate = |input, input_cursor: Option<InputCursor>| -> Result<bool, RunError> {
             // A runtime error belongs to the current input root.  A later
@@ -1619,7 +1638,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             if let Some(cursor) = input_cursor {
                 vm = vm.with_input_cursor(cursor);
             }
-            if options.unbuffered {
+            if options.unbuffered || live_proxy_mode {
                 let worker_stop =
                     cancellation().unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
                 vm = vm.with_cancellation(Arc::clone(&worker_stop));
@@ -1664,6 +1683,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                             worker_stop.store(true, Ordering::Relaxed);
                             sink.cancel();
                             drop(receiver);
+                            let _ = proxy_receiver.take();
                             return Err(error);
                         }
                         match receiver.recv_timeout(Duration::from_millis(5)) {
@@ -1676,6 +1696,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                                     worker_stop.store(true, Ordering::Relaxed);
                                     sink.cancel();
                                     drop(receiver);
+                                    let _ = proxy_receiver.take();
                                     return Err(error);
                                 }
                                 result_count = result_count.saturating_add(1);
@@ -1683,6 +1704,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                                     worker_stop.store(true, Ordering::Relaxed);
                                     sink.cancel();
                                     drop(receiver);
+                                    let _ = proxy_receiver.take();
                                     return Err(RunError::Interrupted);
                                 }
                             }
@@ -1696,7 +1718,27 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                                 vm_trace = trace;
                                 complete = true;
                             }
-                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                let proxy = proxy_receiver.as_ref().map(|receiver| {
+                                    receiver.recv_timeout(Duration::from_millis(5))
+                                });
+                                if let Some(Ok(ProxyHandoff {
+                                    bytes,
+                                    acknowledged,
+                                })) = proxy
+                                {
+                                    if let Err(error) = result_output.proxy(&bytes) {
+                                        worker_stop.store(true, Ordering::Relaxed);
+                                        sink.cancel();
+                                        drop(receiver);
+                                        let _ = proxy_receiver.take();
+                                        return Err(error);
+                                    }
+                                    if let Some(acknowledged) = acknowledged {
+                                        let _ = acknowledged.send(());
+                                    }
+                                }
+                            }
                             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                                 complete = true;
                             }
@@ -1706,6 +1748,7 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                         worker_stop.store(true, Ordering::Relaxed);
                         sink.cancel();
                         drop(receiver);
+                        let _ = proxy_receiver.take();
                         return Err(error);
                     }
                     Ok::<_, RunError>((worker_result, vm_observations, vm_trace))
@@ -1765,6 +1808,36 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
 
         if options.null_input && !analysis.capabilities.whole_input {
             let _ = evaluate(StructuredInput::Value(Value::Null), None)?;
+        } else if options.slurp
+            && !options.raw_input
+            && options.proxy_on_error
+            && !options.null_input
+        {
+            let mut input_diagnostics = Vec::new();
+            match load_inputs(options, stdin, false, &mut input_diagnostics)? {
+                LoadedInputs::Proxy(bytes) => {
+                    let _ = evaluate(StructuredInput::Proxy(bytes), None)?;
+                }
+                LoadedInputs::Documents(inputs) => {
+                    let (identity, line_number) = inputs.last().map_or_else(
+                        || ("<stdin>".to_owned(), 0),
+                        |document| (document.identity.clone(), document.line_number),
+                    );
+                    let cursor = InputCursor::from_input_values(vec![InputValue {
+                        value: Value::array(
+                            inputs
+                                .into_iter()
+                                .map(|document| document.value)
+                                .collect::<Vec<_>>(),
+                        ),
+                        identity: Arc::from(identity),
+                        line_number,
+                    }]);
+                    let input = cursor.next_value()?.expect("slurp supplies one input");
+                    let _ = evaluate(StructuredInput::Value(input), Some(cursor))?;
+                }
+            }
+            deferred_input_diagnostics.extend(input_diagnostics);
         } else if options.slurp && !options.raw_input {
             let mut values = Vec::new();
             let mut had_proxy = false;
@@ -1826,6 +1899,9 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
                                 message: failure.message.into(),
                             })
                         }
+                        Ok(RemainingInputMessage::Proxy(_)) => Err(VmError::Runtime {
+                            message: "proxy input reached a non-proxy cursor".into(),
+                        }),
                         Ok(RemainingInputMessage::Error(error)) => Err(error),
                         Ok(RemainingInputMessage::Done) | Err(_) => Ok(None),
                     }
@@ -1854,36 +1930,120 @@ fn run_resolved_filter<R: Read + Send, W: Write, E: Write>(
             } else {
                 options.clone()
             };
-            match load_inputs(&remaining_options, stdin, false, &mut Vec::new())? {
-                LoadedInputs::Proxy(bytes) => {
-                    let _ = if options.null_input {
-                        evaluate(StructuredInput::Value(Value::Null), None)?
-                    } else {
-                        evaluate(StructuredInput::Proxy(bytes), None)?
-                    };
-                }
-                LoadedInputs::Documents(inputs) => {
-                    let cursor = InputCursor::from_input_values(
-                        inputs
-                            .into_iter()
-                            .map(|document| InputValue {
-                                value: document.value,
-                                identity: Arc::from(document.identity),
-                                line_number: document.line_number,
-                            })
-                            .collect(),
+            thread::scope(|scope| {
+                let (request_sender, request_receiver) = sync_channel(0);
+                let (sender, receiver) = sync_channel(0);
+                scope.spawn(move || {
+                    produce_proxy_remaining_inputs(
+                        &remaining_options,
+                        stdin,
+                        &request_receiver,
+                        &sender,
                     );
+                });
+                let proxy_sender = proxy_sender.clone();
+                let provider_top_level_pull = Arc::clone(&top_level_pull);
+                let provider_top_level_proxy = Arc::clone(&top_level_proxy);
+                let cursor = InputCursor::from_provider(move || {
+                    let top_level = provider_top_level_pull.swap(false, Ordering::Relaxed);
+                    loop {
+                        if request_sender.send(()).is_err() {
+                            return Ok(None);
+                        }
+                        match receiver.recv() {
+                            Ok(RemainingInputMessage::Value(value)) => return Ok(Some(value)),
+                            Ok(RemainingInputMessage::Proxy(bytes)) => {
+                                if top_level {
+                                    let mut slot =
+                                        provider_top_level_proxy.lock().map_err(|_| {
+                                            VmError::Runtime {
+                                                message: "top-level proxy slot is unavailable"
+                                                    .into(),
+                                            }
+                                        })?;
+                                    if slot.is_some() {
+                                        return Err(VmError::Runtime {
+                                            message: "top-level proxy slot is already occupied"
+                                                .into(),
+                                        });
+                                    }
+                                    slot.replace(ProxyHandoff {
+                                        bytes,
+                                        acknowledged: None,
+                                    });
+                                    return Ok(None);
+                                }
+                                let (ack_sender, ack_receiver) = sync_channel(0);
+                                if proxy_sender
+                                    .send(ProxyHandoff {
+                                        bytes,
+                                        acknowledged: Some(ack_sender),
+                                    })
+                                    .is_err()
+                                {
+                                    return Ok(None);
+                                }
+                                if ack_receiver.recv().is_err() {
+                                    return Err(VmError::Interrupted);
+                                }
+                            }
+                            Ok(RemainingInputMessage::Error(error)) => {
+                                return Err(error);
+                            }
+                            Ok(RemainingInputMessage::Done) | Err(_) => return Ok(None),
+                            Ok(RemainingInputMessage::Failure(failure)) => {
+                                return Err(VmError::RecoverableInput {
+                                    context: format!(
+                                        "in '{}' at recovery segment {}",
+                                        failure.identity, failure.recovery_segment_index
+                                    )
+                                    .into(),
+                                    message: failure.message.into(),
+                                });
+                            }
+                        }
+                    }
+                });
+                let result: Result<(), RunError> = (|| {
                     if options.null_input {
-                        let _ = evaluate(StructuredInput::Value(Value::Null), Some(cursor))?;
+                        let _ =
+                            evaluate(StructuredInput::Value(Value::Null), Some(cursor.clone()))?;
                     } else {
-                        while let Some(input) = cursor.next_value()? {
-                            if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                        loop {
+                            top_level_pull.store(true, Ordering::Relaxed);
+                            if let Some(input) = cursor.next_value()? {
+                                if !evaluate(StructuredInput::Value(input), Some(cursor.clone()))? {
+                                    break;
+                                }
+                            } else {
+                                let proxy = top_level_proxy
+                                    .lock()
+                                    .map_err(|_| {
+                                        RunError::Runtime(VmError::Runtime {
+                                            message: "top-level proxy slot is unavailable".into(),
+                                        })
+                                    })?
+                                    .take();
+                                if let Some(ProxyHandoff {
+                                    bytes,
+                                    acknowledged,
+                                }) = proxy
+                                {
+                                    evaluate(StructuredInput::Proxy(bytes), None)?;
+                                    if let Some(acknowledged) = acknowledged {
+                                        let _ = acknowledged.send(());
+                                    }
+                                    continue;
+                                }
                                 break;
                             }
                         }
                     }
-                }
-            }
+                    Ok(())
+                })();
+                drop(cursor);
+                result
+            })?;
         } else if options.slurp || options.raw_input {
             let remaining_options = if options.null_input {
                 let mut remaining = options.clone();
@@ -5653,45 +5813,70 @@ fn load_filter(
             )
         }
     };
-    let startup_source =
-        if options.capability_policy.environment && options.capability_policy.filesystem {
-            if let Some(home) = std::env::var_os("HOME") {
-                let startup = PathBuf::from(home).join(".jq");
-                if startup.is_file() {
-                    let startup_identity = startup.display().to_string();
-                    let startup = read_limited(
-                        open_path(&startup)?,
-                        options.limits.input_bytes,
-                        &startup_identity,
-                    )?;
-                    let total = startup.len().saturating_add(1).saturating_add(query.len());
-                    if u64::try_from(total).unwrap_or(u64::MAX) > options.limits.input_bytes {
-                        return Err(RunError::ResourceSource {
-                            identity: startup_identity,
-                            resource: "input-bytes",
-                        });
-                    }
-                    Some((startup_identity, startup))
-                } else {
-                    None
+    let startup_source = if options.allow_environment
+        && options.capability_policy.environment
+        && options.capability_policy.filesystem
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            let startup = PathBuf::from(home).join(".jq");
+            if startup.is_file() {
+                let startup_identity = startup.display().to_string();
+                let startup = read_limited(
+                    open_path(&startup)?,
+                    options.limits.input_bytes,
+                    &startup_identity,
+                )?;
+                let total = startup.len().saturating_add(1).saturating_add(query.len());
+                if u64::try_from(total).unwrap_or(u64::MAX) > options.limits.input_bytes {
+                    return Err(RunError::ResourceSource {
+                        identity: startup_identity,
+                        resource: "input-bytes",
+                    });
                 }
+                Some((startup_identity, startup))
             } else {
                 None
             }
         } else {
             None
-        };
+        }
+    } else {
+        None
+    };
     Ok((identity, query, startup_source))
+}
+
+#[derive(Default)]
+struct AmbientModuleRoots {
+    home: Option<PathBuf>,
+    library_path: Option<std::ffi::OsString>,
 }
 
 fn module_roots(options: &RunOptions, query_name: &str) -> Vec<PathBuf> {
     if !options.capability_policy.filesystem {
         return Vec::new();
     }
+    let ambient = (options.allow_environment && options.capability_policy.environment).then(|| {
+        AmbientModuleRoots {
+            home: std::env::var_os("HOME").map(PathBuf::from),
+            library_path: std::env::var_os("JQ_LIBRARY_PATH"),
+        }
+    });
+    module_roots_with_ambient(options, query_name, ambient)
+}
+
+fn module_roots_with_ambient(
+    options: &RunOptions,
+    query_name: &str,
+    ambient: Option<AmbientModuleRoots>,
+) -> Vec<PathBuf> {
+    let ambient = (options.allow_environment && options.capability_policy.environment)
+        .then_some(ambient)
+        .flatten();
     let origin = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = ambient.as_ref().and_then(|ambient| ambient.home.as_ref());
     let substitute = |path: &Path| {
         let text = path.to_string_lossy();
         if let Some(rest) = text.strip_prefix("$ORIGIN/") {
@@ -5723,7 +5908,10 @@ fn module_roots(options: &RunOptions, query_name: &str) -> Vec<PathBuf> {
     } else if query_name == "<command-line>" {
         roots.push(PathBuf::from("."));
     }
-    if let Some(paths) = std::env::var_os("JQ_LIBRARY_PATH") {
+    if let Some(paths) = ambient
+        .as_ref()
+        .and_then(|ambient| ambient.library_path.as_deref())
+    {
         roots.extend(std::env::split_paths(&paths));
     }
     if let Some(home) = &home {
@@ -5880,6 +6068,7 @@ fn decode_single_json(bytes: &[u8], identity: &str) -> Result<Value, RunError> {
 enum RemainingInputMessage {
     Value(InputValue),
     Failure(tq_formats::NativeInputFailure),
+    Proxy(Vec<u8>),
     Error(VmError),
     Done,
 }
@@ -5896,6 +6085,80 @@ fn produce_remaining_inputs<R: Read>(
         |()| RemainingInputMessage::Done,
     );
     let _ = sender.send(message);
+}
+
+fn produce_proxy_remaining_inputs<R: Read>(
+    options: &RunOptions,
+    stdin: &mut R,
+    requests: &Receiver<()>,
+    sender: &SyncSender<RemainingInputMessage>,
+) {
+    let result = produce_proxy_remaining_inputs_inner(options, stdin, requests, sender);
+    let message = match result {
+        Ok(true) => RemainingInputMessage::Done,
+        Ok(false) => {
+            if requests.recv().is_err() {
+                return;
+            }
+            RemainingInputMessage::Done
+        }
+        Err(error) => RemainingInputMessage::Error(deferred_run_error(error)),
+    };
+    let _ = sender.send(message);
+}
+
+fn produce_proxy_remaining_inputs_inner<R: Read>(
+    options: &RunOptions,
+    stdin: &mut R,
+    requests: &Receiver<()>,
+    sender: &SyncSender<RemainingInputMessage>,
+) -> Result<bool, RunError> {
+    let mut pending_request = false;
+    let files = if options.files.is_empty() {
+        vec![Path::new("-").to_owned()]
+    } else {
+        options.files.clone()
+    };
+    for path in files {
+        if !pending_request {
+            if requests.recv().is_err() {
+                return Ok(false);
+            }
+            pending_request = true;
+        }
+        let (identity, bytes) = if path == Path::new("-") {
+            (
+                "<stdin>".to_owned(),
+                read_limited(&mut *stdin, options.limits.input_bytes, "<stdin>")?,
+            )
+        } else {
+            let identity = path.display().to_string();
+            let bytes = read_limited(open_path(&path)?, options.limits.input_bytes, &identity)?;
+            (identity, bytes)
+        };
+        let format = selected_input_format(options, &path);
+        match native_source_documents(&bytes, &identity, options, format) {
+            Ok((_, documents)) => {
+                for document in documents {
+                    if !send_remaining(sender, document) {
+                        return Ok(false);
+                    }
+                    if requests.recv().is_err() {
+                        return Ok(false);
+                    }
+                    pending_request = true;
+                }
+            }
+            Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
+                if sender.send(RemainingInputMessage::Proxy(bytes)).is_err() {
+                    return Ok(false);
+                }
+                pending_request = false;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(pending_request)
 }
 
 fn produce_remaining_inputs_inner<R: Read>(
@@ -6113,22 +6376,16 @@ fn load_inputs<R: Read>(
     } else {
         options.files.clone()
     };
+    if options.raw_input && options.slurp {
+        return load_raw_slurp(options, stdin, &files);
+    }
     let mut documents = Vec::new();
     let mut raw_sources = Vec::new();
     let mut proxy = false;
     for path in files {
-        let (identity, bytes) = if path == Path::new("-") {
-            (
-                "<stdin>".to_owned(),
-                read_limited(&mut *stdin, options.limits.input_bytes, "<stdin>")?,
-            )
-        } else {
-            let identity = path.display().to_string();
-            let bytes = read_limited(open_path(&path)?, options.limits.input_bytes, &identity)?;
-            (identity, bytes)
-        };
+        let (identity, bytes) = read_input_source(&mut *stdin, &path, options.limits.input_bytes)?;
         if options.raw_input {
-            raw_documents(&mut documents, identity, bytes, options.slurp)?;
+            raw_documents(&mut documents, identity, &bytes, false)?;
         } else {
             let format = selected_input_format(options, &path);
             let selected = format;
@@ -6184,6 +6441,73 @@ fn load_inputs<R: Read>(
     } else {
         Ok(LoadedInputs::Documents(documents))
     }
+}
+
+fn load_raw_slurp<R: Read>(
+    options: &RunOptions,
+    stdin: &mut R,
+    files: &[PathBuf],
+) -> Result<LoadedInputs, RunError> {
+    let mut bytes = Vec::new();
+    let mut identity = None;
+    let mut line_number = 0;
+    for path in files {
+        let remaining = options
+            .limits
+            .input_bytes
+            .saturating_sub(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        let (source_identity, source_bytes) = read_input_source(&mut *stdin, path, remaining)?;
+        append_raw_slurp_source(
+            &mut bytes,
+            &mut identity,
+            &mut line_number,
+            source_identity,
+            &source_bytes,
+        )?;
+    }
+    let mut documents = Vec::new();
+    raw_documents(
+        &mut documents,
+        identity.unwrap_or_else(|| "<stdin>".to_owned()),
+        &bytes,
+        true,
+    )?;
+    documents[0].line_number = line_number;
+    Ok(LoadedInputs::Documents(documents))
+}
+
+fn read_input_source<R: Read>(
+    stdin: &mut R,
+    path: &Path,
+    limit: u64,
+) -> Result<(String, Vec<u8>), RunError> {
+    if path == Path::new("-") {
+        Ok(("<stdin>".to_owned(), read_limited(stdin, limit, "<stdin>")?))
+    } else {
+        let identity = path.display().to_string();
+        let bytes = read_limited(open_path(path)?, limit, &identity)?;
+        Ok((identity, bytes))
+    }
+}
+
+fn append_raw_slurp_source(
+    aggregate: &mut Vec<u8>,
+    identity: &mut Option<String>,
+    line_number: &mut u64,
+    source_identity: String,
+    source_bytes: &[u8],
+) -> Result<(), RunError> {
+    raw_input_text(source_bytes)?;
+    *line_number = raw_line_number(source_bytes);
+    aggregate
+        .try_reserve(source_bytes.len())
+        .map_err(|_| RunError::ResourceSource {
+            identity: source_identity.clone(),
+            resource: "input-bytes",
+        })?;
+    aggregate.extend_from_slice(source_bytes);
+    *identity = Some(source_identity);
+    Ok(())
 }
 
 fn decode_json_sequence_recoverable(
@@ -6280,22 +6604,17 @@ fn decode_options(options: &RunOptions, format: InputFormat) -> DecodeOptions {
 fn raw_documents(
     documents: &mut Vec<tq_formats::Document>,
     identity: String,
-    bytes: Vec<u8>,
+    bytes: &[u8],
     slurp: bool,
 ) -> Result<(), RunError> {
-    let text = String::from_utf8(bytes).map_err(|error| {
-        RunError::Input(FormatError::Parse {
-            format: InputFormat::Auto,
-            message: format!("raw input is not UTF-8: {error}"),
-        })
-    })?;
+    let text = raw_input_text(bytes)?;
     if slurp {
         documents.push(tq_formats::Document {
             value: Value::string(text),
             identity,
             format: InputFormat::Auto,
             index: 0,
-            line_number: 1,
+            line_number: raw_line_number(bytes),
         });
         return Ok(());
     }
@@ -6309,6 +6628,25 @@ fn raw_documents(
         });
     }
     Ok(())
+}
+
+fn raw_line_number(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0_u64, |count, byte| {
+        if *byte == b'\n' {
+            count.saturating_add(1)
+        } else {
+            count
+        }
+    })
+}
+
+fn raw_input_text(bytes: &[u8]) -> Result<&str, RunError> {
+    std::str::from_utf8(bytes).map_err(|error| {
+        RunError::Input(FormatError::Parse {
+            format: InputFormat::Auto,
+            message: format!("raw input is not UTF-8: {error}"),
+        })
+    })
 }
 
 fn write_raw(
@@ -6585,8 +6923,9 @@ mod tests {
     };
 
     use super::{
-        RunTestCapture, RunTestCaptureSnapshot, prune_object_fields_in_place,
-        record_document_observations, run_test_output_matches, run_with_io,
+        AmbientModuleRoots, RunTestCapture, RunTestCaptureSnapshot, module_roots_with_ambient,
+        prune_object_fields_in_place, record_document_observations, run_test_output_matches,
+        run_with_io,
     };
     use crate::{CapabilityPolicy, Command, ExecutionOverride, ExitStatus, parse_args};
     use tq_core::{PathComponent, Value, VmObservations};
@@ -7574,6 +7913,95 @@ mod tests {
             assert_eq!(output, [] as [u8; 0]);
             assert_eq!(error, [] as [u8; 0]);
         }
+    }
+
+    #[test]
+    fn denied_environment_cannot_supply_ambient_module_roots_but_explicit_l_remains() {
+        let home = tempfile::tempdir().expect("ambient home creates");
+        fs::create_dir(home.path().join(".jq")).expect("ambient home module root creates");
+        let library = tempfile::tempdir().expect("ambient library creates");
+        let ambient = AmbientModuleRoots {
+            home: Some(home.path().to_path_buf()),
+            library_path: Some(library.path().as_os_str().to_owned()),
+        };
+
+        let mut denied_command = parse_args(["-n", "."]).expect("denied module roots parse");
+        let Command::Run(denied_options) = &mut denied_command else {
+            panic!("expected run command")
+        };
+        assert!(!denied_options.allow_environment);
+        let denied_roots =
+            module_roots_with_ambient(denied_options, "<command-line>", Some(ambient));
+        assert!(!denied_roots.contains(&home.path().join(".jq")));
+        assert!(!denied_roots.contains(&library.path().to_path_buf()));
+
+        let mut enabled_command = parse_args(["-n", "."]).expect("enabled module roots parse");
+        let Command::Run(enabled_options) = &mut enabled_command else {
+            panic!("expected run command")
+        };
+        enabled_options.allow_environment = true;
+        let enabled_roots = module_roots_with_ambient(
+            enabled_options,
+            "<command-line>",
+            Some(AmbientModuleRoots {
+                home: Some(home.path().to_path_buf()),
+                library_path: Some(library.path().as_os_str().to_owned()),
+            }),
+        );
+        assert!(enabled_roots.contains(&home.path().join(".jq")));
+        assert!(enabled_roots.contains(&library.path().to_path_buf()));
+
+        let explicit = tempfile::tempdir().expect("explicit module root creates");
+        fs::write(explicit.path().join("answer.jq"), "def answer: 42;")
+            .expect("explicit module writes");
+        let explicit_path = explicit.path().to_path_buf();
+        let mut explicit_command = parse_args([
+            "-L",
+            explicit_path.to_str().expect("explicit root is UTF-8"),
+            "-n",
+            ".",
+        ])
+        .expect("explicit module roots parse");
+        let Command::Run(explicit_options) = &mut explicit_command else {
+            panic!("expected run command")
+        };
+        explicit_options.capability_policy = CapabilityPolicy {
+            environment: false,
+            ..CapabilityPolicy::default()
+        };
+        let explicit_roots = module_roots_with_ambient(
+            explicit_options,
+            "<command-line>",
+            Some(AmbientModuleRoots::default()),
+        );
+        assert_eq!(explicit_roots, vec![explicit_path.clone()]);
+
+        let mut explicit_run = parse_args([
+            "-L",
+            explicit_path.to_str().expect("explicit root is UTF-8"),
+            "-n",
+            "--output-format",
+            "json",
+            "-c",
+            "include \"answer\"; answer",
+        ])
+        .expect("explicit module run parses");
+        let Command::Run(explicit_options) = &mut explicit_run else {
+            panic!("expected run command")
+        };
+        explicit_options.capability_policy = CapabilityPolicy {
+            environment: false,
+            ..CapabilityPolicy::default()
+        };
+        let mut input = &[][..];
+        let mut output = Vec::new();
+        let mut error = Vec::new();
+        assert_eq!(
+            run_with_io(explicit_run, &mut input, &mut output, &mut error).unwrap(),
+            ExitStatus::Success
+        );
+        assert_eq!(output, b"42\n");
+        assert_eq!(error, [] as [u8; 0]);
     }
 
     #[derive(Default)]
