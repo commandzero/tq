@@ -273,19 +273,19 @@ pub(super) fn evaluate(
             numeric_predicate(name, input).map(Some)
         }
         "contains" => unary_argument(name, arguments, |needle| {
-            collection_contains(charge, input, needle)
+            collection_contains(charge, input, needle, limits)
         }),
         "inside" => unary_argument(name, arguments, |container| {
-            collection_inside(charge, input, container)
+            collection_inside(charge, input, container, limits)
         }),
         "indices" => unary_argument(name, arguments, |needle| {
-            collection_indices(charge, input, needle)
+            collection_indices(charge, input, needle, limits)
         }),
         "index" => unary_argument(name, arguments, |needle| {
-            collection_index(charge, input, needle, false)
+            collection_index(charge, input, needle, false, limits)
         }),
         "rindex" => unary_argument(name, arguments, |needle| {
-            collection_index(charge, input, needle, true)
+            collection_index(charge, input, needle, true, limits)
         }),
         "has" => unary_argument(name, arguments, |key| has(input, key)),
         "in" => unary_argument(name, arguments, |container| has(container, input)),
@@ -1307,27 +1307,30 @@ fn collection_contains(
     charge: &mut impl FnMut() -> Result<(), VmError>,
     input: &Value,
     needle: &Value,
+    limits: VmLimits,
 ) -> Result<Value, VmError> {
     let checkpoint = make_checkpoint(charge);
-    collection::contains(input, needle, &checkpoint)
+    collection::contains(input, needle, limits, &checkpoint)
 }
 
 fn collection_inside(
     charge: &mut impl FnMut() -> Result<(), VmError>,
     input: &Value,
     container: &Value,
+    limits: VmLimits,
 ) -> Result<Value, VmError> {
     let checkpoint = make_checkpoint(charge);
-    collection::inside(input, container, &checkpoint)
+    collection::inside(input, container, limits, &checkpoint)
 }
 
 fn collection_indices(
     charge: &mut impl FnMut() -> Result<(), VmError>,
     input: &Value,
     needle: &Value,
+    limits: VmLimits,
 ) -> Result<Value, VmError> {
     let checkpoint = make_checkpoint(charge);
-    collection::indices(input, needle, &checkpoint)
+    collection::indices(input, needle, limits, &checkpoint)
 }
 
 fn collection_index(
@@ -1335,9 +1338,10 @@ fn collection_index(
     input: &Value,
     needle: &Value,
     reverse: bool,
+    limits: VmLimits,
 ) -> Result<Value, VmError> {
     let checkpoint = make_checkpoint(charge);
-    collection::index(input, needle, reverse, &checkpoint)
+    collection::index(input, needle, reverse, limits, &checkpoint)
 }
 
 #[cfg(test)]

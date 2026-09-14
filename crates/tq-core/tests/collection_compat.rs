@@ -157,6 +157,97 @@ fn collection_scans_obey_vm_step_limits() {
 }
 
 #[test]
+fn nested_index_comparisons_use_the_managed_vm_step_budget() {
+    let nested = (0..64).fold("1".to_owned(), |value, _| format!("[{value}]"));
+    let input = format!(r#"{{"haystack":[{nested}],"needle":[{nested}]}}"#);
+    let query = ".needle as $needle | .haystack | indices($needle)";
+    assert_eq!(
+        evaluate_with_limits(
+            query,
+            &input,
+            VmLimits {
+                steps: 256,
+                ..VmLimits::default()
+            },
+        )
+        .expect("nested indices should succeed with enough managed steps")[0]
+            .to_string(),
+        "[0]"
+    );
+    let error = evaluate_with_limits(
+        query,
+        &input,
+        VmLimits {
+            steps: 32,
+            ..VmLimits::default()
+        },
+    )
+    .expect_err("nested collection comparison should exhaust managed VM steps");
+    assert!(matches!(
+        error,
+        tq_core::VmError::Resource {
+            resource: "vm-steps"
+        }
+    ));
+
+    let scalar_control = evaluate_with_limits(
+        query,
+        r#"{"haystack":[1,2,3],"needle":2}"#,
+        VmLimits {
+            steps: 32,
+            ..VmLimits::default()
+        },
+    )
+    .expect("scalar comparison should fit the same managed step budget");
+    assert_eq!(scalar_control[0].to_string(), "[1]");
+}
+
+#[test]
+fn nested_index_comparisons_use_the_managed_vm_step_budget_for_index() {
+    let nested = (0..64).fold("1".to_owned(), |value, _| format!("[{value}]"));
+    let input = format!(r#"{{"haystack":[{nested}],"needle":[{nested}]}}"#);
+    let query = ".needle as $needle | .haystack | index($needle)";
+    assert_eq!(
+        evaluate_with_limits(
+            query,
+            &input,
+            VmLimits {
+                steps: 256,
+                ..VmLimits::default()
+            },
+        )
+        .expect("nested index should succeed with enough managed steps")[0]
+            .to_string(),
+        "0"
+    );
+    let error = evaluate_with_limits(
+        query,
+        &input,
+        VmLimits {
+            steps: 32,
+            ..VmLimits::default()
+        },
+    )
+    .expect_err("nested collection comparison should exhaust managed VM steps");
+    assert!(matches!(
+        error,
+        tq_core::VmError::Resource {
+            resource: "vm-steps"
+        }
+    ));
+    let scalar_control = evaluate_with_limits(
+        query,
+        r#"{"haystack":[1,2,3],"needle":2}"#,
+        VmLimits {
+            steps: 32,
+            ..VmLimits::default()
+        },
+    )
+    .expect("scalar comparison should fit the same managed step budget");
+    assert_eq!(scalar_control[0].to_string(), "1");
+}
+
+#[test]
 fn string_search_charges_each_character_comparison() {
     let error = evaluate_with_limits(
         r#"contains("aaaaab")"#,
