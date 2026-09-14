@@ -61,9 +61,14 @@ fn root_test_tree_keeps_jsonl_catalogs_but_no_json_documents() {
     assert!(
         paths
             .iter()
-            .all(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .any(|path| path.extension().is_some_and(|ext| ext == "jsonl")),
+        "preserve the legacy JSONL catalogs"
     );
-    let catalog = load_catalog(&catalogs).expect("every JSONL catalog is schema-valid");
+    assert!(paths.iter().all(|path| {
+        path.extension()
+            .is_some_and(|ext| matches!(ext.to_str(), Some("jsonl" | "toon")))
+    }));
+    let catalog = load_catalog(&catalogs).expect("every JSONL or TOON catalog is schema-valid");
     assert!(!catalog.cases.is_empty(), "the catalog must contain cases");
 }
 
