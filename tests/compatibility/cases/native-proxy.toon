@@ -1,0 +1,51 @@
+[2]:
+  - schema_version: 1
+    id: native.proxy-inputs-rejected-source
+    title: Remaining-input cursor passes through a rejected source
+    classification: cli
+    capabilities[1]: cli.input-source
+    status: mvp
+    fixture:
+      format: raw
+      inline: "not-json\n"
+    query: inputs
+    adapters:
+      jq:
+        supported: false
+        note: jq has no malformed-source passthrough option.
+      yq:
+        supported: false
+        note: This is a tq-only passthrough contract.
+      tq:
+        supported: true
+        args[3]: -x,-i,json
+        note: Exact byte and ordered multi-source assertions live in input_streams.rs.
+    invocation_mode: stdin
+    expected:
+      contract: raw-bytes
+      baseline: not-applicable
+  - schema_version: 1
+    id: native.proxy-null-inputs-rejected-source
+    title: Null-input collection passes through rejected bytes before its array
+    classification: cli
+    capabilities[1]: cli.input-source
+    status: mvp
+    fixture:
+      format: raw
+      inline: "not-json\n"
+    query: "[inputs]"
+    adapters:
+      jq:
+        supported: false
+        note: jq has no malformed-source passthrough option.
+      yq:
+        supported: false
+        note: This is a tq-only passthrough contract.
+      tq:
+        supported: true
+        args[4]: -n,-x,-i,json
+        note: Exact byte and ordered multi-source assertions live in input_streams.rs.
+    invocation_mode: stdin
+    expected:
+      contract: raw-bytes
+      baseline: not-applicable

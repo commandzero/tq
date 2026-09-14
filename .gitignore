@@ -14,6 +14,12 @@
 /benchmark-cache/
 /benchmark-data/
 /reports/local/
+# Full campaign observations are generated evidence, not source fixtures.
+/tests/compatibility/reviews/**/comparison*.toon
+/tests/compatibility/reviews/**/execution.toon
+/tests/compatibility/reviews/**/coverage-v*.toon
+/tests/compatibility/reviews/manual-comparison.*
+/tests/compatibility/reviews/manual-execution.*
 *.generated.json
 *.generated.yaml
 *.generated.yml
