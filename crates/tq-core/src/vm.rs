@@ -205,6 +205,19 @@ impl EffectState {
         state.acknowledged = false;
         Ok(())
     }
+
+    fn cancel(&self) {
+        let Ok(gate) = self.gate.lock() else {
+            return;
+        };
+        let Some(gate) = gate.as_ref() else {
+            return;
+        };
+        if let Ok(mut state) = gate.state.lock() {
+            state.cancelled = true;
+            gate.wake.notify_all();
+        }
+    }
 }
 
 /// Opaque handle used to drain effects emitted by a running VM.
@@ -276,16 +289,7 @@ impl EffectSink {
 
     /// Cancels a producer waiting for delivery acknowledgement.
     pub fn cancel(&self) {
-        let Ok(gate) = self.0.gate.lock() else {
-            return;
-        };
-        let Some(gate) = gate.as_ref() else {
-            return;
-        };
-        if let Ok(mut state) = gate.state.lock() {
-            state.cancelled = true;
-            gate.wake.notify_all();
-        }
+        self.0.cancel();
     }
 
     fn acknowledge(&self) {
@@ -720,6 +724,8 @@ impl Vm {
     }
 
     /// Enables acknowledgement-gated effect delivery for a live consumer.
+    /// Tree plans consumed through [`Self::for_each_result`] require a
+    /// concurrently draining [`EffectSink`] consumer.
     #[must_use]
     pub fn with_effect_acknowledgements(self) -> Self {
         let sink = self.effect_sink();
@@ -841,6 +847,8 @@ impl Vm {
     ///
     /// Returns deterministic runtime or resource errors, including step-budget
     /// failures for trivial roots that [`Self::next_result`] returns directly.
+    /// When acknowledgement-gated effects are enabled, the caller must drain
+    /// the [`EffectSink`] concurrently while this method evaluates the tree.
     pub fn for_each_result(&mut self, mut emit: impl FnMut(Value) -> bool) -> Result<(), VmError> {
         let uses_tree = !self.tree_started
             && self.tree_receiver.is_none()
@@ -976,6 +984,7 @@ impl Vm {
     }
 
     fn stop_tree_worker(&mut self) {
+        self.effects.cancel();
         self.tree_stop.store(true, Ordering::Relaxed);
         self.tree_demand.take();
         self.tree_receiver.take();
@@ -1221,6 +1230,11 @@ mod tests {
     use std::sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc::channel,
+    };
+    use std::{
+        thread,
+        time::{Duration, Instant},
     };
 
     use crate::{
@@ -1232,6 +1246,101 @@ mod tests {
 
     fn number(value: &str) -> Value {
         Value::Number(Number::parse(value).unwrap())
+    }
+
+    fn effect_plan() -> crate::Plan<crate::Compiled, crate::Document> {
+        analyze(
+            resolve(
+                parse("debug(\"effect\")").unwrap(),
+                &ResolveOptions::default(),
+            )
+            .unwrap(),
+        )
+        .compile()
+        .unwrap()
+        .document_plan()
+    }
+
+    #[test]
+    fn dropping_acknowledged_tree_vm_cancels_effect_wait() {
+        let mut vm = Vm::new(&effect_plan(), Value::Null, VmLimits::default())
+            .with_effect_acknowledgements();
+        let sink = vm.effect_sink();
+        vm.start_tree().unwrap();
+        vm.tree_demand.as_ref().unwrap().send(()).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while vm.effects.bytes.lock().unwrap().is_empty() {
+            if Instant::now() >= deadline {
+                sink.cancel();
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        let effect_started = !vm.effects.bytes.lock().unwrap().is_empty();
+
+        let (stopped_sender, stopped_receiver) = channel();
+        let drop_thread = thread::spawn(move || {
+            drop(vm);
+            stopped_sender.send(()).unwrap();
+        });
+        let stopped_before_cancel = stopped_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .is_ok();
+        if !stopped_before_cancel {
+            sink.cancel();
+        }
+        drop_thread.join().unwrap();
+
+        assert_ne!(sink.drain(), [] as [u8; 0]);
+        assert!(effect_started, "effect worker did not start");
+        assert!(
+            stopped_before_cancel,
+            "stopping the VM needed external effect cancellation"
+        );
+    }
+
+    #[test]
+    fn for_each_result_supports_acknowledged_tree_with_live_sink_consumer() {
+        let mut vm = Vm::new(&effect_plan(), Value::Null, VmLimits::default())
+            .with_effect_acknowledgements();
+
+        let sink = vm.effect_sink();
+        let consumer_sink = sink.clone();
+        let (effects_sender, effects_receiver) = channel();
+        let consumer_thread = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                let effects = consumer_sink.drain();
+                if !effects.is_empty() {
+                    effects_sender.send(effects).unwrap();
+                    return;
+                }
+                if Instant::now() >= deadline {
+                    effects_sender.send(Vec::new()).unwrap();
+                    return;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+
+        let (result_sender, result_receiver) = channel();
+        let evaluation_thread = thread::spawn(move || {
+            result_sender.send(vm.for_each_result(|_| true)).unwrap();
+        });
+
+        let effects = effects_receiver.recv_timeout(Duration::from_secs(1));
+        let result = result_receiver.recv_timeout(Duration::from_secs(1));
+        if effects.is_err() || result.is_err() {
+            sink.cancel();
+        }
+        let effects = effects.expect("live sink should receive the effect");
+        let result = result.expect("effect evaluation thread should terminate");
+        evaluation_thread.join().unwrap();
+        consumer_thread.join().unwrap();
+
+        assert_ne!(effects, [] as [u8; 0]);
+        assert_eq!(result, Ok(()));
     }
 
     #[test]
