@@ -69,3 +69,38 @@ fn delimited_input_preserves_header_order_scalar_types_and_quoted_newlines() {
         assert!(input.next_observation().unwrap().is_none());
     }
 }
+
+#[test]
+fn delimited_input_reports_physical_start_lines_for_multiline_rows_and_crlf() {
+    for format in [NativeFormat::Csv, NativeFormat::Tsv] {
+        let delimiter = if format == NativeFormat::Csv {
+            ','
+        } else {
+            '\t'
+        };
+        let bytes = format!(
+            "name{delimiter}age\r\n\"a\r\nb\"{delimiter}1\r\n\"c\rd\"{delimiter}2\r\nlast{delimiter}3"
+        );
+        let identity = if format == NativeFormat::Csv {
+            "rows.csv"
+        } else {
+            "rows.tsv"
+        };
+        let mut input = format
+            .select_input(DecodeOptions::default(), InputRepresentation::Documents)
+            .unwrap()
+            .open(bytes.as_bytes(), identity);
+
+        for (index, expected_line) in [2_u64, 4, 6].into_iter().enumerate() {
+            let NativeInputObservation::Document(document) =
+                input.next_observation().unwrap().unwrap()
+            else {
+                panic!("row document");
+            };
+            assert_eq!(document.index, index as u64);
+            assert_eq!(document.line_number, expected_line);
+            assert_eq!(document.identity, identity);
+        }
+        assert!(input.next_observation().unwrap().is_none());
+    }
+}
