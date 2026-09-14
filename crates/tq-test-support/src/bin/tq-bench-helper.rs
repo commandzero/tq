@@ -25,6 +25,12 @@ fn main() -> ExitCode {
                 remaining -= length;
             }
         }
+        "streams" => {
+            let stdout_bytes = usize::try_from(number(arguments.next())).unwrap_or(usize::MAX);
+            let stderr_bytes = usize::try_from(number(arguments.next())).unwrap_or(usize::MAX);
+            write_bytes(std::io::stdout(), stdout_bytes);
+            write_bytes(std::io::stderr(), stderr_bytes);
+        }
         "first" => {
             println!("first");
             let _ = std::io::stdout().flush();
@@ -43,6 +49,18 @@ fn main() -> ExitCode {
         _ => return ExitCode::from(64),
     }
     ExitCode::SUCCESS
+}
+
+fn write_bytes(mut output: impl std::io::Write, bytes: usize) {
+    let chunk = vec![b'x'; bytes.min(64 * 1024)];
+    let mut remaining = bytes;
+    while remaining > 0 {
+        let length = remaining.min(chunk.len());
+        if output.write_all(&chunk[..length]).is_err() {
+            return;
+        }
+        remaining -= length;
+    }
 }
 
 fn number(value: Option<String>) -> u64 {

@@ -395,7 +395,7 @@ Known-duration controls SHALL report observed excess duration and dispersion. Fu
 ### Requirement: Isolated measurement worker
 An internal Rust worker MAY isolate target launching from the campaign coordinator's memory. It SHALL initialize its own executable image before launching the target and SHALL return the target's exact-child resource usage, never its own lifetime usage. Bulk input and capture preparation SHALL remain outside the worker's target-launch memory footprint. Control messages SHALL be bounded and preserve the existing public invocation contract without loading corpus-sized input or reports into the worker before target launch.
 
-The worker SHALL remain the single owner of target completion and resource collection. Coordinator management of worker completion MUST NOT race target reaping. Startup, communication, cancellation, and cleanup SHALL be bounded. Worker absence, failure, malformed or truncated replies, and lost control channels SHALL fail closed with retained diagnostics. Target and process-group cleanup SHALL be verified for worker and coordinator failure. No failure MAY silently fall back to the contaminated in-process launch path.
+The worker SHALL remain the single owner of target completion and resource collection. Coordinator management of worker completion MUST NOT race target reaping. Startup, communication, cancellation, and the caller's cleanup wait SHALL be bounded. If cleanup cannot finish within that wait, the worker SHALL remain alive as the target's reaper and the caller SHALL receive a collection failure. Pending cleanup SHALL block new samples rather than accumulate unbounded work. Worker absence, failure, malformed or truncated replies, and lost control channels SHALL fail closed with retained diagnostics. Target and process-group cleanup SHALL be verified for recoverable worker-control and coordinator failure. Forced loss of the target's parent process SHALL be reported as unavailable exact-child accounting, not a successful measurement. No failure MAY silently fall back to the contaminated in-process launch path.
 
 Reports and calibration SHALL identify the worker executable, launch protocol, collector sources, resource scope, and residual launch-floor evidence. Changed workers or protocols SHALL invalidate calibration and prevent incompatible comparisons. Worker adoption SHALL require native parent-memory independence, request-sequence isolation, and independent platform-time validation on both hosts. This permission does not establish that a worker is a verified solution; inability to meet these conditions SHALL require another design decision.
 
@@ -412,15 +412,20 @@ Reports and calibration SHALL identify the worker executable, launch protocol, c
 - **THEN** the measured target interval excludes those delays and still uses the target owner's monotonic clock
 
 #### Scenario: Worker control failure
-- **WHEN** the worker fails or its control channel is lost while a target is running
-- **THEN** bounded cleanup leaves no live target or descendant, diagnostics identify the infrastructure failure, and no valid measurement is published
+- **WHEN** worker control fails or the coordinator disappears while a target is running
+- **THEN** the target-parent reaper retains ownership while terminating and reaping the target, diagnostics identify the infrastructure failure, and no valid measurement is published
+- **AND** a caller deadline does not terminate the only remaining target-parent reaper
+
+#### Scenario: Reaper process forcibly terminated
+- **WHEN** an external actor forcibly terminates the target-parent reaper or the host fails
+- **THEN** the harness reports unavailable exact-child accounting and does not claim recovered resource usage or verified exact reaping
 
 #### Scenario: Worker changes after calibration
 - **WHEN** a worker executable or launch protocol differs from the independently validated identity
 - **THEN** old calibration cannot authorize the new measurement path and fresh native controls are required
 
 ### Requirement: Single-owner child resource lifecycle
-One measurement lifecycle SHALL own child completion, resource collection, timeout, cancellation, forced termination, and cleanup. The resource collector MUST target the specific child and collect its usage during reaping; ordinary waits MUST NOT consume status first. Cumulative accounting across prior children MUST NOT be used. Normal exit, nonzero exit, signal, timeout, output limit, and configured memory-limit outcomes SHALL remain distinct. All paths SHALL close input delivery and bound process and worker cleanup without zombies or double reaping. Collection errors SHALL retain available exit diagnostics without manufacturing metrics.
+One measurement lifecycle SHALL own child completion, resource collection, timeout, cancellation, forced termination, and cleanup. The resource collector MUST target the specific child and collect its usage during reaping; ordinary waits MUST NOT consume status first. Cumulative accounting across prior children MUST NOT be used. Normal exit, nonzero exit, signal, timeout, output limit, and configured memory-limit outcomes SHALL remain distinct. All paths SHALL close input delivery and bound the caller's cleanup wait without dropping an unreaped child or reaping twice. Cleanup that exceeds this wait SHALL retain an explicit reaper owner until exact reaping completes or lost ownership is reported. Collection errors SHALL retain available exit diagnostics without manufacturing metrics. A successful reap or lost-ownership ECHILD SHALL invalidate the stored process identity before any further signal.
 
 #### Scenario: Independent repeated children
 - **WHEN** a high-memory child is followed by a low-memory child or independent samples overlap
@@ -432,7 +437,17 @@ One measurement lifecycle SHALL own child completion, resource collection, timeo
 
 #### Scenario: Forced termination with blocked input
 - **WHEN** a child does not consume stdin and exceeds its deadline or output limit
-- **THEN** termination, pipe closure, and worker cleanup complete within bounded time and report the forced outcome with collected usage or explicit collection failure
+- **THEN** termination and pipe closure are attempted within the caller's bounded wait and report the forced outcome with collected usage or explicit collection failure
+- **AND** unfinished cleanup retains a reaper owner rather than dropping the child
+
+#### Scenario: Cleanup exceeds its deadline
+- **WHEN** a cleanup deadline expires before the child can be reaped
+- **THEN** the caller receives a collection failure while a reserved reaper owner continues cleanup
+- **AND** pending cleanup prevents new samples, and later reaping cannot promote the failed sample into an accepted timing or RSS result
+
+#### Scenario: Reaper capacity unavailable
+- **WHEN** the harness cannot reserve the resources needed to retain cleanup ownership
+- **THEN** it fails before launching another target rather than risking an unowned child
 
 #### Scenario: Normal and abnormal exit
 - **WHEN** helpers exit successfully, exit nonzero, or terminate by signal
@@ -441,7 +456,7 @@ One measurement lifecycle SHALL own child completion, resource collection, timeo
 ### Requirement: Native accounting validation
 macOS and Linux SHALL exercise the same measurement interface through safe Rust APIs. Dependency selection MUST audit lifecycle semantics, target support, resource units, maintenance, licensing, and transitive dependencies. First-party unsafe code or FFI bridges SHALL NOT be introduced; failure to find suitable safe APIs SHALL require a separate design decision before implementation proceeds.
 
-The workspace SHALL declare a minimum Rust version of 1.95 to support the selected `wait4 0.2.0` dependency. The consuming wait API and dependency-internal interrupted-call retries SHALL preserve the existing exact-child observation, cleanup, and reap ordering. Raising MSRV SHALL NOT be treated as evidence that Linux pre-exec RSS inheritance is resolved.
+The workspace SHALL declare a minimum Rust version of 1.95 to support the selected `wait4 0.2.0` dependency. Its consuming or nonblocking resource-aware wait API and dependency-internal interrupted-call retries SHALL preserve exact-child observation, cleanup, and reap ordering. Nonblocking waits SHALL retain ownership when the child is still running or a recoverable wait error occurs, and clear ownership immediately after a successful reap. Raising MSRV SHALL NOT be treated as evidence that Linux pre-exec RSS inheritance is resolved.
 
 The approved dependency MAY rely on valid, nonnegative OS counters within its audited numeric range when its internal conversions expose no overflow error. This assumption and its limits MUST be documented; the implementation MUST NOT claim it can detect every malformed upstream counter after conversion. First-party conversions SHALL use checked arithmetic and reject detectable invalid, zero-RSS, unavailable, or overflowed results. Independent native validation remains mandatory.
 

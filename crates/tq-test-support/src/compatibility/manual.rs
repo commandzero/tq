@@ -156,7 +156,7 @@ impl DisparityEvidence {
             DisparityValidationError::Report("disparity report is missing tq identity".to_owned())
         })?;
         let tq_toon = (!case["tq_toon"].is_null())
-            .then(|| ReviewedObservation::from_report(&case["tq_toon"]))
+            .then(|| observation_for_role(&case["tq_toon"], super::ToolKind::Tq, "tq_toon"))
             .transpose()?;
         let toon_contract_match = case["toon_contract_match"].as_bool();
         let (
@@ -183,16 +183,24 @@ impl DisparityEvidence {
                             "disparity compact campaign needs a differences array".to_owned(),
                         )
                     })?;
-                let jq = ReviewedObservation::from_report(compact.get("jq").ok_or_else(|| {
-                    DisparityValidationError::Report(
-                        "disparity compact campaign is missing jq observation".to_owned(),
-                    )
-                })?)?;
-                let tq = ReviewedObservation::from_report(compact.get("tq").ok_or_else(|| {
-                    DisparityValidationError::Report(
-                        "disparity compact campaign is missing tq observation".to_owned(),
-                    )
-                })?)?;
+                let jq = observation_for_role(
+                    compact.get("jq").ok_or_else(|| {
+                        DisparityValidationError::Report(
+                            "disparity compact campaign is missing jq observation".to_owned(),
+                        )
+                    })?,
+                    super::ToolKind::Jq,
+                    "compact jq",
+                )?;
+                let tq = observation_for_role(
+                    compact.get("tq").ok_or_else(|| {
+                        DisparityValidationError::Report(
+                            "disparity compact campaign is missing tq observation".to_owned(),
+                        )
+                    })?,
+                    super::ToolKind::Tq,
+                    "compact tq",
+                )?;
                 (Some(jq), Some(tq), Some(exact), Some(differences))
             }
             None if case["compact"].is_null() => (None, None, None, None),
@@ -214,8 +222,8 @@ impl DisparityEvidence {
             case_fingerprint: case_fingerprint.to_owned(),
             reference_identity,
             target_identity,
-            jq: ReviewedObservation::from_report(&case["jq"])?,
-            tq: ReviewedObservation::from_report(&case["tq"])?,
+            jq: observation_for_role(&case["jq"], super::ToolKind::Jq, "jq")?,
+            tq: observation_for_role(&case["tq"], super::ToolKind::Tq, "tq")?,
             tq_toon,
             compact_jq: compact_reference_observation,
             compact_tq: compact_target_observation,
@@ -323,6 +331,21 @@ impl ReviewedObservation {
         serde_json::from_value(value.clone())
             .map_err(|error| DisparityValidationError::Report(error.to_string()))
     }
+}
+
+fn observation_for_role(
+    value: &Value,
+    expected: super::ToolKind,
+    label: &str,
+) -> Result<ReviewedObservation, DisparityValidationError> {
+    let observation = ReviewedObservation::from_report(value)?;
+    if observation.tool != expected {
+        return Err(DisparityValidationError::Report(format!(
+            "{label} observation has tool role {:?}, expected {expected:?}",
+            observation.tool
+        )));
+    }
+    Ok(observation)
 }
 
 /// Computes the stable catalog-case fingerprint embedded in manual reports.
@@ -660,7 +683,8 @@ fn validate_approval_evidence(
     case: &Value,
     approval: &ReviewedDisparity,
 ) -> Result<(), DisparityValidationError> {
-    if DisparityEvidence::from_report(report, case)? != approval.evidence {
+    let observed = DisparityEvidence::from_report(report, case)?;
+    if !stable_evidence_equal(&observed, &approval.evidence) {
         return Err(DisparityValidationError::Stale {
             case_id: approval.case_id.clone(),
             reason: "stable observation, tool identity, or catalog fingerprint changed".to_owned(),
@@ -681,6 +705,61 @@ fn validate_approval_evidence(
         }
     }
     Ok(())
+}
+
+/// Compares approval evidence while treating executable installation paths as
+/// provenance rather than identity. Every executable byte digest, build
+/// feature, version, runtime-library identity, and observation remains exact.
+fn stable_evidence_equal(left: &DisparityEvidence, right: &DisparityEvidence) -> bool {
+    left.case_fingerprint == right.case_fingerprint
+        && stable_tool_identity_equal(&left.reference_identity, &right.reference_identity)
+        && stable_tool_identity_equal(&left.target_identity, &right.target_identity)
+        && left.jq == right.jq
+        && left.tq == right.tq
+        && left.tq_toon == right.tq_toon
+        && left.compact_jq == right.compact_jq
+        && left.compact_tq == right.compact_tq
+        && left.toon_contract_match == right.toon_contract_match
+        && left.compact_exact == right.compact_exact
+        && left.compact_differences == right.compact_differences
+        && left.semantic_differences == right.semantic_differences
+}
+
+/// Compares a discovered tool without binding approval evidence to its local
+/// installation directory. Artifact names and digests still identify runtime
+/// libraries, while their checkout-specific parent directories remain raw
+/// provenance in the serialized evidence.
+fn stable_tool_identity_equal(left: &super::ToolIdentity, right: &super::ToolIdentity) -> bool {
+    left.tool == right.tool
+        && left.version == right.version
+        && stable_artifact_equal(&left.executable, &right.executable)
+        && left.build_features == right.build_features
+        && stable_runtime_identities(&left.runtime_libraries)
+            == stable_runtime_identities(&right.runtime_libraries)
+}
+
+fn stable_artifact_equal(
+    left: &crate::corpus::ArtifactIdentity,
+    right: &crate::corpus::ArtifactIdentity,
+) -> bool {
+    left.bytes == right.bytes && left.sha256 == right.sha256
+}
+
+fn stable_runtime_identities(
+    libraries: &[crate::corpus::ArtifactIdentity],
+) -> Vec<(String, u64, String)> {
+    let mut identities = libraries
+        .iter()
+        .map(|library| {
+            let name = Path::new(&library.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map_or_else(|| library.path.clone(), str::to_owned);
+            (name, library.bytes, library.sha256.clone())
+        })
+        .collect::<Vec<_>>();
+    identities.sort();
+    identities
 }
 
 fn validate_approval_scope(approval: &ReviewedDisparity) -> Result<(), DisparityValidationError> {
@@ -1066,15 +1145,9 @@ fn validate_report_case(id: &str, case: &Value, context: ReportCaseContext<'_>) 
     if verdict != "match" && !(allow_disparities && is_disparity) {
         failures.push(format!("{id}: verdict {verdict}"));
     }
-    if is_disparity {
-        match expected_fingerprint {
-            Some(expected) if case["case_fingerprint"] == expected => {}
-            Some(_) => failures.push(format!("{id}: stale catalog fingerprint")),
-            None => failures.push(format!("{id}: missing catalog fingerprint")),
-        }
-        if case["reviewed_disparity"].is_null() {
-            failures.push(format!("{id}: missing reviewed disparity evidence"));
-        }
+    validate_catalog_identity(id, case, catalog_case, expected_fingerprint, failures);
+    if is_disparity && case["reviewed_disparity"].is_null() {
+        failures.push(format!("{id}: missing reviewed disparity evidence"));
     }
     let Some(reference) = case.get("jq") else {
         failures.push(format!("{id}: missing reference"));
@@ -1084,6 +1157,8 @@ fn validate_report_case(id: &str, case: &Value, context: ReportCaseContext<'_>) 
         failures.push(format!("{id}: missing tq observation"));
         return;
     };
+    validate_tool_role(id, "reference", reference, "jq", failures);
+    validate_tool_role(id, "tq", actual, "tq", failures);
     validate_observation(id, "reference", reference, failures);
     validate_observation(id, "tq", actual, failures);
     if let Some(contract) = tq_contract {
@@ -1093,12 +1168,15 @@ fn validate_report_case(id: &str, case: &Value, context: ReportCaseContext<'_>) 
         let reference_succeeded = reference["state"] == "executed"
             && reference["process_status"] == "exited"
             && reference["exit_code"] == 0;
+        let stderr_matches = !compare_stderr || reference["stderr_hex"] == actual["stderr_hex"];
         if !valid_case {
             failures.push(format!("{id}: invalid tq-native CLI contract association"));
         } else if !reference_succeeded {
             failures.push(format!("{id}: mismatch (reference CLI contract)"));
         } else if !matches {
             failures.push(format!("{id}: mismatch (tq-native CLI contract assertion)"));
+        } else if !stderr_matches {
+            failures.push(format!("{id}: mismatch (explicit stderr payload)"));
         }
     }
     if tq_contract.is_none()
@@ -1147,6 +1225,32 @@ fn validate_report_case(id: &str, case: &Value, context: ReportCaseContext<'_>) 
     }
 }
 
+fn validate_catalog_identity(
+    id: &str,
+    case: &Value,
+    catalog_case: Option<&super::CompatibilityCase>,
+    expected_fingerprint: Option<&str>,
+    failures: &mut Vec<String>,
+) {
+    match expected_fingerprint {
+        Some(expected) if case["case_fingerprint"] == expected => {}
+        Some(_) => failures.push(format!("{id}: stale catalog fingerprint")),
+        None => failures.push(format!("{id}: missing catalog fingerprint")),
+    }
+    if let Some(catalog_case) = catalog_case {
+        let expected_contract =
+            serde_json::to_value(catalog_case.expected.contract).expect("contract serializes");
+        if case["contract"] != expected_contract {
+            failures.push(format!(
+                "{id}: report contract {:?} does not match catalog contract {:?}",
+                case["contract"], expected_contract
+            ));
+        }
+    } else {
+        failures.push(format!("{id}: missing catalog case"));
+    }
+}
+
 fn report_case_ids(cases: &[Value]) -> Result<BTreeSet<String>, StrictCampaignError> {
     let mut ids = BTreeSet::new();
     for case in cases {
@@ -1171,6 +1275,7 @@ fn validate_encoding_campaigns(
 ) {
     let actual = &case["tq"];
     let toon = &case["tq_toon"];
+    validate_tool_role(id, "TOON", toon, "tq", failures);
     validate_observation(id, "TOON", toon, failures);
     if !is_disparity
         && (case["toon_contract_match"] != true
@@ -1182,6 +1287,8 @@ fn validate_encoding_campaigns(
         failures.push(format!("{id}: mismatch (independent TOON contract)"));
     }
     let compact = &case["compact"];
+    validate_tool_role(id, "compact reference", &compact["jq"], "jq", failures);
+    validate_tool_role(id, "compact tq", &compact["tq"], "tq", failures);
     validate_observation(id, "compact reference", &compact["jq"], failures);
     validate_observation(id, "compact tq", &compact["tq"], failures);
     let Some(compact_differences) = compact["differences"].as_array() else {
@@ -1200,6 +1307,21 @@ fn validate_encoding_campaigns(
             || !compact_differences.is_empty())
     {
         failures.push(format!("{id}: mismatch (exact compact JSON contract)"));
+    }
+}
+
+fn validate_tool_role(
+    id: &str,
+    role: &str,
+    observation: &Value,
+    expected: &str,
+    failures: &mut Vec<String>,
+) {
+    if observation["tool"].as_str() != Some(expected) {
+        failures.push(format!(
+            "{id}: {role} observation has tool role {:?}, expected {expected}",
+            observation["tool"]
+        ));
     }
 }
 
@@ -1252,4 +1374,170 @@ pub fn manual_case_ids(entry: &Value) -> Result<Vec<&str>, &'static str> {
         };
     }
     Err("expected scalar case_id or nullable evidence_case_id")
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::{
+        DisparityEvidence, ReviewedDisparity, validate_approval_evidence, validate_tool_role,
+    };
+
+    fn observation(tool: &str) -> Value {
+        json!({
+            "tool": tool,
+            "input_format": null,
+            "state": "executed",
+            "results": [],
+            "stdout_hex": "",
+            "raw_stdout_hex": null,
+            "stderr_hex": null,
+            "process_status": "exited",
+            "exit_code": 0,
+            "error_class": null,
+        })
+    }
+
+    fn evidence_fixture() -> (Value, Value) {
+        let report = json!({
+            "tools": [
+                {
+                    "tool": "jq",
+                    "path": "jq",
+                    "version": "jq",
+                    "executable": {"path": "jq", "bytes": 1, "sha256": "00"},
+                    "build_features": [],
+                    "runtime_libraries": [
+                        {"path": "/old/libjq.so", "bytes": 2, "sha256": "11"}
+                    ],
+                },
+                {
+                    "tool": "tq",
+                    "path": "tq",
+                    "version": "tq",
+                    "executable": {"path": "tq", "bytes": 1, "sha256": "00"},
+                    "build_features": [],
+                },
+            ],
+        });
+        let case = json!({
+            "case_fingerprint": "fingerprint",
+            "jq": observation("jq"),
+            "tq": observation("tq"),
+            "tq_toon": observation("tq"),
+            "compact": {
+                "exact": true,
+                "jq": observation("jq"),
+                "tq": observation("tq"),
+                "differences": [],
+            },
+            "differences": [{"summary": "result sequence"}],
+        });
+        (report, case)
+    }
+
+    fn approval(evidence: DisparityEvidence) -> ReviewedDisparity {
+        ReviewedDisparity {
+            case_id: "case".to_owned(),
+            contract: super::super::ContractKind::ResultSequence,
+            difference_summary: "result sequence".to_owned(),
+            rationale: "reviewed".to_owned(),
+            evidence,
+        }
+    }
+
+    #[test]
+    fn relocated_tool_paths_do_not_invalidate_approval_evidence() {
+        let (report, case) = evidence_fixture();
+        let original = DisparityEvidence::from_report(&report, &case).expect("fixture evidence");
+        let mut relocated = report;
+        for tool in relocated["tools"].as_array_mut().expect("tool identities") {
+            let name = tool["tool"].as_str().expect("tool role").to_owned();
+            tool["path"] = Value::String(format!("/relocated/{name}"));
+            tool["executable"]["path"] = Value::String(format!("/relocated/bin/{name}"));
+        }
+        let current =
+            DisparityEvidence::from_report(&relocated, &case).expect("relocated fixture evidence");
+        let approval = approval(original.clone());
+
+        assert!(validate_approval_evidence(&relocated, &case, &approval).is_ok());
+        assert_ne!(
+            current.reference_identity.path,
+            original.reference_identity.path
+        );
+        assert_eq!(
+            current.reference_identity.path.to_string_lossy(),
+            "/relocated/jq"
+        );
+        assert_eq!(original.reference_identity.path.to_string_lossy(), "jq");
+    }
+
+    #[test]
+    fn executable_digest_changes_invalidate_approval_evidence() {
+        let (report, case) = evidence_fixture();
+        let original = DisparityEvidence::from_report(&report, &case).expect("fixture evidence");
+        let mut changed = report;
+        changed["tools"][0]["executable"]["sha256"] = Value::String("changed".to_owned());
+        let current =
+            DisparityEvidence::from_report(&changed, &case).expect("changed fixture evidence");
+        let approval = approval(original);
+
+        assert!(validate_approval_evidence(&changed, &case, &approval).is_err());
+        assert_ne!(
+            current.reference_identity.executable.sha256,
+            approval.evidence.reference_identity.executable.sha256
+        );
+    }
+
+    #[test]
+    fn observation_changes_invalidate_approval_evidence() {
+        let (report, mut case) = evidence_fixture();
+        let original = DisparityEvidence::from_report(&report, &case).expect("fixture evidence");
+        case["jq"]["stdout_hex"] = Value::String("changed".to_owned());
+        let current =
+            DisparityEvidence::from_report(&report, &case).expect("changed fixture evidence");
+        let approval = approval(original);
+
+        assert!(validate_approval_evidence(&report, &case, &approval).is_err());
+        assert_ne!(current.jq.stdout_hex, approval.evidence.jq.stdout_hex);
+    }
+
+    #[test]
+    fn disparity_evidence_rejects_mislabeled_observation_roles() {
+        for path in [
+            "/jq/tool",
+            "/tq/tool",
+            "/tq_toon/tool",
+            "/compact/jq/tool",
+            "/compact/tq/tool",
+        ] {
+            let (report, mut case) = evidence_fixture();
+            case.pointer_mut(path)
+                .expect("role field")
+                .clone_from(&json!("yq"));
+            let error = DisparityEvidence::from_report(&report, &case)
+                .expect_err("a role label must match its evidence field");
+            assert!(
+                error.to_string().contains("observation has tool role"),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn manual_gate_rejects_mislabeled_observation_roles() {
+        let mut failures = Vec::new();
+        validate_tool_role(
+            "case",
+            "compact reference",
+            &observation("tq"),
+            "jq",
+            &mut failures,
+        );
+        validate_tool_role("case", "TOON", &observation("jq"), "tq", &mut failures);
+
+        assert_eq!(failures.len(), 2);
+        assert!(failures.iter().all(|failure| failure.contains("tool role")));
+    }
 }
