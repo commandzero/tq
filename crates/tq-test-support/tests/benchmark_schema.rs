@@ -52,6 +52,58 @@ fn benchmark_schemas_are_valid_and_campaign_shape_is_versioned() {
 }
 
 #[test]
+fn adapter_applicability_requires_a_matching_unsupported_reason() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema: Value = serde_json::from_slice(
+        &fs::read(root.join("schemas/benchmark-case-v1.schema.json")).expect("case schema"),
+    )
+    .expect("case schema JSON");
+    let validator = jsonschema::Validator::new(&schema).expect("case validator");
+    let base = json!({
+        "schema_version": 1,
+        "id": "schema-test",
+        "compatibility_gate": "schema-test",
+        "dataset_selector": {"family": "natural", "tiers": ["small"]},
+        "query": ".",
+        "execution_class": "document",
+        "measure_first_result": false,
+        "sampling": {"warmups": 0, "small": 30, "medium": 10, "large": 3},
+        "timeout_seconds": 1,
+        "limits": {"output_bytes": 1},
+        "output_contract": {"kind": "semantic-sequence", "reference_adapter": "jq-json"},
+        "adapters": [{
+            "id": "jq-json",
+            "tool": "jq",
+            "input_format": "json",
+            "applicable": true,
+            "args": [],
+            "comparison_families": ["same-format"]
+        }]
+    });
+    assert!(validator.is_valid(&base));
+
+    let mut enabled_with_reason = base.clone();
+    enabled_with_reason["adapters"][0]["unsupported_reason"] = json!("not needed");
+    assert!(!validator.is_valid(&enabled_with_reason));
+
+    let mut disabled_with_reason = base.clone();
+    disabled_with_reason["adapters"][0]["applicable"] = json!(false);
+    disabled_with_reason["adapters"][0]["unsupported_reason"] = json!("format unavailable");
+    assert!(validator.is_valid(&disabled_with_reason));
+
+    let mut disabled_without_reason = disabled_with_reason.clone();
+    disabled_without_reason["adapters"][0]
+        .as_object_mut()
+        .expect("adapter object")
+        .remove("unsupported_reason");
+    assert!(!validator.is_valid(&disabled_without_reason));
+
+    let mut disabled_with_whitespace_reason = disabled_with_reason;
+    disabled_with_whitespace_reason["adapters"][0]["unsupported_reason"] = json!(" \t\n ");
+    assert!(!validator.is_valid(&disabled_with_whitespace_reason));
+}
+
+#[test]
 fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema: Value = serde_json::from_slice(
@@ -102,6 +154,114 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
         }
     }
     assert_eq!(ids.len(), 39);
+}
+
+#[test]
+fn excluded_catalog_adapters_have_concise_capability_reasons() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let cases =
+        fs::read_to_string(root.join("benchmarks/cases/workloads.jsonl")).expect("benchmark cases");
+
+    for line in cases.lines().filter(|line| !line.trim().is_empty()) {
+        let case: Value = serde_json::from_str(line).expect("case JSON");
+        for adapter in case["adapters"].as_array().expect("adapter matrix") {
+            let reason = adapter.get("unsupported_reason");
+            if adapter["applicable"] == true {
+                assert!(
+                    reason.is_none(),
+                    "enabled adapter has unsupported reason: {} / {}",
+                    case["id"],
+                    adapter["id"]
+                );
+            } else {
+                let reason = reason
+                    .and_then(Value::as_str)
+                    .filter(|reason| !reason.trim().is_empty())
+                    .expect("excluded adapter reason");
+                assert!(
+                    ![
+                        "file://",
+                        "/Users/",
+                        "/home/",
+                        "/private/",
+                        "/tmp/",
+                        "tq-benchmarks/.work/",
+                    ]
+                    .iter()
+                    .any(|path| reason.contains(path)),
+                    "adapter reason must not expose a local path: {reason}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn catalog_enables_proven_tq_and_yq_applicability() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let cases = fs::read_to_string(root.join("benchmarks/cases/workloads.jsonl"))
+        .expect("benchmark cases")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("case JSON"))
+        .collect::<Vec<_>>();
+
+    for id in [
+        "benchmark.object-deep-merge",
+        "benchmark.format-base64-startup",
+        "benchmark.format-json",
+        "benchmark.format-csv",
+        "benchmark.format-tsv",
+        "benchmark.format-base64-roundtrip",
+        "benchmark.format-uri-html",
+        "benchmark.format-template",
+        "benchmark.issue5-collection",
+        "benchmark.issue5-json-conversion",
+        "benchmark.recurse-bounded",
+        "benchmark.walk-structural",
+        "benchmark.label-early-break",
+    ] {
+        let case = cases
+            .iter()
+            .find(|case| case["id"] == id)
+            .unwrap_or_else(|| panic!("missing workload {id}"));
+        let enabled = case["adapters"]
+            .as_array()
+            .expect("adapter matrix")
+            .iter()
+            .filter(|adapter| adapter["applicable"] == true)
+            .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
+            .collect::<BTreeSet<_>>();
+
+        let expected = match id {
+            "benchmark.format-uri-html"
+            | "benchmark.format-template"
+            | "benchmark.recurse-bounded"
+            | "benchmark.walk-structural"
+            | "benchmark.label-early-break" => {
+                BTreeSet::from(["jq-json", "tq-json", "tq-toon", "tq-yaml"])
+            }
+            _ => BTreeSet::from([
+                "jq-json", "tq-json", "tq-toon", "tq-yaml", "yq-json", "yq-yaml",
+            ]),
+        };
+        assert_eq!(enabled, expected, "applicability for {id}");
+    }
+
+    let event = cases
+        .iter()
+        .find(|case| case["id"] == "benchmark.event-stream")
+        .expect("event stream workload");
+    let event_enabled = event["adapters"]
+        .as_array()
+        .expect("adapter matrix")
+        .iter()
+        .filter(|adapter| adapter["applicable"] == true)
+        .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        event_enabled,
+        BTreeSet::from(["jq-json", "tq-json", "tq-toon"])
+    );
 }
 
 #[test]
@@ -166,7 +326,7 @@ fn workload_breadth_and_stream_resource_requirements_are_explicit() {
 }
 
 #[test]
-fn format_workloads_separate_startup_and_throughput_jq_tq_comparisons() {
+fn format_workloads_have_jq_tq_baselines() {
     let cases = fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/cases/workloads.jsonl"),
     )
@@ -200,9 +360,8 @@ fn format_workloads_separate_startup_and_throughput_jq_tq_comparisons() {
             .filter(|adapter| adapter["applicable"] == true)
             .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
             .collect::<BTreeSet<_>>();
-        assert_eq!(
-            applicable,
-            BTreeSet::from(["jq-json", "tq-json", "tq-yaml", "tq-toon"])
+        assert!(
+            BTreeSet::from(["jq-json", "tq-json", "tq-yaml", "tq-toon"]).is_subset(&applicable)
         );
     }
 }
@@ -212,7 +371,11 @@ fn compatibility_ids(root: &Path) -> BTreeSet<String> {
     for entry in fs::read_dir(root.join("tests/compatibility/cases")).expect("compatibility cases")
     {
         let path = entry.expect("case entry").path();
-        for line in fs::read_to_string(path).expect("case file").lines() {
+        for line in tq_test_support::fixture_data::case_lines(&path)
+            .expect("case file")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+        {
             let case: Value = serde_json::from_str(line).expect("case JSON");
             ids.insert(case["id"].as_str().expect("case ID").to_owned());
         }
@@ -238,6 +401,11 @@ fn native_format_workloads_have_separate_correctness_gated_reference_pairs() {
     ] {
         let case = catalog.cases.iter().find(|case| case.id == id).expect(id);
         assert!(validator.is_valid(&serde_json::to_value(case).unwrap()));
+        let mut colored = serde_json::to_value(case).unwrap();
+        colored["output_contract"]["kind"] = json!("colored-semantic-sequence");
+        assert!(validator.is_valid(&colored));
+        colored["output_contract"]["kind"] = json!("not-a-contract");
+        assert!(!validator.is_valid(&colored));
         assert!(gates.contains(&case.compatibility_gate));
         assert_eq!(case.output_contract.reference_adapter, reference);
         assert_eq!(
