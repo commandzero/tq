@@ -74,6 +74,41 @@ fn encoding_campaigns_cannot_be_omitted_or_forged_by_a_semantic_match() {
 }
 
 #[test]
+fn strict_gate_rejects_a_report_contract_relabeling() {
+    let (catalog, inventory, review_ids, _) = baseline_inputs();
+    let mut report = passing_report();
+    let row = report["cases"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["id"] == "manual.types.fence-variable-key")
+        .expect("result-sequence report row");
+    assert_eq!(row["contract"], "result-sequence");
+    row["contract"] = Value::String("raw-bytes".to_owned());
+    let error = validate_strict_manual_report(&report, &catalog, &inventory, &review_ids)
+        .expect_err("the report cannot relabel the catalog contract");
+    assert!(error.to_string().contains("report contract"));
+}
+
+#[test]
+fn strict_gate_requires_catalog_fingerprints_for_matching_rows() {
+    let (catalog, inventory, review_ids, _) = baseline_inputs();
+    for fingerprint in [Value::Null, Value::String("stale".to_owned())] {
+        let mut report = passing_report();
+        let row = report["cases"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["id"] == "manual.types.fence-variable-key")
+            .expect("result-sequence report row");
+        row["case_fingerprint"] = fingerprint;
+        let error = validate_strict_manual_report(&report, &catalog, &inventory, &review_ids)
+            .expect_err("matching rows must bind their catalog fingerprint");
+        assert!(error.to_string().contains("catalog fingerprint"));
+    }
+}
+
+#[test]
 fn adapter_query_rewrites_cannot_mask_a_manual_language_gap() {
     let (mut catalog, inventory, review_ids, _) = baseline_inputs();
     let case = catalog
@@ -342,15 +377,15 @@ fn strict_gate_rejects_invalid_tq_identity_contract_observations() {
     row["tq"]["process_status"] = "timed-out".into();
     assert_rejected(failed_status, "failed status");
 
-    let mut stderr = passing_report();
-    let row = stderr["cases"]
+    let mut failed_output = passing_report();
+    let row = failed_output["cases"]
         .as_array_mut()
         .unwrap()
         .iter_mut()
         .find(|row| row["id"] == "manual.invoking.version")
         .unwrap();
-    row["tq"]["stderr_hex"] = encode_hex(b"diagnostic\n").into();
-    assert_rejected(stderr, "stderr");
+    row["tq"]["exit_code"] = 1.into();
+    assert_rejected(failed_output, "nonzero exit with matching identity output");
 
     let (mut ordinary_catalog, inventory, review_ids, _) = baseline_inputs();
     ordinary_catalog
@@ -384,6 +419,52 @@ fn strict_gate_rejects_invalid_tq_identity_contract_observations() {
     let error = validate_strict_manual_report(&failed_reference, &catalog, &inventory, &review_ids)
         .expect_err("identity contracts must not hide a failed reference invocation");
     assert!(error.to_string().contains("reference CLI contract"));
+}
+
+#[test]
+fn strict_gate_enforces_requested_stderr_for_tq_identity_contracts() {
+    let (mut catalog, inventory, review_ids, _) = baseline_inputs();
+    catalog
+        .cases
+        .iter_mut()
+        .find(|case| case.id == "manual.invoking.version")
+        .expect("version identity case")
+        .expected
+        .compare_stderr = true;
+
+    let diagnostic = encode_hex(b"version diagnostic\n");
+    let mut matching = passing_report();
+    {
+        let row = matching["cases"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["id"] == "manual.invoking.version")
+            .expect("version report row");
+        let version_case = catalog
+            .cases
+            .iter()
+            .find(|case| case.id == "manual.invoking.version")
+            .expect("version catalog case");
+        row["case_fingerprint"] = case_fingerprint(version_case)
+            .expect("version case fingerprint")
+            .into();
+        row["jq"]["stderr_hex"] = diagnostic.clone().into();
+        row["tq"]["stderr_hex"] = diagnostic.into();
+    }
+    validate_strict_manual_report(&matching, &catalog, &inventory, &review_ids)
+        .expect("matching stderr is valid for an identity contract");
+
+    matching["cases"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["id"] == "manual.invoking.version")
+        .expect("version report row")["tq"]["stderr_hex"] =
+        encode_hex(b"different diagnostic\n").into();
+    let error = validate_strict_manual_report(&matching, &catalog, &inventory, &review_ids)
+        .expect_err("a requested stderr mismatch must fail the completion gate");
+    assert!(error.to_string().contains("explicit stderr payload"));
 }
 
 #[test]
@@ -447,16 +528,15 @@ fn one_disparity_report() -> Value {
         .as_array()
         .unwrap()
         .iter()
-        .position(|case| case["id"] == "manual-bof-prose-halt-error")
+        .position(|case| case["id"] == "manual-bof-synth-format-urid")
         .unwrap();
     let catalog_case = catalog
         .cases
         .iter()
-        .find(|case| case.id == "manual-bof-prose-halt-error")
+        .find(|case| case.id == "manual-bof-synth-format-urid")
         .unwrap();
     report["cases"][index]["case_fingerprint"] =
         Value::String(case_fingerprint(catalog_case).expect("case fingerprint"));
-    report["cases"][index]["contract"] = Value::String("result-sequence".to_owned());
     report["cases"][index]["json_equivalent"] = Value::Bool(true);
     report["cases"][index]["verdict"] = Value::String("failure".to_owned());
     report["cases"][index]["differences"] = serde_json::json!([{
@@ -470,10 +550,10 @@ fn reviewed_disparity(report: &Value) -> ReviewedDisparity {
         .as_array()
         .unwrap()
         .iter()
-        .position(|case| case["id"] == "manual-bof-prose-halt-error")
+        .position(|case| case["id"] == "manual-bof-synth-format-urid")
         .unwrap();
     ReviewedDisparity {
-        case_id: "manual-bof-prose-halt-error".to_owned(),
+        case_id: "manual-bof-synth-format-urid".to_owned(),
         contract: ContractKind::ResultSequence,
         difference_summary: "result sequence".to_owned(),
         rationale: "Measured safe-library limitation with a retained regression witness."
@@ -529,7 +609,7 @@ fn reviewed_disparity_rejects_unknown_stale_duplicate_and_broad_approvals() {
         .as_array()
         .unwrap()
         .iter()
-        .position(|case| case["id"] == "manual-bof-prose-halt-error")
+        .position(|case| case["id"] == "manual-bof-synth-format-urid")
         .unwrap();
     changed_observation["cases"][index]["tq"]["results"] =
         serde_json::json!(["changed-after-review"]);
@@ -682,7 +762,7 @@ fn reviewed_disparity_accepts_exact_decimal_spellings() {
         serde_json::from_str("1.7976931348623157e+308").expect("scientific finite maximum");
     let expanded_max: Value = serde_json::from_str(&expanded_max).expect("expanded maximum");
     let mut report = one_disparity_report();
-    let report_case_id = "manual-bof-prose-halt-error";
+    let report_case_id = "manual-bof-synth-format-urid";
     let row = report["cases"]
         .as_array_mut()
         .expect("report cases")

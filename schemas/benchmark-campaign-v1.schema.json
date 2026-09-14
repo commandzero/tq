@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "campaign_id": {"type": "string", "minLength": 1},
-    "profile": {"enum": ["smoke", "rapid", "standard", "large"]},
+    "profile": {"enum": ["smoke", "rapid", "standard", "large", "stack-overflow"]},
     "environment": {
       "type": "object",
       "additionalProperties": true,
@@ -16,9 +16,321 @@
     },
     "corpus": {"type": "array"},
     "tools": {"type": "array"},
-    "cases": {"type": "array"},
+    "output_comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["captured_at", "tools", "cases"],
+      "properties": {
+        "captured_at": {"type": "string"},
+        "tools": {"type": "array"},
+        "cases": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/output_case"}
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id", "adapter_id", "source_id", "tier", "input_format",
+          "execution_class", "comparison_families", "command", "outcome",
+          "warmups", "requested_samples", "timeout_seconds", "limits",
+          "samples", "summary", "reference_ratios"
+        ],
+        "properties": {
+          "case_id": {"type": "string", "minLength": 1},
+          "adapter_id": {"type": "string", "minLength": 1},
+          "source_id": {"type": "string", "minLength": 1},
+          "tier": {"type": "string", "minLength": 1},
+          "input_format": {"enum": ["json", "yaml", "toon", "json-seq", "csv", "tsv"]},
+          "execution_class": {"enum": ["startup", "streaming", "document", "blocking"]},
+          "comparison_families": {
+            "type": "array",
+            "items": {"enum": ["same-format", "native-format", "parser-specific"]}
+          },
+          "command": {"type": "array", "items": {"type": "string"}},
+          "outcome": {
+            "enum": ["timed", "incorrect", "unsupported", "timeout", "oom-or-signal", "resource-limit"]
+          },
+          "warmups": {"type": "integer", "minimum": 0},
+          "requested_samples": {"type": "integer", "minimum": 0},
+          "timeout_seconds": {"type": "integer", "minimum": 0},
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["output_bytes", "rss_bytes"],
+            "properties": {
+              "output_bytes": {"type": "integer", "minimum": 0},
+              "rss_bytes": {"type": ["integer", "null"], "minimum": 0}
+            }
+          },
+          "diagnostic": {"type": "string", "maxLength": 1024},
+          "instrumented_samples": {"$ref": "#/properties/cases/items/properties/samples"},
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["wall_time_micros", "output_bytes"],
+              "properties": {
+                "wall_time_micros": {"type": "integer", "minimum": 0},
+                "user_cpu_micros": {"type": ["integer", "null"], "minimum": 0},
+                "system_cpu_micros": {"type": ["integer", "null"], "minimum": 0},
+                "peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
+                "process_group_peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
+                "rss_provenance": {
+                  "anyOf": [
+                    {"enum": ["gnu-time-v", "bsd-time-l", "darwin-wait4", "linux-wait4"]},
+                    {"type": "null"}
+                  ]
+                },
+                "measurement_protocol": {
+                  "anyOf": [
+                    {"$ref": "#/$defs/measurement_protocol"},
+                    {"type": "null"}
+                  ]
+                },
+                "first_result_micros": {"type": ["integer", "null"], "minimum": 0},
+                "output_bytes": {"type": "integer", "minimum": 0}
+              },
+              "allOf": [{
+                "if": {
+                  "required": ["rss_provenance"],
+                  "properties": {"rss_provenance": {"enum": ["darwin-wait4", "linux-wait4"]}}
+                },
+                "then": {
+                  "required": ["measurement_protocol", "peak_rss_bytes", "user_cpu_micros", "system_cpu_micros"],
+                  "properties": {
+                    "measurement_protocol": {"$ref": "#/$defs/measurement_protocol"},
+                    "peak_rss_bytes": {"type": "integer", "minimum": 1},
+                    "user_cpu_micros": {"type": "integer", "minimum": 0},
+                    "system_cpu_micros": {"type": "integer", "minimum": 0}
+                  }
+                }
+              }]
+            }
+          },
+          "summary": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "wall_time_micros", "user_cpu_micros", "system_cpu_micros",
+                  "peak_rss_bytes", "output_bytes", "logical_records_per_second",
+                  "physical_mib_per_second"
+                ],
+                "properties": {
+                  "wall_time_micros": {"$ref": "#/$defs/metric_summary"},
+                  "first_result_micros": {
+                    "anyOf": [{"$ref": "#/$defs/metric_summary"}, {"type": "null"}]
+                  },
+                  "user_cpu_micros": {"type": ["number", "null"], "minimum": 0},
+                  "system_cpu_micros": {"type": ["number", "null"], "minimum": 0},
+                  "peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
+                  "output_bytes": {"type": "integer", "minimum": 0},
+                  "logical_records_per_second": {"type": "number", "minimum": 0},
+                  "physical_mib_per_second": {"type": "number", "minimum": 0}
+                }
+              }
+            ]
+          },
+          "reference_ratios": {
+            "type": "object",
+            "additionalProperties": {"type": "number", "minimum": 0}
+          },
+          "reference_peak_rss_ratios": {
+            "type": "object",
+            "additionalProperties": {"type": "number", "minimum": 0}
+          },
+          "soft_performance_objective": {
+            "anyOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["wall_time_ratio", "peak_rss_ratio", "wall_time", "peak_rss"],
+                "properties": {
+                  "wall_time_ratio": {"type": ["number", "null"], "minimum": 0},
+                  "peak_rss_ratio": {"type": ["number", "null"], "minimum": 0},
+                  "wall_time": {"enum": ["met", "missed", "not-comparable"]},
+                  "peak_rss": {"enum": ["met", "missed", "not-comparable"]}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
     "comparability": {"type": "object"},
-    "regression_gate": {"type": "object"},
+    "regression_gate": {
+      "type": "object",
+      "properties": {
+        "evaluated": {"type": "boolean"},
+        "thresholds": {"type": ["object", "null"]},
+        "failures": {"type": "array", "items": {"type": "string"}},
+        "disclosures": {"type": "array", "items": {"type": "string"}},
+        "unavailable": {"type": "array", "items": {"type": "string"}}
+      }
+    },
     "final_status": {"enum": ["passed", "observed-failures", "regression"]}
+  },
+  "$defs": {
+    "measurement_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timing_method", "input_delivery", "rss_scope", "exit_poll_interval_micros", "rss_poll_interval_micros", "validated_accuracy_micros"],
+      "properties": {
+        "timing_method": {"type": "string", "minLength": 1},
+        "input_delivery": {"type": "string", "minLength": 1},
+        "rss_scope": {"type": "string", "minLength": 1},
+        "exit_poll_interval_micros": {"type": "integer", "minimum": 1},
+        "rss_poll_interval_micros": {"type": ["integer", "null"], "minimum": 1},
+        "validated_accuracy_micros": {"type": ["integer", "null"], "minimum": 1},
+        "worker": {
+          "anyOf": [
+            {"$ref": "#/$defs/worker_identity"},
+            {"type": "null"}
+          ]
+        },
+        "isolation_evidence": {
+          "anyOf": [
+            {"$ref": "#/$defs/launch_isolation_evidence"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "worker_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable_sha256", "launch_protocol", "collector_source_sha256"],
+      "properties": {
+        "executable_sha256": {"type": "string", "minLength": 1},
+        "launch_protocol": {"type": "string", "minLength": 1},
+        "collector_source_sha256": {"type": "string", "minLength": 1}
+      }
+    },
+    "launch_isolation_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary_sha256", "control_peak_rss_bytes", "max_parent_delta_bytes", "tolerance_bytes"],
+      "properties": {
+        "summary_sha256": {"type": "string", "minLength": 1},
+        "control_peak_rss_bytes": {"type": "integer", "minimum": 1},
+        "max_parent_delta_bytes": {"type": "integer", "minimum": 0},
+        "tolerance_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "output_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query", "input_sha256"],
+      "properties": {
+        "query": {"type": "string"},
+        "input_sha256": {"type": "string"},
+        "output_mode": {"enum": ["structured", "raw", "color"]},
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fixture", "input_bytes", "output_mode", "environment", "contract_sha256"],
+          "properties": {
+            "fixture": {"type": "string", "minLength": 1},
+            "input_bytes": {"type": "integer", "minimum": 0},
+            "output_mode": {"enum": ["structured", "raw", "color"]},
+            "environment": {"type": "object", "additionalProperties": {"type": "string"}},
+            "contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "compact": {"$ref": "#/$defs/capture"},
+        "expanded": {"$ref": "#/$defs/capture"},
+        "toon": {"$ref": "#/$defs/capture"},
+        "scenario_captures": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["jq", "yq", "tq"],
+          "properties": {
+            "jq": {"$ref": "#/$defs/capture"},
+            "yq": {"$ref": "#/$defs/capture"},
+            "tq": {"$ref": "#/$defs/capture"}
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["compact", "expanded", "toon"],
+          "not": {"anyOf": [
+            {"required": ["output_mode"]},
+            {"required": ["scenario_captures"]}
+          ]}
+        },
+        {
+          "required": ["output_mode", "compact", "expanded", "toon"],
+          "properties": {"output_mode": {"const": "structured"}},
+          "not": {"required": ["scenario_captures"]}
+        },
+        {
+          "required": ["output_mode", "provenance", "scenario_captures"],
+          "properties": {"output_mode": {"enum": ["raw", "color"]}},
+          "not": {"anyOf": [
+            {"required": ["compact"]},
+            {"required": ["expanded"]},
+            {"required": ["toon"]}
+          ]}
+        }
+      ]
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "exit_code", "stdout", "stderr"],
+      "properties": {
+        "command": {"type": "array", "items": {"type": "string"}},
+        "status": {"enum": ["exited", "timed-out", "signaled", null]},
+        "exit_code": {"type": ["integer", "null"]},
+        "output_limit": {
+          "anyOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["stream", "limit", "observed_bytes"],
+              "properties": {
+                "stream": {"enum": ["stdout", "stderr"]},
+                "limit": {"type": "integer", "minimum": 0},
+                "observed_bytes": {"type": "integer", "minimum": 0}
+              }
+            }
+          ]
+        },
+        "stdout": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 0, "maximum": 255}
+        },
+        "stderr": {
+          "type": "array",
+          "items": {"type": "integer", "minimum": 0, "maximum": 255}
+        }
+      }
+    },
+    "metric_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "samples", "median", "median_absolute_deviation", "p95", "minimum", "maximum"
+      ],
+      "properties": {
+        "samples": {"type": "integer", "minimum": 0},
+        "median": {"type": "number", "minimum": 0},
+        "median_absolute_deviation": {"type": "number", "minimum": 0},
+        "p95": {"type": "number", "minimum": 0},
+        "minimum": {"type": "number", "minimum": 0},
+        "maximum": {"type": "number", "minimum": 0}
+      }
+    }
   }
 }

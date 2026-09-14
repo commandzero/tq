@@ -1,11 +1,15 @@
 //! Local correctness-gated benchmark campaign driver.
 
+#[path = "tq-bench/calibration.rs"]
+mod calibration;
+
 use std::{
     collections::BTreeMap,
     env, fs,
     io::Write as _,
     path::{Path, PathBuf},
     process::ExitCode,
+    sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
 
@@ -13,12 +17,14 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tq_test_support::{
     benchmark::{
-        BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus,
-        BenchmarkInvocation, BenchmarkOutcome, BenchmarkSampling, BenchmarkTool, Comparability,
-        DatasetTier, InputFormat, RegressionGate, RegressionThresholds, collect_environment,
-        compare_reports, evaluate_regression, is_correctness_output_limit, load_benchmark_catalog,
-        normalize_correctness_run, populate_reference_ratios, run_correctness_limit_probe,
-        run_gated_row, unsupported_row,
+        BenchmarkAdapter, BenchmarkCampaignReport, BenchmarkCase, BenchmarkCorpusIdentity,
+        BenchmarkFinalStatus, BenchmarkInvocation, BenchmarkOutcome, BenchmarkRow,
+        BenchmarkRunnerError, BenchmarkSampling, BenchmarkTool, Comparability, DatasetTier,
+        InputFormat, RegressionGate, RegressionThresholds, collect_environment, compare_reports,
+        correctness_witness_limit_row, evaluate_regression, is_correctness_output_limit,
+        load_benchmark_catalog, normalize_correctness_run, populate_reference_ratios,
+        preflight_rss, render_markdown_campaigns, render_markdown_pages,
+        run_correctness_limit_probe, run_gated_row, unsupported_row,
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
     corpus::{
@@ -61,6 +67,10 @@ struct Options {
     rss_limit_bytes: Option<u64>,
     selected_cases: Vec<String>,
     baseline: Option<PathBuf>,
+    markdown_dir: Option<PathBuf>,
+    render_only: Vec<PathBuf>,
+    preflight_only: bool,
+    timing_calibrations: Vec<PathBuf>,
     regression_thresholds: RegressionThresholds,
 }
 
@@ -83,8 +93,64 @@ struct PreparedCampaign {
     reason = "campaign orchestration is intentionally linear and delegates measurement details"
 )]
 fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
+    if env::args().nth(1).as_deref() == Some("--internal-rss-control") {
+        return Ok(ExitCode::SUCCESS);
+    }
+    if env::args().nth(1).as_deref() == Some("--internal-rss-probe") {
+        tq_test_support::benchmark::run_allocation_probe(64 * 1024 * 1024, 1)?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let options = options()?;
+    if options.preflight_only && !options.render_only.is_empty() {
+        return Err("--preflight-only cannot be combined with --render-only".into());
+    }
+    if !options.render_only.is_empty() {
+        let markdown_dir = options
+            .markdown_dir
+            .as_deref()
+            .ok_or("--render-only requires --markdown-dir")?;
+        let reports = options
+            .render_only
+            .iter()
+            .map(|path| {
+                serde_json::from_reader(fs::File::open(path)?)
+                    .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
+            })
+            .collect::<Result<Vec<BenchmarkCampaignReport>, _>>()?;
+        render_markdown_campaigns(markdown_dir, &reports)?;
+        for (index, report) in reports.iter().enumerate() {
+            if index > 0 {
+                println!();
+            }
+            print!("{}", report.render_human());
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    let cancellation = Arc::new(AtomicBool::new(false));
+    // The CLI owns these process-lifetime handlers. Measurements only inspect
+    // the shared flag; their single owner still performs termination and reap.
+    for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+        signal_hook::flag::register(signal, Arc::clone(&cancellation))?;
+    }
+    let rss_preflight = preflight_rss(Some(Arc::clone(&cancellation)))?;
+    eprintln!(
+        "tq-bench: RSS preflight passed ({})",
+        rss_preflight.provenance.label()
+    );
+    if options.preflight_only {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let calibrations = options
+        .timing_calibrations
+        .iter()
+        .map(|path| calibration::TimingCalibration::load(path))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let tools = discover_tools(&root)?;
+    require_campaign_tools(&tools)?;
     let mut prepared = if options.profile == "smoke" {
         prepare_smoke(&root.join("examples"))?
     } else {
@@ -105,7 +171,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             .extend(native_rows::prepare(directory.path())?);
     }
     let catalog = load_benchmark_catalog(&root.join("benchmarks/cases"))?;
-    let tools = discover_tools(&root)?;
+    let planned_rows = plan_rows(&catalog.cases, &options.selected_cases, &prepared.datasets)?;
     let mut corpus = Vec::new();
     for dataset in &prepared.datasets {
         for (format, (_, artifact)) in &dataset.formats {
@@ -150,8 +216,14 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             let reference_identity = tools
                 .get(&reference_adapter.tool)
                 .ok_or("reference executable is unavailable")?;
-            let reference_invocation =
-                invocation(&case, reference_adapter, dataset, reference_identity)?;
+            let reference_invocation = invocation(
+                &case,
+                reference_adapter,
+                dataset,
+                reference_identity,
+                &cancellation,
+            )?;
+            let mut reference_witness_limit = None;
             let reference = match normalize_correctness_run(
                 &reference_invocation,
                 match reference_adapter.tool {
@@ -163,6 +235,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             ) {
                 Ok(reference) => Some(reference),
                 Err(error) if is_correctness_output_limit(&error) => None,
+                Err(BenchmarkRunnerError::CorrectnessWitnessLimit { limit }) => {
+                    reference_witness_limit = Some(limit);
+                    None
+                }
                 Err(error) => return Err(error.into()),
             };
             for adapter in &case.adapters {
@@ -176,6 +252,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         .1,
                 );
                 let placeholder = BenchmarkInvocation {
+                    cancellation: Some(Arc::clone(&cancellation)),
                     executable: PathBuf::from(tool_name(adapter.tool)),
                     args: Vec::new(),
                     stdin: Vec::new(),
@@ -186,27 +263,39 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                     retain_output: false,
                 };
                 let Some(identity) = tools.get(&adapter.tool) else {
-                    rows.push(unsupported_row(
+                    record_row(
+                        &mut rows,
                         &case,
+                        dataset,
                         adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &placeholder,
-                    ));
+                        unsupported_row(
+                            &case,
+                            adapter,
+                            &corpus_identity,
+                            dataset.tier,
+                            &placeholder,
+                        ),
+                    );
                     continue;
                 };
-                let invocation = invocation(&case, adapter, dataset, identity)?;
+                let invocation = invocation(&case, adapter, dataset, identity, &cancellation)?;
                 if !adapter.applicable {
-                    rows.push(unsupported_row(
+                    record_row(
+                        &mut rows,
                         &case,
+                        dataset,
                         adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &invocation,
-                    ));
+                        unsupported_row(
+                            &case,
+                            adapter,
+                            &corpus_identity,
+                            dataset.tier,
+                            &invocation,
+                        ),
+                    );
                     continue;
                 }
-                rows.push(if let Some(reference) = &reference {
+                let row = if let Some(reference) = &reference {
                     run_gated_row(
                         &case,
                         adapter,
@@ -215,6 +304,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         &invocation,
                         reference,
                     )?
+                } else if let Some(limit) = reference_witness_limit {
+                    correctness_witness_limit_row(
+                        &case,
+                        adapter,
+                        &corpus_identity,
+                        dataset.tier,
+                        &invocation,
+                        limit,
+                    )
                 } else {
                     run_correctness_limit_probe(
                         &case,
@@ -223,7 +321,28 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                         dataset.tier,
                         &invocation,
                     )?
-                });
+                };
+                record_row(&mut rows, &case, dataset, adapter, row);
+            }
+        }
+    }
+    validate_rows_against_plan(&planned_rows, &rows)?;
+    for row in &mut rows {
+        for sample in row
+            .samples
+            .iter_mut()
+            .chain(row.instrumented_samples.iter_mut())
+        {
+            if !calibrations.is_empty() {
+                let protocol = sample
+                    .measurement_protocol
+                    .as_mut()
+                    .ok_or("measured sample has no protocol for timing calibration")?;
+                calibrations
+                    .iter()
+                    .find(|calibration| calibration.matches(protocol))
+                    .ok_or("no matching timing calibration for sample instrumentation")?
+                    .apply(protocol)?;
             }
         }
     }
@@ -248,7 +367,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         schema_version: 1,
         campaign_id: jiff::Timestamp::now().to_string(),
         profile: options.profile,
-        environment: collect_environment("release-benchmark"),
+        environment: collect_environment(if cfg!(debug_assertions) {
+            "debug-benchmark"
+        } else {
+            "release-benchmark"
+        }),
         corpus,
         tools: tools.into_values().collect(),
         cases: rows,
@@ -265,13 +388,177 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         report.comparability = compare_reports(&baseline, &report);
         report.regression_gate =
             evaluate_regression(&baseline, &report, options.regression_thresholds.clone());
-        if report.regression_gate.evaluated && !report.regression_gate.failures.is_empty() {
+        if regression_gate_failed(&report.regression_gate) {
             report.final_status = BenchmarkFinalStatus::Regression;
         }
     }
+    report
+        .validate_authoritative_rss()
+        .map_err(|error| format!("benchmark report RSS validation failed: {error}"))?;
+    // A report without linked native controls is useful diagnostic JSON, but
+    // it must not reach the stable Results renderer. Validate before writing
+    // either artifact so a failed publication cannot leave a misleading report
+    // beside the campaign output.
+    if options.markdown_dir.is_some() {
+        report
+            .validate_for_publication()
+            .map_err(|error| format!("benchmark report publication validation failed: {error}"))?;
+    }
+    if cancellation.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("benchmark campaign cancelled; report not published".into());
+    }
     write_report(&options.output, &report)?;
+    if let Some(markdown_dir) = &options.markdown_dir {
+        render_markdown_pages(markdown_dir, &report)?;
+    }
     print!("{}", report.render_human());
-    Ok(ExitCode::SUCCESS)
+    Ok(exit_code_for_status(report.final_status))
+}
+
+fn exit_code_for_status(status: BenchmarkFinalStatus) -> ExitCode {
+    match status {
+        BenchmarkFinalStatus::Passed => ExitCode::SUCCESS,
+        BenchmarkFinalStatus::ObservedFailures | BenchmarkFinalStatus::Regression => {
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn regression_gate_failed(gate: &RegressionGate) -> bool {
+    // Structural failures (for example, a missing baseline row) are fatal even
+    // when no comparable timing rows remain and `evaluated` is therefore false.
+    !gate.failures.is_empty()
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct PlannedRowIdentity {
+    case_id: String,
+    source_id: String,
+    tier: String,
+    adapter_id: String,
+}
+
+fn plan_rows(
+    cases: &[BenchmarkCase],
+    selected_cases: &[String],
+    datasets: &[PreparedDataset],
+) -> Result<std::collections::BTreeSet<PlannedRowIdentity>, String> {
+    for selected in selected_cases {
+        if !cases.iter().any(|case| case.id == *selected) {
+            return Err(format!(
+                "selected benchmark case {selected} is not present in the catalog"
+            ));
+        }
+    }
+
+    let mut planned = std::collections::BTreeSet::new();
+    for case in cases {
+        if !selected_cases.is_empty() && !selected_cases.contains(&case.id) {
+            continue;
+        }
+        let matching_datasets = datasets.iter().filter(|dataset| {
+            case.dataset_selector.tiers.contains(&dataset.tier)
+                && family_matches(case.dataset_selector.family, dataset)
+        });
+        let mut matched = false;
+        for dataset in matching_datasets {
+            matched = true;
+            for adapter in &case.adapters {
+                let identity = PlannedRowIdentity {
+                    case_id: case.id.clone(),
+                    source_id: dataset.source_id.clone(),
+                    tier: tier_name(dataset.tier).to_owned(),
+                    adapter_id: adapter.id.clone(),
+                };
+                if !planned.insert(identity.clone()) {
+                    return Err(format!(
+                        "duplicate planned benchmark row identity: {}",
+                        format_row_identity(&identity)
+                    ));
+                }
+            }
+        }
+        if !matched && !selected_cases.is_empty() {
+            return Err(format!(
+                "selected benchmark case {} has no prepared datasets for this profile",
+                case.id
+            ));
+        }
+        if matched && case.adapters.is_empty() {
+            return Err(format!(
+                "selected benchmark case {} has no adapters in the catalog",
+                case.id
+            ));
+        }
+    }
+    if planned.is_empty() {
+        return Err("benchmark campaign produced no planned rows".to_owned());
+    }
+    Ok(planned)
+}
+
+fn validate_rows_against_plan(
+    planned: &std::collections::BTreeSet<PlannedRowIdentity>,
+    rows: &[BenchmarkRow],
+) -> Result<(), String> {
+    let mut actual = std::collections::BTreeSet::new();
+    for row in rows {
+        let identity = PlannedRowIdentity {
+            case_id: row.case_id.clone(),
+            source_id: row.source_id.clone(),
+            tier: row.tier.clone(),
+            adapter_id: row.adapter_id.clone(),
+        };
+        if !actual.insert(identity.clone()) {
+            return Err(format!(
+                "duplicate benchmark row identity: {}",
+                format_row_identity(&identity)
+            ));
+        }
+    }
+    let missing = planned
+        .difference(&actual)
+        .map(format_row_identity)
+        .collect::<Vec<_>>();
+    let unexpected = actual
+        .difference(planned)
+        .map(format_row_identity)
+        .collect::<Vec<_>>();
+    if !missing.is_empty() || !unexpected.is_empty() {
+        let mut details = Vec::new();
+        if !missing.is_empty() {
+            details.push(format!("missing [{}]", missing.join(", ")));
+        }
+        if !unexpected.is_empty() {
+            details.push(format!("unexpected [{}]", unexpected.join(", ")));
+        }
+        return Err(format!(
+            "benchmark matrix did not complete its planned rows: {}",
+            details.join("; ")
+        ));
+    }
+    Ok(())
+}
+
+fn format_row_identity(identity: &PlannedRowIdentity) -> String {
+    format!(
+        "{}/{}/{}/{}",
+        identity.case_id, identity.source_id, identity.tier, identity.adapter_id
+    )
+}
+
+fn record_row(
+    rows: &mut Vec<BenchmarkRow>,
+    case: &BenchmarkCase,
+    dataset: &PreparedDataset,
+    adapter: &BenchmarkAdapter,
+    row: BenchmarkRow,
+) {
+    eprintln!(
+        "tq-bench: workload={} dataset={} adapter={} outcome={:?}",
+        case.id, dataset.source_id, adapter.id, row.outcome
+    );
+    rows.push(row);
 }
 
 #[allow(
@@ -291,8 +578,12 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut rss_limit_bytes = None;
     let mut selected_cases = Vec::new();
     let mut baseline = None;
+    let mut markdown_dir = None;
+    let mut render_only = Vec::new();
+    let mut preflight_only = false;
+    let mut timing_calibrations = Vec::new();
     let mut wall_time_percent: f64 = 50.0;
-    let mut peak_rss_percent: f64 = 20.0;
+    let mut peak_rss_percent: f64 = 50.0;
     let mut minimum_samples = 5;
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
@@ -337,6 +628,29 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
                     arguments.next().ok_or("--baseline needs a path")?,
                 ));
             }
+            "--timing-calibration" => {
+                timing_calibrations.push(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--timing-calibration needs a summary path")?,
+                ));
+            }
+            "--markdown-dir" => {
+                if markdown_dir.is_some() {
+                    return Err("--markdown-dir may be supplied only once".into());
+                }
+                markdown_dir = Some(PathBuf::from(
+                    arguments.next().ok_or("--markdown-dir needs a directory")?,
+                ));
+            }
+            "--render-only" => {
+                render_only.push(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or("--render-only needs a report path")?,
+                ));
+            }
+            "--preflight-only" => preflight_only = true,
             "--wall-regression-percent" => {
                 wall_time_percent = arguments
                     .next()
@@ -357,7 +671,7 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N]"
+                    "Usage: tq-bench [--preflight-only] run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--timing-calibration SUMMARY ...] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N] [--markdown-dir DIRECTORY] [--render-only REPORT... --markdown-dir DIRECTORY] [native child accounting on macOS/Linux; platform time commands are independent validation only; Windows deferred]"
                 );
                 std::process::exit(0);
             }
@@ -367,23 +681,25 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if !matches!(profile.as_str(), "smoke" | "rapid" | "standard" | "large") {
         return Err(format!("invalid profile: {profile}").into());
     }
-    if profile == "rapid" {
-        if max_samples.is_none() {
-            max_samples = Some(1);
+    if render_only.is_empty() && !preflight_only {
+        if profile == "rapid" {
+            if max_samples.is_none() {
+                max_samples = Some(1);
+            }
+            if selected_cases.is_empty() {
+                selected_cases.extend(RAPID_CASES.iter().map(|case| (*case).to_owned()));
+            }
         }
-        if selected_cases.is_empty() {
-            selected_cases.extend(RAPID_CASES.iter().map(|case| (*case).to_owned()));
+        if profile != "smoke" && manifests.is_empty() {
+            if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
+                manifests.extend(env::split_paths(&paths));
+            } else {
+                manifests = discover_latest_validated_manifests(&cache_root)?;
+            }
         }
-    }
-    if profile != "smoke" && manifests.is_empty() {
-        if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
-            manifests.extend(env::split_paths(&paths));
-        } else {
-            manifests = discover_latest_validated_manifests(&cache_root)?;
+        if profile != "smoke" && manifests.is_empty() {
+            return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
         }
-    }
-    if profile != "smoke" && manifests.is_empty() {
-        return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
     }
     if !matches!(origin.as_str(), "refreshed" | "frozen") {
         return Err(format!("invalid origin: {origin}").into());
@@ -403,6 +719,9 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if rss_limit_bytes == Some(0) {
         return Err("--rss-limit-bytes must be at least 1".into());
     }
+    if !render_only.is_empty() && markdown_dir.is_none() {
+        return Err("--render-only requires --markdown-dir".into());
+    }
     Ok(Options {
         profile,
         output,
@@ -414,6 +733,10 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
         rss_limit_bytes,
         selected_cases,
         baseline,
+        markdown_dir,
+        render_only,
+        preflight_only,
+        timing_calibrations,
         regression_thresholds: RegressionThresholds {
             wall_time_percent,
             peak_rss_percent,
@@ -525,7 +848,16 @@ fn prepare_smoke_snapshot(
         &format!("{}.toon", snapshot.source_id),
     )?;
     let mut formats = BTreeMap::new();
-    formats.insert("json", (snapshot.file.clone(), snapshot.artifact.clone()));
+    // The command records the concrete temporary/source path it launches. Keep
+    // the artifact identity aligned with that path even for synthetic smoke
+    // fixtures whose seed metadata uses a cache-relative name.
+    formats.insert(
+        "json",
+        (
+            snapshot.file.clone(),
+            absolute_identity(&snapshot.file, snapshot.artifact.clone()),
+        ),
+    );
     formats.insert(
         "yaml",
         (yaml.clone(), absolute_identity(&yaml, generated.yaml)),
@@ -686,11 +1018,28 @@ fn discover_tools(
     Ok(tools)
 }
 
+fn require_campaign_tools(tools: &BTreeMap<BenchmarkTool, ToolIdentity>) -> Result<(), String> {
+    let missing = [BenchmarkTool::Jq, BenchmarkTool::Yq, BenchmarkTool::Tq]
+        .into_iter()
+        .filter(|tool| !tools.contains_key(tool))
+        .map(tool_name)
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "required campaign executables unavailable: {}; repair discovery before running the matrix",
+            missing.join(", ")
+        ))
+    }
+}
+
 fn invocation(
     case: &tq_test_support::benchmark::BenchmarkCase,
     adapter: &tq_test_support::benchmark::BenchmarkAdapter,
     dataset: &PreparedDataset,
     identity: &ToolIdentity,
+    cancellation: &Arc<AtomicBool>,
 ) -> Result<BenchmarkInvocation, Box<dyn std::error::Error>> {
     let path = &dataset
         .formats
@@ -705,6 +1054,7 @@ fn invocation(
     args.push(adapter.query.clone().unwrap_or_else(|| case.query.clone()));
     args.push(path.display().to_string());
     Ok(BenchmarkInvocation {
+        cancellation: Some(Arc::clone(cancellation)),
         executable: identity.path.clone(),
         args,
         stdin: Vec::new(),
@@ -834,9 +1184,27 @@ fn write_report(
 
 #[cfg(test)]
 mod tests {
-    use super::{DatasetTier, PreparedDataset, family_matches};
+    use super::{
+        BenchmarkFinalStatus, DatasetTier, PlannedRowIdentity, PreparedDataset, SmokeSnapshot,
+        exit_code_for_status, family_matches, plan_rows, prepare_smoke_snapshot,
+        regression_gate_failed, validate_rows_against_plan,
+    };
     use std::collections::BTreeMap;
-    use tq_test_support::benchmark::DatasetFamily;
+    use std::fs;
+    use tempfile::tempdir;
+    use tq_test_support::benchmark::{
+        BenchmarkAdapter, BenchmarkCase, BenchmarkLimits, BenchmarkSampling, BenchmarkTool,
+        DatasetFamily, DatasetSelector, ExecutionClass, InputFormat, OutputContract,
+        OutputContractKind, RegressionGate,
+    };
+    use tq_test_support::corpus::DocumentIdentity;
+
+    #[test]
+    fn missing_executables_are_not_unsupported_capability_rows() {
+        let error = super::require_campaign_tools(&BTreeMap::new()).unwrap_err();
+        assert!(error.contains("jq, yq, tq"));
+        assert!(error.contains("repair discovery"));
+    }
 
     #[test]
     fn issue5_input_sequence_has_one_disjoint_dataset_family() {
@@ -853,5 +1221,148 @@ mod tests {
         assert!(!family_matches(DatasetFamily::Usgs, &dataset));
         assert!(!family_matches(DatasetFamily::LargeNatural, &dataset));
         assert!(!family_matches(DatasetFamily::SyntheticHelper, &dataset));
+    }
+
+    #[test]
+    fn failed_final_statuses_return_a_failure_exit_code() {
+        for status in [
+            BenchmarkFinalStatus::ObservedFailures,
+            BenchmarkFinalStatus::Regression,
+        ] {
+            assert_eq!(
+                exit_code_for_status(status),
+                std::process::ExitCode::from(1)
+            );
+        }
+    }
+
+    fn selected_case(family: DatasetFamily, tiers: Vec<DatasetTier>) -> BenchmarkCase {
+        BenchmarkCase {
+            schema_version: 1,
+            id: "benchmark.test".to_owned(),
+            compatibility_gate: "test".to_owned(),
+            dataset_selector: DatasetSelector { family, tiers },
+            query: ".".to_owned(),
+            execution_class: ExecutionClass::Startup,
+            measure_first_result: false,
+            sampling: BenchmarkSampling {
+                warmups: 0,
+                small: 1,
+                medium: 1,
+                large: 1,
+            },
+            timeout_seconds: 1,
+            limits: BenchmarkLimits {
+                output_bytes: 1,
+                rss_bytes: None,
+            },
+            output_contract: OutputContract {
+                kind: OutputContractKind::ExitOnly,
+                reference_adapter: "tq-json".to_owned(),
+            },
+            adapters: vec![BenchmarkAdapter {
+                id: "tq-json".to_owned(),
+                tool: BenchmarkTool::Tq,
+                input_format: InputFormat::Json,
+                applicable: true,
+                unsupported_reason: None,
+                args: Vec::new(),
+                query: None,
+                comparison_families: Vec::new(),
+            }],
+        }
+    }
+
+    fn prepared_dataset(source_id: &str, tier: DatasetTier) -> PreparedDataset {
+        PreparedDataset {
+            source_id: source_id.to_owned(),
+            tier,
+            logical_records: 1,
+            manifest_sha256: String::new(),
+            origin: "test".to_owned(),
+            formats: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn selected_unknown_case_fails_closed() {
+        let error = plan_rows(
+            &[selected_case(
+                DatasetFamily::Natural,
+                vec![DatasetTier::Small],
+            )],
+            &["benchmark.missing".to_owned()],
+            &[prepared_dataset("small", DatasetTier::Small)],
+        )
+        .expect_err("unknown selected cases must not produce an empty report");
+        assert!(error.contains("benchmark.missing"));
+        assert!(error.contains("not present in the catalog"));
+    }
+
+    #[test]
+    fn selected_case_without_profile_dataset_fails_closed() {
+        let error = plan_rows(
+            &[selected_case(
+                DatasetFamily::LargeNatural,
+                vec![DatasetTier::Large],
+            )],
+            &["benchmark.test".to_owned()],
+            &[prepared_dataset("small", DatasetTier::Small)],
+        )
+        .expect_err("a selected case with no applicable dataset must fail");
+        assert!(error.contains("benchmark.test"));
+        assert!(error.contains("no prepared datasets"));
+    }
+
+    #[test]
+    fn actual_rows_must_match_the_planned_matrix() {
+        let planned = std::collections::BTreeSet::from([PlannedRowIdentity {
+            case_id: "benchmark.test".to_owned(),
+            source_id: "small".to_owned(),
+            tier: "small".to_owned(),
+            adapter_id: "tq-json".to_owned(),
+        }]);
+        let error = validate_rows_against_plan(&planned, &[])
+            .expect_err("missing rows must not publish a passing report");
+        assert!(error.contains("missing"));
+        assert!(error.contains("benchmark.test/small/small/tq-json"));
+    }
+
+    #[test]
+    fn structural_regression_failure_blocks_even_when_not_evaluated() {
+        let gate = RegressionGate {
+            evaluated: false,
+            failures: vec!["missing baseline row".to_owned()],
+            ..RegressionGate::default()
+        };
+        assert!(regression_gate_failed(&gate));
+    }
+
+    #[test]
+    fn smoke_json_identity_records_the_launch_path() {
+        let directory = tempdir().expect("temporary smoke directory");
+        let json_path = directory.path().join("startup.json");
+        let json = br#"{"type":"FeatureCollection","features":[]}"#;
+        fs::write(&json_path, json).expect("write smoke fixture");
+        let snapshot = SmokeSnapshot {
+            source_id: "startup".to_owned(),
+            file: json_path.clone(),
+            artifact: tq_test_support::corpus::ArtifactIdentity {
+                path: "startup.json".to_owned(),
+                bytes: json.len() as u64,
+                sha256: String::new(),
+            },
+            document: DocumentIdentity {
+                root_type: "FeatureCollection".to_owned(),
+                logical_records: 0,
+            },
+        };
+
+        let prepared = prepare_smoke_snapshot(&snapshot, directory.path())
+            .expect("prepare smoke representations");
+        assert_eq!(
+            prepared.formats["json"].1.path,
+            json_path.display().to_string()
+        );
     }
 }
