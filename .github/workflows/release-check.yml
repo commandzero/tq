@@ -29,9 +29,14 @@ jobs:
           ref: ${{ inputs.tag }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
       - name: Install validation tools
         run: |
           source scripts/tools-versions.sh
+          toolchain=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
+          rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt
           rustup show active-toolchain
           cargo install okf --version "$OKF_VERSION" --locked
           npm install --global "@fission-ai/openspec@$OPENSPEC_VERSION"

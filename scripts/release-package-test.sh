@@ -61,9 +61,9 @@ printf 'dirty\n' >> LICENSE
 expect_failure ./scripts/release-package.sh v0.4.0
 git restore LICENSE
 expect_failure env BINARY_VERSION=0.3.0 ./scripts/release-package.sh v0.4.0
-rm -rf target/release-artifacts
+[[ -z $(ls -A target/release-artifacts) ]]
 expect_failure env QUERY_RESULT=wrong ./scripts/release-package.sh v0.4.0
-rm -rf target/release-artifacts
+[[ -z $(ls -A target/release-artifacts) ]]
 ./scripts/release-package.sh v0.4.0
 archive=target/release-artifacts/tq-v0.4.0-aarch64-apple-darwin.tar.gz
 before=$(shasum -a 256 "$archive")

@@ -16,6 +16,10 @@ if [[ $(git rev-parse HEAD) != "$(git rev-parse --verify "${2:?Expected BASE HEA
     exit 1
 fi
 git diff --exit-code HEAD -- openspec/
+if [[ -n $(git ls-files --others -- openspec/) ]]; then
+    echo "Untracked OpenSpec paths cannot stand in for committed evidence." >&2
+    exit 1
+fi
 archives=$(./scripts/repo-check.sh openspec "$@")
 if [[ -n $archives ]]; then
     # Export only associated archives from committed HEAD. The native CLI checks

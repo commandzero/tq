@@ -2,6 +2,8 @@
 # Build and verify one native archive. This command never publishes artifacts.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+RUSTUP_TOOLCHAIN=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
+export RUSTUP_TOOLCHAIN
 tag=${1:?Usage: release-package.sh vVERSION}
 version=${tag#v}
 version_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
@@ -43,8 +45,6 @@ if [[ $found != true ]]; then
     echo "Add the dated $version changelog section before tagging." >&2
     exit 1
 fi
-RUSTUP_TOOLCHAIN=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
-export RUSTUP_TOOLCHAIN
 host=$(rustc -vV | awk '/^host:/ {print $2}')
 case "$host" in
     aarch64-apple-darwin|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu) ;;
@@ -61,8 +61,16 @@ if [[ -e $destination || -e $destination.sha256 ]]; then
     echo "Refusing to replace existing release artifacts: $destination" >&2
     exit 1
 fi
-stage=$(mktemp -d "${TMPDIR:-/tmp}/tq-release.XXXXXX")
-trap 'rm -rf "$stage"' EXIT
+stage=$(mktemp -d "$PWD/target/release-artifacts/.tq-release.XXXXXX")
+archive_linked=false
+published=false
+cleanup() {
+    if [[ $archive_linked == true && $published != true ]]; then
+        rm -f "$destination"
+    fi
+    rm -rf "$stage"
+}
+trap cleanup EXIT
 cp "target/$host/release/tq" "$stage/tq"
 cp LICENSE "$stage/LICENSE"
 {
@@ -71,9 +79,9 @@ cp LICENSE "$stage/LICENSE"
     uname -a
     if [[ $host == *linux* ]]; then ldd --version; else sw_vers; fi
 } > "$stage/release.txt"
-tar -czf "$destination" -C "$stage" tq LICENSE release.txt
+tar -czf "$stage/$archive" -C "$stage" tq LICENSE release.txt
 mkdir "$stage/extracted"
-tar -xzf "$destination" -C "$stage/extracted"
+tar -xzf "$stage/$archive" -C "$stage/extracted"
 if [[ ! -x $stage/extracted/tq || ! -s $stage/extracted/LICENSE ]]; then
     echo "Extracted archive is missing an executable or license." >&2
     exit 1
@@ -88,5 +96,11 @@ if [[ $actual != 42 ]]; then
     echo "Extracted binary failed the JSON query smoke test." >&2
     exit 1
 fi
-(cd target/release-artifacts && shasum -a 256 "$archive" > "$archive.sha256" && shasum -a 256 -c "$archive.sha256")
+(cd "$stage" && shasum -a 256 "$archive" > "$archive.sha256" && shasum -a 256 -c "$archive.sha256")
+# Hard links publish verified files atomically without replacing concurrent output.
+# Staging on the destination filesystem keeps this portable across native hosts.
+ln "$stage/$archive" "$destination"
+archive_linked=true
+ln "$stage/$archive.sha256" "$destination.sha256"
+published=true
 printf 'Verified native archive: %s\n' "$destination"

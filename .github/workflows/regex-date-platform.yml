@@ -59,6 +59,10 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
           persist-credentials: false
+      - name: Install repository toolchain
+        run: |
+          toolchain=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
+          rustup toolchain install "$toolchain" --profile minimal
       - name: Record release host target
         run: rustc -vV
       - name: Verify UTC boundaries and portable regex behavior

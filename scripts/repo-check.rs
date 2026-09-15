@@ -31,7 +31,7 @@ fn valid_id(id: &str) -> bool {
 fn change_id(path: &str) -> Option<String> {
     let rest = path.strip_prefix("openspec/changes/")?;
     let id = if let Some(archive) = rest.strip_prefix("archive/") {
-        let folder = archive.split('/').next()?;
+        let folder = archive.split_once('/')?.0;
         // Archive names are YYYY-MM-DD-<change-id>.
         if folder.len() < 12
             || folder.as_bytes()[4] != b'-'
@@ -46,7 +46,7 @@ fn change_id(path: &str) -> Option<String> {
         }
         folder.get(11..)?
     } else {
-        rest.split('/').next()?
+        rest.split_once('/')?.0
     };
     valid_id(id).then(|| id.to_owned())
 }
@@ -132,7 +132,7 @@ fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
         .collect();
     let modified: BTreeSet<_> = delta_requirements
         .iter()
-        .filter(|r| r.mode == "MODIFIED Requirements" || r.mode == "ADDED Requirements")
+        .filter(|r| r.mode == "MODIFIED Requirements")
         .map(|r| r.name.clone())
         .collect();
     let mut checked = 0;
@@ -188,6 +188,13 @@ fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
             let old = from.take().ok_or("Rename is missing its FROM entry")?;
             if main_map.contains_key(old) || !main_map.contains_key(name) {
                 return Err(format!("Rename {old} -> {name} is not synchronized"));
+            }
+            // A rename may already be synchronized at the merge base. In that
+            // case the destination, rather than the source, establishes its body.
+            if previous_map.contains_key(old) == previous_map.contains_key(name) {
+                return Err(format!(
+                    "Rename {old} -> {name} needs exactly one prior name"
+                ));
             }
             if !modified.contains(name)
                 && previous_map.get(old).or_else(|| previous_map.get(name)) != main_map.get(name)
@@ -252,14 +259,7 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
     for path in changed.split('\0').filter(|p| !p.is_empty()) {
         if let Some(id) = change_id(path) {
             ids.insert(id);
-        } else if path
-            .strip_prefix("openspec/changes/archive/")
-            .is_some_and(|rest| rest.contains('/'))
-            || (!path.starts_with("openspec/changes/archive/")
-                && path
-                    .strip_prefix("openspec/changes/")
-                    .is_some_and(|rest| rest.contains('/')))
-        {
+        } else {
             return Err(format!(
                 "Cannot identify the change for {path}; use lowercase change IDs and YYYY-MM-DD-<id> archive directories"
             ));
@@ -527,6 +527,21 @@ mod tests {
         let renamed = "## RENAMED Requirements\n- FROM: `### Requirement: Old`\n- TO: `### Requirement: Behavior`\n";
         assert!(synchronized(renamed, MAIN, &MAIN.replace("Behavior", "Old")).is_ok());
         assert!(synchronized(renamed, "", MAIN).is_err());
+        assert!(synchronized(renamed, MAIN, MAIN).is_ok());
+        let changed = MAIN.replace("correct", "wrong");
+        let added = format!("{renamed}{}", DELTA.replace("correct", "wrong"));
+        assert!(synchronized(&added, &changed, &MAIN.replace("Behavior", "Old")).is_err());
+        let modified = added.replace("ADDED Requirements", "MODIFIED Requirements");
+        assert!(synchronized(&modified, &changed, &MAIN.replace("Behavior", "Old")).is_ok());
+        assert!(synchronized(&modified, &changed, "").is_err());
+        assert!(
+            synchronized(
+                &modified,
+                &changed,
+                &format!("{MAIN}{}", MAIN.replace("Behavior", "Old"))
+            )
+            .is_err()
+        );
         assert!(
             synchronized(
                 renamed,
@@ -545,6 +560,21 @@ mod tests {
         let head = repo.commit();
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: unrelated").is_err());
+    }
+    #[test]
+    fn unrecognized_change_paths_fail_closed() {
+        for path in [
+            "openspec/changes/loose.md",
+            "openspec/changes/loose",
+            "openspec/changes/archive/loose.md",
+            "openspec/changes/archive/2026-09-15-loose",
+        ] {
+            let repo = Repo::new();
+            let base = repo.commit();
+            repo.write(path, "Unassociated change");
+            let head = repo.commit();
+            assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        }
     }
     #[test]
     fn edited_deleted_and_renamed_active_changes_fail() {
@@ -647,6 +677,11 @@ mod tests {
             String::from_utf8_lossy(&complete.stdout),
             String::from_utf8_lossy(&complete.stderr)
         );
+        repo.write("openspec/specs/untracked/spec.md", MAIN);
+        let untracked = run(&head);
+        assert!(!untracked.status.success());
+        assert!(String::from_utf8_lossy(&untracked.stderr).contains("Untracked OpenSpec"));
+        fs::remove_dir_all(repo.0.join("openspec/specs/untracked")).unwrap();
         repo.write(
             "openspec/changes/archive/2026-09-06-selected/tasks.md",
             "- [ ] Uncommitted regression\n",
