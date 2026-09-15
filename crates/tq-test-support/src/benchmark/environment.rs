@@ -70,17 +70,29 @@ fn filesystem_identity() -> Option<String> {
     let args = ["-PT", "."];
     #[cfg(not(target_os = "linux"))]
     let args = ["-P", "."];
-    stable_filesystem(&command_output("df", &args)?, cfg!(target_os = "linux"))
+    let output = Command::new("df")
+        .args(args)
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    stable_filesystem(
+        &String::from_utf8_lossy(&output.stdout),
+        cfg!(target_os = "linux"),
+    )
 }
 
 fn stable_filesystem(output: &str, includes_type: bool) -> Option<String> {
-    let fields = output
-        .lines()
-        .nth(1)?
-        .split_whitespace()
-        .collect::<Vec<_>>();
+    let mut lines = output.lines();
+    let header = lines.next()?.split_whitespace().collect::<Vec<_>>();
+    // macOS can include inode counters before the mount, depending on df mode.
+    let mount_index = header
+        .windows(2)
+        .position(|pair| pair == ["Mounted", "on"])?;
+    let fields = lines.next()?.split_whitespace().collect::<Vec<_>>();
     let device = fields.first()?;
-    let mount_index = if includes_type { 6 } else { 5 };
     let mount = fields.get(mount_index..)?.join(" ");
     if mount.is_empty() {
         return None;
@@ -142,6 +154,21 @@ fn identity(manifest: &EnvironmentManifest) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn filesystem_identity_ignores_optional_inode_columns() {
+        let header =
+            "Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on\n";
+        for row in [
+            "/dev/disk 100 10 90 10% 12 88 12% /Volumes/Bench Data\n",
+            "/dev/disk 100 20 80 20% 24 76 24% /Volumes/Bench Data\n",
+        ] {
+            assert_eq!(
+                super::stable_filesystem(&format!("{header}{row}"), false).as_deref(),
+                Some("/dev/disk /Volumes/Bench Data")
+            );
+        }
+    }
+
     #[test]
     fn filesystem_identity_ignores_changing_free_space() {
         let first = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n/dev/root ext4 100 10 90 10% /\n";
