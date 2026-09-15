@@ -6,6 +6,36 @@ disparities documented for later reconsideration. Completed tasks are recorded i
 the live task checklist. The final verification section distinguishes accepted
 evidence from historical checkpoints. No checkpoint establishes 100% exact parity.
 
+## Format composition audit, 2026-09-15
+
+The suspected `@urid` composition failure does not reproduce. The existing
+`builtin_argument_order` path admits it through `scalar::supports`, which
+recognizes all supported format operators. The primary reviewer removed a
+redundant allowlist addition after the new test passed without it. No runtime
+fix is claimed.
+
+New embedded tests assert the results of all ten format operators inside a
+user-defined filter passed to `map`. Additional `@urid` tests cover invalid
+percent encoding and the output-byte limit. CLI tests cover default TOON,
+explicit pretty JSON, compact JSON, and invalid-encoding process behavior.
+The focused suites pass 13 core tests and four CLI tests.
+
+A fresh native macOS debug campaign against pinned jq 1.8.1 records 949 exact
+matches among 952 cases, including all 297 composition cases. Compact JSON
+passes 918 of 921 contracts; TOON passes all 921. The strict gate exits 1 on
+`manual.audit.math.erfc-ulp`, `manual.audit.math.tgamma-ulp`, and
+`manual.regex.flag-l`. No disparity approval was renewed by this run.
+The tq executable SHA-256 is
+`3388ead6f54b6a44de956cc016700831913ee8846259ab262b6f293a4053e432`.
+Raw evidence remains in ignored `target/pr35-format-audit/` storage.
+
+The ledger's `composition-deferred` admission descriptions predate the current
+scalar and generator implementations. They are not current failure verdicts.
+Task 3.14 remains open for the complete embedded inventory, recursion/resource
+acceptance, ledger reconciliation, and fresh native release and performance
+evidence. The prior platform reports and identity-bound approvals remain
+historical; no release acceptance task is closed by this debug campaign.
+
 ## Current acceptance checkpoint, 2026-09-10
 
 Acceptance is 63 of 69 tasks. Task 7.2 is complete after primary review of

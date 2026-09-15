@@ -32,6 +32,69 @@ fn evaluate_with_limits(query: &str, input: &str, limits: VmLimits) -> Result<Ve
 }
 
 #[test]
+fn composed_uri_decode_preserves_scalar_errors_and_limits() {
+    let values = evaluate_with_limits(
+        "def decode: @urid; map(decode)",
+        r#"["a%2Fb", "x%20y"]"#,
+        VmLimits::default(),
+    )
+    .expect("uri decoding composes through a user filter");
+    assert_eq!(
+        values,
+        [Value::from_json(serde_json::json!(["a/b", "x y"])).unwrap()]
+    );
+
+    let invalid = evaluate_with_limits(
+        "def decode: @urid; map(decode)",
+        r#"["ok", "bad%ZZ"]"#,
+        VmLimits::default(),
+    )
+    .expect_err("invalid percent encoding remains a runtime error");
+    assert!(matches!(invalid, VmError::Runtime { .. }));
+
+    let limited = evaluate_with_limits(
+        "def decode: @urid; map(decode)",
+        r#"["%41"]"#,
+        VmLimits {
+            output_bytes: 0,
+            ..VmLimits::default()
+        },
+    )
+    .expect_err("uri decoding honors the output resource limit in composition");
+    assert!(matches!(
+        limited,
+        VmError::Resource {
+            resource: "output-bytes"
+        }
+    ));
+}
+
+#[test]
+fn composed_format_operators_preserve_scalar_results() {
+    for (operator, input, expected) in [
+        ("@text", r#"["x"]"#, r#"["x"]"#),
+        ("@json", r#"["x"]"#, r#"["\"x\""]"#),
+        ("@html", r#"["<&"]"#, r#"["&lt;&amp;"]"#),
+        ("@uri", r#"["a b"]"#, r#"["a%20b"]"#),
+        ("@urid", r#"["a%2Fb"]"#, r#"["a/b"]"#),
+        ("@csv", r#"[["a b",1]]"#, r#"["\"a b\",1"]"#),
+        ("@tsv", r#"[["a b",1]]"#, r#"["a b\t1"]"#),
+        ("@sh", r#"[["a b",1]]"#, r#"["'a b' 1"]"#),
+        ("@base64", r#"["hello"]"#, r#"["aGVsbG8="]"#),
+        ("@base64d", r#"["aGVsbG8="]"#, r#"["hello"]"#),
+    ] {
+        let query = format!("def format_value: {operator}; map(format_value)");
+        let values = evaluate_with_limits(&query, input, VmLimits::default())
+            .unwrap_or_else(|error| panic!("{operator} composition failed: {error:?}"));
+        assert_eq!(
+            values,
+            [Value::from_json(serde_json::from_str(expected).unwrap()).unwrap()],
+            "operator: {operator}"
+        );
+    }
+}
+
+#[test]
 fn scalar_value_and_filter_arguments_keep_cartesian_order() {
     let direct = evaluate_with_limits(
         "def direct: [pow((2,3);(2,3))]; direct",
