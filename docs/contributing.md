@@ -1,9 +1,16 @@
+---
+type: Guide
+title: "Contributing to tq"
+description: "Contributor setup, validation, and development requirements."
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
+---
+
 # Contributing to tq
 
 The workspace requires Rust 1.95 or newer. Development and CI track the latest
 stable Rust toolchain. Run `rustup update stable` before preflight checks, and
 ensure the rustup shims take precedence over standalone Rust installations in
-your `PATH`.
+your `PATH`. Run all commands below from the repository root.
 
 Run the repository preflight before submitting a change:
 
@@ -11,23 +18,28 @@ Run the repository preflight before submitting a change:
 ./scripts/preflight.sh
 ```
 
-The script checks formatting, compilation, lint rules, workspace tests, and all
-OpenSpec specifications, plus the complete `docs/` bundle with OKF 0.2.7.
-Install the pinned documentation validator with
-`cargo install okf --version 0.2.7 --locked` when it is not already available.
-Install OpenSpec 1.11.0 with
-`npm install --global --save-exact @fission-ai/openspec@1.11.0` as well.
-New automation should call this script.
+The script checks documentation, shell scripts, repository governance tests,
+Rust formatting, compilation, lint rules, workspace tests, and main OpenSpec
+specifications. New automation should call this script.
+
+For tool installation, documentation-only checks, and PR OpenSpec completion,
+see [contributor checks](contributor-checks.md).
+Use the [release playbook](releasing.md) for coordinated publication and the
+[changelog policy](changelog-policy.md) for new history entries.
+
+Shared standards come from the repo-man bundle selected by the nearest workspace
+AGENTS.md. Resolve its pointer relative to that file. If no pointer is configured,
+use the local repo-man entry point at `~/.agents/memory/repo-man/index.md`.
 
 The campaign runner handles compatibility, benchmark, and fuzz programs:
 
 ```console
-./scripts/run-campaign.sh compatibility smoke
-./scripts/run-campaign.sh compatibility full
-./scripts/run-campaign.sh benchmark smoke
-./scripts/run-campaign.sh benchmark standard
-./scripts/run-campaign.sh benchmark large
-./scripts/run-campaign.sh fuzz default
+./scripts/campaign-run.sh compatibility smoke
+./scripts/campaign-run.sh compatibility full
+./scripts/campaign-run.sh benchmark smoke
+./scripts/campaign-run.sh benchmark standard
+./scripts/campaign-run.sh benchmark large
+./scripts/campaign-run.sh fuzz default
 ```
 
 ## Compatibility-case-first development

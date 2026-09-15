@@ -5,23 +5,13 @@ repository_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository_root"
 
 cargo_bin=${CARGO:-cargo}
-openspec_bin=${OPENSPEC:-openspec}
-okf_bin=${OKF:-okf}
+./scripts/repository-check.sh
+if [ "${1:-}" = --docs ]; then exit 0; fi
 
 "$cargo_bin" fmt --all --check
-"$cargo_bin" check --workspace --all-targets
-"$cargo_bin" clippy --workspace --all-targets --all-features -- -D warnings
-"$cargo_bin" test --workspace
-case "$("$okf_bin" --version 2>/dev/null)" in
-    "okf 0.2.7"|"okf 0.2.7 "*) ;;
-    *)
-        echo "Install the pinned documentation validator: cargo install okf --version 0.2.7 --locked" >&2
-        exit 1
-        ;;
-esac
-"$okf_bin" validate docs/
-if [ "$(OPENSPEC_TELEMETRY=0 "$openspec_bin" --version 2>/dev/null)" != "1.11.0" ]; then
-    echo "Install the pinned OpenSpec CLI: npm install --global --save-exact @fission-ai/openspec@1.11.0" >&2
-    exit 1
-fi
-OPENSPEC_TELEMETRY=0 "$openspec_bin" validate --all --strict
+"$cargo_bin" check --workspace --all-targets --locked
+"$cargo_bin" clippy --workspace --all-targets --all-features --locked -- -D warnings
+"$cargo_bin" test --workspace --locked
+# Main specifications are the repository contract. Associated active changes are
+# selected and checked separately by openspec-check.sh at the PR boundary.
+./scripts/openspec-check.sh

@@ -4,6 +4,12 @@ okf_version: "0.2"
 
 # tq documentation
 
+The complete `docs/` directory is the OKF bundle, including published test reports.
+`requirements-traceability.tsv` is supporting data. Keep tooling and temporary
+measurement captures outside this directory.
+
+Run `./scripts/docs-check.sh` from the repository root to validate the bundle.
+
 1. [Format compatibility](formats.md) - Input and output formats supported by jq, yq, and tq.
 2. [Compatibility](compatibility.md) - Supported behavior and compatibility evidence.
 3. [jq 1.8 CLI options](jq-1.8-cli-options.md) - Command-line behavior and intentional differences.
@@ -16,3 +22,8 @@ okf_version: "0.2"
 10. [jq compatibility disparities](jq-compatibility-disparities.md) - Measured safe-library limitations and post-implementation reconsideration.
 11. [jq parity migration and security notes](jq-parity-migration.md) - Unreleased output, numeric, and ambient-access changes.
 12. [Test reviews](tests/index.md) - Section reviews and generated jq/tq token comparisons.
+13. [Native format architecture](adr/0001-compose-native-formats.md) - Document codecs, framing, and directional profiles.
+14. [Changelog policy](changelog-policy.md) - New entries and historical releases.
+15. [Contributor checks](contributor-checks.md) - Local validation and PR completion.
+16. [Contributing](contributing.md) - Setup and development requirements.
+17. [Releasing](releasing.md) - Candidate archives and coordinated publication.

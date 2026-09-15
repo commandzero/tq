@@ -2,7 +2,7 @@
 type: Report
 title: jq regex, date, and platform compatibility
 description: Safe-library behavior, resource limits, and ambient capability controls.
-generated: { by: codex/gpt-6-astra, at: 2026-09-14T02:19:09Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:46:06Z }
 ---
 
 # jq regex, date, and platform compatibility
@@ -69,8 +69,9 @@ cargo test -p tq-core regex_date_platform_release_host_contract
 cargo test -p tq-cli ambient
 ```
 
-The same checks run on Linux and macOS when a GitHub release is published by
-`.github/workflows/regex-date-platform.yml`. Native Windows execution is deferred
+The same checks run on Linux and macOS before release publication through the
+reusable `.github/workflows/regex-date-platform.yml` workflow. It also supports
+manual runs. Native Windows execution is deferred
 until a runner is available. Windows test definitions remain in the repository;
 their presence does not establish Windows compatibility.
 

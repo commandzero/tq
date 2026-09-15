@@ -2,7 +2,7 @@
 type: Report
 title: jq compatibility
 description: Supported jq behavior and the manual compatibility evidence policy.
-generated: { by: codex/gpt-6-astra, at: 2026-09-13T23:50:52Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
 ---
 
 # jq compatibility
@@ -163,7 +163,7 @@ The manual campaign pins jq 1.8.1, the imported source documents, and the
 original 518 cases, including 303 protected matches. It compares ordered JSON
 results and process behavior, exact compact JSON bytes, and whether TOON
 preserves the JSON execution contract. See the
-[campaign instructions and review inventories](../tests/compatibility/README.md).
+[campaign instructions and review inventories](../tests/compatibility/readme.md).
 The [selected historical assertions](../tests/compatibility/reviews/coverage-summary.toon)
 retain reviewed baseline classifications from the older campaign. The raw
 campaign dump is not tracked, and this summary is not approval for the current

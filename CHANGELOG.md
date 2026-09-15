@@ -2,7 +2,8 @@
 
 All notable changes to this project are documented in this file.
 
-The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
+New entries follow the [repository changelog policy](docs/changelog-policy.md).
+Historical release entries retain their original ordering.
 
 ## [Unreleased]
 
@@ -110,3 +111,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 - Added crates.io packaging for `tq-cli`, which installs the `tq` command.
 - Initial release
+
+[Unreleased]: https://github.com/commandzero/tq/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/commandzero/tq/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/commandzero/tq/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/commandzero/tq/releases/tag/v0.1.0

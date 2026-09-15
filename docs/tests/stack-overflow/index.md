@@ -24,7 +24,7 @@ One scenario page corresponds to each checked-in question fixture. The fixtures 
 18. [18: Get outputs from jq on a single line](./18-get-outputs-from-jq-on-a-single-line.md)
 19. [19: jq to replace text directly on file (like sed -i)](./19-jq-to-replace-text-directly-on-file-like-sed-i.md)
 20. [20: Concat 2 fields in JSON using jq](./20-concat-2-fields-in-json-using-jq.md)
-21. [21: How to sort a json file by keys and values of those keys in jq](./21-how-to-sort-a-json-file-by-keys-and-values-of-those-keys-in-.md)
+21. [21: How to sort a json file by keys and values of those keys in jq](./21-how-to-sort-a-json-file-by-keys-and-values-of-those-keys-in.md)
 22. [22: Modify a key-value in a json using jq in-place](./22-modify-a-key-value-in-a-json-using-jq-in-place.md)
 23. [23: How to format a JSON string as a table using jq?](./23-how-to-format-a-json-string-as-a-table-using-jq.md)
 24. [24: jq: print key and value for each entry in an object](./24-jq-print-key-and-value-for-each-entry-in-an-object.md)
@@ -45,7 +45,7 @@ One scenario page corresponds to each checked-in question fixture. The fixtures 
 39. [39: jq not working on tag name with dashes and numbers](./39-jq-not-working-on-tag-name-with-dashes-and-numbers.md)
 40. [40: Convert string to json in jq](./40-convert-string-to-json-in-jq.md)
 41. [41: Output specific key value in object for each element in array with jq for JSON](./41-output-specific-key-value-in-object-for-each-element-in-arra.md)
-42. [42: jq: how to query for array values that don't contain text "foo"?](./42-jq-how-to-query-for-array-values-that-don-39-t-contain-text-.md)
+42. [42: jq: how to query for array values that don't contain text "foo"?](./42-jq-how-to-query-for-array-values-that-don-39-t-contain-text.md)
 43. [43: How do I keep colors when piping "jq" output to "less"?](./43-how-do-i-keep-colors-when-piping-quot-jq-quot-output-to-quot.md)
 44. [44: Exclude column from jq json output](./44-exclude-column-from-jq-json-output.md)
 45. [45: How to use jq when the variable has reserved characters?](./45-how-to-use-jq-when-the-variable-has-reserved-characters.md)
@@ -61,7 +61,7 @@ This suite runs separately from the default tests and benchmark profiles. From
 the repository root:
 
 ```console
-./scripts/run-campaign.sh benchmark stack-overflow
+./scripts/campaign-run.sh benchmark stack-overflow
 ```
 
 The 148 successful timing rows used one warmup and 30 measured samples for each
