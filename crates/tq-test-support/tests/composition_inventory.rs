@@ -1,14 +1,23 @@
 //! Source-linked inventory for bounded user-filter composition admission.
 
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
-use tq_core::{ResolveOptions, Value as RuntimeValue, Vm, VmLimits, analyze, parse, resolve};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    io::Cursor,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+use tq_core::{
+    Compiled, Document, InputCursor, InputValue, JsonInput, JsonInputOptions, ResolveOptions,
+    Value as RuntimeValue, Vm, VmError, VmLimits, analyze, parse, resolve,
+};
 use tq_test_support::compatibility::{
-    CaseAdapter, CaseStatus, CompatibilityCase, load_catalog, read_manual_review_case_ids,
+    CaseAdapter, CaseStatus, CompatibilityCase, ContractKind, FixtureFormat, InvocationMode,
+    load_catalog, read_manual_review_case_ids,
 };
 
 type Cases<'a> = BTreeMap<&'a str, &'a CompatibilityCase>;
+type DocumentPlan = tq_core::Plan<Compiled, Document>;
 
 fn root() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
@@ -60,7 +69,7 @@ fn validate_operations(
         let name = row["name"].as_str().expect("operation name");
         let admission = row["admission"].as_str().expect("admission");
         assert!(
-            ["managed", "limited", "kernel-only"].contains(&admission),
+            ["managed", "kernel-only"].contains(&admission),
             "{name} has unknown admission {admission}"
         );
         assert_ne!(row["family"].as_str().unwrap_or_default(), "");
@@ -293,10 +302,7 @@ fn validate_arity_groups(
     for group in groups {
         let family = group["family"].as_str().expect("arity family");
         assert!(family_ids.contains(family), "unknown arity family {family}");
-        assert!(
-            ["managed-allowlist", "composition-deferred"]
-                .contains(&group["admission"].as_str().expect("arity admission"))
-        );
+        assert_eq!(group["admission"].as_str(), Some("managed"));
         let case_id = group["case_id"].as_str().expect("arity case ID");
         assert!(
             cases.contains_key(case_id),
@@ -317,13 +323,7 @@ fn validate_arity_groups(
                 witness_by_signature.get(text).map(String::as_str),
                 "{text} has no normalized witness mapping"
             );
-            assert!(
-                ["managed-allowlist", "composition-deferred"].contains(
-                    &signature["admission"]
-                        .as_str()
-                        .expect("signature admission")
-                )
-            );
+            assert_eq!(signature["admission"].as_str(), Some("managed"));
             assert_ne!(signature["rationale"].as_str().unwrap_or_default(), "");
         }
     }
@@ -441,6 +441,391 @@ fn evaluate_document_filter(query: &str) -> Vec<RuntimeValue> {
         values.push(value);
     }
     values
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct EmbeddedObservation {
+    results: Vec<RuntimeValue>,
+    error: Option<VmError>,
+    effects: Vec<u8>,
+}
+
+fn composition_fixture_bytes(case: &CompatibilityCase, repo_root: &Path) -> Vec<u8> {
+    if let Some(inline) = &case.fixture.inline {
+        inline.as_bytes().to_vec()
+    } else if let Some(path) = &case.fixture.path {
+        std::fs::read(repo_root.join(path))
+            .unwrap_or_else(|error| panic!("{} fixture {} cannot be read: {error}", case.id, path))
+    } else {
+        Vec::new()
+    }
+}
+
+fn composition_fixture_inputs(case: &CompatibilityCase, repo_root: &Path) -> Vec<InputValue> {
+    assert!(
+        matches!(
+            case.fixture.format,
+            FixtureFormat::Json | FixtureFormat::Raw
+        ),
+        "{} has an embedded-incompatible fixture format {:?}",
+        case.id,
+        case.fixture.format
+    );
+    let bytes = composition_fixture_bytes(case, repo_root);
+    let mut reader = JsonInput::new(Cursor::new(bytes.clone()), JsonInputOptions::default());
+    let mut inputs = Vec::new();
+    loop {
+        let position = reader.position();
+        let mut line_number = position.line;
+        let mut offset = position.offset;
+        while let Some(byte) = bytes.get(offset) {
+            if !byte.is_ascii_whitespace() {
+                break;
+            }
+            if *byte == b'\n' {
+                line_number = line_number.saturating_add(1);
+            }
+            offset = offset.saturating_add(1);
+        }
+        let value = reader
+            .next_value(&mut || Ok(()))
+            .unwrap_or_else(|error| panic!("{} fixture JSON failed: {error}", case.id));
+        let Some(value) = value else { break };
+        inputs.push(InputValue {
+            value,
+            identity: Arc::from("<stdin>"),
+            line_number: u64::try_from(line_number).expect("JSON line number fits in u64"),
+        });
+    }
+    inputs
+}
+
+fn composition_variables(
+    case: &CompatibilityCase,
+    input: &InputValue,
+) -> BTreeMap<Arc<str>, RuntimeValue> {
+    let mut variables = BTreeMap::new();
+    match case.id.as_str() {
+        "manual.composition.arity.env.0" => {
+            variables.insert(
+                Arc::from("__tq_ambient_environment"),
+                RuntimeValue::from_json(serde_json::json!({"PAGER": "less"}))
+                    .expect("environment fixture converts"),
+            );
+        }
+        "manual.composition.arity.input-filename.0" => {
+            variables.insert(Arc::from("__tq_ambient_platform"), RuntimeValue::Bool(true));
+            variables.insert(
+                Arc::from("__tq_input_filename"),
+                RuntimeValue::string("<stdin>"),
+            );
+        }
+        "manual.composition.arity.localtime.0"
+        | "manual.composition.arity.now.0"
+        | "manual.composition.arity.strflocaltime.1" => {
+            variables.insert(Arc::from("__tq_ambient_platform"), RuntimeValue::Bool(true));
+        }
+        "manual.composition.arity.input-line-number.0" => {
+            variables.insert(
+                Arc::from("__tq_input_line_number"),
+                RuntimeValue::from_json(serde_json::json!(input.line_number))
+                    .expect("line number converts"),
+            );
+        }
+        _ => {}
+    }
+    variables
+}
+
+fn composition_plan(case: &CompatibilityCase, query: &str, repo_root: &Path) -> DocumentPlan {
+    let parsed = parse(query).unwrap_or_else(|error| panic!("{} query parses: {error}", case.id));
+    let mut options = ResolveOptions::default();
+    if case.id == "manual.composition.arity.modulemeta.0" {
+        options
+            .module_roots
+            .push(repo_root.join("tests/fixtures/manual-modules"));
+    }
+    let resolved = resolve(parsed, &options)
+        .unwrap_or_else(|error| panic!("{} query resolves: {error}", case.id));
+    analyze(resolved)
+        .compile()
+        .unwrap_or_else(|error| panic!("{} query compiles: {error}", case.id))
+        .document_plan()
+}
+
+fn execute_composition_query(
+    case: &CompatibilityCase,
+    query: &str,
+    repo_root: &Path,
+) -> EmbeddedObservation {
+    assert_eq!(case.invocation_mode, InvocationMode::Stdin, "{}", case.id);
+    let plan = composition_plan(case, query, repo_root);
+    let inputs = composition_fixture_inputs(case, repo_root);
+    let null_input = case
+        .adapters
+        .tq
+        .args
+        .iter()
+        .any(|argument| argument == "-n");
+    let source = Arc::new(Mutex::new(VecDeque::from(inputs)));
+    let cursor_source = Arc::clone(&source);
+    let cursor = InputCursor::from_provider(move || {
+        let mut source = cursor_source.lock().map_err(|_| VmError::Runtime {
+            message: Arc::from("composition input source is unavailable"),
+        })?;
+        Ok(source.pop_front())
+    });
+    let mut pending_roots = if null_input {
+        VecDeque::from([InputValue {
+            value: RuntimeValue::Null,
+            identity: Arc::from("<stdin>"),
+            line_number: 1,
+        }])
+    } else {
+        VecDeque::new()
+    };
+    if !null_input
+        && let Some(first_root) = source
+            .lock()
+            .expect("composition input source is available")
+            .pop_front()
+    {
+        pending_roots.push_back(first_root);
+    }
+
+    let mut results = Vec::new();
+    let mut effects = Vec::new();
+    while let Some(input) = pending_roots.pop_front() {
+        let variables = composition_variables(case, &input);
+        let mut vm = Vm::new_with_variables(&plan, input.value, VmLimits::default(), variables)
+            .with_input_cursor(cursor.clone());
+        let mut error = None;
+        loop {
+            match vm.next_result() {
+                Ok(Some(value)) => results.push(value),
+                Ok(None) => break,
+                Err(runtime_error) => {
+                    error = Some(runtime_error);
+                    break;
+                }
+            }
+        }
+        effects.extend(vm.take_effects());
+        if error.is_none()
+            && !null_input
+            && let Some(next_root) = source
+                .lock()
+                .expect("composition input source is available")
+                .pop_front()
+        {
+            pending_roots.push_back(next_root);
+        }
+        if error.is_some() {
+            return EmbeddedObservation {
+                results,
+                error,
+                effects,
+            };
+        }
+    }
+    EmbeddedObservation {
+        results,
+        error: None,
+        effects,
+    }
+}
+
+fn direct_composition_query(query: &str) -> Option<String> {
+    for name in ["__manual_operation_witness", "__manual_composition_witness"] {
+        let prefix = format!("def {name}: ");
+        let Some(start) = query.find(&prefix) else {
+            continue;
+        };
+        let body = query[start + prefix.len()..].strip_suffix(&format!("; {name}"))?;
+        return Some(format!("{}{}", &query[..start], body));
+    }
+    None
+}
+
+fn expected_inventory_results(case_id: &str) -> Vec<RuntimeValue> {
+    let expected = match case_id {
+        "manual.composition.inventory.constructors.def" => {
+            serde_json::json!([{"head": 1, "whole": [1, 2]}])
+        }
+        "manual.composition.inventory.constructors.around" => serde_json::json!([{ "head": 1 }]),
+        "manual.composition.inventory.constructors.filter" => {
+            serde_json::json!([[{ "value": 1 }]])
+        }
+        "manual.composition.inventory.constructors.value" => {
+            serde_json::json!([{ "value": [1, 2], "first": 1 }])
+        }
+        "manual.composition.inventory.navigation.def" => serde_json::json!(["a", "b"]),
+        "manual.composition.inventory.navigation.around"
+        | "manual.composition.inventory.folds.around"
+        | "manual.composition.inventory.math.def"
+        | "manual.composition.inventory.math.around"
+        | "manual.composition.inventory.effects.def"
+        | "manual.composition.inventory.effects.filter" => serde_json::json!([1]),
+        "manual.composition.inventory.navigation.filter" => serde_json::json!([["a", "b"]]),
+        "manual.composition.inventory.navigation.value" => serde_json::json!(["a"]),
+        "manual.composition.inventory.scalar-control.def"
+        | "manual.composition.inventory.scalar-control.around"
+        | "manual.composition.inventory.math.value" => serde_json::json!([4]),
+        "manual.composition.inventory.scalar-control.filter"
+        | "manual.composition.inventory.scalar-control.value"
+        | "manual.composition.inventory.bindings.around"
+        | "manual.composition.inventory.paths.around"
+        | "manual.composition.inventory.callbacks.around" => serde_json::json!([2]),
+        "manual.composition.inventory.bindings.def" => serde_json::json!([[1, null]]),
+        "manual.composition.inventory.bindings.filter" => serde_json::json!([[1]]),
+        "manual.composition.inventory.bindings.value" => serde_json::json!([[1, 1]]),
+        "manual.composition.inventory.folds.def" | "manual.composition.inventory.folds.filter" => {
+            serde_json::json!([3])
+        }
+        "manual.composition.inventory.folds.value" => serde_json::json!([[1, 3]]),
+        "manual.composition.inventory.paths.def" | "manual.composition.inventory.paths.filter" => {
+            serde_json::json!([{ "a": 2 }])
+        }
+        "manual.composition.inventory.paths.value" => serde_json::json!([{ "a": 2, "b": 2 }]),
+        "manual.composition.inventory.callbacks.def"
+        | "manual.composition.inventory.callbacks.filter" => serde_json::json!([[2, 3]]),
+        "manual.composition.inventory.callbacks.value" => serde_json::json!([[11, 12]]),
+        "manual.composition.inventory.generators.def"
+        | "manual.composition.inventory.generators.value" => serde_json::json!([[0, 1, 2]]),
+        "manual.composition.inventory.generators.around" => serde_json::json!([10, 11, 12]),
+        "manual.composition.inventory.generators.filter" => serde_json::json!([[0, 1]]),
+        "manual.composition.inventory.math.filter" => serde_json::json!([[0, 0]]),
+        "manual.composition.inventory.regex.def" | "manual.composition.inventory.regex.value" => {
+            serde_json::json!([true])
+        }
+        "manual.composition.inventory.regex.around" => serde_json::json!([false]),
+        "manual.composition.inventory.regex.filter" => serde_json::json!(["xbx"]),
+        "manual.composition.inventory.effects.around" => serde_json::json!(["1"]),
+        "manual.composition.inventory.effects.value"
+        | "manual.composition.inventory.errors.def"
+        | "manual.composition.inventory.errors.around"
+        | "manual.composition.inventory.errors.filter"
+        | "manual.composition.inventory.errors.value" => serde_json::json!(["x"]),
+        _ => panic!("missing independent expected witness for {case_id}"),
+    };
+    expected
+        .as_array()
+        .expect("inventory expected sequence")
+        .iter()
+        .cloned()
+        .map(|value| RuntimeValue::from_json(value).expect("inventory expected value converts"))
+        .collect()
+}
+
+fn expected_composition_effects(case_id: &str) -> Option<&'static [u8]> {
+    match case_id {
+        "manual.composition.arity.debug.0" => Some(b"[\"DEBUG:\",42]\n"),
+        "manual.composition.inventory.effects.def"
+        | "manual.composition.inventory.effects.around"
+        | "manual.composition.inventory.effects.filter" => Some(b"[\"DEBUG:\",1]\n"),
+        "manual.composition.arity.debug.1" => Some(b"[\"DEBUG:\",\"message\"]\n"),
+        "manual.composition.arity.stderr.0" => Some(b"hello"),
+        "manual.composition.inventory.effects.value" => Some(b"[\"DEBUG:\",\"x\"]\n"),
+        _ => None,
+    }
+}
+
+fn expected_special_results(case_id: &str) -> Option<Vec<RuntimeValue>> {
+    let expected = match case_id {
+        "manual.composition.arity.env.0" => serde_json::json!(["less"]),
+        "manual.composition.arity.input-filename.0" => serde_json::json!(["<stdin>"]),
+        "manual.composition.arity.input-line-number.0" => serde_json::json!([1, 2]),
+        "manual.composition.arity.input.0" => serde_json::json!([[1, 2], [3, 4]]),
+        "manual.composition.arity.inputs.0" => serde_json::json!([6]),
+        "manual.composition.arity.modulemeta.0" => serde_json::json!([{
+            "homepage": "https://example.invalid/basic",
+            "deps": [],
+            "defs": ["value/0"]
+        }]),
+        _ => return None,
+    };
+    Some(
+        expected
+            .as_array()
+            .expect("special expected sequence")
+            .iter()
+            .cloned()
+            .map(|value| RuntimeValue::from_json(value).expect("special expected value converts"))
+            .collect(),
+    )
+}
+
+fn assert_composition_contract(case: &CompatibilityCase, observation: &EmbeddedObservation) {
+    match case.expected.contract {
+        ContractKind::ResultSequence => {
+            if case.id == "manual.composition.arity.halt.0" {
+                assert!(matches!(
+                    &observation.error,
+                    Some(VmError::Halt { status: 0, stderr }) if stderr.is_empty()
+                ));
+            } else {
+                assert!(
+                    observation.error.is_none(),
+                    "{} unexpectedly failed: {:?}",
+                    case.id,
+                    observation.error
+                );
+            }
+        }
+        ContractKind::Error => {
+            let Some(error) = &observation.error else {
+                panic!("{} must produce its intentional runtime error", case.id)
+            };
+            assert!(!matches!(error, VmError::Halt { .. }), "{} halted", case.id);
+            match case.id.as_str() {
+                "manual.composition.arity.error.1" => assert!(matches!(
+                    error,
+                    VmError::Raised {
+                        value: RuntimeValue::String(value),
+                        ..
+                    } if value.as_ref() == "boom"
+                )),
+                "manual.composition.arity.upper-join.2" => assert!(matches!(
+                    error,
+                    VmError::Runtime { message }
+                        if message.as_ref() == "field access cannot be applied to string"
+                )),
+                _ => panic!("{} has no typed embedded error contract", case.id),
+            }
+        }
+        ContractKind::ExitStatus => {
+            let Some(VmError::Halt { status, stderr }) = &observation.error else {
+                panic!("{} must produce a typed halt", case.id)
+            };
+            let expected_status = if case.id.ends_with("halt-error.0") {
+                5
+            } else {
+                7
+            };
+            assert_eq!(*status, expected_status, "{} halt status", case.id);
+            let expected_stderr = if case.id.ends_with("halt-error.0") {
+                b"".as_slice()
+            } else {
+                b"failure".as_slice()
+            };
+            assert_eq!(stderr.as_ref(), expected_stderr, "{} halt stderr", case.id);
+        }
+        ContractKind::RawBytes => panic!("{} is not an embedded value case", case.id),
+    }
+}
+
+fn assert_same_composition_observation(
+    case: &CompatibilityCase,
+    composed: &EmbeddedObservation,
+    direct: &EmbeddedObservation,
+) {
+    assert_eq!(
+        composed.results, direct.results,
+        "{} result sequence",
+        case.id
+    );
+    assert_eq!(composed.error, direct.error, "{} runtime outcome", case.id);
+    assert_eq!(composed.effects, direct.effects, "{} effect bytes", case.id);
 }
 
 #[test]
@@ -569,6 +954,80 @@ fn composition_inventory_admits_documented_signatures_without_execution() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+#[test]
+fn composition_inventory_executes_all_catalog_witnesses_through_embedded_vm() {
+    let repo_root = root();
+    let catalog = load_catalog(&repo_root.join("tests/compatibility/cases")).expect("catalog");
+    let cases = catalog
+        .cases
+        .iter()
+        .filter(|case| case.id.starts_with("manual.composition."))
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 297, "composition catalog denominator");
+
+    let mut direct_comparisons = 0;
+    let mut inventory_expectations = 0;
+    for case in cases {
+        assert_eq!(case.status, CaseStatus::Mvp, "{} status", case.id);
+        assert!(case.adapters.tq.supported, "{} tq adapter", case.id);
+        assert_eq!(
+            case.invocation_mode,
+            InvocationMode::Stdin,
+            "{} mode",
+            case.id
+        );
+
+        let composed = execute_composition_query(case, &case.query, repo_root);
+        assert_composition_contract(case, &composed);
+        if let Some(expected) = expected_special_results(&case.id) {
+            assert_eq!(
+                composed.results, expected,
+                "{} independent input/module witness",
+                case.id
+            );
+        }
+        if let Some(expected_effects) = expected_composition_effects(&case.id) {
+            assert_eq!(
+                composed.effects, expected_effects,
+                "{} effect bytes",
+                case.id
+            );
+        } else {
+            assert!(
+                composed.effects.is_empty(),
+                "{} unexpected effects",
+                case.id
+            );
+        }
+
+        if let Some(direct_query) = direct_composition_query(&case.query) {
+            let direct = execute_composition_query(case, &direct_query, repo_root);
+            assert_same_composition_observation(case, &composed, &direct);
+            direct_comparisons += 1;
+        } else if case.id.starts_with("manual.composition.inventory.") {
+            assert_eq!(
+                composed.error, None,
+                "{} inventory witness unexpectedly failed",
+                case.id
+            );
+            assert_eq!(
+                composed.results,
+                expected_inventory_results(&case.id),
+                "{} independent inventory witness",
+                case.id
+            );
+            inventory_expectations += 1;
+        } else {
+            panic!("{} has no independent execution witness", case.id);
+        }
+    }
+    assert_eq!(
+        direct_comparisons, 249,
+        "operation and arity direct comparisons"
+    );
+    assert_eq!(inventory_expectations, 48, "inventory expected witnesses");
 }
 
 #[test]

@@ -6,6 +6,37 @@ disparities documented for later reconsideration. Completed tasks are recorded i
 the live task checklist. The final verification section distinguishes accepted
 evidence from historical checkpoints. No checkpoint establishes 100% exact parity.
 
+## Embedded inventory execution, 2026-09-15
+
+All 297 composition witnesses now execute through the public embedded VM API.
+The test compares 249 operation and arity witnesses with their direct-query
+forms, including ordered results, typed errors, halts, and effect bytes. The
+remaining 48 context witnesses use explicit expected result sequences. Input,
+line-number, environment, module metadata, and effect witnesses also have
+independent expectations so shared harness setup cannot hide those mistakes.
+The primary review corrected shared input consumption and tightened error and
+effect assertions before accepting the run. This is composition evidence, not
+an independent jq oracle for every embedded result.
+
+The current inventory labels now say `managed` for executable witnesses and
+retain `kernel-only` for VM control instructions. All case IDs, source links,
+queries, inputs, and other non-admission fields are unchanged. Historical
+campaign reports and executable-bound approvals are untouched.
+
+Pinned nightly checks pass all 14 inventory and campaign-script tests, plus
+28 recursion, resource-limit, and path-composition tests. The native release
+workflow now uploads its manual reports even after a strict-gate failure,
+without allowing the gate to pass or tolerating missing artifacts. Workflow
+linting passes. No new native release campaign is claimed by these checks.
+
+The subsequent full pinned-nightly preflight passes 1,655 tests across 137
+suites, with eight ignored and two filtered. Formatting, workspace checks,
+strict Clippy, OKF, and all 21 OpenSpec items also pass.
+
+Tasks 3.14 and 10.1 remain open for native release execution and the remaining
+acceptance evidence. Overall completion remains 63 of 69 tasks; the change is
+not ready to synchronize, archive, or merge into main.
+
 ## Format composition audit, 2026-09-15
 
 The suspected `@urid` composition failure does not reproduce. The existing
