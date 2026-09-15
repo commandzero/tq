@@ -3,7 +3,7 @@
 use std::{ffi::OsString, fmt::Write as _, fs, io::Cursor};
 
 use tempfile::NamedTempFile;
-use tq_cli::{ExitStatus, parse_args, run_with_io};
+use tq_cli::{Command, ExitStatus, parse_args, run_with_io};
 use tq_core::{PlanKind, ResolveOptions, analyze, parse, resolve};
 
 #[derive(Debug, Eq, PartialEq)]
@@ -18,7 +18,19 @@ where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
-    let command = parse_args(arguments).expect("spool-limit arguments parse");
+    execute_with_filesystem(arguments, input, true)
+}
+
+fn execute_with_filesystem<I, S>(arguments: I, input: &[u8], filesystem: bool) -> Observation
+where
+    I: IntoIterator<Item = S>,
+    S: Into<OsString>,
+{
+    let mut command = parse_args(arguments).expect("spool-limit arguments parse");
+    let Command::Run(options) = &mut command else {
+        panic!("expected query command");
+    };
+    options.capability_policy.filesystem = filesystem;
     let mut input = Cursor::new(input.to_vec());
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
@@ -53,6 +65,39 @@ fn many_items(count: usize) -> String {
     }
     input.push_str("]}");
     input
+}
+
+#[test]
+fn filesystem_denial_rejects_root_spills_but_preserves_memory_fit_input() {
+    let query = ".features[].id";
+    assert_subtree_proof(query);
+    let arguments = [
+        "--input-format",
+        "json",
+        "--output-format",
+        "jsonl",
+        "--prepare-memory-bytes",
+        "2048",
+        "--max-spool-bytes",
+        "1048576",
+        query,
+    ];
+    let large = many_items(1_000);
+    let allowed = execute_with_filesystem(arguments, large.as_bytes(), true);
+    assert_eq!(allowed.status, Ok(ExitStatus::Success));
+    let mut expected = String::new();
+    for index in 0..1_000 {
+        writeln!(expected, "{index}").expect("expected output string write");
+    }
+    assert_eq!(allowed.stdout, expected.as_bytes());
+
+    let denied = execute_with_filesystem(arguments, large.as_bytes(), false);
+    assert_eq!(denied.status, Err(ExitStatus::Resource));
+    assert_eq!(denied.stdout, [] as [u8; 0]);
+
+    let memory_fit = execute_with_filesystem(arguments, many_items(1).as_bytes(), false);
+    assert_eq!(memory_fit.status, Ok(ExitStatus::Success));
+    assert_eq!(memory_fit.stdout, b"0\n");
 }
 
 #[test]
