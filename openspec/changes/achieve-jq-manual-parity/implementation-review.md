@@ -20,6 +20,21 @@ percent encoding and the output-byte limit. CLI tests cover default TOON,
 explicit pretty JSON, compact JSON, and invalid-encoding process behavior.
 The focused suites pass 13 core tests and four CLI tests.
 
+The first local preflight used Homebrew Rust 1.98 and Clippy 0.1.98 because
+their executables preceded rustup in `PATH`; the repository toolchain file did
+not control those executables. That run passed 1,653 tests but is not pinned
+nightly evidence. Both CI runs caught `clippy::assert_is_empty` in the new CLI
+test. The assertion now compares stdout with an empty byte array, preserving
+the contract and improving failure diagnostics. Pinned verification must put
+the resolved nightly toolchain's `bin` directory first in `PATH` and verify
+the actual compiler and Clippy versions before running preflight.
+The subsequent fresh-target run with Rust 1.100.0-nightly and Clippy 0.1.100
+from the pinned 2026-08-30 toolchain passed all 1,653 tests, with eight ignored
+and two filtered across 137 suites, plus formatting, workspace checks, strict
+Clippy, OKF and all 21 OpenSpec items. An overlapping Homebrew rerun hit the
+previously recorded 100 ms timeout-capture prefix assertion; its failed
+observation remains recorded separately and is not explained by this pass.
+
 A fresh native macOS debug campaign against pinned jq 1.8.1 records 949 exact
 matches among 952 cases, including all 297 composition cases. Compact JSON
 passes 918 of 921 contracts; TOON passes all 921. The strict gate exits 1 on
