@@ -1170,7 +1170,12 @@ pub fn decode_bytes(
         InputFormat::Json => decode_json_with_options(bytes, identity, options),
         InputFormat::Json5 => decode_json5(bytes, identity, options),
         InputFormat::JsonLines => decode_json_lines(bytes, identity, options),
-        InputFormat::ToonSequence => decode_toon_sequence(bytes, identity, options.toon),
+        InputFormat::ToonSequence => decode_toon_sequence_with_frame_limit(
+            bytes,
+            identity,
+            options.toon,
+            options.maximum_frame_bytes,
+        ),
         InputFormat::JsonSequence | InputFormat::Csv | InputFormat::Tsv => {
             let mut input = crate::NativeFormat::from_input(options.format)
                 .ok_or_else(|| FormatError::Parse {
@@ -1894,9 +1899,18 @@ pub fn decode_toon_sequence(
     identity: impl Into<String>,
     config: DecoderConfig,
 ) -> Result<Vec<Document>, FormatError> {
+    decode_toon_sequence_with_frame_limit(bytes, identity, config, bytes.len())
+}
+
+fn decode_toon_sequence_with_frame_limit(
+    bytes: &[u8],
+    identity: impl Into<String>,
+    config: DecoderConfig,
+    maximum_frame_bytes: usize,
+) -> Result<Vec<Document>, FormatError> {
     let identity = identity.into();
     let mut documents = Vec::new();
-    let mut frames = crate::rs_framing::RsFramer::new(bytes, bytes.len());
+    let mut frames = crate::rs_framing::RsFramer::new(bytes, maximum_frame_bytes);
     while let Some((index, record)) = frames.next_segment()? {
         documents.push(decode_toon_segment(&record, &identity, config, index)?);
     }
@@ -2417,6 +2431,49 @@ second \n line with "quotes""""}"#,
         let quoted_digits = format!("\"{over_limit}\"");
         let documents = decode_yaml(quoted_digits.as_bytes(), "quoted-digits").unwrap();
         assert_eq!(documents[0].value, tq_core::Value::string(over_limit));
+    }
+
+    #[test]
+    fn toon_sequence_byte_decode_enforces_configured_frame_limit() {
+        let result = decode_bytes(
+            b"\x1ea: 1\n",
+            "sequence",
+            DecodeOptions {
+                format: InputFormat::ToonSequence,
+                maximum_frame_bytes: 4,
+                ..DecodeOptions::default()
+            },
+        );
+        assert!(matches!(result, Err(FormatError::Resource("frame-bytes"))));
+    }
+
+    #[test]
+    fn toon_sequence_byte_decode_frame_limit_is_per_segment_and_includes_lf() {
+        let options = DecodeOptions {
+            format: InputFormat::ToonSequence,
+            maximum_frame_bytes: 5,
+            ..DecodeOptions::default()
+        };
+        let documents = decode_bytes(b"\x1ea: 1\n\x1eb: 2\n", "sequence", options).unwrap();
+        assert_eq!(documents.len(), 2);
+        assert_eq!(documents[0].value.to_string(), r#"{"a":1}"#);
+        assert_eq!(documents[1].value.to_string(), r#"{"b":2}"#);
+        assert_eq!(documents[1].index, 1);
+        assert!(matches!(
+            decode_bytes(b"\x1ea: 1\n\x1eb: 22\n", "sequence", options),
+            Err(FormatError::Resource("frame-bytes"))
+        ));
+        assert!(matches!(
+            decode_bytes(
+                b"\x1e1\n",
+                "sequence",
+                DecodeOptions {
+                    maximum_frame_bytes: 0,
+                    ..options
+                },
+            ),
+            Err(FormatError::Resource("frame-bytes"))
+        ));
     }
 
     #[test]

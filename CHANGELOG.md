@@ -50,6 +50,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Security
 
+- Enforced configured TOON sequence frame limits in byte-slice decoding before document materialization (#35).
 - Prevented automatic runtime root staging from spilling to disk when an embedded caller denies filesystem access (#42).
 - Kept signed jq artifact URLs out of downloader command arguments and sanitized download failure diagnostics (#47).
 
