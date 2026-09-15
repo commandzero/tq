@@ -2,7 +2,7 @@
 type: Report
 title: jq parity migration and security notes
 description: Unreleased output, numeric, and ambient-access changes for jq manual compatibility.
-generated: { by: codex/gpt-6-astra, at: 2026-09-10T00:05:28Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T05:04:02Z }
 ---
 
 # jq parity migration and security notes
@@ -10,6 +10,35 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-10T00:05:28Z }
 These notes describe the unreleased manual-compatibility work. They are not a
 claim that the full manual or every release platform has passed acceptance.
 See the [compatibility guide](compatibility.md) for the evidence policy.
+
+## Rust library migration to 0.4.0
+
+The workspace crates move together from 0.3.0 to 0.4.0. This minor-version
+boundary identifies incompatible pre-1.0 Rust API changes, not a change to the
+jq language target or a completed compatibility claim. Update dependencies on
+the published tq crates together to avoid mixing incompatible value types.
+
+`tq_formats::Document` adds the required public `line_number: u64` field.
+Code constructing a struct literal must supply the one-based physical source
+line reached while decoding that document. For a synthetic single-line source:
+
+```rust
+use tq_core::Value;
+use tq_formats::{Document, InputFormat};
+
+let document = Document {
+    value: Value::Null,
+    identity: "synthetic".to_owned(),
+    format: InputFormat::Json,
+    index: 0,
+    line_number: 1,
+};
+```
+
+This is a Rust construction-contract change; CLI users do not construct these
+values. Decoders populate the field themselves. For multiline or multi-document
+sources, preserve the physical line position rather than deriving it from the
+document index. The unreleased version bump does not publish crates or tags.
 
 ## Minimum Rust version
 
