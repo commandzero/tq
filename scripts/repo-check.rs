@@ -305,8 +305,9 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
                 return Err(format!("{id}: archive is missing {required}"));
             }
         }
-        // Existing artifacts cannot disappear while an active change is archived.
-        let old = git(
+        // Preserve baseline artifacts and artifacts introduced by PR commits,
+        // even when their active paths disappeared before the final diff.
+        let mut old = git(
             root,
             &[
                 "ls-tree",
@@ -318,6 +319,20 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
                 &format!("openspec/changes/{id}/"),
             ],
         )?;
+        old.push_str(&git(
+            root,
+            &[
+                "log",
+                "--format=",
+                "--name-only",
+                "-z",
+                "--no-renames",
+                "--diff-filter=AM",
+                &format!("{}..{head}", merge_base.trim()),
+                "--",
+                &format!("openspec/changes/{id}/"),
+            ],
+        )?);
         for path in old.split('\0').filter(|p| !p.is_empty()) {
             let suffix = path
                 .strip_prefix(&format!("openspec/changes/{id}/"))
@@ -772,6 +787,26 @@ mod tests {
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_ok());
         let head = repo.commit();
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_err());
+    }
+
+    #[test]
+    fn archive_preserves_artifacts_introduced_during_the_pr() {
+        let repo = Repo::new();
+        repo.write("openspec/specs/test/spec.md", MAIN);
+        let base = repo.commit();
+        repo.write("openspec/changes/change/design.md", "New design");
+        repo.commit();
+        fs::remove_dir_all(repo.0.join("openspec/changes/change")).unwrap();
+        repo.archive("change");
+        let head = repo.commit();
+        let error = openspec(&repo.0, &base, &head, "OpenSpec changes: change").unwrap_err();
+        assert!(error.contains("lost artifact design.md"), "{error}");
+        repo.write(
+            "openspec/changes/archive/2026-09-06-change/design.md",
+            "New design",
+        );
+        let head = repo.commit();
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_ok());
     }
 
     #[test]

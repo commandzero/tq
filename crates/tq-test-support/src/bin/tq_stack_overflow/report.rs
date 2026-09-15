@@ -275,7 +275,7 @@ pub fn render_report_with_outputs(
 
     let mut pending = Vec::with_capacity(scenarios.len() + 1);
     let mut migrations = Vec::new();
-    let mut page_paths = BTreeSet::new();
+    let mut page_paths = BTreeSet::from([report_dir.join("index.md")]);
     for record in scenarios {
         let path = report_dir.join(page_filename(record));
         if !page_paths.insert(path.clone()) {
@@ -1309,6 +1309,20 @@ mod tests {
             fs::read_to_string(&legacy).unwrap(),
             "Conflicting legacy text"
         );
+    }
+
+    #[test]
+    fn rendering_rejects_reserved_index_filename_without_overwriting() {
+        let directory = tempdir().unwrap();
+        let report = report(false, &BenchmarkOutcome::Timed);
+        let mut scenario = scenario_fixture();
+        scenario.path = directory.path().join("index.toon");
+        let index = directory.path().join("index.md");
+        fs::write(&index, "Existing index").unwrap();
+        let error =
+            render_report(&report, &[scenario], directory.path(), directory.path()).unwrap_err();
+        assert!(error.to_string().contains("duplicate report path"));
+        assert_eq!(fs::read_to_string(index).unwrap(), "Existing index");
     }
 
     #[test]
