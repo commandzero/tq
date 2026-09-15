@@ -256,7 +256,7 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
         &["ls-tree", "-r", "--name-only", "-z", head, "--", "openspec"],
     )?;
     let paths: Vec<_> = tree.split('\0').filter(|p| !p.is_empty()).collect();
-    let mut ids = associations(body)?;
+    let ids = associations(body)?;
     let mut changed_specs = BTreeSet::new();
     for path in changed.split('\0').filter(|p| !p.is_empty()) {
         if path.starts_with("openspec/specs/") {
@@ -264,7 +264,11 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
             continue;
         }
         if let Some(id) = change_id(path) {
-            ids.insert(id);
+            if !ids.contains(&id) {
+                return Err(format!(
+                    "{id}: list this changed archive or change in 'OpenSpec changes:'"
+                ));
+            }
         } else {
             return Err(format!(
                 "Cannot identify the change for {path}; use lowercase change IDs and YYYY-MM-DD-<id> archive directories"
@@ -598,7 +602,8 @@ mod tests {
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
         repo.archive("new-spec");
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: new-spec").is_ok());
         repo.write("openspec/specs/unrelated/spec.md", MAIN);
         let head = repo.commit();
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: new-spec").is_err());
@@ -609,7 +614,7 @@ mod tests {
         let base = repo.commit();
         repo.archive("new-spec");
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: new-spec").is_err());
     }
     #[test]
     fn edited_deleted_and_renamed_active_changes_fail() {
@@ -638,7 +643,9 @@ mod tests {
         repo.archive("first");
         repo.archive("second");
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: first").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: first, second").is_ok());
         repo.write(
             "openspec/specs/test/spec.md",
             &MAIN.replace("correct", "wrong"),
@@ -737,13 +744,13 @@ mod tests {
         )
         .unwrap();
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_err());
         repo.write(
             "openspec/changes/archive/2026-09-06-change/no-spec-deltas.md",
             "Documentation-only change; no product requirements change. Review with the PR.",
         );
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_ok());
     }
     #[test]
     fn archive_preserves_active_artifacts_and_checks_committed_state() {
@@ -754,17 +761,17 @@ mod tests {
         fs::remove_dir_all(repo.0.join("openspec/changes/change")).unwrap();
         repo.archive("change");
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_err());
         repo.write(
             "openspec/changes/archive/2026-09-06-change/design.md",
             "Important design",
         );
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_ok());
         repo.write("openspec/specs/test/spec.md", "uncommitted change");
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_ok());
         let head = repo.commit();
-        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: change").is_err());
     }
 
     #[test]
