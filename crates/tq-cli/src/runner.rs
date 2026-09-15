@@ -3637,7 +3637,7 @@ fn runtime_spool_for(options: &RunOptions) -> RuntimeSpool {
         maximum_token_bytes: options.limits.token_bytes,
         maximum_decoded_bytes: options.limits.preparation_memory_bytes as u64,
         spool_directory: std::env::temp_dir(),
-        allow_spool: true,
+        allow_spool: options.capability_policy.filesystem,
     };
     let spool = RuntimeSpool::new(config);
     match cancellation() {
