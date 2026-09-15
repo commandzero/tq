@@ -8,9 +8,14 @@ use std::{
 use tempfile::tempdir;
 
 fn run(query: &str, input: &[u8]) -> std::process::Output {
+    run_with_args(&["-o", "toon", "--unframed"], query, input)
+}
+
+fn run_with_args(args: &[&str], query: &str, input: &[u8]) -> std::process::Output {
     let home = tempdir().expect("controlled home creates");
     let mut child = Command::new(env!("CARGO_BIN_EXE_tq"))
-        .args(["-o", "toon", "--unframed", query])
+        .args(args)
+        .arg(query)
         .env("HOME", home.path())
         .env_remove("JQ_LIBRARY_PATH")
         .stdin(Stdio::piped())
@@ -50,4 +55,60 @@ fn cli_executes_composed_object_and_slice_filters() {
     );
     assert_eq!(slice.stdout, b"[3]: 0,1,2");
     assert_eq!(slice.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn cli_composes_uri_decode_through_default_toon_output() {
+    let output = run_with_args(
+        &[],
+        "def decode: @urid; map(decode)",
+        b"[\"a%2Fb\",\"x%20y\"]\n",
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"[2]: a/b,x y\n");
+    assert_eq!(output.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn cli_composes_uri_decode_with_explicit_json_and_compact_output() {
+    let query = "def decode: @urid; map(decode)";
+    let input = b"[\"a%2Fb\",\"x%20y\"]\n";
+
+    let pretty = run_with_args(&["-i", "json", "-o", "json"], query, input);
+    assert!(
+        pretty.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pretty.stderr)
+    );
+    assert_eq!(pretty.stdout, b"[\n  \"a/b\",\n  \"x y\"\n]\n");
+    assert_eq!(pretty.stderr, [] as [u8; 0]);
+
+    let compact = run_with_args(&["-i", "json", "-c"], query, input);
+    assert!(
+        compact.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compact.stderr)
+    );
+    assert_eq!(compact.stdout, b"[\"a/b\",\"x y\"]\n");
+    assert_eq!(compact.stderr, [] as [u8; 0]);
+}
+
+#[test]
+fn cli_composed_uri_decode_reports_invalid_encoding_as_runtime_failure() {
+    let output = run_with_args(
+        &["-i", "json", "-c"],
+        "def decode: @urid; map(decode)",
+        b"[\"ok\",\"bad%ZZ\"]\n",
+    );
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("valid uri encoding"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
