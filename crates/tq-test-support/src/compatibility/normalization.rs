@@ -74,6 +74,9 @@ pub enum NormalizationError {
     /// tq output was not a valid TOON Text Sequence.
     #[error("malformed TOON Text Sequence: {0}")]
     ToonSequence(String),
+    /// tq output was not a valid standalone TOON document.
+    #[error("malformed standalone TOON document: {0}")]
+    Toon(String),
 }
 
 /// Normalizes zero-or-more jq JSON result texts without sorting.
@@ -189,6 +192,120 @@ pub fn normalize_toon_sequence(
     ))
 }
 
+/// Normalizes one standalone TOON document, or zero output from a tq process.
+/// Empty stdout is retained as zero normalized results. The comparison layer
+/// uses the independently captured JSON results to preserve TOON's empty
+/// object encoding when its LF-terminated empty object was actually emitted.
+///
+/// # Errors
+///
+/// Returns a TOON decoding error when non-empty stdout is not one document.
+pub fn normalize_toon_document(
+    outcome: &ProcessOutcome,
+) -> Result<NormalizedObservation, NormalizationError> {
+    if outcome.stdout.is_empty() {
+        return Ok(observation(
+            ToolKind::Tq,
+            outcome,
+            Vec::new(),
+            None,
+            Vec::new(),
+        ));
+    }
+    let results = tq_formats::decode_toon(
+        &outcome.stdout,
+        "<tq-compatibility-output>",
+        tq_toon::DecoderConfig::default(),
+    )
+    .map_err(|error| NormalizationError::Toon(error.to_string()))?
+    .into_iter()
+    .map(|document| {
+        document
+            .value
+            .to_json()
+            .map(canonicalize_numbers)
+            .map_err(|error| NormalizationError::Toon(error.to_string()))
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+    Ok(observation(
+        ToolKind::Tq,
+        outcome,
+        results,
+        None,
+        Vec::new(),
+    ))
+}
+
+/// Uses independently observed JSON values to resolve TOON result boundaries.
+/// Every result must end with LF and every captured byte must be consumed.
+#[must_use]
+pub fn toon_values_match(stdout: &[u8], expected: &[Value]) -> bool {
+    if stdout.is_empty() {
+        return expected.is_empty();
+    }
+    let mut start = 0;
+    for expected_value in expected {
+        let end = stdout[start..]
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'\n')
+            .map(|(offset, _)| start + offset + 1)
+            .find(|end| {
+                tq_formats::decode_toon(
+                    &stdout[start..*end],
+                    "<tq-result>",
+                    tq_toon::DecoderConfig::default(),
+                )
+                .is_ok_and(|documents| {
+                    documents.len() == 1
+                        && documents[0]
+                            .value
+                            .to_json()
+                            .ok()
+                            .map(canonicalize_numbers)
+                            .as_ref()
+                            == Some(expected_value)
+                })
+            });
+        let Some(end) = end else {
+            return false;
+        };
+        start = end;
+    }
+    start == stdout.len()
+}
+
+/// Matches one unframed TOON document against the companion JSON value.
+///
+/// Unlike a normal TOON stream, an unframed document has no required trailing
+/// LF. The encoder also represents one empty object with zero bytes, so that
+/// representation is accepted only when the companion proves exactly one
+/// empty-object result.
+#[must_use]
+pub(crate) fn toon_unframed_value_match(stdout: &[u8], expected: &[Value]) -> bool {
+    if expected.len() != 1 {
+        return false;
+    }
+    if stdout.is_empty() {
+        return expected[0] == serde_json::json!({});
+    }
+    tq_formats::decode_toon(
+        stdout,
+        "<tq-unframed-result>",
+        tq_toon::DecoderConfig::default(),
+    )
+    .is_ok_and(|documents| {
+        documents.len() == 1
+            && documents[0]
+                .value
+                .to_json()
+                .ok()
+                .map(canonicalize_numbers)
+                .as_ref()
+                == Some(&expected[0])
+    })
+}
+
 /// Preserves exact stdout bytes for a raw-output contract.
 #[must_use]
 pub fn normalize_raw(tool: ToolKind, outcome: &ProcessOutcome) -> NormalizedObservation {
@@ -259,6 +376,10 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
     if stderr.contains("cannot index")
         || stderr.contains("type error")
         || stderr.contains("runtime error")
+        || tool == ToolKind::Jq
+            && stderr
+                .lines()
+                .any(|line| line.starts_with("jq: error (at "))
     {
         return Some(ErrorClass::RuntimeTypePath);
     }
@@ -273,9 +394,9 @@ pub fn classify_process(tool: ToolKind, outcome: &ProcessOutcome) -> Option<Erro
 
 fn canonicalize_numbers(value: Value) -> Value {
     match value {
-        Value::Number(number) => tq_core::Number::parse(&number.to_string())
+        Value::Number(number) => tq_core::Number::canonicalize_literal_numeric(&number.to_string())
             .ok()
-            .and_then(|number| number.to_string().parse().ok())
+            .and_then(|number| number.parse().ok())
             .map(Value::Number)
             .unwrap_or(Value::Number(number)),
         Value::Array(values) => {
@@ -314,7 +435,39 @@ fn observation(
 
 #[cfg(test)]
 mod tests {
-    use super::{ProcessOutcome, ProcessStatus, normalize_toon_sequence};
+    use super::{
+        ProcessOutcome, ProcessStatus, normalize_toon_document, normalize_toon_sequence,
+        toon_unframed_value_match,
+    };
+
+    #[test]
+    fn ordinary_toon_results_use_expected_boundaries_and_preserve_all_bytes() {
+        let values = vec![serde_json::json!({"a": 1}), serde_json::json!({"b": 2})];
+        assert!(super::toon_values_match(b"a: 1\nb: 2\n", &values));
+        assert!(!super::toon_values_match(b"a: 1\nb: 2", &values));
+        assert!(!super::toon_values_match(b"a: 1\nb: 2\n3\n", &values));
+        assert!(super::toon_values_match(b"", &[]));
+        assert!(!super::toon_values_match(b"", &[serde_json::json!({})]));
+        assert!(!super::toon_values_match(b"\n", &[]));
+        assert!(super::toon_values_match(b"\n", &[serde_json::json!({})]));
+        assert!(super::toon_values_match(
+            b"0\n1e3\n",
+            &[serde_json::json!(0), serde_json::json!(1000)]
+        ));
+    }
+
+    #[test]
+    fn unframed_toon_matching_requires_one_value_and_allows_no_lf() {
+        assert!(toon_unframed_value_match(b"1", &[serde_json::json!(1)]));
+        assert!(toon_unframed_value_match(b"", &[serde_json::json!({})]));
+        assert!(!toon_unframed_value_match(b"", &[]));
+        assert!(!toon_unframed_value_match(
+            b"1",
+            &[serde_json::json!(1), serde_json::json!(2)]
+        ));
+        assert!(!toon_unframed_value_match(b"1\n2", &[serde_json::json!(1)]));
+        assert!(!super::toon_values_match(b"1", &[serde_json::json!(1)]));
+    }
 
     #[test]
     fn failed_tq_process_ignores_only_its_incomplete_final_frame() {
@@ -346,5 +499,71 @@ mod tests {
         };
 
         assert!(normalize_toon_sequence(&outcome).is_err());
+    }
+
+    #[test]
+    fn successful_empty_toon_sequence_has_no_results() {
+        let outcome = ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(0),
+            signal: None,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        };
+
+        let normalized = normalize_toon_sequence(&outcome).unwrap();
+        assert_eq!(normalized.results, [] as [serde_json::Value; 0]);
+    }
+
+    #[test]
+    fn standalone_toon_output_is_normalized_without_sequence_framing() {
+        let outcome = ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(0),
+            signal: None,
+            stdout: b"a: 1".to_vec(),
+            stderr: Vec::new(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        };
+
+        let normalized = normalize_toon_document(&outcome).unwrap();
+        assert_eq!(normalized.results, [serde_json::json!({"a": 1})]);
+        assert_eq!(normalized.error_class, None);
+    }
+
+    #[test]
+    fn successful_empty_standalone_toon_document_has_no_results() {
+        let outcome = ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(0),
+            signal: None,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        };
+
+        let normalized = normalize_toon_document(&outcome).unwrap();
+        assert_eq!(normalized.results, [] as [serde_json::Value; 0]);
+    }
+
+    #[test]
+    fn failed_empty_standalone_toon_output_has_no_results() {
+        let outcome = ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(5),
+            signal: None,
+            stdout: Vec::new(),
+            stderr: b"runtime error".to_vec(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        };
+
+        let normalized = normalize_toon_document(&outcome).unwrap();
+        assert_eq!(normalized.results, [] as [serde_json::Value; 0]);
+        assert!(normalized.error_class.is_some());
     }
 }

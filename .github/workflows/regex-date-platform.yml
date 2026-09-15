@@ -1,0 +1,103 @@
+name: Regex, date, and platform contract
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Reviewed release tag to validate before publication
+        required: true
+        type: string
+      reference_jq_linux_url:
+        description: "Reviewed x86_64-linux jq artifact URL"
+        required: false
+        type: string
+      reference_jq_linux_sha256:
+        description: "SHA-256 for the reviewed x86_64-linux jq artifact"
+        required: false
+        type: string
+      reference_jq_macos_url:
+        description: "Reviewed aarch64-macos jq artifact URL"
+        required: false
+        type: string
+      reference_jq_macos_sha256:
+        description: "SHA-256 for the reviewed aarch64-macos jq artifact"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release-host-contract:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native Linux and macOS remain required release-host contracts. The
+          # checked-in artifact identities are fail-closed defaults; dispatch
+          # inputs and repository variables remain explicit reviewed overrides.
+          - os: ubuntu-latest
+            reference_target: x86_64-linux
+            reference_jq_url: https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64
+            reference_jq_sha256: 020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d
+          - os: macos-latest
+            reference_target: aarch64-macos
+            reference_jq_url: https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-macos-arm64
+            reference_jq_sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+          # Windows execution is deferred pending an authorized native
+          # runner. Keep its shell contracts in platform_shell.rs for later
+          # execution; do not represent an unverified host as complete here.
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Record release host target
+        run: rustc -vV
+      - name: Verify UTC boundaries and portable regex behavior
+        run: cargo test --locked -p tq-core regex_date_platform_release_host_contract
+      - name: Verify ambient policy and redaction
+        run: cargo test --locked -p tq-cli ambient
+      - name: Verify native shell invocation contracts
+        run: cargo test --locked -p tq-cli --test platform_shell
+      - name: Require a provisioned reviewed jq reference
+        # Reusable calls have no reference overrides. They use repository-variable
+        # overrides when present, otherwise the matrix's checked-in official
+        # URL/digest pair. The Linux artifact is static, while every observed
+        # runtime-library identity is still checked by the manual validator.
+        env:
+          TQ_REFERENCE_JQ_URL: ${{ matrix.reference_target == 'x86_64-linux' && (inputs.reference_jq_linux_url || vars.TQ_REFERENCE_JQ_LINUX_URL || matrix.reference_jq_url) || matrix.reference_target == 'aarch64-macos' && (inputs.reference_jq_macos_url || vars.TQ_REFERENCE_JQ_MACOS_URL || matrix.reference_jq_url) || '' }}
+          TQ_REFERENCE_JQ_SHA256: ${{ matrix.reference_target == 'x86_64-linux' && (inputs.reference_jq_linux_sha256 || vars.TQ_REFERENCE_JQ_LINUX_SHA256 || matrix.reference_jq_sha256) || matrix.reference_target == 'aarch64-macos' && (inputs.reference_jq_macos_sha256 || vars.TQ_REFERENCE_JQ_MACOS_SHA256 || matrix.reference_jq_sha256) || '' }}
+        shell: bash
+        run: ./scripts/reference-jq-provision.sh
+      - name: Provision the host tq parser
+        # Cargo install gives the bootstrap parser a stable path independent of
+        # build.target and target-dir settings used by the campaign itself.
+        shell: bash
+        run: |
+          host_target=$(rustc -vV | sed -n 's/^host: //p')
+          test -n "$host_target"
+          cargo install --locked --path crates/tq-cli --bin tq \
+            --target "$host_target" --root "$RUNNER_TEMP/tq-host"
+          "$RUNNER_TEMP/tq-host/bin/tq" --version
+          printf 'TQ_HOST_TQ=%s\n' "$RUNNER_TEMP/tq-host/bin/tq" >> "$GITHUB_ENV"
+      - name: Run the pinned manual release gate
+        # The command intentionally fails closed when this host has no
+        # reviewed jq pin; a green platform job must carry matched evidence.
+        shell: bash
+        run: ./scripts/campaign-run.sh compatibility strict
+      - name: Retain native manual evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: manual-${{ matrix.reference_target }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: target/compatibility/
+          if-no-files-found: error
+          retention-days: 30

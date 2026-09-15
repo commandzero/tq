@@ -2,12 +2,12 @@
 type: Guide
 title: "Contributing to tq"
 description: "Contributor setup, validation, and development requirements."
-generated: { by: codex/gpt-6, at: 2026-09-07T18:25:59Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
 ---
 
 # Contributing to tq
 
-All workspace crates require Rust 1.88 or newer. Use the repository's pinned
+All workspace crates require Rust 1.95 or newer. Use the repository's pinned
 toolchain for preflight checks. Run all commands below from the repository root.
 
 Run the repository preflight before submitting a change:
@@ -26,19 +26,18 @@ Use the [release playbook](releasing.md) for coordinated publication and the
 [changelog policy](changelog-policy.md) for new history entries.
 
 Shared standards come from the repo-man bundle selected by the nearest workspace
-AGENTS.md. In this workspace it starts at
-`/Users/reno/Development/commandzero/repo-man/index.md`.
-For another checkout, configure the parent AGENTS.md with the local bundle path.
+AGENTS.md. Resolve its pointer relative to that file. If no pointer is configured,
+use the local repo-man entry point at `~/.agents/memory/repo-man/index.md`.
 
 The campaign runner handles compatibility, benchmark, and fuzz programs:
 
 ```console
-./scripts/run-campaign.sh compatibility smoke
-./scripts/run-campaign.sh compatibility full
-./scripts/run-campaign.sh benchmark smoke
-./scripts/run-campaign.sh benchmark standard
-./scripts/run-campaign.sh benchmark large
-./scripts/run-campaign.sh fuzz default
+./scripts/campaign-run.sh compatibility smoke
+./scripts/campaign-run.sh compatibility full
+./scripts/campaign-run.sh benchmark smoke
+./scripts/campaign-run.sh benchmark standard
+./scripts/campaign-run.sh benchmark large
+./scripts/campaign-run.sh fuzz default
 ```
 
 ## Compatibility-case-first development
@@ -66,10 +65,48 @@ Add a self-regression threshold only after a stable local baseline exists.
 jq/yq ratios are comparisons, not universal tq pass/fail gates. Preserve
 incorrect, unsupported, timeout, signal/OOM, and resource-limit rows.
 
-Run every benchmark command outside restricted sandboxes with elevated
-permission to inspect child processes. On macOS, use `/usr/bin/time -l` for
-every authoritative peak RSS sample and record `maximum resident set size`.
-Discard and rerun campaigns whose permissions leave RSS unavailable.
+Run every authoritative benchmark campaign outside restricted sandboxes with
+the elevated permissions needed for native child accounting. The required
+production path is the Rust harness launching each executable directly and,
+once its native backend passes lifecycle and audited-counter validation,
+collecting the exact child's exit status, CPU usage, and OS-recorded peak RSS
+through its resource-aware waiter. It runs the native allocation preflight
+before corpus preparation; if RSS, units, or collector provenance are
+unavailable, abort before corpus work and repair the host permissions before
+retrying. A later invalid or missing authoritative RSS sample invalidates the
+campaign and must not be published. A draft or unverified native backend is
+not accepted benchmark evidence.
+
+Use `/usr/bin/time -l` on macOS and GNU `/usr/bin/time -v` on Linux only for
+independent validation of the native counters. These commands do not wrap
+production benchmark invocations or replace the harness accounting. `ps` is
+optional and may be selected only for explicitly requested process-group RSS
+limits or diagnostics; record its scope and interval because sampling can miss
+short peaks. Measurements without sampled limits do not require `ps`.
+Catalog cases that select an RSS limit, such as event streaming, still require
+it for separate enforcement repetitions. Production measurements never require
+`/usr/bin/time` or Python probes.
+
+Reports record the direct spawn-to-exit timing boundary, input-delivery method,
+RSS scope, and observed timing controls. One-decimal display precision is a
+presentation choice, not evidence of sub-millisecond or nanosecond accuracy.
+No-op and known-duration controls include startup and scheduling effects, not
+just timer error. Compare tools on the same host and OS with equivalent
+measurement settings, using repetitions and dispersion. Native
+Windows accounting remains deferred to issue #31 and cannot be claimed as
+verified by cross-compilation or emulation.
+
+State whether the platform waiter accounts for only the waited-for child or
+also includes waited-for descendants. Limit process-only comparisons to
+verified non-forking jq, yq, and tq workloads; forked workloads require an
+explicitly comparable RSS scope.
+
+For issue #30 self-regression review, disclose each comparable wall-time and
+peak-RSS increase above 20% independently with baseline, candidate, samples,
+dispersion, and an explanation. An increase greater than 20% and at most 50%
+is acceptable only when documented and all other gates pass; an increase above
+50% blocks acceptance until it is mitigated and remeasured. Exactly 20% does
+not require disclosure and exactly 50% does not block acceptance.
 
 ## Capability promotion
 

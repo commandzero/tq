@@ -1,8 +1,8 @@
 ---
 type: Decision
-title: "Compose native formats from framing, document codecs, and profiles"
-description: "Compose native formats from framing, document codecs, and directional profiles."
-generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+title: Compose native formats from framing, document codecs, and profiles
+description: Native format composition and the choice of a closed format catalog.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
 ---
 
 # Compose native formats from framing, document codecs, and profiles

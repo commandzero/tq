@@ -57,21 +57,26 @@ pub(crate) enum ExprKind {
     },
     Bind {
         value: Box<Expr>,
-        name: Arc<str>,
+        pattern: BindingPattern,
+        body: Box<Expr>,
+    },
+    BindAlternatives {
+        value: Box<Expr>,
+        patterns: Vec<BindingPattern>,
         body: Box<Expr>,
     },
     Reduce {
         generator: Box<Expr>,
-        name: Arc<str>,
+        pattern: BindingPattern,
         initial: Box<Expr>,
         update: Box<Expr>,
     },
     Foreach {
         generator: Box<Expr>,
-        name: Arc<str>,
+        pattern: BindingPattern,
         initial: Box<Expr>,
         update: Box<Expr>,
-        extract: Box<Expr>,
+        extract: Option<Box<Expr>>,
     },
     Define {
         definition: Box<Definition>,
@@ -123,6 +128,19 @@ pub(crate) struct FunctionParameter {
     pub(crate) kind: ParameterKind,
     pub(crate) span: Span,
     pub(crate) runtime_name: Option<Arc<str>>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum BindingPattern {
+    Variable(Arc<str>),
+    Array(Vec<BindingPattern>),
+    Object(Vec<BindingPatternEntry>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BindingPatternEntry {
+    pub(crate) key: Arc<str>,
+    pub(crate) pattern: BindingPattern,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -348,25 +366,44 @@ fn render(expr: &Expr, output: &mut String) {
             render(alternative, output);
             output.push(')');
         }
-        ExprKind::Bind { value, name, body } => {
+        ExprKind::Bind {
+            value,
+            pattern,
+            body,
+        } => {
             output.push_str("bind(");
             render(value, output);
-            output.push_str(" as $");
-            output.push_str(name);
+            output.push_str(" as ");
+            render_pattern(pattern, output);
+            output.push_str(" => ");
+            render(body, output);
+            output.push(')');
+        }
+        ExprKind::BindAlternatives {
+            value,
+            patterns,
+            body,
+        } => {
+            output.push_str("bind-alternatives(");
+            render(value, output);
+            for pattern in patterns {
+                output.push_str(" ?// ");
+                render_pattern(pattern, output);
+            }
             output.push_str(" => ");
             render(body, output);
             output.push(')');
         }
         ExprKind::Reduce {
             generator,
-            name,
+            pattern,
             initial,
             update,
         } => {
             output.push_str("reduce(");
             render(generator, output);
-            output.push_str(" as $");
-            output.push_str(name);
+            output.push_str(" as ");
+            render_pattern(pattern, output);
             output.push_str("; init: ");
             render(initial, output);
             output.push_str("; update: ");
@@ -375,21 +412,23 @@ fn render(expr: &Expr, output: &mut String) {
         }
         ExprKind::Foreach {
             generator,
-            name,
+            pattern,
             initial,
             update,
             extract,
         } => {
             output.push_str("foreach(");
             render(generator, output);
-            output.push_str(" as $");
-            output.push_str(name);
+            output.push_str(" as ");
+            render_pattern(pattern, output);
             output.push_str("; init: ");
             render(initial, output);
             output.push_str("; update: ");
             render(update, output);
-            output.push_str("; extract: ");
-            render(extract, output);
+            if let Some(extract) = extract {
+                output.push_str("; extract: ");
+                render(extract, output);
+            }
             output.push(')');
         }
         ExprKind::Define { definition, body } => {
@@ -473,6 +512,37 @@ fn render(expr: &Expr, output: &mut String) {
             path,
             value,
         } => render_binary(assignment_name(*operator), path, value, output),
+    }
+}
+
+fn render_pattern(pattern: &BindingPattern, output: &mut String) {
+    match pattern {
+        BindingPattern::Variable(name) => {
+            output.push('$');
+            output.push_str(name);
+        }
+        BindingPattern::Array(patterns) => {
+            output.push('[');
+            for (index, pattern) in patterns.iter().enumerate() {
+                if index > 0 {
+                    output.push_str(", ");
+                }
+                render_pattern(pattern, output);
+            }
+            output.push(']');
+        }
+        BindingPattern::Object(entries) => {
+            output.push('{');
+            for (index, entry) in entries.iter().enumerate() {
+                if index > 0 {
+                    output.push_str(", ");
+                }
+                output.push_str(&entry.key);
+                output.push_str(": ");
+                render_pattern(&entry.pattern, output);
+            }
+            output.push('}');
+        }
     }
 }
 

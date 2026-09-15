@@ -99,18 +99,19 @@ The CLI SHALL respond to user interruption and downstream pipe closure without u
 
 ### Requirement: Partial output transparency
 If an error occurs after results have already been written, the CLI SHALL
-preserve earlier valid framed records and report that execution ended with an
-error. Direct transcode output MAY leave an incomplete current framed record and
-MUST identify that possibility in plan explanation. Unframed output MUST remain
-atomic. The CLI MUST NOT claim atomic sequence output unless an explicit atomic
-or fully spooled mode was requested.
+preserve earlier valid records using the selected output writer's framing and
+report that execution ended with an error. Direct transcode in an explicitly
+selected sequence mode MAY leave an incomplete current sequence record and MUST
+identify that possibility in plan explanation. Unframed output MUST remain
+atomic. The CLI MUST NOT claim atomic sequence output unless an explicit
+atomic-or-fully-spooled mode was requested.
 
 #### Scenario: Error after first result
 - **WHEN** a filter emits one result and then raises an error
 - **THEN** the first complete record remains on stdout, the diagnostic appears on stderr, and the process exits nonzero
 
 #### Scenario: Error during transcode record
-- **WHEN** a transcode decoder fails after writing part of the current sequence record
+- **WHEN** a transcode decoder fails after writing part of the current sequence record in an explicitly selected sequence mode
 - **THEN** the CLI reports an incomplete final record and exits nonzero without retracting earlier complete records
 
 #### Scenario: Error during unframed preparation

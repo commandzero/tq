@@ -2,7 +2,7 @@
 type: Policy
 title: "Contributor checks"
 description: "Local validation, OpenSpec completion, and required PR checks."
-generated: { by: codex/gpt-6, at: 2026-09-07T01:44:50Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
 ---
 
 # Contributor checks
@@ -19,15 +19,24 @@ The development compiler is pinned in `rust-toolchain.toml`. Install rustup,
 Node.js 22 or newer, Go, and ShellCheck, then run from the repository root:
 
 ```sh
-source scripts/tool-versions.sh
+source scripts/tools-versions.sh
 cargo install okf --version "$OKF_VERSION" --locked
 npm install --global "@fission-ai/openspec@$OPENSPEC_VERSION"
 GOBIN="$PWD/target/tools/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@v$ACTIONLINT_VERSION"
 ```
 
-The Bash scripts support Bash 3.2. The dependency-free Rust repository checker
-avoids a separate scripting runtime or dependency graph for governance checks.
-Tool versions live in `scripts/tool-versions.sh`; update local and CI usage together.
+The Bash scripts support Bash 3.2 and require ripgrep for filename scans.
+The dependency-free Rust repository checker handles Git-scoped association,
+artifact preservation, and requirement comparison, not Markdown or task parsing.
+Tool versions live in `scripts/tools-versions.sh`; update local and CI usage together.
+
+OKF 0.2.7 provides bundle conformance, index and cross-link validation, including
+section anchors. Its lint command provides document hygiene checks. The shared
+docs check uses both. `okf links --broken --check` also reports non-concept assets
+such as the existing traceability TSV, so it is not an unconditional gate here.
+The filename check supplements OKF with the team's lowercase kebab-case rule
+for all docs files and test Markdown, including hidden and ignored files.
+No general Markdown parser runs alongside OKF.
 
 ## OpenSpec completion
 
@@ -45,13 +54,17 @@ Check out the PR head and run against its target branch:
 
 ```sh
 PR_BODY='OpenSpec changes: example-change' \
-  ./scripts/check-openspec.sh origin/main HEAD
+  ./scripts/openspec-check.sh origin/main HEAD
 ```
 
 The checker uses the merge base, examines both sides of renames, and checks
 committed state. Unrelated active changes do not block the PR.
 Every selected change must leave the active directory and retain its artifacts
-in one date-prefixed archive. Archived tasks must be complete.
+in one date-prefixed archive. Archived tasks must pass OpenSpec's native check.
+The script exports only selected, committed task files to a temporary OpenSpec
+root and runs `openspec validate --archived` there. Version 1.11.0 checks every
+archive in its working directory, so this isolation keeps unrelated historical
+findings outside the PR gate. It preserves native task semantics and diagnostics.
 
 Added and modified requirements must match the main specification, including
 scenario bodies, after whitespace normalization. Removed requirements must be

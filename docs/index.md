@@ -4,23 +4,26 @@ okf_version: "0.2"
 
 # tq documentation
 
-The complete `docs/` directory is the OKF bundle. Markdown files are concepts;
-`requirements-traceability.tsv` is supporting data. Keep source code, tooling,
-benchmark outputs, and working reports outside this directory.
+The complete `docs/` directory is the OKF bundle, including published test reports.
+`requirements-traceability.tsv` is supporting data. Keep tooling and temporary
+measurement captures outside this directory.
 
-Validate the complete bundle with `./scripts/check-docs.sh` from the repository root.
-The same entry point runs in PR checks.
+Run `./scripts/docs-check.sh` from the repository root to validate the bundle.
 
-1. [compatibility](compatibility.md) - jq semantics, supported behavior, and deliberate compatibility differences.
-2. [formats](formats.md) - Supported native formats, framing, and conversion behavior.
-3. [jq-1.8-cli-options](jq-1.8-cli-options.md) - Classification of jq command-line options and tq behavior.
-4. [jq-regex-date-platform](jq-regex-date-platform.md) - Regex and date behavior, platform capabilities, and resource limits.
-5. [performance-baseline](performance-baseline.md) - Benchmark correctness gates, baseline comparisons, and measurement limits.
-6. [requirements-traceability](requirements-traceability.md) - Routes from specification scenarios to implementation and test evidence.
-7. [toon-event-boundary](toon-event-boundary.md) - Event decoding and the boundary between TOON and query execution.
-8. [yaml-adapter-spike](yaml-adapter-spike.md) - YAML adapter findings and implementation constraints.
-9. [adr/0001-compose-native-formats](adr/0001-compose-native-formats.md) - Compose native formats from framing, document codecs, and directional profiles.
-10. [Changelog policy](changelog-policy.md) - How tq records notable changes and preserves release history.
-11. [Contributor checks](contributor-checks.md) - Local validation, OpenSpec completion, and required PR checks.
-12. [Contributing to tq](contributing.md) - Contributor setup and development requirements.
-13. [Releasing tq](releasing.md) - Prepare, validate, package, and publish a coordinated tq release.
+1. [Format compatibility](formats.md) - Input and output formats supported by jq, yq, and tq.
+2. [Compatibility](compatibility.md) - Supported behavior and compatibility evidence.
+3. [jq 1.8 CLI options](jq-1.8-cli-options.md) - Command-line behavior and intentional differences.
+4. [Regex, dates, and platform behavior](jq-regex-date-platform.md) - Dependencies, limits, and capability controls.
+5. [Test fixture storage savings](test-fixture-savings.md) - Exact character and tokenizer measurements for the root tests directory migration to TOON.
+6. [Performance baseline](performance-baseline.md) - Performance measurement and baseline evidence.
+7. [Requirements traceability](requirements-traceability.md) - Requirements mapped to implementation and test evidence.
+8. [TOON event boundary](toon-event-boundary.md) - Decoder and event-boundary design.
+9. [YAML adapter spike](yaml-adapter-spike.md) - YAML adapter investigation.
+10. [jq compatibility disparities](jq-compatibility-disparities.md) - Measured safe-library limitations and post-implementation reconsideration.
+11. [jq parity migration and security notes](jq-parity-migration.md) - Unreleased output, numeric, and ambient-access changes.
+12. [Test reviews](tests/index.md) - Section reviews and generated jq/tq token comparisons.
+13. [Native format architecture](adr/0001-compose-native-formats.md) - Document codecs, framing, and directional profiles.
+14. [Changelog policy](changelog-policy.md) - New entries and historical releases.
+15. [Contributor checks](contributor-checks.md) - Local validation and PR completion.
+16. [Contributing](contributing.md) - Setup and development requirements.
+17. [Releasing](releasing.md) - Candidate archives and coordinated publication.

@@ -1,8 +1,8 @@
 ---
-type: Design
-title: "TOON event boundary"
-description: "Event decoding and the boundary between TOON and query execution."
-generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+type: Report
+title: TOON event boundary
+description: Decoder event responsibilities and the boundary with query execution.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
 ---
 
 # TOON event boundary

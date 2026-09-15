@@ -1,8 +1,8 @@
 ---
-type: Research
-title: "`yaml_serde` adapter spike"
-description: "YAML adapter findings and implementation constraints."
-generated: { by: codex/gpt-6, at: 2026-09-07T01:36:48Z }
+type: Report
+title: YAML adapter spike
+description: MVP YAML adapter behavior and limits of scalar fidelity.
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
 ---
 
 # `yaml_serde` adapter spike

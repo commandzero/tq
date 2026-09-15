@@ -1,8 +1,8 @@
-//! Dependency-free checks for repository documentation and committed OpenSpec state.
+//! Git-scoped repository policy. Native validators own document and task syntax.
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env, fs,
-    path::{Path, PathBuf},
+    env,
+    path::Path,
     process::Command,
 };
 
@@ -18,71 +18,6 @@ fn git(root: &Path, args: &[&str]) -> Check<String> {
         return Err(String::from_utf8_lossy(&out.stderr).into_owned());
     }
     String::from_utf8(out.stdout).map_err(|e| e.to_string())
-}
-
-fn files(root: &Path) -> Check<Vec<PathBuf>> {
-    let mut result = Vec::new();
-    for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
-            result.extend(files(&entry.path())?);
-        } else {
-            result.push(entry.path());
-        }
-    }
-    result.sort();
-    Ok(result)
-}
-
-fn read(path: &Path) -> Check<String> {
-    fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-fn docs(root: &Path) -> Check<()> {
-    let bundle = root.join("docs");
-    let index = read(&bundle.join("index.md"))?;
-    for path in files(&bundle)? {
-        if path.extension().is_none_or(|e| e != "md") {
-            continue;
-        }
-        let relative = path.strip_prefix(&bundle).unwrap().to_string_lossy();
-        if relative != "index.md" && !index.contains(&format!("]({relative})")) {
-            return Err(format!("docs/index.md must list {relative}"));
-        }
-        let body = read(&path)?;
-        let mut fenced = false;
-        for line in body.lines() {
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                fenced = !fenced;
-                continue;
-            }
-            if fenced {
-                continue;
-            }
-            for part in line.split("](").skip(1) {
-                let target = part
-                    .split(')')
-                    .next()
-                    .unwrap_or("")
-                    .split('#')
-                    .next()
-                    .unwrap_or("");
-                if target.is_empty() || target.contains("://") || target.starts_with("mailto:") {
-                    continue;
-                }
-                let destination = if target.starts_with('/') {
-                    bundle.join(target.trim_start_matches('/'))
-                } else {
-                    path.parent().unwrap().join(target)
-                };
-                if !destination.exists() {
-                    return Err(format!("{}: missing link target {target}", path.display()));
-                }
-            }
-        }
-    }
-    println!("Documentation index and local file links pass.");
-    Ok(())
 }
 
 fn valid_id(id: &str) -> bool {
@@ -257,7 +192,7 @@ fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
     Ok(())
 }
 
-fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<()> {
+fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String>> {
     // Resolve revisions first, so neither revision can be interpreted as a Git option.
     let base = git(
         root,
@@ -315,6 +250,7 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<()> {
             ));
         }
     }
+    let mut selected = Vec::new();
     for id in &ids {
         if paths
             .iter()
@@ -342,10 +278,6 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<()> {
             if !paths.contains(&format!("{archive}/{required}").as_str()) {
                 return Err(format!("{id}: archive is missing {required}"));
             }
-        }
-        let tasks = git(root, &["show", &format!("{head}:{archive}/tasks.md")])?;
-        if tasks.contains("- [ ]") {
-            return Err(format!("{id}: archived tasks are incomplete"));
         }
         // Existing artifacts cannot disappear while an active change is archived.
         let old = git(
@@ -399,12 +331,13 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<()> {
             .unwrap_or_default();
             synchronized(&delta, &main, &previous).map_err(|e| format!("{id}/{suffix}: {e}"))?;
         }
-        println!("{id}: archived and synchronized; review any no-spec-deltas explanation.");
+        eprintln!("{id}: archived and synchronized; review any no-spec-deltas explanation.");
+        selected.push(archive.clone());
     }
     if ids.is_empty() {
-        println!("OpenSpec completion: not applicable.");
+        eprintln!("OpenSpec completion: not applicable.");
     }
-    Ok(())
+    Ok(selected)
 }
 
 fn docs_only(path: &str) -> bool {
@@ -458,10 +391,11 @@ fn main() {
     let args: Vec<_> = env::args().collect();
     let root = Path::new(".");
     let result = match args.get(1).map(String::as_str) {
-        Some("docs") if args.len() == 2 => docs(root),
         Some("scope") if args.len() == 4 => scope(root, &args[2], &args[3]),
-        Some("openspec") if args.len() == 4 => openspec(root, &args[2], &args[3], &env::var("PR_BODY").unwrap_or_default()),
-        _ => Err("Usage: repo-check.sh docs | scope BASE HEAD | openspec BASE HEAD (set PR_BODY with OpenSpec changes: field)".into()),
+        Some("openspec") if args.len() == 4 => openspec(root, &args[2], &args[3], &env::var("PR_BODY").unwrap_or_default()).map(|archives| {
+            for archive in archives { println!("{archive}"); }
+        }),
+        _ => Err("Usage: repo-check.sh scope BASE HEAD | openspec BASE HEAD (set PR_BODY with OpenSpec changes: field)".into()),
     };
     if let Err(error) = result {
         eprintln!("{error}");
@@ -473,6 +407,7 @@ fn main() {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::{fs, path::PathBuf};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     struct Repo(PathBuf);
     impl Repo {
@@ -598,6 +533,81 @@ mod tests {
         let head = repo.commit();
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: first, second").is_err());
     }
+
+    #[test]
+    fn native_task_gate_rejects_incomplete_selected_archives_only() {
+        let repo = Repo::new();
+        for script in [
+            "openspec-check.sh",
+            "repo-check.sh",
+            "repo-check.rs",
+            "tools-versions.sh",
+        ] {
+            let body = fs::read_to_string(Path::new("scripts").join(script)).unwrap();
+            repo.write(&format!("scripts/{script}"), &body);
+        }
+        use std::os::unix::fs::PermissionsExt;
+        for script in ["openspec-check.sh", "repo-check.sh"] {
+            fs::set_permissions(
+                repo.0.join("scripts").join(script),
+                fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        repo.archive("unrelated");
+        repo.write(
+            "openspec/changes/archive/2026-09-06-unrelated/tasks.md",
+            "- [ ] Unrelated unfinished history\n",
+        );
+        repo.write("openspec/specs/test/spec.md", &format!("# Test\n\n## Purpose\nVerify repository policy without changing native task validation semantics.\n\n{MAIN}"));
+        let base = repo.commit();
+        repo.archive("selected");
+        repo.write(
+            "openspec/changes/archive/2026-09-06-selected/tasks.md",
+            "- [ ] Finish selected change\n",
+        );
+        let head = repo.commit();
+        let run = |head: &str| {
+            Command::new("bash")
+                .args(["scripts/openspec-check.sh", &base, head])
+                .current_dir(&repo.0)
+                .env("PR_BODY", "OpenSpec changes: selected")
+                .env("OPENSPEC_TELEMETRY", "0")
+                .output()
+                .unwrap()
+        };
+        let incomplete = run(&head);
+        assert!(
+            !incomplete.status.success(),
+            "native validation must reject incomplete tasks"
+        );
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&incomplete.stdout),
+            String::from_utf8_lossy(&incomplete.stderr)
+        );
+        assert!(diagnostic.contains("selected"), "{diagnostic}");
+        repo.write(
+            "openspec/changes/archive/2026-09-06-selected/tasks.md",
+            "- [x] Finish selected change\n",
+        );
+        let head = repo.commit();
+        let complete = run(&head);
+        assert!(
+            complete.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&complete.stdout),
+            String::from_utf8_lossy(&complete.stderr)
+        );
+        repo.write(
+            "openspec/changes/archive/2026-09-06-selected/tasks.md",
+            "- [ ] Uncommitted regression\n",
+        );
+        assert!(
+            !run(&head).status.success(),
+            "dirty specs cannot stand in for committed evidence"
+        );
+    }
     #[test]
     fn no_delta_requires_archived_explanation() {
         let repo = Repo::new();
@@ -617,18 +627,6 @@ mod tests {
         let head = repo.commit();
         assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
     }
-    #[test]
-    fn docs_detect_missing_index_entries_and_deleted_targets() {
-        let repo = Repo::new();
-        repo.write("docs/index.md", "# Docs");
-        repo.write("docs/topic.md", "# Topic");
-        assert!(docs(&repo.0).is_err());
-        repo.write("docs/index.md", "[Topic](topic.md)");
-        assert!(docs(&repo.0).is_ok());
-        repo.write("docs/topic.md", "[Missing](gone.md)");
-        assert!(docs(&repo.0).is_err());
-    }
-
     #[test]
     fn archive_preserves_active_artifacts_and_checks_committed_state() {
         let repo = Repo::new();

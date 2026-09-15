@@ -2,11 +2,13 @@
 
 mod args;
 mod runner;
+mod runtime_spool;
 
 pub use args::{
     CapabilityPolicy, CliError, ColorMode, Command, ExecutionOverride, ExplainFormat,
-    ExternalArgument, ExternalArgumentKind, FilterSource, PositionalArgumentKind, ResourceLimits,
-    RunOptions, generated_help, parse_args, parse_args_with_policy,
+    ExternalArgument, ExternalArgumentKind, FilterSource, PositionalArgument,
+    PositionalArgumentKind, ResourceLimits, RunOptions, generated_help, parse_args,
+    parse_args_with_policy,
 };
 pub use runner::{RunError, run, run_with_io};
 pub use tq_formats::JsonIndent;
@@ -16,17 +18,17 @@ pub use tq_formats::JsonIndent;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExitStatus {
     /// Successful execution.
-    Success = 0,
+    Success,
     /// False/null last result under `--exit-status`.
-    FalseOrNull = 1,
+    FalseOrNull,
     /// No result under `--exit-status`.
-    NoResult = 4,
+    NoResult,
     /// CLI usage failure.
-    Usage = 2,
+    Usage,
     /// Query compilation failure.
-    Compile = 3,
+    Compile,
     /// Structured or raw input failure.
-    Input = 5,
+    Input,
     /// Query runtime failure.
     Runtime,
     /// Configured resource limit failure.
@@ -35,6 +37,8 @@ pub enum ExitStatus {
     Unsupported,
     /// Execution interrupted by the user.
     Interrupted,
+    /// jq's non-catchable `halt`/`halt_error` process status.
+    Halt(u8),
 }
 
 impl ExitStatus {
@@ -49,6 +53,7 @@ impl ExitStatus {
             Self::NoResult => 4,
             Self::Input | Self::Runtime | Self::Resource => 5,
             Self::Interrupted => 130,
+            Self::Halt(status) => status,
         }
     }
 }

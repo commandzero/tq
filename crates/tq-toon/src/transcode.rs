@@ -23,6 +23,8 @@ use crate::{
 pub enum TranscodeCommitment {
     /// Completed RS-prefixed records publish independently.
     DirectSequence,
+    /// LF-terminated values without RS framing.
+    DirectValues,
     /// Output targets an atomic publication buffer.
     AtomicUnframed,
 }
@@ -754,17 +756,19 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
                 self.document_active = true;
                 self.root_complete = false;
                 self.current_truthy = None;
-                if self.commitment == TranscodeCommitment::DirectSequence {
+                if self.commitment != TranscodeCommitment::AtomicUnframed {
                     self.output
                         .begin(self.preparation.clone(), self.arena.clone())?;
-                    self.output.write_all(b"\x1e")?;
+                    if self.commitment == TranscodeCommitment::DirectSequence {
+                        self.output.write_all(b"\x1e")?;
+                    }
                 }
             }
             Event::DocumentEnd { .. } => {
                 if !self.document_active || !self.root_complete || !self.frames.is_empty() {
                     return Err(TranscodeError::Structure("incomplete document"));
                 }
-                if self.commitment == TranscodeCommitment::DirectSequence {
+                if self.commitment != TranscodeCommitment::AtomicUnframed {
                     self.output.write_all(b"\n")?;
                     self.output.commit()?;
                 }
@@ -836,8 +840,8 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
         self.check_cancellation()
             .map_err(|error| error.to_string())?;
         if self.accepts_lightweight_scalar() {
-            let canonical =
-                Number::canonicalize_literal(&literal).map_err(|error| error.to_string())?;
+            let number = Number::parse(&literal).map_err(|error| error.to_string())?;
+            let canonical = number.canonical_numeric();
             self.complete_scalar(ScalarToken::Number(&canonical))
                 .map_err(|error| error.to_string())
         } else {

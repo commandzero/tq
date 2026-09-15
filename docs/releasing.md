@@ -2,7 +2,7 @@
 type: Playbook
 title: "Releasing tq"
 description: "Prepare, validate, package, and publish a coordinated tq release."
-generated: { by: codex/gpt-6, at: 2026-09-07T01:44:50Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
 ---
 
 # Releasing tq
@@ -38,16 +38,18 @@ workflow artifacts. It does not publish a GitHub release or registry package.
 
 This is the candidate validation matrix, not evidence that a given tag has
 passed. Do not advertise a target until that release's run succeeds.
-Windows retains its existing regex, date, and ambient-capability source tests,
-now before publication. Windows, Intel macOS, and musl archives have no recipe
-in this pipeline.
+The reusable native contract workflow retains main's reviewed jq provisioning,
+shell invocation tests, and strict manual release gate on Linux and macOS.
+It now runs against the candidate tag before publication. Windows execution
+remains deferred; its source tests remain in the repository. Windows, Intel
+macOS, and musl archives have no recipe in this pipeline.
 Record measured OS/ABI minimums before promising older-host compatibility.
 Ubuntu build success alone does not establish compatibility with older glibc.
 
 To reproduce one native job, use a clean checkout of the tag:
 
 ```sh
-./scripts/package-release.sh v0.4.0
+./scripts/release-package.sh v0.4.0
 ```
 
 The version above is an example, not a release claim.

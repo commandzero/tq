@@ -31,10 +31,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: preflight-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/tool-versions.sh') }}
+          key: preflight-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'scripts/tools-versions.sh') }}
       - name: Install validation tools
         run: |
-          source scripts/tool-versions.sh
+          source scripts/tools-versions.sh
           rustup show active-toolchain
           export PATH="$PWD/target/tools/bin:$PATH"
           echo "$PWD/target/tools/bin" >> "$GITHUB_PATH"
@@ -44,7 +44,7 @@ jobs:
           npm install --global "@fission-ai/openspec@$OPENSPEC_VERSION"
           GOBIN="$PWD/target/tools/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@v$ACTIONLINT_VERSION"
           sudo apt-get update
-          sudo apt-get install --yes shellcheck
+          sudo apt-get install --yes shellcheck ripgrep
       - name: Select checks
         id: scope
         env:
@@ -71,9 +71,9 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: ./scripts/check-openspec.sh "$BASE_SHA" "$HEAD_SHA"
+        run: ./scripts/openspec-check.sh "$BASE_SHA" "$HEAD_SHA"
       - name: Check minimum supported Rust
         if: steps.scope.outputs.mode != 'docs'
         run: |
-          rustup toolchain install 1.88.0 --profile minimal
-          rustup run 1.88.0 cargo check --workspace --all-targets --locked
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup run 1.95.0 cargo check --workspace --all-targets --locked

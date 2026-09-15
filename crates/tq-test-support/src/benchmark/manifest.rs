@@ -140,6 +140,9 @@ pub struct OutputContract {
 pub enum OutputContractKind {
     /// Compare ordered structured result values.
     SemanticSequence,
+    /// Compare ordered JSON values after validating and removing ANSI SGR escapes.
+    #[serde(rename = "colored-semantic-sequence")]
+    ColoredSemanticSequence,
     /// Compare exact output bytes.
     RawBytes,
     /// Compare exit behavior only.
@@ -157,6 +160,13 @@ pub struct BenchmarkAdapter {
     pub input_format: InputFormat,
     /// Whether the parser/execution combination applies.
     pub applicable: bool,
+    /// Why this adapter is excluded when it is not applicable.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_unsupported_reason",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unsupported_reason: Option<String>,
     /// Tool arguments before the query.
     pub args: Vec<String>,
     /// Tool-specific expression when its language differs from jq syntax.
@@ -164,6 +174,15 @@ pub struct BenchmarkAdapter {
     pub query: Option<String>,
     /// Report comparison group membership.
     pub comparison_families: Vec<ComparisonFamily>,
+}
+
+fn deserialize_unsupported_reason<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer)
+        .map(Some)
+        .map_err(|error| serde::de::Error::custom(format!("unsupported_reason: {error}")))
 }
 
 /// Benchmark tool.
@@ -232,6 +251,30 @@ pub enum BenchmarkCatalogError {
         /// JSON failure.
         source: serde_json::Error,
     },
+    /// Adapter applicability and exclusion reason disagree.
+    #[error("invalid benchmark adapter {adapter_id} at {path}:{line}: {message}")]
+    InvalidAdapter {
+        /// Source path.
+        path: String,
+        /// One-based line.
+        line: usize,
+        /// Adapter with an invalid exclusion reason.
+        adapter_id: String,
+        /// Violated adapter contract.
+        message: &'static str,
+    },
+    /// The correctness reference does not name an applicable adapter.
+    #[error("invalid benchmark reference adapter {adapter_id} at {path}:{line}: {message}")]
+    InvalidReferenceAdapter {
+        /// Source path.
+        path: String,
+        /// One-based line.
+        line: usize,
+        /// Adapter selected by the correctness contract.
+        adapter_id: String,
+        /// Violated reference contract.
+        message: &'static str,
+    },
     /// Duplicate ID.
     #[error("duplicate benchmark case ID: {0}")]
     DuplicateId(String),
@@ -241,7 +284,7 @@ pub enum BenchmarkCatalogError {
 ///
 /// # Errors
 ///
-/// Returns source-positioned I/O, JSON, and duplicate-ID errors.
+/// Returns I/O and duplicate-ID errors, or source-positioned JSON and adapter errors.
 pub fn load_benchmark_catalog(directory: &Path) -> Result<BenchmarkCatalog, BenchmarkCatalogError> {
     let mut paths = fs::read_dir(directory)?
         .map(|entry| entry.map(|value| value.path()))
@@ -264,6 +307,42 @@ pub fn load_benchmark_catalog(directory: &Path) -> Result<BenchmarkCatalog, Benc
                     line: index + 1,
                     source,
                 })?;
+            for adapter in &case.adapters {
+                let message = match (adapter.applicable, adapter.unsupported_reason.as_deref()) {
+                    (true, Some(_)) => Some("applicable adapters must omit unsupported_reason"),
+                    (false, reason) if reason.is_none_or(|reason| reason.trim().is_empty()) => {
+                        Some("inapplicable adapters require a nonempty unsupported_reason")
+                    }
+                    _ => None,
+                };
+                if let Some(message) = message {
+                    return Err(BenchmarkCatalogError::InvalidAdapter {
+                        path: path.display().to_string(),
+                        line: index + 1,
+                        adapter_id: adapter.id.clone(),
+                        message,
+                    });
+                }
+            }
+            let reference_error = match case
+                .adapters
+                .iter()
+                .find(|adapter| adapter.id == case.output_contract.reference_adapter)
+            {
+                None => Some("output_contract.reference_adapter must name an existing adapter"),
+                Some(adapter) if !adapter.applicable => {
+                    Some("output_contract.reference_adapter must name an applicable adapter")
+                }
+                Some(_) => None,
+            };
+            if let Some(message) = reference_error {
+                return Err(BenchmarkCatalogError::InvalidReferenceAdapter {
+                    path: path.display().to_string(),
+                    line: index + 1,
+                    adapter_id: case.output_contract.reference_adapter.clone(),
+                    message,
+                });
+            }
             if !ids.insert(case.id.clone()) {
                 return Err(BenchmarkCatalogError::DuplicateId(case.id));
             }
