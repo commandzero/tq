@@ -84,3 +84,11 @@ jobs:
         # reviewed jq pin; a green platform job must carry matched evidence.
         shell: bash
         run: ./scripts/run-campaign.sh compatibility strict
+      - name: Retain native manual evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: manual-${{ matrix.reference_target }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: target/compatibility/
+          if-no-files-found: error
+          retention-days: 30

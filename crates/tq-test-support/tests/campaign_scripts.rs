@@ -359,3 +359,41 @@ fn release_workflow_has_checked_in_official_reference_defaults() {
     assert!(workflow.contains("matrix.reference_jq_url"));
     assert!(workflow.contains("matrix.reference_jq_sha256"));
 }
+
+#[test]
+fn release_workflow_retains_manual_evidence_even_when_the_gate_fails() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workflow: yaml_serde::Value = yaml_serde::from_str(
+        &fs::read_to_string(root.join(".github/workflows/regex-date-platform.yml")).unwrap(),
+    )
+    .unwrap();
+    let steps = workflow["jobs"]["release-host-contract"]["steps"]
+        .as_sequence()
+        .unwrap();
+    let gate = steps
+        .iter()
+        .position(|step| step["name"].as_str() == Some("Run the pinned manual release gate"))
+        .unwrap();
+    let upload = steps
+        .iter()
+        .position(|step| {
+            step["uses"]
+                .as_str()
+                .is_some_and(|action| action.starts_with("actions/upload-artifact@"))
+        })
+        .expect("retain the native manual gate's evidence");
+    assert!(upload > gate);
+    assert_eq!(steps[upload]["if"].as_str(), Some("always()"));
+    assert_eq!(
+        steps[upload]["with"]["path"].as_str(),
+        Some("target/compatibility/")
+    );
+    let name = steps[upload]["with"]["name"].as_str().unwrap();
+    assert!(name.contains("matrix.reference_target"));
+    assert!(name.contains("github.run_attempt"));
+    assert_eq!(
+        steps[upload]["with"]["if-no-files-found"].as_str(),
+        Some("error")
+    );
+    assert_ne!(steps[gate]["continue-on-error"].as_bool(), Some(true));
+}
