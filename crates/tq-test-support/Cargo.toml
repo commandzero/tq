@@ -36,4 +36,4 @@ libproc = "=0.14.11"
 workspace = true
 
 [dev-dependencies]
-jsonschema = { version = "0.54.0", default-features = false }
+jsonschema = { version = "0.56.0", default-features = false }
