@@ -281,3 +281,56 @@ fn delimited_row_limits_apply_to_undecorated_logical_rows() {
         assert_eq!(output, b"");
     }
 }
+
+#[test]
+fn staged_json_recovers_partial_writes_without_retrying_broken_pipes() {
+    use std::io::{self, Write};
+    struct Sink {
+        bytes: Vec<u8>,
+        calls: usize,
+        accepted: usize,
+        error: io::ErrorKind,
+    }
+    impl Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.calls += 1;
+            if self.calls == 1 && self.accepted > 0 {
+                self.bytes.extend_from_slice(&bytes[..self.accepted]);
+                return Ok(self.accepted);
+            }
+            if self.calls <= 2 {
+                return Err(io::Error::new(self.error, "original publication error"));
+            }
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    for (accepted, error) in [
+        (8, io::ErrorKind::Other),
+        (8, io::ErrorKind::BrokenPipe),
+        (0, io::ErrorKind::Other),
+    ] {
+        let mut sink = Sink {
+            bytes: vec![],
+            calls: 0,
+            accepted,
+            error,
+        };
+        let mut sequence = NativeOutputSequence::new(
+            NativeFormat::Json
+                .select_output(colored_options(OutputFormat::Json))
+                .unwrap(),
+        );
+        let result = sequence.write_result(&mut sink, &Value::string("payload"));
+        assert!(matches!(result, Err(tq_formats::OutputError::Io(ref err)) if err.kind() == error));
+        if accepted > 0 && error != io::ErrorKind::BrokenPipe {
+            assert!(sink.bytes.ends_with(b"\x1b[0m"), "{:?}", sink.bytes);
+        } else {
+            assert_eq!(sink.bytes.len(), accepted);
+            assert_eq!(sink.calls, if accepted == 0 { 1 } else { 2 });
+        }
+    }
+}

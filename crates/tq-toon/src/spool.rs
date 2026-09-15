@@ -1231,7 +1231,7 @@ impl PreparedArray {
         )?;
         write_span(&mut output, palette, ColorRole::Array, b"]")?;
         match layout {
-            Layout::Empty => write_span(&mut output, palette, ColorRole::Array, b":")?,
+            Layout::Empty => output.write_all(b":")?,
             Layout::Scalars => {
                 output.write_all(b": ")?;
                 let mut index = 0_usize;
@@ -1283,7 +1283,7 @@ impl PreparedArray {
                     )?;
                 }
                 write_span(&mut output, palette, ColorRole::Object, b"}")?;
-                write_span(&mut output, palette, ColorRole::Object, b":")?;
+                output.write_all(b":")?;
                 self.for_each_value(|value| {
                     let Value::Object(object) = value else {
                         unreachable!("layout tracked during preparation")
@@ -1304,7 +1304,7 @@ impl PreparedArray {
                 })?;
             }
             Layout::Expanded => {
-                write_span(&mut output, palette, ColorRole::Array, b":")?;
+                output.write_all(b":")?;
                 self.for_each_value(|value| {
                     output.write_all(b"\n")?;
                     let mut indented = LineIndentWriter {

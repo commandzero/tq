@@ -124,7 +124,9 @@ tq intentionally differs from jq's default colors and styles enclosing quotes
 with their enclosing container's delimiters/separators, not string/key content.
 Root scalar quotes use the object style. YAML/TOON mappings use the object
 style and sequences use the array style; table field quotes and separators
-use the object style. Escaped content keeps its scalar/key style. These are
+use the object style. TOON colon separators remain unstyled in every output
+path; colons inside string content retain the string style.
+Escaped content keeps its scalar/key style. These are
 non-breaking presentation differences, not query or data-format differences.
 
 Removing tq-generated SGR recovers the exact plain serialization. RS, LF, and

@@ -15,6 +15,10 @@ Each colored result must recover the exact plain bytes after stripping
 generated SGR before timing begins. Color is presentation, not a data-format
 change. Automatic redirected output stays plain.
 
+The correctness gate matches the exact monochrome capture while allowing only
+additional complete SGR sequences. Literal ESC bytes and literal SGR content
+must remain present; their presence alone is not evidence of generated color.
+
 ## Results
 
 <!-- benchmark-results:start -->

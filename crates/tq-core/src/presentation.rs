@@ -137,7 +137,7 @@ pub fn write_span<W: Write + ?Sized>(
             buffer[prefix..prefix + count].copy_from_slice(&content[..count]);
             let end = prefix + count + RESET.len();
             buffer[prefix + count..end].copy_from_slice(RESET);
-            write_closed_chunk(writer, &buffer[..end])?;
+            write_styled_bytes(writer, &buffer[..end])?;
             content = &content[count..];
         }
         writer.write_all(boundary)?;
@@ -145,7 +145,13 @@ pub fn write_span<W: Write + ?Sized>(
     Ok(())
 }
 
-fn write_closed_chunk<W: Write + ?Sized>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
+/// Publishes already-styled bytes without adding another layer of color.
+/// Attempts a reset after a partial non-broken-pipe failure, preserving the
+/// original error. A rejected first write emits no recovery bytes.
+///
+/// # Errors
+/// Returns the original publication error, including a zero-length write.
+pub fn write_styled_bytes<W: Write + ?Sized>(writer: &mut W, bytes: &[u8]) -> io::Result<()> {
     let mut remaining = bytes;
     while !remaining.is_empty() {
         let error = match writer.write(remaining) {

@@ -101,14 +101,31 @@ fn invalid_samples_or_markers_do_not_modify_the_page() {
 }
 
 #[test]
-fn strips_only_complete_sgr_and_preserves_frame_bytes() {
-    assert_eq!(
-        strip_sgr(b"\x1e\x1b[0;32mhello\x1b[0m\n").unwrap(),
-        b"\x1ehello\n"
-    );
+fn accepts_only_added_complete_sgr_and_preserves_frame_bytes() {
+    assert!(check_colored_output(b"\x1ehello\n", b"\x1e\x1b[0;32mhello\x1b[0m\n").unwrap());
     for bad in [b"\x1b[31".as_slice(), b"\x1b[2J", b"\x1bX"] {
-        assert!(strip_sgr(bad).is_err());
+        assert!(check_colored_output(b"", bad).is_err());
     }
+}
+
+#[test]
+fn literal_non_sgr_escape_content_is_preserved() {
+    for literal in [
+        b"\x1bX".as_slice(),
+        b"\x1b[2J",
+        b"\x1b[31",
+        b"\x1b[31m",
+        b"\x1b[0m",
+    ] {
+        assert!(!check_colored_output(literal, literal).unwrap());
+        let mut decorated = b"\x1b[31m".to_vec();
+        decorated.extend_from_slice(literal);
+        decorated.extend_from_slice(b"\x1b[0m");
+        assert!(check_colored_output(literal, &decorated).unwrap());
+        assert!(check_colored_output(literal, b"changed").is_err());
+    }
+    assert!(check_colored_output(b"\x1b[31mhello", b"\x1b[32mhello").is_err());
+    assert!(check_colored_output(b"abc", b"ab").is_err());
 }
 
 #[test]

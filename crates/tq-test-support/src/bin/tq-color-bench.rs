@@ -8,7 +8,9 @@ use tq_test_support::benchmark::{
     BenchmarkInvocation, collect_environment, measure_process, preflight_rss, run_allocation_probe,
 };
 
-use report::{CASES, ColorReport, ColorRow, checked_sample, render_reports, sha256, strip_sgr};
+use report::{
+    CASES, ColorReport, ColorRow, check_colored_output, checked_sample, render_reports, sha256,
+};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
@@ -113,19 +115,15 @@ fn measure_rows(report: &mut ColorReport, label: &str) -> Result<(), Box<dyn Err
                     .as_ref()
                     .ok_or("missing retained output")?,
             )?;
-            let color_present = output.contains(&0x1b);
-            if flag == "-M" {
-                if color_present {
-                    return Err(
-                        "monochrome correctness capture contains ANSI; captures retained".into(),
-                    );
-                }
+            let color_present = if flag == "-M" {
                 plain = output;
-            } else if strip_sgr(&output)? != plain || !color_present {
-                return Err(
-                    format!("color correctness failed for {case}; captures retained").into(),
-                );
-            }
+                false
+            } else {
+                if !check_colored_output(&plain, &output)? {
+                    return Err(format!("no generated color for {case}; captures retained").into());
+                }
+                true
+            };
             let expected_bytes = check.output_bytes;
             for path in [check.stdout_path, check.stderr_path].into_iter().flatten() {
                 fs::remove_file(path)?;
@@ -171,7 +169,7 @@ mod tests {
         let source = directory.path().join("synthetic.json");
         fs::write(
             &source,
-            br#"{"features":[{"id":"a","properties":{"mag":1,"place":"test"}}]}"#,
+            br#"{"features":[{"id":"a","properties":{"mag":1,"place":"test\u001bX"}}]}"#,
         )
         .unwrap();
         let mut report = ColorReport {

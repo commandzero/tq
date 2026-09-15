@@ -8,6 +8,7 @@
 
 - [x] 2.1 Integrate semantic spans into JSON and YAML writers; verify pretty/compact JSON, JSON Lines aliases, JSON sequences, YAML documents, ASCII escaping, sorted keys, and embedded line breaks retain exact undecorated bytes.
 - [x] 2.2 Integrate TOON document, table, folded-key, delimiter, framed/unframed, and direct transcode paths; verify stripping generated styling matches plain output and color alone preserves the transcode plan and bounded state.
+- [x] 2.2a Keep TOON colon separators unstyled across native, direct, and prepared/spooled paths; preserve the pre-color direct scalar quoting context.
 - [x] 2.3 Integrate CSV/TSV headers and typed fields; verify quoted numeric strings, null versus empty string, doubled quotes, tabs, embedded newlines, header order, and row publication against plain-byte fixtures.
 - [x] 2.4 Cover raw strings, structured non-string fallback, query formatter strings, and proxy sources; verify raw/proxy bytes are unchanged and no tq style leaks across those boundaries.
 

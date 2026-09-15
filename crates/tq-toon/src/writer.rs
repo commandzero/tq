@@ -192,14 +192,14 @@ impl<'a, W: Write> Encoder<'a, W> {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
                 self.start_line(depth, prefix)?;
                 self.write_key(&folded_key)?;
-                self.write_structure(ColorRole::Object, b":")?;
+                self.writer.write_all(b":")?;
                 self.writer.write_all(b" ")?;
                 self.write_scalar(folded_value, ScalarContext::Object)?;
             }
             Value::Object(object) => {
                 self.start_line(depth, prefix)?;
                 self.write_key(&folded_key)?;
-                self.write_structure(ColorRole::Object, b":")?;
+                self.writer.write_all(b":")?;
                 self.object(object, logical_depth + 1, allow_folding && !folded_here)?;
             }
             Value::Array(values) => {
@@ -261,7 +261,7 @@ impl<'a, W: Write> Encoder<'a, W> {
         self.write_structure(ColorRole::Array, b"]")?;
 
         if values.iter().all(is_scalar) {
-            self.write_structure(ColorRole::Array, b":")?;
+            self.writer.write_all(b":")?;
             if !values.is_empty() {
                 self.writer.write_all(b" ")?;
                 for (index, value) in values.iter().enumerate() {
@@ -283,7 +283,7 @@ impl<'a, W: Write> Encoder<'a, W> {
                 self.write_key(field)?;
             }
             self.write_structure(ColorRole::Object, b"}")?;
-            self.write_structure(ColorRole::Object, b":")?;
+            self.writer.write_all(b":")?;
             for value in values {
                 let Value::Object(object) = value else {
                     unreachable!("tabular eligibility checked")
@@ -299,7 +299,7 @@ impl<'a, W: Write> Encoder<'a, W> {
             return Ok(());
         }
 
-        self.write_structure(ColorRole::Array, b":")?;
+        self.writer.write_all(b":")?;
         for value in values {
             match value {
                 Value::Object(object) if object.is_empty() => {

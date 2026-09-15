@@ -72,30 +72,43 @@ pub fn sha256(path: &Path) -> Result<String, Box<dyn Error>> {
     Ok(digest)
 }
 
-pub fn strip_sgr(bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-    let mut result = Vec::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == 0x1b {
-            if bytes.get(index + 1) != Some(&b'[') {
-                return Err("unexpected escape in structured output".into());
-            }
-            index += 2;
-            while bytes
-                .get(index)
-                .is_some_and(|b| b.is_ascii_digit() || *b == b';')
-            {
-                index += 1;
-            }
-            if bytes.get(index) != Some(&b'm') {
-                return Err("unterminated or non-SGR escape".into());
-            }
-        } else {
-            result.push(bytes[index]);
-        }
-        index += 1;
+fn sgr_length(bytes: &[u8]) -> Option<usize> {
+    if !bytes.starts_with(b"\x1b[") {
+        return None;
     }
-    Ok(result)
+    let parameters = bytes[2..]
+        .iter()
+        .take_while(|b| b.is_ascii_digit() || **b == b';')
+        .count();
+    (bytes.get(parameters + 2) == Some(&b'm')).then_some(parameters + 3)
+}
+
+/// Match exact plain content, allowing only additional complete SGR tokens.
+/// Treat literal SGR tokens atomically so their ESC prefix cannot be mistaken
+/// for part of a generated style. Other escapes remain ordinary content.
+/// Returns whether at least one additional SGR token was observed.
+pub fn check_colored_output(plain: &[u8], colored: &[u8]) -> Result<bool, Box<dyn Error>> {
+    let mut plain_index = 0;
+    let mut color_index = 0;
+    let mut added_sgr = false;
+    while color_index < colored.len() {
+        let sgr = sgr_length(&colored[color_index..]);
+        let length = sgr.unwrap_or(1);
+        let token = &colored[color_index..color_index + length];
+        let expected_length = sgr_length(&plain[plain_index..]).unwrap_or(1);
+        if plain.get(plain_index..plain_index + expected_length) == Some(token) {
+            plain_index += expected_length;
+        } else if sgr.is_some() {
+            added_sgr = true;
+        } else {
+            return Err("colored output changed plain content".into());
+        }
+        color_index += length;
+    }
+    if plain_index != plain.len() {
+        return Err("colored output omitted plain content".into());
+    }
+    Ok(added_sgr)
 }
 
 pub fn checked_sample(sample: &MeasuredOutcome) -> Result<(), Box<dyn Error>> {

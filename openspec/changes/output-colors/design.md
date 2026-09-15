@@ -26,6 +26,8 @@ Quotes share the structural entry of their immediate enclosing container: array 
 
 Role precedence is transport boundary, syntactic quotation mark, key text, scalar content, then syntax punctuation/container delimiters. Escaped quotes inside a scalar are content, not enclosing quotes. CSV/TSV null fields remain empty. TOON counts are numbers. The noninteractive writers do not emit indices or focused tokens, and no serializer is changed to add them.
 
+TOON colon separators are unstyled in every writer route, including array and table headers and spooled replay. This exception does not change quote ownership or colon characters in string content. Styling must not change the scalar serialization context; direct-transcode object values retain their existing root-context spelling.
+
 ### Policy once per invocation
 
 Resolve Auto/Always/Never and the palette once at the CLI process boundary using the existing capability policy. Read `JQ_COLORS` only when environment access is permitted; otherwise use the built-in default. Apply the resolved choice to every supported writer. A custom palette does not enable color. Retain last-explicit-flag precedence, allow `-C` to override `NO_COLOR`, and allow `-M` for every format. Do not couple color to input extensions, formatter builtins, or output indentation families.

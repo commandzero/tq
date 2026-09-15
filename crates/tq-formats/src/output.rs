@@ -425,7 +425,11 @@ fn write_json_document(
         options.ascii_json,
         options.palette(),
     )?;
-    writer.write_all(&encoded)?;
+    if options.palette().is_some() {
+        tq_core::presentation::write_styled_bytes(writer, &encoded)?;
+    } else {
+        writer.write_all(&encoded)?;
+    }
     Ok(())
 }
 

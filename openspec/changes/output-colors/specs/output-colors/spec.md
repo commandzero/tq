@@ -30,7 +30,7 @@ The leading `0` resets emphasis and background before selecting the foreground. 
 #### Scenario: Typed values and keys
 - **WHEN** colored output uses the default palette to render an object with null, boolean, number, and string values
 - **THEN** key text is cyan, null has normal document styling, booleans are light-blue, numbers are magenta, and string content is green
-- **AND** syntactic quotation marks and punctuation are light-black
+- **AND** syntactic quotation marks and punctuation are light-black, except unstyled TOON colon separators
 
 #### Scenario: JSON uses tq's palette
 - **WHEN** a user selects JSON output with color enabled and no valid palette override
@@ -56,6 +56,12 @@ Opening and closing syntactic quotation marks SHALL use the same palette entry a
 
 YAML and TOON sequence syntax SHALL use the array entry, and mapping syntax SHALL use the object entry. TOON table header/row fields SHALL use object context for field quotes and separators; outer array syntax SHALL retain array context. CSV/TSV headers, field separators, and syntactic field quotes SHALL use the object entry. Document markers SHALL use the object entry. These rules SHALL apply to custom palettes as well as the built-in palette; quotation marks SHALL NOT be hardcoded to light black.
 
+TOON colon separators SHALL be an exception to structural punctuation styling: mapping, array-header, and table-header colons SHALL remain unstyled in native, direct-transcode, and prepared/spooled output. This exception SHALL NOT change quote ownership or the styling of colon characters inside string content.
+
+#### Scenario: TOON colon consistency
+- **WHEN** the same TOON shape is emitted through native, direct-transcode, or prepared/spooled output with default or custom colors
+- **THEN** every syntactic colon is emitted outside active styles and undecorated serialization remains unchanged
+
 #### Scenario: Default JSON quote colors
 - **WHEN** the default palette renders `{"key":["value"]}` in color
 - **THEN** all enclosing quotes and the characters `{ } : [ ]` are light black, key content is cyan, and value content is green
@@ -79,7 +85,7 @@ Color policy SHALL apply independently of the input format to JSON, YAML, TOON, 
 ### Requirement: Roles follow serialized meaning
 Writers SHALL distinguish syntax from content using the serialized token's role. Object keys, including TOON table headers and CSV/TSV header fields, SHALL use the object-key entry. Scalar contents SHALL use their serialized type, so a quoted numeric-looking string uses the string entry (green by default). Escaped content SHALL retain its scalar/key role, including JSON escape spellings and doubled CSV quotes; opening and closing syntactic quotation marks SHALL use the structural entry defined above.
 
-Container delimiters and separators SHALL use their structural entry. TOON array counts SHALL use the number entry; counts and ordinary numeric array values SHALL NOT be styled as indices. Tabs, spaces, newlines, and RS transport bytes SHALL retain their bytes without acquiring printable substitutes.
+Container delimiters and separators SHALL use their structural entry, except for the unstyled TOON colons defined above. TOON array counts SHALL use the number entry; counts and ordinary numeric array values SHALL NOT be styled as indices. Tabs, spaces, newlines, and RS transport bytes SHALL retain their bytes without acquiring printable substitutes.
 
 Roles SHALL apply only where the writer emits the corresponding syntax. The noninteractive CLI SHALL NOT synthesize array-index labels, focus state, or trailing commas. These do not introduce additional `JQ_COLORS` entries.
 

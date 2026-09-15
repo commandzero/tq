@@ -528,7 +528,7 @@ impl<W: Write> TranscodeConsumer<W> {
                     &mut indented,
                     value,
                     self.writer,
-                    ScalarContext::Object,
+                    ScalarContext::Root,
                     palette,
                 )?;
                 let Frame::DirectObject { wrote_member, .. } = &mut self.frames[index] else {
