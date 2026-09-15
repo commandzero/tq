@@ -6,7 +6,9 @@ export PATH="$PWD/target/tools/bin:$PATH"
 ./scripts/docs-check.sh
 bash scripts/filenames-test.sh
 shellcheck scripts/*.sh benchmarks/cases/*.sh
-if [[ $(actionlint -version) != "v$ACTIONLINT_VERSION"$'\n'* ]]; then
+actionlint_version=$(actionlint -version)
+actionlint_version=${actionlint_version%%$'\n'*}
+if [[ ${actionlint_version#v} != "$ACTIONLINT_VERSION" ]]; then
     echo "Install Actionlint $ACTIONLINT_VERSION using docs/contributor-checks.md." >&2
     exit 1
 fi

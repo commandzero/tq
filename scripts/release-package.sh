@@ -37,7 +37,7 @@ for package in tq-core tq-toon tq-formats tq-cli; do
 done
 found=false
 while IFS= read -r line; do
-    if [[ $line == "## [$version] - "????-??-?? ]]; then found=true; fi
+    if [[ $line == "## [$version] - "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] ]]; then found=true; fi
 done < CHANGELOG.md
 if [[ $found != true ]]; then
     echo "Add the dated $version changelog section before tagging." >&2

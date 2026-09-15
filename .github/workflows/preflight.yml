@@ -38,7 +38,7 @@ jobs:
           rustup show active-toolchain
           export PATH="$PWD/target/tools/bin:$PATH"
           echo "$PWD/target/tools/bin" >> "$GITHUB_PATH"
-          if ! command -v okf || [[ $(okf --version) != "okf $OKF_VERSION "* ]]; then
+          if ! command -v okf || [[ $(okf --version) != "okf $OKF_VERSION" && $(okf --version) != "okf $OKF_VERSION "* ]]; then
             cargo install okf --version "$OKF_VERSION" --locked --root target/tools
           fi
           npm install --global "@fission-ai/openspec@$OPENSPEC_VERSION"

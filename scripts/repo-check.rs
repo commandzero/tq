@@ -37,6 +37,10 @@ fn change_id(path: &str) -> Option<String> {
             || folder.as_bytes()[4] != b'-'
             || folder.as_bytes()[7] != b'-'
             || folder.as_bytes()[10] != b'-'
+            || folder.as_bytes()[..10]
+                .iter()
+                .enumerate()
+                .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
         {
             return None;
         }
@@ -104,6 +108,17 @@ fn normalize(text: &str) -> String {
 }
 
 fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
+    for section in delta.lines().filter_map(|line| line.strip_prefix("## ")) {
+        if !matches!(
+            section,
+            "ADDED Requirements"
+                | "MODIFIED Requirements"
+                | "REMOVED Requirements"
+                | "RENAMED Requirements"
+        ) {
+            return Err(format!("Unsupported delta section {section:?}"));
+        }
+    }
     let main_requirements = requirements(main)?;
     let main_map: BTreeMap<_, _> = main_requirements
         .iter()
@@ -392,10 +407,22 @@ fn main() {
     let root = Path::new(".");
     let result = match args.get(1).map(String::as_str) {
         Some("scope") if args.len() == 4 => scope(root, &args[2], &args[3]),
-        Some("openspec") if args.len() == 4 => openspec(root, &args[2], &args[3], &env::var("PR_BODY").unwrap_or_default()).map(|archives| {
-            for archive in archives { println!("{archive}"); }
+        Some("openspec") if args.len() == 4 => openspec(
+            root,
+            &args[2],
+            &args[3],
+            &env::var("PR_BODY").unwrap_or_default(),
+        )
+        .map(|archives| {
+            for archive in archives {
+                println!("{archive}");
+            }
         }),
-        _ => Err("Usage: repo-check.sh scope BASE HEAD | openspec BASE HEAD (set PR_BODY with OpenSpec changes: field)".into()),
+        _ => Err(concat!(
+            "Usage: repo-check.sh scope BASE HEAD | openspec BASE HEAD ",
+            "(set PR_BODY with OpenSpec changes: field)"
+        )
+        .into()),
     };
     if let Err(error) = result {
         eprintln!("{error}");
@@ -463,6 +490,27 @@ mod tests {
         assert!(associations("").is_err());
         assert!(associations("OpenSpec changes: none").unwrap().is_empty());
         assert!(associations("OpenSpec changes: ../bad").is_err());
+    }
+    #[test]
+    fn archive_dates_require_numeric_components() {
+        for date in ["abcd-ef-ij", "2026-XX-06", "2026-09-XX", "é026-09-06"] {
+            assert!(
+                change_id(&format!("openspec/changes/archive/{date}-change/tasks.md")).is_none()
+            );
+        }
+        assert_eq!(
+            change_id("openspec/changes/archive/2026-09-15-change/tasks.md"),
+            Some("change".into())
+        );
+    }
+    #[test]
+    fn unknown_delta_sections_fail_even_without_requirements() {
+        for extra in [
+            "## OTHER Requirements\nIgnored text\n",
+            "## OTHER Requirements\n",
+        ] {
+            assert!(synchronized(&format!("{DELTA}{extra}"), MAIN, "").is_err());
+        }
     }
     #[test]
     fn detects_missing_or_changed_scenarios() {

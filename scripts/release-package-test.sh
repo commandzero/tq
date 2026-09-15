@@ -71,3 +71,15 @@ expect_failure ./scripts/release-package.sh v0.4.0
 [[ $(shasum -a 256 "$archive") == "$before" ]]
 [[ $(tar -tzf "$archive") == $'tq\nLICENSE\nrelease.txt' ]]
 echo "Release package checks pass."
+for invalid_date in abcd-ef-gh 2026-XX-06 2026-09-XX; do
+    printf '## [0.4.0] - %s\n' "$invalid_date" > CHANGELOG.md
+    git add CHANGELOG.md
+    git -c commit.gpgsign=false commit -qm 'Malformed date fixture'
+    git -c tag.gpgsign=false tag -f v0.4.0
+    expect_failure ./scripts/release-package.sh v0.4.0
+    if ! rg -q 'Add the dated 0.4.0 changelog section' "$fixture/output"; then
+        cat "$fixture/output" >&2
+        exit 1
+    fi
+done
+echo "Malformed release dates rejected."
