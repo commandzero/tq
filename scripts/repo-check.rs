@@ -248,6 +248,7 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
             head,
             "--",
             "openspec/changes",
+            "openspec/specs",
         ],
     )?;
     let tree = git(
@@ -256,7 +257,12 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
     )?;
     let paths: Vec<_> = tree.split('\0').filter(|p| !p.is_empty()).collect();
     let mut ids = associations(body)?;
+    let mut changed_specs = BTreeSet::new();
     for path in changed.split('\0').filter(|p| !p.is_empty()) {
+        if path.starts_with("openspec/specs/") {
+            changed_specs.insert(path.to_owned());
+            continue;
+        }
         if let Some(id) = change_id(path) {
             ids.insert(id);
         } else {
@@ -266,6 +272,7 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
         }
     }
     let mut selected = Vec::new();
+    let mut covered_specs = BTreeSet::new();
     for id in &ids {
         if paths
             .iter()
@@ -345,9 +352,15 @@ fn openspec(root: &Path, base: &str, head: &str, body: &str) -> Check<Vec<String
             )
             .unwrap_or_default();
             synchronized(&delta, &main, &previous).map_err(|e| format!("{id}/{suffix}: {e}"))?;
+            covered_specs.insert(format!("openspec/specs/{suffix}"));
         }
         eprintln!("{id}: archived and synchronized; review any no-spec-deltas explanation.");
         selected.push(archive.clone());
+    }
+    if let Some(path) = changed_specs.difference(&covered_specs).next() {
+        return Err(format!(
+            "{path}: main-spec edits require a corresponding delta in an associated archive"
+        ));
     }
     if ids.is_empty() {
         eprintln!("OpenSpec completion: not applicable.");
@@ -575,6 +588,28 @@ mod tests {
             let head = repo.commit();
             assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
         }
+    }
+    #[test]
+    fn main_spec_edits_require_archived_deltas() {
+        let repo = Repo::new();
+        let base = repo.commit();
+        repo.write("openspec/specs/test/spec.md", MAIN);
+        let head = repo.commit();
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
+        repo.archive("new-spec");
+        let head = repo.commit();
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_ok());
+        repo.write("openspec/specs/unrelated/spec.md", MAIN);
+        let head = repo.commit();
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: new-spec").is_err());
+    }
+    #[test]
+    fn unapplied_new_spec_delta_is_not_synchronization() {
+        let repo = Repo::new();
+        let base = repo.commit();
+        repo.archive("new-spec");
+        let head = repo.commit();
+        assert!(openspec(&repo.0, &base, &head, "OpenSpec changes: none").is_err());
     }
     #[test]
     fn edited_deleted_and_renamed_active_changes_fail() {

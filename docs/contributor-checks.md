@@ -2,7 +2,7 @@
 type: Policy
 title: "Contributor checks"
 description: "Local validation, OpenSpec completion, and required PR checks."
-generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T19:22:27Z }
 ---
 
 # Contributor checks
@@ -59,6 +59,9 @@ PR_BODY='OpenSpec changes: example-change' \
 
 The checker uses the merge base, examines both sides of renames, and checks
 committed state. Unrelated active changes do not block the PR.
+Every changed main-spec file must have a corresponding delta in an associated
+archive. Direct edits cannot bypass archival by declaring `none`. New main specs
+must exist at the PR head; an unapplied ADDED delta is not synchronization.
 Every selected change must leave the active directory and retain its artifacts
 in one date-prefixed archive. Archived tasks must pass OpenSpec's native check.
 The script exports only selected, committed task files to a temporary OpenSpec
