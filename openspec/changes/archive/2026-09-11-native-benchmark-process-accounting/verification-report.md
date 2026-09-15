@@ -2,10 +2,15 @@
 
 Change: `native-benchmark-process-accounting`
 Date: 2026-09-12 UTC
-Scope: current code, all planning artifacts, issue #30 acceptance criteria,
-local preflight, and fresh native macOS/Linux controls.
+Scope: historical issue #30 implementation, planning artifacts, acceptance
+criteria, local preflight and native macOS/Linux controls recorded at that date.
 
-## Summary
+This report preserves evidence from the earlier native benchmark change. It is
+not verification of the current consolidated PR or its current binaries. The
+active `achieve-jq-manual-parity` acceptance tasks remain separate and incomplete.
+No new campaign, spec synchronization or archive is established by this report.
+
+## Historical summary
 
 | Dimension | Status |
 | --- | --- |
@@ -43,9 +48,9 @@ accuracy guarantee. CPU/RSS and self-regression tolerances are unchanged.
   regression test covers relative seed metadata. The original smoke reports
   retain three automated unavailable rows; the
   [supplemental smoke review](smoke-regression-review.md) accepts six
-  automatically comparable pairs and manually validates three pairs whose raw
-  comparison status remains unavailable, for nine accepted smoke pairs without
-  changing samples. No smoke wall-time or RSS increase exceeds 20%.
+  automatically comparable pairs. Three manually inspected pairs remain
+  unavailable and excluded from acceptance and regression comparisons. No
+  accepted smoke wall-time or RSS increase exceeds 20%. Samples are unchanged.
 - Final standards review found no hard violations and two non-blocking
   maintenance suggestions. Final spec review found no remaining implementation
   blocker. Issue #30 acceptance commands explicitly pin both regression
@@ -118,10 +123,10 @@ builds. Host specifications and collector identities are in
 [worker-proof.md](worker-proof.md).
 
 The Linux baseline/candidate gate accepts 410 comparable standard pairs. The
-supplemental smoke review accepts six automatically comparable pairs and
-manually validates three pairs whose retained raw reports remain automated
-`unavailable`, for nine accepted smoke pairs and 419 accepted comparisons
-total, with no wall-time or peak-RSS disclosure above 20%.
+supplemental smoke review accepts six automatically comparable pairs, for
+416 accepted comparisons total, with no wall-time or peak-RSS disclosure above
+20%. Three manually inspected smoke pairs remain `unavailable` and are excluded
+from this denominator and from regression comparisons.
 The 13 unsupported/resource-limited standard rows remain unavailable, not
 passing regression comparisons. Public comparison Results remain Linux-only.
 macOS supplies native verification evidence, not a cross-OS ranking or a
@@ -224,12 +229,17 @@ settings. Both tq binaries use the same frozen Linux collector and corpus.
 The completed campaigns and self-regression decisions are recorded in the
 linked Linux reviews.
 
-## Assessment
+## Historical assessment and current limits
 
-Implementation, lifecycle tests, both-host controls and matrices, Linux
-self-regression review, publication and repository preflight are complete.
-There are no outstanding critical or warning findings. Two non-blocking
-maintenance suggestions remain from the standards review: consider splitting
-the large native-validation test module in future work, and rename the
-lifecycle fixture's PID artifact for clarity. Neither changes acceptance.
-The change is ready for sync and archive.
+The earlier report recorded completed implementation, lifecycle tests,
+both-host controls and matrices, Linux self-regression review, publication
+and repository preflight.
+The earlier review reported no outstanding critical or warning findings. Two
+non-blocking maintenance suggestions remained from that standards review:
+consider splitting the large native-validation test module, and rename the
+lifecycle fixture's PID artifact for clarity.
+
+The accepted historical regression denominator is 416 pairs, not 419. The
+three unavailable smoke pairs are supplemental measurements only. This archived
+assessment does not establish current-head acceptance, resolve later findings,
+or authorize synchronization or archival of the active jq-parity change.

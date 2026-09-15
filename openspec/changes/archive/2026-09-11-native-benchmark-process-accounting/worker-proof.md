@@ -7,9 +7,10 @@ with collector-source SHA-256
 `9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5`.
 Its self-regression gate accepted 410 comparable standard pairs with no
 disclosures or blocking increases. The separate supplemental smoke review
-accepted six automatically comparable pairs and manually validated three
-pairs whose retained raw reports remain automated `unavailable`, for nine
-accepted smoke pairs total. Those workload results remain linked to their
+accepted six automatically comparable pairs. Three manually inspected pairs
+remain automated `unavailable` and are excluded from acceptance and regression
+comparisons. The accepted total is 416 standard and smoke pairs. Those
+historical workload results remain linked to their
 retained controls; the poll-fix controls below use a different collector source and
 must not be substituted into those published rows. See the
 [comparison index](../../../../docs/tests/comparison/index.md),
