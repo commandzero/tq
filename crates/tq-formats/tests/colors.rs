@@ -237,3 +237,47 @@ fn default_palette_matches_the_shared_roles() {
     assert_eq!(palette.style(ColorRole::Object), "0;90");
     assert_eq!(palette.style(ColorRole::Key), "0;36");
 }
+
+#[test]
+fn exact_number_spellings_receive_number_color_in_every_json_writer() {
+    for spelling in ["1E+3", "1e+03", "-0.00"] {
+        let parsed = Number::parse(spelling).unwrap();
+        let preserved = parsed.to_string();
+        let number = Value::Number(parsed);
+        for (native, format) in [
+            (NativeFormat::Json, OutputFormat::Json),
+            (NativeFormat::JsonLines, OutputFormat::JsonLines),
+            (NativeFormat::JsonSequence, OutputFormat::JsonSequence),
+        ] {
+            let options = colored_options(format);
+            let expected = format!("\x1b[33m{preserved}\x1b[0m");
+            let colored = write(native, &number, options.clone());
+            assert!(contains_bytes(&colored, expected.as_bytes()), "{colored:?}");
+            assert_strips_to_plain(native, &number, options.clone());
+            let mut raw = Vec::new();
+            tq_formats::write_raw_json_value(&mut raw, &number, Some(&options.color_palette))
+                .unwrap();
+            assert_eq!(raw, expected.as_bytes());
+        }
+    }
+}
+
+#[test]
+fn delimited_row_limits_apply_to_undecorated_logical_rows() {
+    let value: Value = serde_json::from_str(r#"{"x":1}"#).unwrap();
+    for (native, format) in [
+        (NativeFormat::Csv, OutputFormat::Csv),
+        (NativeFormat::Tsv, OutputFormat::Tsv),
+    ] {
+        let mut options = colored_options(format);
+        options.delimited_limits.row_bytes = 2;
+        let colored = write(native, &value, options.clone());
+        assert_eq!(strip_sgr(&colored), b"x\n1\n");
+        assert!(colored.len() > 4);
+        options.delimited_limits.row_bytes = 1;
+        let mut sequence = NativeOutputSequence::new(native.select_output(options).unwrap());
+        let mut output = Vec::new();
+        assert!(sequence.write_result(&mut output, &value).is_err());
+        assert_eq!(output, b"");
+    }
+}

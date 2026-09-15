@@ -113,9 +113,15 @@ fn measure_rows(report: &mut ColorReport, label: &str) -> Result<(), Box<dyn Err
                     .as_ref()
                     .ok_or("missing retained output")?,
             )?;
+            let color_present = output.contains(&0x1b);
             if flag == "-M" {
+                if color_present {
+                    return Err(
+                        "monochrome correctness capture contains ANSI; captures retained".into(),
+                    );
+                }
                 plain = output;
-            } else if strip_sgr(&output)? != plain || !output.contains(&0x1b) {
+            } else if strip_sgr(&output)? != plain || !color_present {
                 return Err(
                     format!("color correctness failed for {case}; captures retained").into(),
                 );
@@ -143,6 +149,7 @@ fn measure_rows(report: &mut ColorReport, label: &str) -> Result<(), Box<dyn Err
                 case: case.into(),
                 flag: flag.into(),
                 stripped_correctness: "byte-identical".into(),
+                color_present: Some(color_present),
                 samples,
             });
             eprintln!("completed {label} {case} {flag}");
@@ -188,6 +195,12 @@ mod tests {
         assert_eq!(report.rows.len(), 8);
         let second: ColorReport =
             serde_json::from_value(serde_json::to_value(&report).unwrap()).unwrap();
+        assert!(
+            second
+                .rows
+                .iter()
+                .all(|row| row.color_present == Some(row.flag == "-C"))
+        );
         let page = directory.path().join("report.md");
         fs::write(&page, "# Synthetic test\n\n## Results\n<!-- benchmark-results:start -->\n<!-- benchmark-results:end -->\n").unwrap();
         render_reports(&page, &[report, second]).unwrap();

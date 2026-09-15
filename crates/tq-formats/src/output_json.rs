@@ -385,7 +385,9 @@ impl<F: Formatter> Formatter for ColoringFormatter<'_, F> {
     where
         W: ?Sized + Write,
     {
-        self.inner.write_raw_fragment(writer, fragment)
+        // Only Number's exact-spelling serialization emits raw fragments in Value.
+        // Do not normalize or reparse the token to assign its presentation role.
+        write_span_bounded(writer, self.palette, ColorRole::Number, fragment.as_bytes())
     }
 }
 

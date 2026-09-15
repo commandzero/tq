@@ -37,6 +37,7 @@ fn report() -> ColorReport {
                     case: (*case).into(),
                     flag: flag.into(),
                     stripped_correctness: "byte-identical".into(),
+                    color_present: Some(flag == "-C"),
                     samples: vec![sample(), sample()],
                 })
             })
@@ -115,4 +116,25 @@ fn missing_legacy_metadata_is_not_filled_from_the_current_host() {
     let text = render(&[report(), report()]).unwrap();
     assert!(text.contains("not recorded in this legacy raw report"));
     assert!(!text.contains("Recorded:"));
+}
+
+#[test]
+fn render_only_rejects_missing_or_false_color_evidence_without_changing_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("colors.md");
+    let authored = format!(
+        "# Test\n\n## Results\n{RESULTS_START_MARKER}\nkeep results\n{RESULTS_END_MARKER}\n"
+    );
+    fs::write(&page, &authored).unwrap();
+    for evidence in [None, Some(false)] {
+        let mut raw = serde_json::to_value(report()).unwrap();
+        let row = raw["rows"][1].as_object_mut().unwrap();
+        row.remove("color_present");
+        if let Some(present) = evidence {
+            row.insert("color_present".into(), present.into());
+        }
+        let bad: ColorReport = serde_json::from_value(raw).unwrap();
+        assert!(render_reports(&page, &[report(), bad]).is_err());
+        assert_eq!(fs::read_to_string(&page).unwrap(), authored);
+    }
 }

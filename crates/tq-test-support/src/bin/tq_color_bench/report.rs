@@ -47,6 +47,10 @@ pub struct ColorRow {
     pub case: String,
     pub flag: String,
     pub stripped_correctness: String,
+    /// Whether the correctness capture contained generated SGR. Missing evidence
+    /// in older reports is rejected rather than inferred from the requested flag.
+    #[serde(default)]
+    pub color_present: Option<bool>,
     pub samples: Vec<MeasuredOutcome>,
 }
 
@@ -118,6 +122,11 @@ fn validate(report: &ColorReport) -> Result<(), Box<dyn Error>> {
     }
     let mut seen = BTreeSet::new();
     for row in &report.rows {
+        if row.color_present != Some(row.flag == "-C") {
+            return Err(
+                "missing or inconsistent color-presence evidence; remeasure the report".into(),
+            );
+        }
         if !CASES.iter().any(|(case, _, _)| *case == row.case)
             || !matches!(row.flag.as_str(), "-M" | "-C")
             || !seen.insert((&row.case, &row.flag))

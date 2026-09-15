@@ -101,8 +101,12 @@ have a 120-second timeout and a 512 MiB capture limit. Cases run sequentially,
 plain before color. Tables show medians, not performance guarantees.
 
 New raw reports record the measured host, release build profile, input and
-binary hashes, and native worker/collector identity. Legacy reports remain
-renderable, but absent metadata is identified rather than inferred from the
+binary hashes, native worker/collector identity, and `color_present` from the
+correctness capture. Render-only requires this evidence to be true for colored
+rows and false for monochrome rows. Older reports without color-presence
+evidence must be remeasured; do not infer it from the requested flag. The tables
+above retain the historical measurements and are not a new run of this gate.
+Absent optional host metadata is identified rather than inferred from the
 machine rendering this page. Detailed provenance and historical analysis stay
 in the separate benchmark archive, not in this generated test page.
 
