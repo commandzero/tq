@@ -121,8 +121,8 @@ See the [format compatibility matrix](docs/formats.md) for native input and
 output support in each tool.
 
 ```console
-./scripts/run-campaign.sh compatibility smoke
-./scripts/run-campaign.sh compatibility full
+./scripts/campaign-run.sh compatibility smoke
+./scripts/campaign-run.sh compatibility full
 target/release/tq compatibility
 ```
 
@@ -131,9 +131,9 @@ timing jq, yq, and tq. Reports and large corpora belong in the separate
 `commandzero/tq-benchmarks` repository.
 
 ```console
-./scripts/run-campaign.sh benchmark smoke
-./scripts/run-campaign.sh benchmark standard
-./scripts/run-campaign.sh benchmark large
+./scripts/campaign-run.sh benchmark smoke
+./scripts/campaign-run.sh benchmark standard
+./scripts/campaign-run.sh benchmark large
 ```
 
 See the [benchmark guide](benchmarks/README.md) for campaign details and the
@@ -190,5 +190,10 @@ index limits return resource or range errors instead of silently losing data.
 TOON output and configured resource limits differ from jq's default contract.
 The [compatibility guide](docs/compatibility.md) separates tested matches,
 reviewed library disparities, and remaining implementation gaps.
+
+## Contributing
+
+See the [contributor guide](docs/contributing.md) for setup, validation, and
+development requirements.
 
 Licensed under MIT.

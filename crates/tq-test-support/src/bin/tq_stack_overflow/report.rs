@@ -274,9 +274,37 @@ pub fn render_report_with_outputs(
     fs::create_dir_all(report_dir)?;
 
     let mut pending = Vec::with_capacity(scenarios.len() + 1);
+    let mut migrations = Vec::new();
+    let mut page_paths = BTreeSet::from([report_dir.join("index.md")]);
     for record in scenarios {
         let path = report_dir.join(page_filename(record));
-        let source = match fs::read_to_string(&path) {
+        if !page_paths.insert(path.clone()) {
+            return Err(ReportError::Invalid(format!(
+                "duplicate report path: {}",
+                path.display()
+            )));
+        }
+        let legacy = report_dir.join(
+            record
+                .path
+                .with_extension("md")
+                .file_name()
+                .ok_or_else(|| ReportError::Invalid("scenario path has no filename".to_owned()))?,
+        );
+        let source_path = if legacy != path && legacy.try_exists()? {
+            if path.try_exists()? {
+                return Err(ReportError::Invalid(format!(
+                    "both legacy and normalized report pages exist; reconcile {} and {} before rendering",
+                    legacy.display(),
+                    path.display()
+                )));
+            }
+            migrations.push((legacy.clone(), path.clone()));
+            legacy
+        } else {
+            path.clone()
+        };
+        let source = match fs::read_to_string(&source_path) {
             Ok(source) => source,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 scenario_preamble(record, repository_root)
@@ -309,11 +337,20 @@ pub fn render_report_with_outputs(
     }
 
     let index_path = report_dir.join("index.md");
-    let source = match fs::read_to_string(&index_path) {
+    let mut source = match fs::read_to_string(&index_path) {
         Ok(source) => source,
         Err(error) if error.kind() == io::ErrorKind::NotFound => index_preamble(scenarios),
         Err(error) => return Err(error.into()),
     };
+    for (legacy, normalized) in &migrations {
+        let old = legacy.file_name().expect("page filename").to_string_lossy();
+        let new = normalized
+            .file_name()
+            .expect("page filename")
+            .to_string_lossy();
+        source = source.replace(&format!("(./{old})"), &format!("(./{new})"));
+        source = source.replace(&format!("({old})"), &format!("({new})"));
+    }
     let mut generated = render_index_results(report, scenarios);
     generated.push_str(&super::outputs::render_summary(outputs));
     let index = replace_results_region(&index_path, &source, &generated)?;
@@ -322,13 +359,16 @@ pub fn render_report_with_outputs(
     for (path, contents) in pending {
         fs::write(path, contents)?;
     }
+    for (legacy, _) in migrations {
+        fs::remove_file(legacy)?;
+    }
     Ok(index)
 }
 
 fn page_filename(record: &ScenarioRecord) -> String {
     record.path.file_stem().map_or_else(
         || format!("{:02}-scenario.md", record.scenario.rank),
-        |stem| format!("{}.md", stem.to_string_lossy()),
+        |stem| format!("{}.md", stem.to_string_lossy().trim_end_matches('-')),
     )
 }
 
@@ -1214,6 +1254,75 @@ mod tests {
         assert!(index.contains("Matched successful scenario comparison"));
         assert!(!page.contains("Last updated:"));
         assert!(index.contains("Last updated:"));
+    }
+
+    #[test]
+    fn rendering_trims_truncated_title_separators_from_document_names() {
+        let directory = tempdir().expect("tempdir");
+        let report_dir = directory.path().join("docs");
+        let report = report(false, &BenchmarkOutcome::Timed);
+        let mut scenario = scenario_fixture();
+        scenario.path = directory.path().join("01-a-.toon");
+        render_report(&report, &[scenario], &report_dir, directory.path()).expect("render");
+        assert!(report_dir.join("01-a.md").exists());
+        assert!(!report_dir.join("01-a-.md").exists());
+        let index = fs::read_to_string(report_dir.join("index.md")).expect("index");
+        assert!(index.contains("(./01-a.md)"));
+    }
+
+    #[test]
+    fn rendering_migrates_legacy_pages_and_preserves_authored_text() {
+        let directory = tempdir().unwrap();
+        let report = report(false, &BenchmarkOutcome::Timed);
+        let mut scenario = scenario_fixture();
+        scenario.path = directory.path().join("01-a-.toon");
+        let scenarios = [scenario];
+        render_report(&report, &scenarios, directory.path(), directory.path()).unwrap();
+        let page = directory.path().join("01-a.md");
+        let legacy = directory.path().join("01-a-.md");
+        fs::rename(&page, &legacy).unwrap();
+        let text = fs::read_to_string(&legacy)
+            .unwrap()
+            .replace("## Results", "Authored note.\n\n## Results");
+        fs::write(&legacy, &text).unwrap();
+        let index = directory.path().join("index.md");
+        fs::write(
+            &index,
+            fs::read_to_string(&index)
+                .unwrap()
+                .replace("(./01-a.md)", "(./01-a-.md)"),
+        )
+        .unwrap();
+        render_report(&report, &scenarios, directory.path(), directory.path()).unwrap();
+        assert!(!legacy.exists());
+        assert!(
+            fs::read_to_string(&page)
+                .unwrap()
+                .contains("Authored note.")
+        );
+        assert!(!fs::read_to_string(&index).unwrap().contains("(./01-a-.md)"));
+        fs::write(&legacy, "Conflicting legacy text").unwrap();
+        let before = fs::read_to_string(&page).unwrap();
+        assert!(render_report(&report, &scenarios, directory.path(), directory.path()).is_err());
+        assert_eq!(fs::read_to_string(&page).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(&legacy).unwrap(),
+            "Conflicting legacy text"
+        );
+    }
+
+    #[test]
+    fn rendering_rejects_reserved_index_filename_without_overwriting() {
+        let directory = tempdir().unwrap();
+        let report = report(false, &BenchmarkOutcome::Timed);
+        let mut scenario = scenario_fixture();
+        scenario.path = directory.path().join("index.toon");
+        let index = directory.path().join("index.md");
+        fs::write(&index, "Existing index").unwrap();
+        let error =
+            render_report(&report, &[scenario], directory.path(), directory.path()).unwrap_err();
+        assert!(error.to_string().contains("duplicate report path"));
+        assert_eq!(fs::read_to_string(index).unwrap(), "Existing index");
     }
 
     #[test]

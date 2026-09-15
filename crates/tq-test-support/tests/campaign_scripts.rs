@@ -32,42 +32,42 @@ fn campaign_stub(bin: &Path) {
 }
 
 #[test]
-fn preflight_checks_the_exact_okf_version_without_ripgrep() {
+fn documentation_check_pins_okf_before_scanning_and_preserves_scan_failures() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    copy_script(root, "preflight.sh");
+    for script in ["docs-check.sh", "filenames-check.sh", "tools-versions.sh"] {
+        copy_script(root, script);
+    }
     let bin = root.join("bin");
     fs::create_dir(&bin).unwrap();
-    executable(&bin.join("cargo"), "#!/bin/sh\nexit 0\n");
-    executable(
-        &bin.join("openspec"),
-        "#!/bin/sh\n[ \"$1\" != --version ] || echo 1.11.0\nexit 0\n",
-    );
     executable(
         &bin.join("okf"),
         "#!/bin/sh\n[ \"$1\" != --version ] || echo \"$TEST_OKF_VERSION\"\nexit 0\n",
     );
     executable(
         &bin.join("rg"),
-        "#!/bin/sh\necho called > \"$TEST_RG_MARKER\"\nexit 99\n",
+        "#!/bin/sh\necho called > \"$TEST_RG_MARKER\"\nexit \"$TEST_RG_STATUS\"\n",
     );
-    for (version, expected_success) in [
-        ("okf 0.2.7", true),
-        ("okf 0.2.7 build", true),
-        ("okf 0.2.70 build", false),
+    for (version, scan_status, expected_success, scanned) in [
+        ("okf 0.2.70 build", "1", false, false),
+        ("okf 0.2.7", "1", true, true),
+        ("okf 0.2.7 build", "1", true, true),
+        ("okf 0.2.7", "99", false, true),
     ] {
-        let output = Command::new("/bin/sh")
-            .arg(root.join("scripts/preflight.sh"))
+        let output = Command::new("/bin/bash")
+            .arg(root.join("scripts/docs-check.sh"))
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-            .env("CARGO", bin.join("cargo"))
-            .env("OPENSPEC", bin.join("openspec"))
             .env("OKF", bin.join("okf"))
             .env("TEST_OKF_VERSION", version)
+            .env("TEST_RG_STATUS", scan_status)
             .env("TEST_RG_MARKER", root.join("rg-called"))
             .output()
             .unwrap();
         assert_eq!(output.status.success(), expected_success, "{output:?}");
-        assert!(!root.join("rg-called").exists());
+        assert_eq!(root.join("rg-called").exists(), scanned);
+        if scanned {
+            fs::remove_file(root.join("rg-called")).unwrap();
+        }
     }
 }
 
@@ -75,7 +75,7 @@ fn preflight_checks_the_exact_okf_version_without_ripgrep() {
 fn stack_overflow_campaign_uses_emitted_artifacts_and_keeps_uncalibrated_pages() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    copy_script(root, "run-campaign.sh");
+    copy_script(root, "campaign-run.sh");
     let bin = root.join("bin");
     fs::create_dir(&bin).unwrap();
     campaign_stub(&bin);
@@ -83,7 +83,7 @@ fn stack_overflow_campaign_uses_emitted_artifacts_and_keeps_uncalibrated_pages()
     let log = root.join("commands");
     let target = root.join("custom target");
     let output = Command::new("/bin/sh")
-        .arg(root.join("scripts/run-campaign.sh"))
+        .arg(root.join("scripts/campaign-run.sh"))
         .args(["benchmark", "stack-overflow"])
         .current_dir(root)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -119,7 +119,7 @@ fn stack_overflow_campaign_uses_emitted_artifacts_and_keeps_uncalibrated_pages()
 fn campaign_preserves_explicit_binary_overrides() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    copy_script(root, "run-campaign.sh");
+    copy_script(root, "campaign-run.sh");
     let bin = root.join("bin");
     fs::create_dir(&bin).unwrap();
     campaign_stub(&bin);
@@ -129,7 +129,7 @@ fn campaign_preserves_explicit_binary_overrides() {
     let tq = root.join("provided tq");
     let worker = root.join("provided worker");
     let output = Command::new("/bin/sh")
-        .arg(root.join("scripts/run-campaign.sh"))
+        .arg(root.join("scripts/campaign-run.sh"))
         .args(["benchmark", "stack-overflow"])
         .current_dir(root)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -154,7 +154,7 @@ fn campaign_preserves_explicit_binary_overrides() {
 fn benchmark_smoke_forwards_timing_calibration() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    copy_script(root, "run-campaign.sh");
+    copy_script(root, "campaign-run.sh");
     let bin = root.join("bin");
     fs::create_dir(&bin).unwrap();
     campaign_stub(&bin);
@@ -163,7 +163,7 @@ fn benchmark_smoke_forwards_timing_calibration() {
     let target = root.join("custom target");
     let calibration = root.join("calibration.json");
     let output = Command::new("/bin/sh")
-        .arg(root.join("scripts/run-campaign.sh"))
+        .arg(root.join("scripts/campaign-run.sh"))
         .args(["benchmark", "smoke"])
         .current_dir(root)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -188,12 +188,12 @@ fn benchmark_smoke_forwards_timing_calibration() {
 fn benchmark_standard_requires_timing_calibration() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
-    copy_script(root, "run-campaign.sh");
+    copy_script(root, "campaign-run.sh");
     let bin = root.join("bin");
     fs::create_dir(&bin).unwrap();
     campaign_stub(&bin);
     let output = Command::new("/bin/sh")
-        .arg(root.join("scripts/run-campaign.sh"))
+        .arg(root.join("scripts/campaign-run.sh"))
         .args(["benchmark", "standard"])
         .current_dir(root)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -211,7 +211,7 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
     for bad_artifact in ["missing", "ambiguous", "malformed"] {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
-        copy_script(root, "run-campaign.sh");
+        copy_script(root, "campaign-run.sh");
         let bin = root.join("bin");
         let temporary = root.join("temporary");
         fs::create_dir(&bin).unwrap();
@@ -220,7 +220,7 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
         let target = root.join("custom target");
         let log = root.join("commands");
         let output = Command::new("/bin/sh")
-            .arg(root.join("scripts/run-campaign.sh"))
+            .arg(root.join("scripts/campaign-run.sh"))
             .args(["benchmark", "stack-overflow"])
             .current_dir(root)
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -251,7 +251,7 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
 #[test]
 fn campaign_manifest_parsing_uses_host_tq_instead_of_jq() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let script = fs::read_to_string(root.join("scripts/run-campaign.sh")).unwrap();
+    let script = fs::read_to_string(root.join("scripts/campaign-run.sh")).unwrap();
     assert!(!script.contains("$(jq "));
     assert!(script.contains("host_tq"));
     assert!(script.contains("TQ_HOST_TQ"));

@@ -2,7 +2,7 @@
 type: Report
 title: "jq manual coverage audit, original baseline"
 description: "Recorded review of jq manual coverage audit, original baseline."
-generated: { by: codex/gpt-5.6-luna, at: 2026-09-13T23:02:50Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
 ---
 
 # jq manual coverage audit, original baseline
@@ -13,7 +13,7 @@ The tables and claims below preserve that baseline for provenance only. They do
 not describe the current tree or establish a current compatibility result.
 See the current comparison results in the
 [jq manual index](index.md) and
-[compatibility README](../../../tests/compatibility/README.md#jq-manual-coverage) for later evidence and
+[compatibility README](../../../tests/compatibility/readme.md#jq-manual-coverage) for later evidence and
 the expanded inventory. A source mapping establishes coverage, not a passing
 execution.
 
@@ -70,4 +70,4 @@ Structured cases compare jq with explicit `tq -o json`, ignoring JSON presentati
 
 `tq` was built from this worktree at base commit `6fc9c54`. The reference tools were jq 1.8.1 and yq 4.53.2. These results describe that build, not later changes on other branches.
 
-See the [compatibility README](../../../tests/compatibility/README.md#jq-manual-coverage) for commands to rerun coverage checks and the full campaign.
+See the [compatibility README](../../../tests/compatibility/readme.md#jq-manual-coverage) for commands to rerun coverage checks and the full campaign.

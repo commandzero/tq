@@ -1,10 +1,17 @@
 name: Regex, date, and platform contract
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
+      tag:
+        description: Reviewed release tag to validate before publication
+        required: true
+        type: string
       reference_jq_linux_url:
         description: "Reviewed x86_64-linux jq artifact URL"
         required: false
@@ -48,8 +55,14 @@ jobs:
           # runner. Keep its shell contracts in platform_shell.rs for later
           # execution; do not represent an unverified host as complete here.
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Install repository toolchain
+        run: |
+          toolchain=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
+          rustup toolchain install "$toolchain" --profile minimal
       - name: Record release host target
         run: rustc -vV
       - name: Verify UTC boundaries and portable regex behavior
@@ -59,7 +72,7 @@ jobs:
       - name: Verify native shell invocation contracts
         run: cargo test --locked -p tq-cli --test platform_shell
       - name: Require a provisioned reviewed jq reference
-        # Release events have no dispatch inputs. They use repository-variable
+        # Reusable calls have no reference overrides. They use repository-variable
         # overrides when present, otherwise the matrix's checked-in official
         # URL/digest pair. The Linux artifact is static, while every observed
         # runtime-library identity is still checked by the manual validator.
@@ -83,7 +96,7 @@ jobs:
         # The command intentionally fails closed when this host has no
         # reviewed jq pin; a green platform job must carry matched evidence.
         shell: bash
-        run: ./scripts/run-campaign.sh compatibility strict
+        run: ./scripts/campaign-run.sh compatibility strict
       - name: Retain native manual evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

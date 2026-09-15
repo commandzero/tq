@@ -143,7 +143,7 @@ Repeated samples and dispersion remain necessary; a shared harness does not
 make noise cancel exactly. Runs without linked controls are diagnostic
 evidence, not a completed native publication review.
 
-For `scripts/run-campaign.sh benchmark standard`, set
+For `scripts/campaign-run.sh benchmark standard`, set
 `TQ_TIMING_CALIBRATION` to that summary path. The script requires it before
 preparing the corpus because standard runs publish comparison tables. Rapid,
 smoke, and large runs also forward this variable when supplied. Use the CLI
@@ -212,14 +212,14 @@ The campaign runner prepares or replays the selected corpus and writes local
 reports:
 
 ```console
-./scripts/run-campaign.sh benchmark
-./scripts/run-campaign.sh benchmark rapid
-./scripts/run-campaign.sh benchmark smoke
-./scripts/run-campaign.sh benchmark standard
-./scripts/run-campaign.sh benchmark large
-./scripts/run-campaign.sh benchmark extra-large
-TQ_CORPUS_ORIGIN=refreshed ./scripts/run-campaign.sh benchmark extra-large
-./scripts/run-campaign.sh benchmark stack-overflow
+./scripts/campaign-run.sh benchmark
+./scripts/campaign-run.sh benchmark rapid
+./scripts/campaign-run.sh benchmark smoke
+./scripts/campaign-run.sh benchmark standard
+./scripts/campaign-run.sh benchmark large
+./scripts/campaign-run.sh benchmark extra-large
+TQ_CORPUS_ORIGIN=refreshed ./scripts/campaign-run.sh benchmark extra-large
+./scripts/campaign-run.sh benchmark stack-overflow
 ```
 
 The standard and large profiles reuse the machine-local corpus. Set
@@ -227,7 +227,7 @@ The standard and large profiles reuse the machine-local corpus. Set
 the rapid, standard, large, or extra-large profile.
 
 The campaign runner defaults to the rapid profile when called as
-`./scripts/run-campaign.sh benchmark`, and `tq-bench` uses the same default when
+`./scripts/campaign-run.sh benchmark`, and `tq-bench` uses the same default when
 no profile is supplied.
 
 ## Stack Overflow top 50
@@ -245,7 +245,7 @@ archive.
 Run the suite from the repository root:
 
 ```console
-./scripts/run-campaign.sh benchmark stack-overflow
+./scripts/campaign-run.sh benchmark stack-overflow
 ```
 
 The wrapper saves measurements in the benchmark archive's
@@ -445,7 +445,7 @@ available workers. It reuses the validated
 `.work/parallel-selected-json/YYYY-MM-DD/`.
 
 ```console
-./scripts/run-campaign.sh benchmark extra-large
+./scripts/campaign-run.sh benchmark extra-large
 ```
 
 ## Native format reference campaign
