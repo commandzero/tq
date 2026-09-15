@@ -1,7 +1,9 @@
 # Contributing to tq
 
-The workspace requires Rust 1.95 or newer. Use the repository's pinned
-toolchain for preflight checks.
+The workspace requires Rust 1.95 or newer. Development and CI track the latest
+stable Rust toolchain. Run `rustup update stable` before preflight checks, and
+ensure the rustup shims take precedence over standalone Rust installations in
+your `PATH`.
 
 Run the repository preflight before submitting a change:
 
