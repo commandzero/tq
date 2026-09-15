@@ -7,7 +7,7 @@ Only outputs that pass the correctness check are timed. Failed, unsupported,
 and unmeasured cases remain visible. This historical Linux review uses
 `tq-bench` native measurements of jq 1.8.1, pinned yq 4.53.2, and the recorded
 `tq 0.1.0` build at `a4b4d916-worktree`. It is not evidence about the current
-`tq 0.3.0` implementation or a self-regression baseline. A future rerun with
+tq implementation or a self-regression baseline. A future rerun with
 the reviewed executable must supersede this snapshot under a new explicit
 tool identity.
 

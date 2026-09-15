@@ -68,7 +68,7 @@ The aggregate manual report records execution results. A mapped case is test cov
 
 Historical capture note: The `tq 0.1.0 (TOON v3; jq target 1.8.x; revision
 unknown)` line in the `manual.invoking.version` case is retained evidence from
-an earlier manual campaign, not output from the current `tq 0.3.0` build. A
+an earlier manual campaign, not output from the current tq build. A
 future full manual-campaign refresh should regenerate this case and its related
 captures; the historical stdout is preserved verbatim here.
 
