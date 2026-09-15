@@ -16,6 +16,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
+- Changed benchmark filesystem identity parsing to exclude optional macOS inode counters while preserving Linux and inode-free layouts (#43).
 - Changed macOS and Linux benchmark collection to direct spawn-to-exit timing and native child peak RSS, with separately labeled optional sampling and independent platform-time validation (#30).
 - Changed benchmark timeout cleanup to retain child ownership in safe-Rust reapers, bound caller waits, and block new samples while cleanup is pending (#30).
 - Changed benchmark result tables to show one decimal and units in measurement cells, use `-` for unavailable comparisons, and keep collector provenance outside tables (#30).
@@ -49,6 +50,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Security
 
+- Prevented automatic runtime root staging from spilling to disk when an embedded caller denies filesystem access (#42).
 - Kept signed jq artifact URLs out of downloader command arguments and sanitized download failure diagnostics (#47).
 
 ## [0.3.0] - 2026-09-06
