@@ -74,7 +74,7 @@ pub struct PositionalArgument {
     pub kind: PositionalArgumentKind,
 }
 
-/// JSON color selection.
+/// Format-independent terminal color selection.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ColorMode {
     /// Use terminal/environment policy at the process boundary.
@@ -261,7 +261,7 @@ pub struct RunOptions {
     pub ascii_output: bool,
     /// Recursively sort object keys before encoding.
     pub sort_keys: bool,
-    /// JSON ANSI color policy.
+    /// ANSI color policy for every supported output format.
     pub color: ColorMode,
     /// Flush after every complete emitted result.
     pub unbuffered: bool,
@@ -394,7 +394,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: Some('C'),
         syntax: "-C, --color-output",
         value: false,
-        description: "force stable ANSI JSON color",
+        description: "force ANSI color for any output format (JQ_COLORS supported)",
     },
     OptionSpec {
         short: Some('M'),
@@ -593,6 +593,9 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
          --decode-batch-bytes N, --decode-in-flight-batches N,\n\
          --decode-in-flight-bytes N, --max-spool-bytes N\n",
     );
+    help.push_str("\nColor: automatic on terminals, plain in pipes/files; NO_COLOR disables automatic color.\n\
+         -C forces color, -M requests plain bytes; the last flag wins.\n\
+         JQ_COLORS accepts seven/eight SGR slots. Raw strings and proxy bytes stay verbatim.\n");
     help
 }
 
@@ -1029,32 +1032,23 @@ where
     let output_controls = NativeFormat::from_output(output_format)
         .descriptor()
         .output_controls;
-    if output_controls == Some(tq_formats::OutputControls::Delimited) {
-        if pretty_explicit
+    if output_controls == Some(tq_formats::OutputControls::Delimited)
+        && (pretty_explicit
             || indent_explicit
             || tab_explicit
             || raw_output
             || join_output
-            || color != ColorMode::Auto
             || framing == ToonFraming::Unframed
-            || toon_writer != WriterConfig::default()
-        {
-            return Err(CliError::Incompatible(
-                "CSV and TSV output cannot use JSON formatting, raw, joined, or color controls"
-                    .to_owned(),
-            ));
-        }
-        color = ColorMode::Never;
+            || toon_writer != WriterConfig::default())
+    {
+        return Err(CliError::Incompatible(
+            "CSV and TSV output cannot use JSON formatting, raw, or joined controls".to_owned(),
+        ));
     }
     let json_controls = matches!(
         output_controls,
         Some(tq_formats::OutputControls::Json | tq_formats::OutputControls::JsonLines)
     );
-    if output_format == OutputFormat::JsonSequence && color == ColorMode::Always {
-        return Err(CliError::Incompatible(
-            "JSON sequence output cannot use forced-color output".to_owned(),
-        ));
-    }
     if output_controls == Some(tq_formats::OutputControls::JsonLines) {
         if pretty_explicit || indent_explicit || tab_explicit {
             return Err(CliError::Incompatible(
@@ -1062,15 +1056,12 @@ where
                     .to_owned(),
             ));
         }
-        if raw_output || join_output || color == ColorMode::Always {
+        if raw_output || join_output {
             return Err(CliError::Incompatible(
-                "JSON Lines output cannot use raw, joined, or forced-color output".to_owned(),
+                "JSON Lines output cannot use raw or joined output".to_owned(),
             ));
         }
         pretty_json = false;
-        if color == ColorMode::Auto {
-            color = ColorMode::Never;
-        }
     }
     let mut json_compatible_writer = WriterConfig::default();
     if let JsonIndent::Spaces(indent) = json_indent {
@@ -1090,11 +1081,6 @@ where
     if !json_controls && ascii_output {
         return Err(CliError::Incompatible(
             "--ascii-output applies only to JSON or JSON Lines output".to_owned(),
-        ));
-    }
-    if output_controls != Some(tq_formats::OutputControls::Json) && color == ColorMode::Always {
-        return Err(CliError::Incompatible(
-            "color controls apply only to JSON output".to_owned(),
         ));
     }
     if output_controls != Some(tq_formats::OutputControls::Json) && json_indent == JsonIndent::Tabs
@@ -1361,7 +1347,7 @@ mod tests {
             assert_eq!(run.input_format, InputFormat::JsonLines);
             assert_eq!(run.output_format, OutputFormat::JsonLines);
             assert!(!run.pretty_json);
-            assert_eq!(run.color, ColorMode::Never);
+            assert_eq!(run.color, ColorMode::Auto);
         }
 
         let Command::Run(run) =
@@ -1393,7 +1379,6 @@ mod tests {
             &["-o", "ndjson", "--tab", "."][..],
             &["-r", "-o", "jsonl", "."][..],
             &["-o", "jsonl", "-j", "."][..],
-            &["-C", "-o", "jsonl", "."][..],
         ] {
             assert!(matches!(
                 parse_args(options),

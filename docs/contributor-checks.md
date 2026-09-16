@@ -15,7 +15,8 @@ compile-fail doctests, and the main OpenSpec specifications.
 
 ## Install the pinned tools
 
-The development compiler is pinned in `rust-toolchain.toml`. Install rustup,
+The development compiler tracks `stable` in `rust-toolchain.toml`. Run
+`rustup update stable` before preflight checks. Install rustup,
 Node.js 22 or newer, Go, and ShellCheck, then run from the repository root:
 
 ```sh

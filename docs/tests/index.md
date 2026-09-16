@@ -5,3 +5,4 @@
 3. [Performance comparisons](comparison/index.md): stable jq, yq, and tq workload pages.
 4. [Benchmark harness repair](benchmark-harness.md): tasks and verification for campaign correctness.
 5. [Stack Overflow top 50](stack-overflow/index.md): 50 separately invoked scenarios with generated results.
+6. [Output color performance](output-colors-performance.md): regenerable plain and colored output measurements.

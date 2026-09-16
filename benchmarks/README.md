@@ -1,5 +1,10 @@
 # Benchmark campaigns
 
+The [output color test](../docs/tests/output-colors-performance.md) has a
+checked-in `tq-color-bench` command. It runs correctness-gated monochrome/color
+measurements and updates its Results block, or regenerates that block from
+saved reports with `--render-only`.
+
 The benchmark scripts, catalog, and Rust harness live in this repository.
 Reviewed findings and generated comparison pages live here under
 `docs/tests/comparison/`. Raw reports, logs, provenance, downloaded corpora,

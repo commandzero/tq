@@ -7,8 +7,10 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
 
 # Contributing to tq
 
-All workspace crates require Rust 1.95 or newer. Use the repository's pinned
-toolchain for preflight checks. Run all commands below from the repository root.
+The workspace requires Rust 1.95 or newer. Development and CI track the latest
+stable Rust toolchain. Run `rustup update stable` before preflight checks, and
+ensure the rustup shims take precedence over standalone Rust installations in
+your `PATH`. Run all commands below from the repository root.
 
 Run the repository preflight before submitting a change:
 

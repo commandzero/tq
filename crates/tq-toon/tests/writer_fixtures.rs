@@ -3,7 +3,7 @@
 use std::{fs, io::Cursor, path::PathBuf};
 
 use serde_json::Value as JsonValue;
-use tq_core::{Number, SourceId, Span, Value};
+use tq_core::{Number, SourceId, Span, Value, presentation::ColorPalette};
 use tq_toon::{
     ArrayPreparationConfig, DecoderConfig, Delimiter, DuplicateKeyPolicy, Event, EventConsumer,
     KeyFolding, PathExpansion, PreparationArena, PreparationLimits, TranscodeCommitment,
@@ -148,4 +148,181 @@ fn lightweight_transcode_matches_dom_numeric_projection() {
         ),
         "0"
     );
+}
+
+fn strip_sgr(bytes: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"\x1b[") {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'm' {
+                index += 1;
+            }
+            assert!(index < bytes.len(), "unterminated SGR");
+            index += 1;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    output
+}
+
+fn transcode_object(commitment: TranscodeCommitment, palette: Option<ColorPalette>) -> Vec<u8> {
+    let span = Span::new(SourceId::new(1), 0, 1);
+    let mut transcode = TranscodeConsumer::new(
+        Vec::new(),
+        WriterConfig::default(),
+        ArrayPreparationConfig::default(),
+        PreparationArena::new(PreparationLimits::default()),
+        DuplicateKeyPolicy::Reject,
+        commitment,
+    );
+    if let Some(palette) = palette {
+        transcode = transcode.with_palette(palette);
+    }
+    transcode.consume(Event::DocumentStart { span }).unwrap();
+    transcode.consume(Event::ObjectStart { span }).unwrap();
+    transcode
+        .consume_text_key(span, "arr".to_owned(), false)
+        .unwrap();
+    transcode
+        .consume(Event::ArrayStart {
+            span,
+            declared_count: Some(1),
+        })
+        .unwrap();
+    transcode
+        .consume_text_string(span, "a,b".to_owned())
+        .unwrap();
+    transcode
+        .consume(Event::ArrayEnd {
+            span,
+            observed_count: 1,
+        })
+        .unwrap();
+    transcode
+        .consume_text_key(span, "count".to_owned(), false)
+        .unwrap();
+    transcode
+        .consume_number_literal(span, "2".to_owned())
+        .unwrap();
+    transcode.consume(Event::ObjectEnd { span }).unwrap();
+    transcode.consume(Event::DocumentEnd { span }).unwrap();
+    transcode.into_inner()
+}
+
+#[test]
+fn colored_transcode_direct_and_atomic_paths_strip_to_plain_bytes() {
+    let palette = ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17");
+    for commitment in [
+        TranscodeCommitment::DirectSequence,
+        TranscodeCommitment::DirectValues,
+        TranscodeCommitment::AtomicUnframed,
+    ] {
+        let plain = transcode_object(commitment, None);
+        let colored = transcode_object(commitment, Some(palette.clone()));
+        assert_eq!(strip_sgr(&colored), plain, "{commitment:?}");
+        if commitment != TranscodeCommitment::AtomicUnframed {
+            assert!(colored.ends_with(b"\n"), "{commitment:?}");
+            assert!(colored.ends_with(b"\x1b[0m\n"), "{commitment:?}");
+        }
+    }
+}
+
+fn assert_colons_are_plain(bytes: &[u8]) {
+    let mut styled = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"\x1b[") {
+            let end = index + bytes[index..].iter().position(|b| *b == b'm').unwrap();
+            styled = &bytes[index..=end] != b"\x1b[0m";
+            index = end;
+        } else if bytes[index] == b':' {
+            assert!(!styled, "colon has a style: {bytes:?}");
+        }
+        index += 1;
+    }
+}
+
+#[test]
+fn toon_colons_are_unstyled_in_native_and_prepared_layouts() {
+    for palette in [
+        ColorPalette::default(),
+        ColorPalette::from_jq_colors("10:11:12:13:14:15:16:17"),
+    ] {
+        for source in [
+            r#"{"x":1,"child":{"y":2}}"#,
+            "[]",
+            "[1,2]",
+            r#"[{"x":1},{"x":2}]"#,
+            "[{},[1]]",
+        ] {
+            let value: Value = serde_json::from_str(source).unwrap();
+            let mut output = Vec::new();
+            tq_toon::write_value_colored(
+                &mut output,
+                &value,
+                WriterConfig::default(),
+                Some(&palette),
+            )
+            .unwrap();
+            assert_colons_are_plain(&output);
+            assert_eq!(
+                strip_sgr(&output),
+                encode(&value, WriterConfig::default()).as_bytes()
+            );
+            if let Value::Array(values) = &value {
+                for memory_threshold_bytes in [0, 4096] {
+                    let mut prepared = tq_toon::PreparedArray::new(ArrayPreparationConfig {
+                        memory_threshold_bytes,
+                        ..ArrayPreparationConfig::default()
+                    });
+                    for value in values.iter() {
+                        prepared.push(value).unwrap();
+                    }
+                    let mut replay = Vec::new();
+                    prepared
+                        .write_to_colored(&mut replay, WriterConfig::default(), Some(&palette))
+                        .unwrap();
+                    assert_colons_are_plain(&replay);
+                    assert_eq!(strip_sgr(&replay), strip_sgr(&output));
+                }
+            }
+        }
+        for commitment in [
+            TranscodeCommitment::DirectValues,
+            TranscodeCommitment::AtomicUnframed,
+        ] {
+            assert_colons_are_plain(&transcode_object(commitment, Some(palette.clone())));
+        }
+    }
+}
+
+#[test]
+fn direct_transcode_preserves_plain_dash_prefixed_scalar_spelling() {
+    let span = Span::new(SourceId::new(1), 0, 1);
+    for palette in [None, Some(ColorPalette::default())] {
+        let mut transcode = TranscodeConsumer::new(
+            Vec::new(),
+            WriterConfig::default(),
+            ArrayPreparationConfig::default(),
+            PreparationArena::new(PreparationLimits::default()),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectValues,
+        );
+        if let Some(palette) = palette {
+            transcode = transcode.with_palette(palette);
+        }
+        transcode.consume(Event::DocumentStart { span }).unwrap();
+        transcode.consume(Event::ObjectStart { span }).unwrap();
+        transcode.consume_text_key(span, "x".into(), false).unwrap();
+        transcode
+            .consume_text_string(span, "-draft".into())
+            .unwrap();
+        transcode.consume(Event::ObjectEnd { span }).unwrap();
+        transcode.consume(Event::DocumentEnd { span }).unwrap();
+        assert_eq!(strip_sgr(&transcode.into_inner()), b"x: -draft\n");
+    }
 }
