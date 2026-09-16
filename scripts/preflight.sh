@@ -12,6 +12,7 @@ if [ "${1:-}" = --docs ]; then exit 0; fi
 "$cargo_bin" check --workspace --all-targets --locked
 "$cargo_bin" clippy --workspace --all-targets --all-features --locked -- -D warnings
 "$cargo_bin" test --workspace --locked
+./scripts/microbench-smoke.sh
 # Main specifications are the repository contract. Associated active changes are
 # selected and checked separately by openspec-check.sh at the PR boundary.
 ./scripts/openspec-check.sh

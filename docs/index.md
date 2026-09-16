@@ -27,3 +27,4 @@ Run `./scripts/docs-check.sh` from the repository root to validate the bundle.
 15. [Contributor checks](contributor-checks.md) - Local validation and PR completion.
 16. [Contributing](contributing.md) - Setup and development requirements.
 17. [Releasing](releasing.md) - Candidate archives and coordinated publication.
+18. [Event-stream microbenchmarks](tests/event-stream-microbenchmarks.md) - In-process attribution and baseline comparisons.

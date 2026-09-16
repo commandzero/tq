@@ -31,8 +31,13 @@ tq-formats = { version = "0.4.0", path = "../tq-formats" }
 tq-toon = { version = "0.4.0", path = "../tq-toon" }
 
 [dev-dependencies]
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
 tempfile = "3.27.0"
 tq-test-support = { path = "../tq-test-support" }
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "event_stream"
+harness = false
