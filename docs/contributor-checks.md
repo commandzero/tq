@@ -41,21 +41,14 @@ No general Markdown parser runs alongside OKF.
 
 ## OpenSpec completion
 
-Each PR body must contain exactly one association field:
-
-```text
-OpenSpec changes: none
-```
-
-Replace `none` with comma-separated change IDs whenever implementation belongs
-to those changes, even when the artifacts were committed earlier.
-Reviewers verify that association and any no-spec-deltas explanation.
+The OpenSpec gate derives associated change IDs from committed paths changed
+between the target merge base and the PR head. It checks active changes,
+archives, and main-spec edits from that diff. It does not parse PR descriptions.
 
 Check out the PR head and run against its target branch:
 
 ```sh
-PR_BODY='OpenSpec changes: example-change' \
-  ./scripts/openspec-check.sh origin/main HEAD
+./scripts/openspec-check.sh origin/main HEAD
 ```
 
 The checker uses the merge base, examines both sides of renames, and checks
