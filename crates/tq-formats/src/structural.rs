@@ -451,9 +451,7 @@ where
                         return Err(io::Error::other("JSON object key has no value"));
                     }
                 } else {
-                    self.consumer
-                        .consume_text_key(self.start_span(position), value.to_string(), true)
-                        .map_err(io::Error::other)?;
+                    self.consume_key(value, position)?;
                 }
             }
             JsonEvent::Scalar { value, position } => {
@@ -490,13 +488,38 @@ where
         let Some((value, position)) = self.pending_key.take() else {
             return Ok(());
         };
-        self.consumer
-            .consume_text_key(self.start_span(position), value.to_string(), true)
-            .map_err(io::Error::other)
+        self.consume_key(value, position)
+    }
+
+    fn consume_key(&mut self, value: Arc<str>, position: JsonPosition) -> io::Result<()> {
+        let span = self.start_span(position);
+        if self.consumer.prefers_decoded_events() {
+            self.send(Event::Key {
+                span,
+                value,
+                quoted: true,
+            })
+        } else {
+            self.consumer
+                .consume_text_key(span, value.to_string(), true)
+                .map_err(io::Error::other)
+        }
     }
 
     fn consume_scalar(&mut self, value: Value, position: JsonPosition) -> io::Result<()> {
         let span = self.start_span(position);
+        if self.consumer.prefers_decoded_events() {
+            let value = match value {
+                Value::Null => Scalar::Null,
+                Value::Bool(value) => Scalar::Bool(value),
+                Value::String(value) => Scalar::String(value),
+                Value::Number(value) => Scalar::Number(value),
+                Value::Array(_) | Value::Object(_) => {
+                    return Err(io::Error::other("JSON scalar contained a composite value"));
+                }
+            };
+            return self.send(Event::Scalar { span, value });
+        }
         match value {
             Value::Null => self.consumer.consume_null(span).map_err(io::Error::other),
             Value::Bool(value) => self
@@ -594,9 +617,38 @@ mod tests {
     impl EventConsumer for Collector {
         type Error = Infallible;
 
+        fn prefers_decoded_events(&self) -> bool {
+            true
+        }
+
         fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
             self.0.push(event);
             Ok(())
+        }
+
+        fn consume_text_key(
+            &mut self,
+            _span: tq_core::Span,
+            _value: String,
+            _quoted: bool,
+        ) -> Result<(), String> {
+            Err("decoded key was converted back to text".to_owned())
+        }
+
+        fn consume_text_string(
+            &mut self,
+            _span: tq_core::Span,
+            _value: String,
+        ) -> Result<(), String> {
+            Err("decoded string was converted back to text".to_owned())
+        }
+
+        fn consume_number_literal(
+            &mut self,
+            _span: tq_core::Span,
+            _literal: String,
+        ) -> Result<(), String> {
+            Err("decoded number was converted back to text".to_owned())
         }
     }
 

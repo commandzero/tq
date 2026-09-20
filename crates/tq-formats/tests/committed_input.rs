@@ -705,3 +705,49 @@ fn committed_input_events_preserve_resource_and_io_failure_classes() {
         Err(InputDeliveryError::Input(FormatError::Io(_)))
     ));
 }
+
+#[test]
+fn json_codec_forwards_decoded_events_and_preserves_scalar_errors() {
+    use tq_core::SourceId;
+    use tq_core::Span;
+    use tq_formats::{CodecConsumerError, InputDeliveryError};
+    use tq_toon::{Event, EventConsumer};
+
+    struct RejectScalar;
+    impl EventConsumer for RejectScalar {
+        type Error = std::io::Error;
+
+        fn prefers_decoded_events(&self) -> bool {
+            true
+        }
+
+        fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
+            if matches!(event, Event::Scalar { .. }) {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            } else {
+                Ok(())
+            }
+        }
+
+        fn consume_text_key(&mut self, _: Span, _: String, _: bool) -> Result<(), String> {
+            panic!("decoded key must retain its shared string")
+        }
+
+        fn consume_number_literal(&mut self, _: Span, _: String) -> Result<(), String> {
+            panic!("decoded number must retain its parsed representation")
+        }
+    }
+    let input = NativeFormat::Json
+        .select_input(DecodeOptions::default(), InputRepresentation::Events)
+        .unwrap()
+        .open(
+            br#"{"key":123456789012345678901234567890}"#.as_slice(),
+            "test",
+        );
+    let Err(InputDeliveryError::Consumer(CodecConsumerError::Event(error))) =
+        input.consume_codec_events(SourceId::new(42), &mut RejectScalar)
+    else {
+        panic!("expected typed scalar consumer error");
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+}

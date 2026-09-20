@@ -81,6 +81,10 @@ where
 {
     type Error = String;
 
+    fn prefers_decoded_events(&self) -> bool {
+        self.consumer.prefers_decoded_events()
+    }
+
     fn consume(&mut self, event: Event) -> Result<(), String> {
         self.consumer.consume(event).map_err(|error| {
             self.failure = Some(CodecConsumerError::Event(error));

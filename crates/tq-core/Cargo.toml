@@ -30,3 +30,10 @@ thiserror = "2.0.20"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion = { version = "=0.8.2", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "event_stream"
+harness = false

@@ -1674,6 +1674,10 @@ where
 {
     type Error = String;
 
+    fn prefers_decoded_events(&self) -> bool {
+        true
+    }
+
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
         self.projector.check_cancellation()?;
         match event {

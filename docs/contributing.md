@@ -57,6 +57,10 @@ crashes, timeouts, signals, and malformed output.
 
 ## Benchmark correctness gates
 
+For in-process Criterion attribution, see
+[event-stream microbenchmarks](tests/event-stream-microbenchmarks.md).
+The full preflight compiles these optimized targets and runs their correctness smoke path.
+
 The runner times a benchmark row only after its output passes the semantic
 correctness check. It generates JSON, YAML, and TOON before timing, and each
 representation must match the ordered source model. Do not slice, repeat, pad,
