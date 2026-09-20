@@ -20,6 +20,9 @@ mod json5_input;
 mod json_limits;
 mod json_recovery;
 mod output;
+mod output_color;
+mod output_json;
+mod output_yaml;
 mod parallel_json;
 mod rs_framing;
 mod selected_input;
@@ -42,7 +45,7 @@ pub use input::{
 };
 pub use output::{
     JsonColorPalette, JsonIndent, NativeOutputSequence, OutputError, OutputOptions, SelectedOutput,
-    ToonFraming, write_results,
+    ToonFraming, write_raw_json_value, write_results,
 };
 pub use parallel_json::{
     ParallelJsonObservations, ParallelJsonOptions, stream_json_selected_records_parallel,
@@ -59,6 +62,7 @@ pub use structural::{
     decode_json_events_with_options, decode_json_events_with_options_control,
     json_decoder_capabilities,
 };
+pub use tq_core::presentation::{ColorPalette, ColorRole};
 
 /// Supported structured input syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

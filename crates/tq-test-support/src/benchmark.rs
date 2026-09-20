@@ -29,7 +29,7 @@ pub use manifest::{
 };
 pub use markdown::{
     MarkdownRenderError, RESULTS_END_MARKER, RESULTS_START_MARKER, render_markdown_campaigns,
-    render_markdown_pages, workload_filename,
+    render_markdown_pages, replace_results_region, workload_filename,
 };
 pub use measure::{
     BenchmarkInvocation, MeasureError, MeasuredOutcome, MeasuredStatus, RssPreflight,

@@ -1236,7 +1236,7 @@ fn argument_free_invocation_uses_identity_filter_over_stdin() {
 fn color_binary_encoding_and_argument_file_limits_are_classified() {
     let output = tq_with_default_palette(&["--output-format", "json", "-nC", "1"], b"");
     assert_eq!(output.code, 0);
-    assert_eq!(output.stdout, b"\x1b[0;39m1\x1b[0m\n");
+    assert_eq!(output.stdout, b"\x1b[0;35m1\x1b[0m\n");
 
     let output = tq(&["--output-format", "json", "-nbc", "1"], b"");
     assert_eq!(output.code, 0);

@@ -209,13 +209,6 @@ fn json_lines_rejects_incompatible_controls_before_opening_input() {
             ".",
             "missing-input-that-must-not-be-opened",
         ][..],
-        &[
-            "-o",
-            "jsonl",
-            "-C",
-            ".",
-            "missing-input-that-must-not-be-opened",
-        ][..],
     ] {
         let result = tq_without_stdin(arguments);
         assert_eq!(result.code, 2, "{arguments:?}");

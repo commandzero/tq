@@ -243,7 +243,11 @@ pub fn workload_filename(case_id: &str) -> Result<String, MarkdownRenderError> {
     Ok(format!("{raw}.md"))
 }
 
-fn replace_results_region(
+/// Replaces only the marked results region in an authored benchmark page.
+///
+/// # Errors
+/// Rejects missing, duplicate, reversed, or misplaced results markers.
+pub fn replace_results_region(
     path: &Path,
     source: &str,
     generated: &str,

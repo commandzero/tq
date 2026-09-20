@@ -425,8 +425,6 @@ fn delimited_options_reject_incompatible_controls_before_input() {
             vec!["--ascii-output"],
             vec!["--raw-output"],
             vec!["--join-output"],
-            vec!["--color-output"],
-            vec!["--monochrome-output"],
             vec!["--unframed"],
         ] {
             let mut args = vec!["-o", format];
@@ -510,9 +508,9 @@ fn seq_defaults_to_toon_and_accepts_json_output_in_either_order() {
 }
 
 #[test]
-fn json_sequence_rejects_forced_color_output() {
-    assert!(parse_args(["-o", "json-seq", "--color-output", "."]).is_err());
-    assert!(parse_args(["-o", "json-seq", "-C", "."]).is_err());
+fn json_sequence_accepts_forced_color_output() {
+    assert!(parse_args(["-o", "json-seq", "--color-output", "."]).is_ok());
+    assert!(parse_args(["-o", "json-seq", "-C", "."]).is_ok());
 }
 
 #[test]

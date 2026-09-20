@@ -15,14 +15,19 @@ mod writer;
 
 pub use decoder::{DecodeIntoError, Decoder};
 pub use dom::{DomBuilder, DomDecodeError, DomError, decode_to_value};
-pub use sequence::{CardinalityError, SequenceError, write_sequence, write_unframed};
+pub use sequence::{
+    CardinalityError, SequenceError, write_sequence, write_sequence_colored, write_unframed,
+    write_unframed_colored,
+};
 pub use spool::{
     ArrayPreparationConfig, PreparationArena, PreparationFrame, PreparationLimits,
     PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PreparedObject,
     PublicationBuffer, PublicationError, SpoolError,
 };
 pub use transcode::{TranscodeCommitment, TranscodeConsumer, TranscodeError};
-pub use writer::{Delimiter, KeyFolding, WriterConfig, WriterError, encode, write_value};
+pub use writer::{
+    Delimiter, KeyFolding, WriterConfig, WriterError, encode, write_value, write_value_colored,
+};
 
 /// Bounded decoder configuration. Declared collection lengths never directly
 /// become allocation capacities.

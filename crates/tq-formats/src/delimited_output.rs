@@ -1,10 +1,13 @@
-//! Validates each complete row before committing a header or row bytes.
+//! CSV and TSV output with validated semantic color spans.
 
 use std::{borrow::Cow, collections::BTreeSet, io::Write, sync::Arc};
 
-use tq_core::Value;
+use tq_core::{
+    Value,
+    presentation::{ColorPalette, ColorRole},
+};
 
-use crate::{DelimitedLimits, OutputError};
+use crate::{DelimitedLimits, OutputError, output_color::write_span_bounded};
 
 pub(crate) struct DelimitedOutput {
     header: Option<Vec<Arc<str>>>,
@@ -27,6 +30,7 @@ impl DelimitedOutput {
         value: &Value,
         strict_conversion: bool,
         limits: DelimitedLimits,
+        palette: Option<&ColorPalette>,
     ) -> Result<(), OutputError> {
         let Value::Object(values) = value else {
             return Err(OutputError::Profile(
@@ -82,7 +86,13 @@ impl DelimitedOutput {
             let fields = header
                 .iter()
                 .map(|key| {
-                    PreparedField::text(Cow::Borrowed(key), self.delimiter, key.is_empty(), limits)
+                    PreparedField::text(
+                        Cow::Borrowed(key),
+                        self.delimiter,
+                        key.is_empty(),
+                        limits,
+                        ColorRole::Key,
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             validate_row(&fields, limits)?;
@@ -91,9 +101,9 @@ impl DelimitedOutput {
             None
         };
         if let Some(fields) = header_row.as_ref() {
-            write_row(writer, fields, self.delimiter)?;
+            write_row(writer, fields, self.delimiter, palette)?;
         }
-        write_row(writer, &row, self.delimiter)?;
+        write_row(writer, &row, self.delimiter, palette)?;
         if let Some(header) = new_header {
             self.keys.extend(header.iter().cloned());
             self.header = Some(header);
@@ -106,6 +116,7 @@ struct PreparedField<'a> {
     text: Cow<'a, str>,
     quoted: bool,
     encoded_bytes: usize,
+    role: ColorRole,
 }
 
 impl<'a> PreparedField<'a> {
@@ -114,17 +125,26 @@ impl<'a> PreparedField<'a> {
         delimiter: u8,
         limits: DelimitedLimits,
     ) -> Result<Self, OutputError> {
-        let (text, quoted) = match value {
-            Value::Null => (Cow::Borrowed(""), false),
-            Value::Bool(value) => (Cow::Borrowed(if *value { "true" } else { "false" }), false),
-            Value::Number(value) => (Cow::Owned(value.to_string()), false),
+        let (text, quoted, role) = match value {
+            Value::Null => (Cow::Borrowed(""), false, ColorRole::Null),
+            Value::Bool(value) => (
+                Cow::Borrowed(if *value { "true" } else { "false" }),
+                false,
+                if *value {
+                    ColorRole::True
+                } else {
+                    ColorRole::False
+                },
+            ),
+            Value::Number(value) => (Cow::Owned(value.to_string()), false, ColorRole::Number),
             Value::String(text) => (
                 Cow::Borrowed(text.as_ref()),
                 crate::delimited_profile::inferred_scalar(text).is_some(),
+                ColorRole::String,
             ),
             Value::Array(_) | Value::Object(_) => unreachable!("complete row validated"),
         };
-        Self::text(text, delimiter, quoted, limits)
+        Self::text(text, delimiter, quoted, limits, role)
     }
 
     fn text(
@@ -132,6 +152,7 @@ impl<'a> PreparedField<'a> {
         delimiter: u8,
         force_quote: bool,
         limits: DelimitedLimits,
+        role: ColorRole,
     ) -> Result<Self, OutputError> {
         if text.len() > limits.field_bytes {
             return Err(OutputError::Resource("field-bytes"));
@@ -148,6 +169,7 @@ impl<'a> PreparedField<'a> {
             text,
             quoted,
             encoded_bytes,
+            role,
         })
     }
 }
@@ -169,12 +191,20 @@ fn write_row(
     writer: &mut impl Write,
     fields: &[PreparedField<'_>],
     delimiter: u8,
+    palette: Option<&ColorPalette>,
 ) -> Result<(), OutputError> {
     for (index, field) in fields.iter().enumerate() {
         if index != 0 {
-            writer.write_all(&[delimiter])?;
+            write_span_bounded(writer, palette, ColorRole::Object, &[delimiter])?;
         }
-        write_string(writer, &field.text, delimiter, field.quoted)?;
+        write_string(
+            writer,
+            &field.text,
+            delimiter,
+            field.quoted,
+            field.role,
+            palette,
+        )?;
     }
     writer.write_all(b"\n")?;
     Ok(())
@@ -190,19 +220,23 @@ fn write_string(
     text: &str,
     delimiter: u8,
     force_quote: bool,
+    role: ColorRole,
+    palette: Option<&ColorPalette>,
 ) -> Result<(), OutputError> {
     let quoted = force_quote || needs_quotes(text, delimiter);
     if !quoted {
-        writer.write_all(text.as_bytes())?;
+        if role != ColorRole::Null {
+            write_span_bounded(writer, palette, role, text.as_bytes())?;
+        }
         return Ok(());
     }
-    writer.write_all(b"\"")?;
+    write_span_bounded(writer, palette, ColorRole::Object, b"\"")?;
     for (index, part) in text.split('"').enumerate() {
         if index != 0 {
-            writer.write_all(b"\"\"")?;
+            write_span_bounded(writer, palette, role, b"\"\"")?;
         }
-        writer.write_all(part.as_bytes())?;
+        write_span_bounded(writer, palette, role, part.as_bytes())?;
     }
-    writer.write_all(b"\"")?;
+    write_span_bounded(writer, palette, ColorRole::Object, b"\"")?;
     Ok(())
 }

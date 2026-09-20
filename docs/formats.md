@@ -2,7 +2,7 @@
 type: Report
 title: Format compatibility
 description: Input and output format support in jq, yq, and tq.
-generated: { by: codex/gpt-6-astra, at: 2026-09-13T16:02:56Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-13T20:03:35Z }
 ---
 
 # Format compatibility
@@ -33,6 +33,11 @@ checkout. `R` means read, `W` means write, and `-` means no native support.
 
 ## Notes
 
+- Every tq output format supports terminal colors, including JSON Lines,
+  JSON/TOON sequences, CSV, and TSV. The shared default and `JQ_COLORS` overrides
+  style semantic tokens; syntactic quotes share delimiter colors. Automatic
+  pipes/files stay plain, and `-M` explicitly requests undecorated bytes.
+  Forced `-C` output needs tq-generated ANSI styling removed before parsing.
 - jq reads a stream of whitespace-separated JSON values. With compact output,
   that covers JSON Lines. `--seq` selects RFC 7464 JSON Text Sequences.
 - yq has an explicit JSON parser and supports multiple JSON documents, including
