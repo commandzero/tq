@@ -48,6 +48,7 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
+- Reduced event-stream overhead by preserving decoded JSON values and avoiding redundant scalar dispatch allocations and continuation copies (#48).
 - Fixed `-R -s` to concatenate multiple sources into one bounded string, including remaining-input access with `-n`.
 
 ### Security

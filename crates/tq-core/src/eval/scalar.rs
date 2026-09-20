@@ -89,18 +89,6 @@ const MATH_BINARY: &[&str] = &[
 /// Zero-arity math functions consume `input`; binary and ternary functions
 /// consume their explicit argument values.
 pub(super) fn supports(name: &str, arity: usize) -> bool {
-    if format::is_supported(name) || name == "@urid" {
-        return arity == 0;
-    }
-    if MATH_UNARY.contains(&name) {
-        return arity == 0;
-    }
-    if MATH_BINARY.contains(&name) {
-        return arity == 2;
-    }
-    if name == "fma" {
-        return arity == 3;
-    }
     match name {
         "type"
         | "length"
@@ -161,7 +149,12 @@ pub(super) fn supports(name: &str, arity: usize) -> bool {
         | "rtrimstr" | "trimstr" | "startswith" | "endswith" | "join" | "strptime" | "strftime"
         | "getpath" | "delpaths" | "bsearch" => arity == 1,
         "setpath" => arity == 2,
-        _ => false,
+        _ => {
+            (arity == 0
+                && (format::is_supported(name) || name == "@urid" || MATH_UNARY.contains(&name)))
+                || (arity == 2 && MATH_BINARY.contains(&name))
+                || (arity == 3 && name == "fma")
+        }
     }
 }
 

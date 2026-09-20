@@ -2909,7 +2909,7 @@ fn managed_operation_supported(bytecode: &Bytecode, operation: &Operation) -> bo
         | Operation::Interpolation(_) => true,
         Operation::Call { name, arguments } => bytecode.string(*name).is_some_and(|name| {
             regex_builtin_shape(name, arguments.len()).is_some()
-                || builtin_argument_order(name, arguments.len()).is_some()
+                || supports_builtin_call(name, arguments.len())
                 || (matches!(name.as_ref(), "IN" | "INDEX") && (1..=2).contains(&arguments.len()))
                 || (name.as_ref() == "JOIN" && (2..=4).contains(&arguments.len()))
                 || (name.as_ref() == "empty" && arguments.is_empty())
@@ -3099,21 +3099,21 @@ fn operation_children(bytecode: &Bytecode, operation: &Operation) -> Option<Vec<
     Some(children)
 }
 
-fn builtin_argument_order(name: &str, arity: usize) -> Option<Arc<[usize]>> {
-    let supported = scalar::supports(name, arity)
+fn supports_builtin_call(name: &str, arity: usize) -> bool {
+    scalar::supports(name, arity)
         || scalar::supports_ambient(name, arity)
         || (name == "range" && (1..=3).contains(&arity))
         || (name == "combinations" && arity <= 1)
-        || (name == "tostream" && arity == 0);
-    if !supported {
-        return None;
-    }
+        || (name == "tostream" && arity == 0)
+}
+
+fn builtin_argument_order(name: &str, arity: usize) -> Arc<[usize]> {
     let order = if arity > 1 && scalar::supports(name, arity) {
         (0..arity).rev().collect::<Vec<_>>()
     } else {
         (0..arity).collect::<Vec<_>>()
     };
-    Some(order.into())
+    order.into()
 }
 
 fn regex_builtin_shape(name: &str, arity: usize) -> Option<(Arc<[usize]>, Option<usize>)> {
@@ -5567,8 +5567,8 @@ fn evaluate_generator_stream(
                         work.continuations
                             .push(GeneratorContinuation::AccessField(Arc::clone(key)));
                         work.node = *base;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
+                        pending.push(GeneratorTask::Eval(work));
+                        continue 'generator;
                     }
                     None => Some(Err(invalid("string missing after validation"))),
                 },
@@ -5580,8 +5580,8 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *base;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Slice { base, start, end } => {
                     work.continuations.push(GeneratorContinuation::SliceBase {
@@ -5593,14 +5593,14 @@ fn evaluate_generator_stream(
                         frames: Arc::clone(&work.frames),
                     });
                     work.node = *base;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Iterate(base) => {
                     work.continuations.push(GeneratorContinuation::Iterate);
                     work.node = *base;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Optional(child) => {
                     let boundary = next_boundary;
@@ -5608,8 +5608,8 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::OptionalBoundary { boundary });
                     work.node = *child;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Pipe { left, right } => {
                     work.continuations.push(GeneratorContinuation::Pipe {
@@ -5617,8 +5617,8 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *left;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Comma { left, right } => {
                     if pending.len().saturating_add(2) > limits.fork_stack {
@@ -5651,8 +5651,8 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::ArrayItem(values));
                     work.node = *child;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Object(entries) => {
                     let entries: Arc<[crate::bytecode::ObjectOperand]> = Arc::from(entries.clone());
@@ -5684,8 +5684,8 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::Unary(*operator));
                     work.node = *child;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Binary {
                     operator,
@@ -5715,8 +5715,8 @@ fn evaluate_generator_stream(
                         });
                     }
                     work.node = *left;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Bind {
                     value,
@@ -5732,8 +5732,8 @@ fn evaluate_generator_stream(
                         origin: None,
                     });
                     work.node = *value;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::BindAlternatives {
                     value,
@@ -5748,8 +5748,8 @@ fn evaluate_generator_stream(
                             environment: Arc::clone(&work.environment),
                         });
                     work.node = *value;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Reduce {
                     generator,
@@ -5767,8 +5767,8 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *initial;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Foreach {
                     generator,
@@ -5787,8 +5787,8 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *initial;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Assignment {
                     operator,
@@ -5840,8 +5840,8 @@ fn evaluate_generator_stream(
                     } else {
                         work.node = *alternative;
                     }
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::UserCall { symbol, arguments } => schedule_user_call(
                     *symbol,
@@ -5878,8 +5878,8 @@ fn evaluate_generator_stream(
                             work.node = argument.node;
                             work.environment = argument.environment;
                             work.frames = argument.frames;
-                            pending.push(GeneratorTask::Eval(work.clone()));
-                            None
+                            pending.push(GeneratorTask::Eval(work));
+                            continue 'generator;
                         }
                         None => Some(Err(invalid(
                             "filter parameter missing from active user frame",
@@ -5896,15 +5896,15 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *expression;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Label { symbol, body } => {
                     work.continuations
                         .push(GeneratorContinuation::Label(*symbol));
                     work.node = *body;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Break(symbol) => Some(Err(VmError::Break { label: *symbol })),
                 Operation::Call { name, arguments }
@@ -6183,10 +6183,49 @@ fn evaluate_generator_stream(
                     }
                 }
                 Operation::Call { name, arguments }
+                    if arguments.is_empty()
+                        && bytecode
+                            .string(*name)
+                            .is_some_and(|name| scalar::supports(name, 0)) =>
+                {
+                    let name = bytecode.string(*name).expect("validated scalar name");
+                    // Retain the charge for the InvokeBuiltin task avoided by this path.
+                    if let Err(error) =
+                        charge_managed_step(&mut observations, limits, cancellation, stop)
+                    {
+                        let _ = emit(Err(error), observations);
+                        return observations;
+                    }
+                    let mut charge =
+                        || charge_managed_step(&mut observations, limits, cancellation, stop);
+                    match scalar::evaluate(name, &work.input, &[], limits, &mut charge) {
+                        Ok(Some(value)) => {
+                            result_origin = match scalar_result_origin(
+                                name,
+                                &work.input,
+                                &[],
+                                work.origin.clone(),
+                                &mut next_origin,
+                            ) {
+                                Ok(origin) => origin,
+                                Err(error) => {
+                                    let _ = emit(Err(error), observations);
+                                    return observations;
+                                }
+                            };
+                            Some(Ok(value))
+                        }
+                        Ok(None) => None,
+                        Err(error) => {
+                            result_origin = None;
+                            Some(Err(error))
+                        }
+                    }
+                }
+                Operation::Call { name, arguments }
                     if bytecode
                         .string(*name)
-                        .and_then(|name| builtin_argument_order(name, arguments.len()))
-                        .is_some() =>
+                        .is_some_and(|name| supports_builtin_call(name, arguments.len())) =>
                 {
                     let Some(name) = bytecode.string(*name).cloned() else {
                         return {
@@ -6194,12 +6233,6 @@ fn evaluate_generator_stream(
                                 Err(invalid("string missing after validation")),
                                 observations,
                             );
-                            observations
-                        };
-                    };
-                    let Some(order) = builtin_argument_order(&name, arguments.len()) else {
-                        return {
-                            let _ = emit(Err(invalid("unsupported builtin call")), observations);
                             observations
                         };
                     };
@@ -6258,6 +6291,7 @@ fn evaluate_generator_stream(
                             };
                         }
                         values.resize(arguments.len(), None);
+                        let order = builtin_argument_order(&name, arguments.len());
                         let first = order[0];
                         let mut continuations = std::mem::take(&mut work.continuations);
                         continuations.push(GeneratorContinuation::BuiltinArguments {
@@ -6298,14 +6332,13 @@ fn evaluate_generator_stream(
                     if let Some(argument) = arguments.first() {
                         work.continuations.push(GeneratorContinuation::Raise);
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
-                    } else {
-                        Some(Err(VmError::Raised {
-                            message: error_message(&work.input),
-                            value: work.input.clone(),
-                        }))
+                        pending.push(GeneratorTask::Eval(work));
+                        continue 'generator;
                     }
+                    Some(Err(VmError::Raised {
+                        message: error_message(&work.input),
+                        value: work.input.clone(),
+                    }))
                 }
                 Operation::Call { name, .. }
                     if bytecode
@@ -6439,15 +6472,14 @@ fn evaluate_generator_stream(
                         });
                         work.continuations.push(GeneratorContinuation::DebugItem);
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
-                    } else {
-                        match debug_effect(&work.input, limits.output_bytes)
-                            .and_then(|bytes| append_effect(effects, &bytes, limits.output_bytes))
-                        {
-                            Ok(()) => Some(Ok(work.input)),
-                            Err(error) => Some(Err(error)),
-                        }
+                        pending.push(GeneratorTask::Eval(work));
+                        continue 'generator;
+                    }
+                    match debug_effect(&work.input, limits.output_bytes)
+                        .and_then(|bytes| append_effect(effects, &bytes, limits.output_bytes))
+                    {
+                        Ok(()) => Some(Ok(work.input)),
+                        Err(error) => Some(Err(error)),
                     }
                 }
                 Operation::Call { name, arguments }
@@ -6466,8 +6498,8 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::AddItem(state));
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Call { name, .. }
                     if bytecode
@@ -6489,16 +6521,15 @@ fn evaluate_generator_stream(
                             input: work.input.clone(),
                         });
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
-                    } else {
-                        match halt_error_text(&work.input, limits.output_bytes) {
-                            Ok(stderr) => Some(Err(VmError::Halt {
-                                status: 5,
-                                stderr: Arc::from(stderr.as_bytes()),
-                            })),
-                            Err(error) => Some(Err(error)),
-                        }
+                        pending.push(GeneratorTask::Eval(work));
+                        continue 'generator;
+                    }
+                    match halt_error_text(&work.input, limits.output_bytes) {
+                        Ok(stderr) => Some(Err(VmError::Halt {
+                            status: 5,
+                            stderr: Arc::from(stderr.as_bytes()),
+                        })),
+                        Err(error) => Some(Err(error)),
                     }
                 }
                 Operation::Call { name, arguments }
@@ -6532,8 +6563,8 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::PullConsumer { state });
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Call { name, arguments }
                     if bytecode
@@ -6617,8 +6648,8 @@ fn evaluate_generator_stream(
                         frames: Arc::clone(&work.frames),
                     });
                     work.node = count;
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Call { name, arguments }
                     if bytecode
@@ -6630,8 +6661,8 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::FromStreamItem(state));
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Call { name, arguments }
                     if bytecode
@@ -6644,8 +6675,8 @@ fn evaluate_generator_stream(
                             count: work.input.clone(),
                         });
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work.clone()));
-                    None
+                    pending.push(GeneratorTask::Eval(work));
+                    continue 'generator;
                 }
                 Operation::Call { name, arguments }
                     if bytecode
@@ -6684,8 +6715,8 @@ fn evaluate_generator_stream(
                                     frames: Arc::clone(&work.frames),
                                 });
                             work.node = *condition;
-                            pending.push(GeneratorTask::Eval(work.clone()));
-                            None
+                            pending.push(GeneratorTask::Eval(work));
+                            continue 'generator;
                         }
                         _ => Some(Err(invalid("loop arguments missing"))),
                     }
@@ -6723,8 +6754,8 @@ fn evaluate_generator_stream(
                                 frames: Arc::clone(&work.frames),
                             });
                             work.node = *count;
-                            pending.push(GeneratorTask::Eval(work.clone()));
-                            None
+                            pending.push(GeneratorTask::Eval(work));
+                            continue 'generator;
                         }
                         _ => Some(Err(invalid("limit arguments missing"))),
                     }
@@ -6875,11 +6906,10 @@ fn evaluate_generator_stream(
                             origin: work.origin.clone(),
                         });
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
-                    } else {
-                        Some(Err(invalid("select argument missing")))
+                        pending.push(GeneratorTask::Eval(work));
+                        continue 'generator;
                     }
+                    Some(Err(invalid("select argument missing")))
                 }
                 Operation::Call { name, arguments }
                     if bytecode
@@ -6895,11 +6925,10 @@ fn evaluate_generator_stream(
                             container_from_result,
                         });
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work.clone()));
-                        None
-                    } else {
-                        Some(Err(invalid("has/in argument missing")))
+                        pending.push(GeneratorTask::Eval(work));
+                        continue 'generator;
                     }
+                    Some(Err(invalid("has/in argument missing")))
                 }
                 Operation::Call { name, arguments }
                     if bytecode.string(*name).is_some_and(|name| {

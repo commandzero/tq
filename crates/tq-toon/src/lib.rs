@@ -157,6 +157,16 @@ pub trait EventConsumer {
     /// Returns the consumer's bounded processing failure.
     fn consume(&mut self, event: Event) -> Result<(), Self::Error>;
 
+    /// Accepts already-decoded keys and scalars directly through [`Self::consume`].
+    ///
+    /// A decoder with shared strings or parsed numbers can avoid converting them
+    /// back into text tokens. The default retains the specialized token callbacks
+    /// for existing consumers. This preference does not require a text-token
+    /// decoder to materialize owned events before delivering its tokens.
+    fn prefers_decoded_events(&self) -> bool {
+        false
+    }
+
     /// Consumes a decoded object key before the decoder converts it to shared
     /// event storage.
     ///

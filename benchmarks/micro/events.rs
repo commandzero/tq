@@ -9,6 +9,10 @@ pub struct Consume {
 }
 impl EventConsumer for Consume {
     type Error = Infallible;
+    fn prefers_decoded_events(&self) -> bool {
+        true
+    }
+
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
         black_box(event);
         self.count += 1;
@@ -22,6 +26,10 @@ pub struct Check {
 }
 impl EventConsumer for Check {
     type Error = Infallible;
+    fn prefers_decoded_events(&self) -> bool {
+        true
+    }
+
     fn consume(&mut self, event: Event) -> Result<(), Self::Error> {
         let token = match event {
             Event::DocumentStart { .. } => "document".to_owned(),

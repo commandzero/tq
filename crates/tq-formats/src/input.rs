@@ -587,6 +587,10 @@ where
     F: FnMut(NativeInputObservation) -> Result<ControlFlow<()>, E>,
 {
     type Error = &'static str;
+    fn prefers_decoded_events(&self) -> bool {
+        true
+    }
+
     fn consume(&mut self, event: tq_toon::Event) -> Result<(), Self::Error> {
         match (self.consume)(NativeInputObservation::Event(event)) {
             Ok(ControlFlow::Continue(())) => Ok(()),
