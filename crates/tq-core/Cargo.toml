@@ -16,6 +16,7 @@ include = ["src/**", "tests/**", "LICENSE", "../../README.md"]
 base64 = "0.23.1"
 fancy-regex = "0.19.1"
 indexmap = { version = "2.14.2", features = ["serde"] }
+itoa = "1.0.18"
 jiff = "0.2.35"
 libm = "0.2.16"
 num-bigint = "0.5.1"

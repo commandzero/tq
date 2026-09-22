@@ -1,6 +1,7 @@
 //! Command parsing and execution boundary for `tq`.
 
 mod args;
+mod memory_budget;
 mod runner;
 mod runtime_spool;
 

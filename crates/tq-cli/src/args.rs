@@ -6,6 +6,8 @@ use thiserror::Error;
 use tq_formats::{InputFormat, JsonIndent, NativeFormat, OutputFormat, ToonFraming};
 use tq_toon::{Delimiter, KeyFolding, WriterConfig};
 
+use crate::memory_budget;
+
 /// Top-level CLI action.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -191,6 +193,24 @@ impl Default for ResourceLimits {
             decode_in_flight_bytes: 64 * 1024 * 1024,
             spool_bytes: 8 * 1024 * 1024 * 1024,
         }
+    }
+}
+
+impl ResourceLimits {
+    /// Builds invocation defaults, adapting only the three memory ceilings.
+    ///
+    /// `Default` intentionally remains deterministic for library callers;
+    /// this seam is used by the CLI parser once, before options are applied.
+    #[must_use]
+    pub(crate) fn for_cli(available_memory: Option<u64>) -> Self {
+        let mut limits = Self::default();
+        if let Some(available_memory) = available_memory {
+            let available = usize::try_from(available_memory).unwrap_or(usize::MAX);
+            limits.preparation_memory_bytes = available / 8;
+            limits.hybrid_in_flight_bytes = available / 32;
+            limits.decode_in_flight_bytes = available / 32;
+        }
+        limits
     }
 }
 
@@ -690,7 +710,7 @@ where
     let mut explain = None;
     let mut trace_limit = 0;
     let mut report_file = None;
-    let mut limits = ResourceLimits::default();
+    let mut limits = ResourceLimits::for_cli(memory_budget::available_memory_bytes());
     let mut positional_only = false;
 
     while let Some(token) = tokens.next() {
@@ -1279,8 +1299,8 @@ mod tests {
     use tq_formats::{InputFormat, OutputFormat, ToonFraming};
 
     use super::{
-        CapabilityPolicy, CliError, ColorMode, Command, FilterSource, generated_help, parse_args,
-        parse_args_with_policy,
+        CapabilityPolicy, CliError, ColorMode, Command, FilterSource, ResourceLimits,
+        generated_help, parse_args, parse_args_with_policy,
     };
 
     #[test]
@@ -1512,5 +1532,65 @@ mod tests {
             panic!("run command")
         };
         assert!(run.allow_environment && run.allow_platform);
+    }
+
+    #[test]
+    fn cli_adaptive_defaults_preserve_library_fallback() {
+        assert_eq!(ResourceLimits::for_cli(None), ResourceLimits::default());
+    }
+
+    #[test]
+    fn adaptive_budgets_use_floor_fractions() {
+        let limits = ResourceLimits::for_cli(Some(1024 * 1024 * 1024 + 31));
+        assert_eq!(limits.preparation_memory_bytes, 128 * 1024 * 1024 + 3);
+        assert_eq!(limits.hybrid_in_flight_bytes, 32 * 1024 * 1024);
+        assert_eq!(limits.decode_in_flight_bytes, 32 * 1024 * 1024);
+    }
+
+    #[test]
+    fn low_available_memory_shrinks_each_ceiling() {
+        let limits = ResourceLimits::for_cli(Some(31));
+        assert_eq!(limits.preparation_memory_bytes, 3);
+        assert_eq!(limits.hybrid_in_flight_bytes, 0);
+        assert_eq!(limits.decode_in_flight_bytes, 0);
+    }
+
+    #[test]
+    fn adaptive_budgets_saturate_before_scaling() {
+        let limits = ResourceLimits::for_cli(Some(u64::MAX));
+        assert_eq!(limits.preparation_memory_bytes, usize::MAX / 8);
+        assert_eq!(limits.hybrid_in_flight_bytes, usize::MAX / 32);
+        assert_eq!(limits.decode_in_flight_bytes, usize::MAX / 32);
+        let aggregate = limits.preparation_memory_bytes as u128
+            + limits.hybrid_in_flight_bytes as u128
+            + limits.decode_in_flight_bytes as u128;
+        assert!(aggregate <= u128::from(u64::MAX) * 3 / 16);
+    }
+
+    #[test]
+    fn zero_available_memory_yields_zero_adaptive_ceilings() {
+        let limits = ResourceLimits::for_cli(Some(0));
+        assert_eq!(limits.preparation_memory_bytes, 0);
+        assert_eq!(limits.hybrid_in_flight_bytes, 0);
+        assert_eq!(limits.decode_in_flight_bytes, 0);
+    }
+
+    #[test]
+    fn explicit_memory_flags_override_adaptive_defaults_including_zero() {
+        let Command::Run(run) = parse_args([
+            "--prepare-memory-bytes",
+            "0",
+            "--hybrid-in-flight-bytes",
+            "0",
+            "--decode-in-flight-bytes",
+            "0",
+            ".",
+        ])
+        .unwrap() else {
+            panic!("run command")
+        };
+        assert_eq!(run.limits.preparation_memory_bytes, 0);
+        assert_eq!(run.limits.hybrid_in_flight_bytes, 0);
+        assert_eq!(run.limits.decode_in_flight_bytes, 0);
     }
 }

@@ -289,11 +289,11 @@ impl StreamRecord {
         if self.raw {
             return self.value.unwrap_or(Value::Null);
         }
-        let mut parts = vec![path_value(&self.path)];
-        if let Some(value) = self.value {
-            parts.push(value);
+        let path = path_value(self.path);
+        match self.value {
+            Some(value) => Value::Array(Arc::new([path, value])),
+            None => Value::Array(Arc::new([path])),
         }
-        Value::array(parts)
     }
 
     fn path(path: Vec<PathComponent>, value: Option<Value>) -> Self {
@@ -1453,7 +1453,7 @@ where
             // Retain the containing path before appending that marker.
             self.null_slot_path()
         } else {
-            path_value(&path)
+            path_value(path)
         };
         let value = Value::array(vec![Value::string(message), error_path]);
         (self.emit)(StreamRecord::raw(value))
@@ -1465,7 +1465,7 @@ where
             .last()
             .and_then(|frame| frame.path.clone())
             .unwrap_or_default();
-        let mut values = match path_value(&path) {
+        let mut values = match path_value(path) {
             Value::Array(values) => values.to_vec(),
             _ => Vec::new(),
         };
@@ -1618,16 +1618,14 @@ fn path_kind_mismatch(actual: &[PathComponent], expected: &[PathComponent]) -> b
     false
 }
 
-fn path_value(path: &[PathComponent]) -> Value {
-    Value::array(
-        path.iter()
+fn path_value(path: Vec<PathComponent>) -> Value {
+    Value::Array(
+        path.into_iter()
             .map(|component| match component {
-                PathComponent::Key(key) => Value::string(Arc::clone(key)),
-                PathComponent::Index(index) => Value::Number(
-                    Number::parse(&index.to_string()).expect("usize is a valid bounded number"),
-                ),
+                PathComponent::Key(key) => Value::String(key),
+                PathComponent::Index(index) => Value::Number(Number::from_usize(index)),
             })
-            .collect::<Vec<_>>(),
+            .collect(),
     )
 }
 

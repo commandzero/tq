@@ -19,7 +19,7 @@ pub enum PathComponent {
 
 /// Root-anchored immutable path.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Path(Arc<[PathComponent]>);
+pub struct Path(Option<Arc<[PathComponent]>>);
 
 impl Path {
     /// Root path.
@@ -31,13 +31,18 @@ impl Path {
     /// Creates a path from owned components.
     #[must_use]
     pub fn new(components: impl Into<Vec<PathComponent>>) -> Self {
-        Self(components.into().into())
+        let components = components.into();
+        if components.is_empty() {
+            Self::root()
+        } else {
+            Self(Some(components.into()))
+        }
     }
 
     /// Ordered components.
     #[must_use]
     pub fn components(&self) -> &[PathComponent] {
-        &self.0
+        self.0.as_deref().unwrap_or_default()
     }
 
     /// Returns the value currently addressed by the path.
@@ -136,6 +141,15 @@ mod tests {
 
     use super::{Path, PathComponent};
     use crate::Value;
+
+    #[test]
+    fn empty_components_address_and_replace_the_root() {
+        let path = Path::new(Vec::new());
+        let root = Value::array(vec![Value::Bool(true)]);
+        assert_eq!(path, Path::root());
+        assert_eq!(path.clone().get(&root), Some(&root));
+        assert_eq!(path.replace(&root, Value::Null).unwrap(), Value::Null);
+    }
 
     #[test]
     fn nested_update_shares_unchanged_sibling() {

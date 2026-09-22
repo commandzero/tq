@@ -89,6 +89,16 @@ impl Number {
         Self::parse_with_limits(source, NumberLimits::default())
     }
 
+    /// Constructs an exact non-negative integer without parsing a JSON token.
+    #[must_use]
+    pub fn from_usize(value: usize) -> Self {
+        let mut buffer = itoa::Buffer::new();
+        Self {
+            binary64: OnceLock::new(),
+            literal: Some(Arc::from(buffer.format(value))),
+        }
+    }
+
     /// Canonicalizes a finite JSON numeric literal without constructing a
     /// runtime number.
     ///
@@ -327,10 +337,13 @@ impl Number {
     }
 
     fn compare(&self, other: &Self) -> Ordering {
-        if let (Some(left), Some(right)) = (&self.literal, &other.literal)
-            && let (Ok(left), Ok(right)) = (DecimalParts::parse(left), DecimalParts::parse(right))
-        {
-            return compare_exact(&left, &right);
+        if let (Some(left), Some(right)) = (&self.literal, &other.literal) {
+            if left == right {
+                return Ordering::Equal;
+            }
+            if let (Ok(left), Ok(right)) = (DecimalParts::parse(left), DecimalParts::parse(right)) {
+                return compare_exact(&left, &right);
+            }
         }
         if let Some(left) = &self.literal
             && other.as_f64() == 0.0
@@ -1159,6 +1172,14 @@ mod tests {
         assert_eq!(Number::parse("1.000").unwrap().to_string(), "1.000");
         assert_eq!(Number::parse("100e-2").unwrap().to_string(), "1.00");
         assert_eq!(Number::parse("1e2").unwrap().to_string(), "1E+2");
+    }
+
+    #[test]
+    fn integer_counts_preserve_full_precision() {
+        let largest = Number::from_usize(usize::MAX);
+        let previous = Number::from_usize(usize::MAX - 1);
+        assert!(largest > previous);
+        assert_eq!(largest.to_string(), usize::MAX.to_string());
     }
 
     #[test]

@@ -235,7 +235,7 @@ pub(super) fn evaluate(
         "length" => length(input).map(Some),
         "abs" => absolute_value(input).map(Some),
         "utf8bytelength" => match input {
-            Value::String(value) => number_usize(value.len()).map(Some),
+            Value::String(value) => Ok(Some(number_usize(value.len()))),
             value => Err(type_error("utf8bytelength", value)),
         },
         "keys" => bounded_keys(input, true, limits, charge).map(Some),
@@ -848,7 +848,7 @@ pub(super) fn bounded_keys(
         Value::Array(values) => {
             for index in 0..values.len() {
                 charge()?;
-                output.push(number_usize(index)?);
+                output.push(number_usize(index));
             }
         }
         Value::Object(values) => {
@@ -885,7 +885,7 @@ pub(super) fn bounded_to_entries(
             for (index, value) in values.iter().enumerate() {
                 charge()?;
                 let mut entry = Object::new();
-                entry.insert(Arc::from("key"), number_usize(index)?);
+                entry.insert(Arc::from("key"), number_usize(index));
                 entry.insert(Arc::from("value"), value.clone());
                 entries.push(Value::object(entry));
             }
@@ -920,7 +920,7 @@ pub(super) fn bounded_explode(
         .map_err(|_| resource("output-bytes"))?;
     for character in input.chars() {
         charge()?;
-        output.push(number_usize(character as usize)?);
+        output.push(number_usize(character as usize));
     }
     Ok(Value::array(output))
 }
