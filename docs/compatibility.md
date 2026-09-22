@@ -2,7 +2,7 @@
 type: Report
 title: jq compatibility
 description: Supported jq behavior and the manual compatibility evidence policy.
-generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-21T23:30:13Z }
 ---
 
 # jq compatibility
@@ -151,6 +151,38 @@ records that ordinary queries can transform or consume through `input` and
 evaluation over the projected records.
 Projection retains bounded decoder state, but a query such as `[inputs]` can
 still collect every projected record. YAML remains document-at-a-time.
+
+The CLI samples available memory once when initializing its resource limits:
+
+| Control | Default share of available memory | Fallback when discovery fails |
+| --- | --- | --- |
+| `--prepare-memory-bytes` | 1/8 | 8 MiB |
+| `--hybrid-in-flight-bytes` | 1/32 | 8 MiB |
+| `--decode-in-flight-bytes` | 1/32 | 64 MiB |
+
+These are ceilings, not reservations. They scale down on constrained systems
+and have no fixed upper cap beyond the platform's addressable integer range.
+The available-memory snapshot comes from the operating system. On Linux,
+readable cgroup v1/v2 limits at standard mount points further restrict it to
+the remaining memory in the current cgroup and its ancestors. Unavailable
+cgroup data leaves the host-memory result in use. An observed zero available
+memory is not a discovery failure. Explicit flags override the corresponding
+defaults; library `ResourceLimits::default()` remains deterministic. Input,
+output, spool, worker-count, and batch-size limits are unchanged. These three
+ceilings do not bound total process RSS or ordinary document materialization.
+
+Array preparation, including object and nested-array elements, stays in memory
+while the shared preparation budget permits it. Under pressure, completed
+array elements spill to private temporary storage, including when decoding the
+next element needs their memory. A single nested value that cannot fit still
+fails with a resource diagnostic; spilling does not bypass the memory limit.
+
+Identity transcode batches publication writes through a fixed 64 KiB I/O buffer,
+separate from the dynamic `--prepare-memory-bytes` budget. This avoids
+token-sized disk writes after preparation spills. Default and RS-framed TOON
+output flush this buffer before publishing each complete record; preparation
+failures discard that record without removing earlier results. Unframed output
+retains its exactly-one-result publication check.
 
 Limits are explicit: input/depth/token/line/lookahead bounds, VM steps and
 result count, output bytes, and TOON preparation/spool ceilings. A resource

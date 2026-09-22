@@ -155,6 +155,37 @@ fn malformed_unframed_input_and_spool_exhaustion_publish_nothing() {
 }
 
 #[test]
+fn sequence_publication_failure_keeps_only_completed_records() {
+    for (commitment, expected) in [
+        (TranscodeCommitment::DirectValues, b"null\n".as_slice()),
+        (
+            TranscodeCommitment::DirectSequence,
+            b"\x1enull\n".as_slice(),
+        ),
+    ] {
+        let (preparation, arena) = preparation(0, 16);
+        let mut consumer = TranscodeConsumer::new(
+            Vec::new(),
+            WriterConfig::default(),
+            preparation,
+            arena,
+            DuplicateKeyPolicy::Reject,
+            commitment,
+        );
+        decode_json_events(b"null".as_slice(), SourceId::new(1), &mut consumer).unwrap();
+        let result = decode_json_events(
+            br#""abcdefghijklmnopqrstuvwxyz""#.as_slice(),
+            SourceId::new(1),
+            &mut consumer,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(consumer.documents(), 1);
+        assert_eq!(consumer.into_inner(), expected);
+    }
+}
+
+#[test]
 fn strict_toon_duplicate_key_does_not_publish_a_partial_sequence_record() {
     let input = b"a: 1\na: 2";
     let (preparation, arena) = preparation(1024, 1024);
@@ -313,6 +344,65 @@ fn one_mib_budget_spools_a_direct_nested_array() {
     assert!(observations.spool_bytes_written > 0);
     assert!(observations.spool_bytes_replayed > 0);
     assert!(observations.memory_high_water_bytes <= MEMORY);
+}
+
+#[test]
+fn composite_arrays_stay_in_memory_when_they_fit() {
+    for input in [
+        br#"{"items":[{"x":1},{"x":2}]}"#.as_slice(),
+        br#"[{"x":1},[2,3],false]"#.as_slice(),
+    ] {
+        let (preparation, arena) = preparation(4096, 1024 * 1024);
+        let mut consumer = TranscodeConsumer::new(
+            Vec::new(),
+            WriterConfig::default(),
+            preparation,
+            arena.clone(),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectSequence,
+        );
+        decode_json_events(input, SourceId::new(1), &mut consumer).unwrap();
+
+        assert_eq!(
+            consumer.into_inner(),
+            document_json(input, WriterConfig::default(), false)
+        );
+        assert_eq!(arena.observations().spool_bytes_written, 0);
+        assert_eq!(arena.observations().spool_bytes_replayed, 0);
+    }
+}
+
+#[test]
+fn transient_keys_and_nested_arrays_can_reclaim_completed_siblings() {
+    const MEMORY: usize = 1024;
+    let prefix = format!(
+        r#"[{{"v":"{}"}},{{"v":"{}"}},"#,
+        "x".repeat(180),
+        "x".repeat(180)
+    );
+    let inputs = [
+        format!(r#"{prefix}{{"{}":1}}]"#, "k".repeat(600)),
+        format!(r#"{prefix}["{}","{}"]]"#, "x".repeat(350), "y".repeat(350)),
+    ];
+    for input in inputs {
+        let (preparation, arena) = preparation(MEMORY, 1024 * 1024);
+        let mut consumer = TranscodeConsumer::new(
+            Vec::new(),
+            WriterConfig::default(),
+            preparation,
+            arena.clone(),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectSequence,
+        );
+        decode_json_events(input.as_bytes(), SourceId::new(1), &mut consumer).unwrap();
+
+        assert_eq!(
+            consumer.into_inner(),
+            document_json(input.as_bytes(), WriterConfig::default(), false)
+        );
+        assert!(arena.observations().spool_bytes_written > 0);
+        assert!(arena.observations().memory_high_water_bytes <= MEMORY);
+    }
 }
 
 #[test]

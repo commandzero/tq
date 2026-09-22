@@ -123,6 +123,14 @@ private temporary files. Sequence output preserves completed records before a
 later error. Unframed output publishes nothing until exactly one successful
 result is known.
 
+CLI memory defaults scale with available RAM: preparation uses a 1/8 ceiling,
+while hybrid and decoder in-flight buffers each use 1/32. These are not
+preallocated reservations; explicit byte-limit flags override them. Readable
+Linux cgroup limits constrain the available-memory snapshot. Array preparation
+stays in memory until the shared budget requires spilling. See
+[memory and limits](docs/compatibility.md#memory-and-limits) for discovery
+fallbacks and the scope of these ceilings.
+
 The resource controls are `--max-input-bytes`, `--max-depth`,
 `--max-token-bytes`, `--max-line-bytes`, `--max-lookahead-bytes`,
 `--max-vm-steps`, `--max-results`, `--max-output-bytes`,

@@ -1,7 +1,7 @@
 //! Structural-event to canonical TOON transcode consumer.
 
 use std::{
-    io::Write,
+    io::{BufWriter, Write},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -76,7 +76,7 @@ pub struct TranscodeConsumer<W> {
 
 struct StagedOutput<W> {
     committed: W,
-    pending: Option<crate::PublicationBuffer>,
+    pending: Option<BufWriter<crate::PublicationBuffer>>,
 }
 
 impl<W> StagedOutput<W> {
@@ -95,7 +95,11 @@ impl<W> StagedOutput<W> {
         if self.pending.is_some() {
             return Err(TranscodeError::Structure("nested output publication"));
         }
-        self.pending = Some(crate::PublicationBuffer::new(config, arena));
+        // Token-sized writes must not become individual spool-file writes.
+        self.pending = Some(BufWriter::with_capacity(
+            64 * 1024,
+            crate::PublicationBuffer::new(config, arena),
+        ));
         Ok(())
     }
 
@@ -107,7 +111,11 @@ impl<W> StagedOutput<W> {
             .pending
             .take()
             .ok_or(TranscodeError::Structure("missing output publication"))?;
-        if let Err(error) = pending.publish_colored(&mut self.committed, palette) {
+        pending.flush()?;
+        if let Err(error) = pending
+            .get_mut()
+            .publish_colored(&mut self.committed, palette)
+        {
             return Err(match error {
                 crate::PublicationError::Cardinality(_) => {
                     TranscodeError::Structure("invalid sequence publication cardinality")
@@ -178,6 +186,30 @@ enum Frame {
         memory: PreparationMemory,
         values: Vec<Value>,
     },
+}
+
+fn grow_preparation_memory(
+    memory: &mut PreparationMemory,
+    bytes: usize,
+    ancestors: &mut [Frame],
+) -> Result<(), SpoolError> {
+    match memory.grow(bytes) {
+        Err(SpoolError::MemoryLimit) => {}
+        result => return result,
+    }
+    // Completed siblings are reclaimable; the element currently being decoded
+    // is not. Spill only under actual pressure, then retry the same charge.
+    for frame in ancestors.iter_mut().rev() {
+        if let Frame::RootArray { array, .. } | Frame::DirectArray { array, .. } = frame
+            && array.spill_retained()?
+        {
+            match memory.grow(bytes) {
+                Err(SpoolError::MemoryLimit) => {}
+                result => return result,
+            }
+        }
+    }
+    Err(SpoolError::MemoryLimit)
 }
 
 struct IndentingWriter<'a, W> {
@@ -399,7 +431,9 @@ impl<W: Write> TranscodeConsumer<W> {
     }
 
     fn key(&mut self, key: Arc<str>) -> Result<(), TranscodeError> {
-        match self.frames.last_mut() {
+        let current = self.frames.len().saturating_sub(1);
+        let (ancestors, current) = self.frames.split_at_mut(current);
+        match current.first_mut() {
             Some(Frame::DirectObject {
                 pending_key, seen, ..
             }) => {
@@ -420,7 +454,7 @@ impl<W: Write> TranscodeConsumer<W> {
                 pending_key,
                 ..
             }) => {
-                memory.grow(key.len().saturating_add(64))?;
+                grow_preparation_memory(memory, key.len().saturating_add(64), ancestors)?;
                 if pending_key.replace(key).is_some() {
                     return Err(TranscodeError::Structure("object key without a value"));
                 }
@@ -431,7 +465,9 @@ impl<W: Write> TranscodeConsumer<W> {
     }
 
     fn complete_value(&mut self, value: Value) -> Result<(), TranscodeError> {
-        match self.frames.last_mut() {
+        let current = self.frames.len().saturating_sub(1);
+        let (ancestors, current) = self.frames.split_at_mut(current);
+        match current.first_mut() {
             Some(Frame::DirectObject { pending_key, .. }) => {
                 let key = pending_key
                     .take()
@@ -485,11 +521,11 @@ impl<W: Write> TranscodeConsumer<W> {
                 if self.duplicate_keys == DuplicateKeyPolicy::Reject && values.contains_key(&key) {
                     return Err(TranscodeError::Duplicate(key));
                 }
-                memory.grow(retained_value_bytes(&value))?;
+                grow_preparation_memory(memory, retained_value_bytes(&value), ancestors)?;
                 values.insert(key, value);
             }
             Some(Frame::Array { memory, values, .. }) => {
-                memory.grow(retained_value_bytes(&value))?;
+                grow_preparation_memory(memory, retained_value_bytes(&value), ancestors)?;
                 values.push(value);
             }
             None if !self.root_complete => {
