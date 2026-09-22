@@ -599,7 +599,7 @@ fn truncate_path_shape(
     charge: &mut impl FnMut() -> Result<(), VmError>,
 ) -> Result<(Value, usize, TruncatePathKind), VmError> {
     match value {
-        Value::Null => Ok((super::number_usize(0)?, 0, TruncatePathKind::Null)),
+        Value::Null => Ok((super::number_usize(0), 0, TruncatePathKind::Null)),
         Value::Number(number) => {
             let length = number.as_f64().abs();
             #[allow(
@@ -615,13 +615,13 @@ fn truncate_path_shape(
             Ok((super::length(value)?, path_len, TruncatePathKind::Number))
         }
         Value::Object(values) => Ok((
-            super::number_usize(values.len())?,
+            super::number_usize(values.len()),
             values.len(),
             TruncatePathKind::Object,
         )),
         Value::Bool(_) => Err(super::type_error("length", value)),
         Value::Array(values) => Ok((
-            super::number_usize(values.len())?,
+            super::number_usize(values.len()),
             values.len(),
             TruncatePathKind::Array,
         )),
@@ -634,7 +634,7 @@ fn truncate_path_shape(
                     .ok_or_else(|| super::resource("output-bytes"))?;
             }
             Ok((
-                super::number_usize(length)?,
+                super::number_usize(length),
                 length,
                 TruncatePathKind::String,
             ))

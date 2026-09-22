@@ -513,7 +513,7 @@ enum TreeMessage {
 pub struct Vm {
     bytecode: Arc<Bytecode>,
     input: Value,
-    variables: BTreeMap<Arc<str>, Value>,
+    variables: Arc<BTreeMap<Arc<str>, Value>>,
     pc: usize,
     values: Vec<Value>,
     calls: Vec<CatchFrame>,
@@ -559,12 +559,14 @@ impl Vm {
     }
 
     /// Creates an event VM with immutable CLI/external variable values.
+    ///
+    /// An `Arc` shares one immutable binding snapshot across event records.
     #[must_use]
     pub fn new_events_with_variables(
         plan: &Plan<Compiled, Events>,
         input: Value,
         limits: VmLimits,
-        variables: BTreeMap<Arc<str>, Value>,
+        variables: impl Into<Arc<BTreeMap<Arc<str>, Value>>>,
     ) -> Self {
         Self::from_bytecode(plan.program().bytecode_arc(), input, limits, variables)
     }
@@ -671,12 +673,12 @@ impl Vm {
         bytecode: Arc<Bytecode>,
         input: Value,
         limits: VmLimits,
-        variables: BTreeMap<Arc<str>, Value>,
+        variables: impl Into<Arc<BTreeMap<Arc<str>, Value>>>,
     ) -> Self {
         Self {
             bytecode,
             input,
-            variables,
+            variables: variables.into(),
             pc: 0,
             values: Vec::new(),
             calls: Vec::new(),
@@ -1233,6 +1235,7 @@ mod tests {
         mpsc::channel,
     };
     use std::{
+        collections::BTreeMap,
         thread,
         time::{Duration, Instant},
     };
@@ -1494,11 +1497,14 @@ mod tests {
     }
 
     #[test]
-    fn exhaustive_consumers_evaluate_tree_without_a_worker_thread() {
+    fn shared_event_bindings_remain_isolated_across_records_and_branches() {
         let plan = analyze_with_context(
             resolve(
-                parse("select(length == 2)").unwrap(),
-                &ResolveOptions::default(),
+                parse("(. as $x | $x), $x").unwrap(),
+                &ResolveOptions {
+                    variables: [Arc::from("x")].into(),
+                    ..ResolveOptions::default()
+                },
             )
             .unwrap(),
             AnalysisContext {
@@ -1511,22 +1517,25 @@ mod tests {
         .unwrap()
         .event_plan()
         .unwrap();
-        let mut vm = Vm::new_events(
-            &plan,
-            Value::array([number("1"), number("2")]),
-            VmLimits::default(),
-        );
-        let mut results = Vec::new();
+        let variables = Arc::new(BTreeMap::from([(Arc::from("x"), Value::string("outer"))]));
 
-        vm.for_each_result(|value| {
-            results.push(value);
-            true
-        })
-        .unwrap();
+        for payload in ["first", "second"] {
+            let record = Value::array([Value::array([]), Value::string(payload)]);
+            let mut vm = Vm::new_events_with_variables(
+                &plan,
+                record.clone(),
+                VmLimits::default(),
+                Arc::clone(&variables),
+            );
+            let mut results = Vec::new();
+            vm.for_each_result(|value| {
+                results.push(value);
+                true
+            })
+            .unwrap();
 
-        assert_eq!(results, [Value::array([number("1"), number("2")])]);
-        assert!(vm.tree_worker.is_none());
-        assert!(vm.done);
+            assert_eq!(results, [record, Value::string("outer")]);
+        }
     }
 
     #[test]

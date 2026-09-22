@@ -2355,6 +2355,7 @@ dependencies = [
  "criterion",
  "fancy-regex 0.19.1",
  "indexmap",
+ "itoa",
  "jiff",
  "libm",
  "num-bigint 0.5.1",

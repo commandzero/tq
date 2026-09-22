@@ -342,7 +342,7 @@ fn getpath_managed(
 
 #[derive(Clone, Default)]
 struct LexicalEnvironment {
-    values: Environment,
+    values: Arc<Environment>,
     origins: OriginEnvironment,
 }
 
@@ -351,7 +351,7 @@ impl LexicalEnvironment {
         Self::default()
     }
 
-    fn from_values(values: Environment) -> Self {
+    fn from_values(values: Arc<Environment>) -> Self {
         Self {
             values,
             origins: OriginEnvironment::new(),
@@ -369,7 +369,7 @@ impl std::ops::Deref for LexicalEnvironment {
 
 impl std::ops::DerefMut for LexicalEnvironment {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.values
+        Arc::make_mut(&mut self.values)
     }
 }
 
@@ -405,7 +405,7 @@ struct UserFrame {
 pub(crate) fn evaluate_stream(
     bytecode: &Bytecode,
     input: &Value,
-    variables: &Environment,
+    variables: &Arc<Environment>,
     limits: VmLimits,
     cancellation: Option<&AtomicBool>,
     stop: &AtomicBool,
@@ -582,7 +582,7 @@ enum GeneratorContinuation {
     ObjectKey {
         entries: Arc<[crate::bytecode::ObjectOperand]>,
         next: usize,
-        object: Object,
+        object: Arc<Object>,
         input: Value,
         origin: Option<OriginToken>,
         environment: Arc<LexicalEnvironment>,
@@ -591,7 +591,7 @@ enum GeneratorContinuation {
     ObjectValue {
         entries: Arc<[crate::bytecode::ObjectOperand]>,
         next: usize,
-        object: Object,
+        object: Arc<Object>,
         key: Arc<str>,
         input: Value,
         origin: Option<OriginToken>,
@@ -1856,7 +1856,7 @@ fn schedule_object_entry(
     bytecode: &Bytecode,
     entries: &Arc<[crate::bytecode::ObjectOperand]>,
     next: usize,
-    object: Object,
+    object: Arc<Object>,
     input: Value,
     origin: Option<OriginToken>,
     environment: Arc<LexicalEnvironment>,
@@ -1865,7 +1865,7 @@ fn schedule_object_entry(
     pending: &mut Vec<GeneratorTask>,
 ) -> Option<Result<Value, VmError>> {
     let Some(entry) = entries.get(next) else {
-        return Some(Ok(Value::object(object)));
+        return Some(Ok(Value::Object(object)));
     };
     match &entry.key {
         KeyOperand::Static(index) => {
@@ -3197,7 +3197,7 @@ fn scalar_result_origin(
 fn evaluate_generator_stream(
     bytecode: &Bytecode,
     input: &Value,
-    variables: &Environment,
+    variables: &Arc<Environment>,
     limits: VmLimits,
     cancellation: Option<&AtomicBool>,
     stop: &AtomicBool,
@@ -3205,9 +3205,10 @@ fn evaluate_generator_stream(
     effects: &Arc<EffectState>,
     mut emit: impl FnMut(Result<Value, VmError>, VmObservations) -> bool,
 ) -> VmObservations {
-    let environment = Arc::new(LexicalEnvironment::from_values(variables.clone()));
+    let environment = Arc::new(LexicalEnvironment::from_values(Arc::clone(variables)));
     let mut next_origin = 1_u64;
-    let mut pending = vec![GeneratorTask::Eval(GeneratorWork {
+    // Immediate evaluation does not need the suspended-task queue's larger payload or allocation.
+    let mut current = Some(GeneratorWork {
         node: bytecode.root(),
         input: input.clone(),
         origin: Some(OriginToken {
@@ -3217,11 +3218,12 @@ fn evaluate_generator_stream(
         environment,
         frames: Arc::from([]),
         continuations: Vec::new(),
-    })];
+    });
+    let mut pending = Vec::new();
     let mut observations = VmObservations::default();
     let mut next_boundary = 0_u64;
 
-    'generator: while let Some(task) = pending.pop() {
+    'generator: while current.is_some() || !pending.is_empty() {
         if stop.load(Ordering::Relaxed)
             || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
         {
@@ -3238,113 +3240,577 @@ fn evaluate_generator_stream(
         }
         observations.steps += 1;
         let mut delivered_from_path = false;
-        let (mut work, delivered) = match task {
-            GeneratorTask::Eval(work) => (work, None),
-            GeneratorTask::InvokeBuiltin {
-                name,
-                arguments,
-                source_arity,
-                input,
-                origin,
-                environment,
-                frames,
-                continuations,
-            } => match generator::start(&name, &input, &arguments, source_arity, limits) {
-                Ok(Some(state)) => {
-                    pending.push(GeneratorTask::BuiltinGenerator {
-                        state,
+        let (mut work, delivered) = if let Some(work) = current.take() {
+            (work, None)
+        } else {
+            match pending.pop().expect("pending work is present") {
+                GeneratorTask::Eval(work) => (work, None),
+                GeneratorTask::InvokeBuiltin {
+                    name,
+                    arguments,
+                    source_arity,
+                    input,
+                    origin,
+                    environment,
+                    frames,
+                    continuations,
+                } => match generator::start(&name, &input, &arguments, source_arity, limits) {
+                    Ok(Some(state)) => {
+                        pending.push(GeneratorTask::BuiltinGenerator {
+                            state,
+                            environment,
+                            frames,
+                            continuations,
+                        });
+                        continue;
+                    }
+                    Err(error) => (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin: None,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Err(error)),
+                    ),
+                    Ok(None) => {
+                        let mut charge = || {
+                            if stop.load(Ordering::Relaxed)
+                                || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+                            {
+                                return Err(VmError::Interrupted);
+                            }
+                            if observations.steps >= limits.steps {
+                                return Err(resource("vm-steps"));
+                            }
+                            observations.steps += 1;
+                            Ok(())
+                        };
+                        let (scalar_result, getpath_path): (
+                            Result<Option<Value>, VmError>,
+                            Option<Option<Path>>,
+                        ) = if name.as_ref() == "getpath" {
+                            match arguments.first() {
+                                None => (Err(invalid("getpath argument missing")), Some(None)),
+                                Some(path_value) => {
+                                    match scalar::bounded_getpath_resolution(
+                                        &input,
+                                        path_value,
+                                        limits,
+                                        &mut charge,
+                                    ) {
+                                        Ok(resolution) => {
+                                            (Ok(Some(resolution.value)), Some(resolution.path))
+                                        }
+                                        Err(error) => (Err(error), Some(None)),
+                                    }
+                                }
+                            }
+                        } else {
+                            let result = if scalar::supports_ambient(&name, arguments.len()) {
+                                scalar::evaluate_ambient(
+                                    &name,
+                                    &input,
+                                    &arguments,
+                                    &environment,
+                                    limits,
+                                    &mut charge,
+                                )
+                            } else {
+                                scalar::evaluate(&name, &input, &arguments, limits, &mut charge)
+                            };
+                            (result, None)
+                        };
+                        match scalar_result {
+                            Ok(Some(value)) => {
+                                let origin_result = match getpath_path {
+                                    Some(Some(path)) => origin_at_path_bounded(
+                                        origin.as_ref(),
+                                        &path,
+                                        limits,
+                                        &mut charge,
+                                    ),
+                                    Some(None) => fresh_origin(&mut next_origin).map(Some),
+                                    None => scalar_result_origin(
+                                        &name,
+                                        &input,
+                                        &arguments,
+                                        origin,
+                                        &mut next_origin,
+                                    ),
+                                };
+                                let origin = match origin_result {
+                                    Ok(origin) => origin,
+                                    Err(error) => {
+                                        return {
+                                            let _ = emit(Err(error), observations);
+                                            observations
+                                        };
+                                    }
+                                };
+                                (
+                                    GeneratorWork {
+                                        node: bytecode.root(),
+                                        input: Value::Null,
+                                        origin,
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    },
+                                    Some(Ok(value)),
+                                )
+                            }
+                            Ok(None) => continue,
+                            Err(error) => (
+                                GeneratorWork {
+                                    node: bytecode.root(),
+                                    input: Value::Null,
+                                    origin: None,
+                                    environment,
+                                    frames,
+                                    continuations,
+                                },
+                                Some(Err(error)),
+                            ),
+                        }
+                    }
+                },
+                GeneratorTask::FinishBuiltinArguments {
+                    name,
+                    source_arity,
+                    values,
+                    input,
+                    origin,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    pending.push(GeneratorTask::InvokeBuiltin {
+                        name,
+                        arguments: values.take(),
+                        source_arity,
+                        input,
+                        origin,
                         environment,
                         frames,
                         continuations,
                     });
                     continue;
                 }
-                Err(error) => (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Err(error)),
-                ),
-                Ok(None) => {
-                    let mut charge = || {
+                GeneratorTask::SqlInFinish {
+                    boundary: _,
+                    state,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let value = Value::Bool(state.borrow().matched);
+                    let (origin, result) = match fresh_origin(&mut next_origin) {
+                        Ok(origin) => (Some(origin), Ok(value)),
+                        Err(error) => (None, Err(error)),
+                    };
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(result),
+                    )
+                }
+                GeneratorTask::SqlIndexFinish {
+                    boundary: _,
+                    state,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let result = state
+                        .borrow_mut()
+                        .builder
+                        .take()
+                        .map(sql::SqlIndexBuilder::finish)
+                        .ok_or_else(|| invalid("SQL INDEX finished more than once"));
+                    let (origin, result) = match result.and_then(|value| {
+                        fresh_origin(&mut next_origin).map(|origin| (Some(origin), Ok(value)))
+                    }) {
+                        Ok((origin, result)) => (origin, result),
+                        Err(error) => (None, Err(error)),
+                    };
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(result),
+                    )
+                }
+                GeneratorTask::SqlJoinFinish {
+                    boundary: _,
+                    state,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let result = state
+                        .borrow_mut()
+                        .collector
+                        .take()
+                        .map(sql::SqlPairCollector::finish)
+                        .ok_or_else(|| invalid("SQL JOIN finished more than once"));
+                    let (origin, result) = match result.and_then(|value| {
+                        fresh_origin(&mut next_origin).map(|origin| (Some(origin), Ok(value)))
+                    }) {
+                        Ok((origin, result)) => (origin, result),
+                        Err(error) => (None, Err(error)),
+                    };
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(result),
+                    )
+                }
+                GeneratorTask::InvokeRegex {
+                    name,
+                    arguments,
+                    replacement,
+                    input,
+                    origin: _origin,
+                    environment,
+                    frames,
+                    continuations,
+                } => 'regex: {
+                    let flags_index = usize::from(matches!(name.as_ref(), "sub" | "gsub")) + 1;
+                    let Some(pattern_value) = arguments.first() else {
+                        break 'regex regex_error_work(
+                            bytecode,
+                            &environment,
+                            &frames,
+                            &continuations,
+                            invalid("regex pattern argument missing"),
+                        );
+                    };
+                    let array_allowed = matches!(name.as_ref(), "test" | "match" | "capture")
+                        && arguments.get(flags_index).is_none();
+                    let (pattern, array_flags) =
+                        match regex_pattern_argument(&name, pattern_value, array_allowed) {
+                            Ok(parsed) => parsed,
+                            Err(error) => {
+                                break 'regex regex_error_work(
+                                    bytecode,
+                                    &environment,
+                                    &frames,
+                                    &continuations,
+                                    error,
+                                );
+                            }
+                        };
+                    let flags = match array_flags {
+                        Some(flags) => Ok(flags),
+                        None => match arguments.get(flags_index) {
+                            None | Some(Value::Null) => Ok(Arc::from("")),
+                            Some(Value::String(flags)) => Ok(Arc::clone(flags)),
+                            Some(value) => Err(type_error(&name, value)),
+                        },
+                    };
+                    let flags = match flags {
+                        Ok(flags) => flags,
+                        Err(error) => {
+                            break 'regex regex_error_work(
+                                bytecode,
+                                &environment,
+                                &frames,
+                                &continuations,
+                                error,
+                            );
+                        }
+                    };
+                    let Value::String(input) = &input else {
+                        break 'regex regex_error_work(
+                            bytecode,
+                            &environment,
+                            &frames,
+                            &continuations,
+                            type_error(&name, &input),
+                        );
+                    };
+                    let checkpoint_steps = Cell::new(observations.steps);
+                    let checkpoint = || {
                         if stop.load(Ordering::Relaxed)
                             || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
                         {
                             return Err(VmError::Interrupted);
                         }
-                        if observations.steps >= limits.steps {
+                        if checkpoint_steps.get() >= limits.steps {
                             return Err(resource("vm-steps"));
                         }
-                        observations.steps += 1;
+                        checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
                         Ok(())
                     };
-                    let (scalar_result, getpath_path): (
-                        Result<Option<Value>, VmError>,
-                        Option<Option<Path>>,
-                    ) = if name.as_ref() == "getpath" {
-                        match arguments.first() {
-                            None => (Err(invalid("getpath argument missing")), Some(None)),
-                            Some(path_value) => {
-                                match scalar::bounded_getpath_resolution(
-                                    &input,
-                                    path_value,
-                                    limits,
-                                    &mut charge,
-                                ) {
-                                    Ok(resolution) => {
-                                        (Ok(Some(resolution.value)), Some(resolution.path))
-                                    }
-                                    Err(error) => (Err(error), Some(None)),
+                    match name.as_ref() {
+                        "test" => {
+                            let test =
+                                stdlib::regex_test(input, &pattern, &flags, limits, &checkpoint);
+                            observations.steps = checkpoint_steps.get();
+                            let value = match test {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    break 'regex regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            };
+                            let origin = match fresh_origin(&mut next_origin) {
+                                Ok(origin) => Some(origin),
+                                Err(error) => {
+                                    break 'regex regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            };
+                            (
+                                GeneratorWork {
+                                    node: bytecode.root(),
+                                    input: Value::Null,
+                                    origin,
+                                    environment,
+                                    frames,
+                                    continuations,
+                                },
+                                Some(Ok(value)),
+                            )
+                        }
+                        "match" | "capture" | "scan" => {
+                            let kind = match name.as_ref() {
+                                "match" => stdlib::RegexPullKind::Match,
+                                "capture" => stdlib::RegexPullKind::Capture,
+                                _ => stdlib::RegexPullKind::Scan,
+                            };
+                            match stdlib::regex_cursor(
+                                Arc::clone(input),
+                                &pattern,
+                                &flags,
+                                kind,
+                                name.as_ref() == "scan",
+                                limits,
+                            ) {
+                                Ok(cursor) => {
+                                    pending.push(GeneratorTask::RegexCursor {
+                                        cursor: Rc::new(RefCell::new(cursor)),
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    });
+                                    continue 'generator;
+                                }
+                                Err(error) => {
+                                    break 'regex regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
                                 }
                             }
                         }
-                    } else {
-                        let result = if scalar::supports_ambient(&name, arguments.len()) {
-                            scalar::evaluate_ambient(
-                                &name,
-                                &input,
-                                &arguments,
-                                &environment,
+                        "splits" => {
+                            match stdlib::regex_cursor(
+                                Arc::clone(input),
+                                &pattern,
+                                &flags,
+                                stdlib::RegexPullKind::Span,
+                                true,
                                 limits,
-                                &mut charge,
-                            )
-                        } else {
-                            scalar::evaluate(&name, &input, &arguments, limits, &mut charge)
-                        };
-                        (result, None)
-                    };
-                    match scalar_result {
-                        Ok(Some(value)) => {
-                            let origin_result = match getpath_path {
-                                Some(Some(path)) => origin_at_path_bounded(
-                                    origin.as_ref(),
-                                    &path,
-                                    limits,
-                                    &mut charge,
-                                ),
-                                Some(None) => fresh_origin(&mut next_origin).map(Some),
-                                None => scalar_result_origin(
-                                    &name,
-                                    &input,
-                                    &arguments,
-                                    origin,
-                                    &mut next_origin,
-                                ),
-                            };
-                            let origin = match origin_result {
-                                Ok(origin) => origin,
+                            ) {
+                                Ok(cursor) => {
+                                    pending.push(GeneratorTask::RegexSplitCursor {
+                                        cursor: Rc::new(RefCell::new(cursor)),
+                                        input: Arc::clone(input),
+                                        copied: 0,
+                                        emitted_tail: false,
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    });
+                                    continue 'generator;
+                                }
                                 Err(error) => {
-                                    return {
-                                        let _ = emit(Err(error), observations);
-                                        observations
+                                    break 'regex regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            }
+                        }
+                        "split" => {
+                            let split = stdlib::regex_split(
+                                input,
+                                &pattern,
+                                &flags,
+                                false,
+                                arguments.get(flags_index).is_none(),
+                                limits,
+                                &checkpoint,
+                            );
+                            observations.steps = checkpoint_steps.get();
+                            match split {
+                                Ok(values) => {
+                                    let origin = match fresh_origin(&mut next_origin) {
+                                        Ok(origin) => Some(origin),
+                                        Err(error) => {
+                                            break 'regex regex_error_work(
+                                                bytecode,
+                                                &environment,
+                                                &frames,
+                                                &continuations,
+                                                error,
+                                            );
+                                        }
                                     };
+                                    (
+                                        GeneratorWork {
+                                            node: bytecode.root(),
+                                            input: Value::Null,
+                                            origin,
+                                            environment,
+                                            frames,
+                                            continuations,
+                                        },
+                                        Some(Ok(values
+                                            .into_iter()
+                                            .next()
+                                            .unwrap_or_else(|| Value::array(Vec::new())))),
+                                    )
+                                }
+                                Err(error) => {
+                                    break 'regex regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            }
+                        }
+                        "sub" | "gsub" => {
+                            let Some(replacement) = replacement else {
+                                break 'regex regex_error_work(
+                                    bytecode,
+                                    &environment,
+                                    &frames,
+                                    &continuations,
+                                    invalid("regex replacement argument missing"),
+                                );
+                            };
+                            match stdlib::regex_substitution(
+                                Arc::clone(input),
+                                &pattern,
+                                &flags,
+                                name.as_ref() == "gsub",
+                                limits,
+                            ) {
+                                Ok(state) => {
+                                    pending.push(GeneratorTask::RegexSubstitution {
+                                        name: Arc::clone(&name),
+                                        state: Rc::new(RefCell::new(state)),
+                                        replacement,
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    });
+                                    continue 'generator;
+                                }
+                                Err(error) => {
+                                    break 'regex regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            }
+                        }
+                        _ => unreachable!("regex dispatch is exhaustive"),
+                    }
+                }
+                GeneratorTask::RegexCursor {
+                    cursor,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let checkpoint_steps = Cell::new(observations.steps);
+                    let checkpoint = || {
+                        if stop.load(Ordering::Relaxed)
+                            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+                        {
+                            return Err(VmError::Interrupted);
+                        }
+                        if checkpoint_steps.get() >= limits.steps {
+                            return Err(resource("vm-steps"));
+                        }
+                        checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
+                        Ok(())
+                    };
+                    let pull = cursor.borrow_mut().next(&checkpoint);
+                    observations.steps = checkpoint_steps.get();
+                    match pull {
+                        Ok(Some(pull)) => {
+                            let value = match pull {
+                                stdlib::RegexPull::Match { value }
+                                | stdlib::RegexPull::Capture { value }
+                                | stdlib::RegexPull::Scan { value } => value,
+                                stdlib::RegexPull::Replacement { .. }
+                                | stdlib::RegexPull::Span { .. } => {
+                                    let _ = emit(
+                                        Err(invalid("unexpected regex cursor result")),
+                                        observations,
+                                    );
+                                    return observations;
                                 }
                             };
+                            let origin = match fresh_origin(&mut next_origin) {
+                                Ok(origin) => Some(origin),
+                                Err(error) => {
+                                    let _ = emit(Err(error), observations);
+                                    return observations;
+                                }
+                            };
+                            pending.push(GeneratorTask::RegexCursor {
+                                cursor,
+                                environment: Arc::clone(&environment),
+                                frames: Arc::clone(&frames),
+                                continuations: continuations.clone(),
+                            });
                             (
                                 GeneratorWork {
                                     node: bytecode.root(),
@@ -3371,736 +3837,374 @@ fn evaluate_generator_stream(
                         ),
                     }
                 }
-            },
-            GeneratorTask::FinishBuiltinArguments {
-                name,
-                source_arity,
-                values,
-                input,
-                origin,
-                environment,
-                frames,
-                continuations,
-            } => {
-                pending.push(GeneratorTask::InvokeBuiltin {
-                    name,
-                    arguments: values.take(),
-                    source_arity,
+                GeneratorTask::RegexSplitCursor {
+                    cursor,
                     input,
-                    origin,
+                    copied,
+                    emitted_tail,
                     environment,
                     frames,
                     continuations,
-                });
-                continue;
-            }
-            GeneratorTask::SqlInFinish {
-                boundary: _,
-                state,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let value = Value::Bool(state.borrow().matched);
-                let (origin, result) = match fresh_origin(&mut next_origin) {
-                    Ok(origin) => (Some(origin), Ok(value)),
-                    Err(error) => (None, Err(error)),
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::SqlIndexFinish {
-                boundary: _,
-                state,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let result = state
-                    .borrow_mut()
-                    .builder
-                    .take()
-                    .map(sql::SqlIndexBuilder::finish)
-                    .ok_or_else(|| invalid("SQL INDEX finished more than once"));
-                let (origin, result) = match result.and_then(|value| {
-                    fresh_origin(&mut next_origin).map(|origin| (Some(origin), Ok(value)))
-                }) {
-                    Ok((origin, result)) => (origin, result),
-                    Err(error) => (None, Err(error)),
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::SqlJoinFinish {
-                boundary: _,
-                state,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let result = state
-                    .borrow_mut()
-                    .collector
-                    .take()
-                    .map(sql::SqlPairCollector::finish)
-                    .ok_or_else(|| invalid("SQL JOIN finished more than once"));
-                let (origin, result) = match result.and_then(|value| {
-                    fresh_origin(&mut next_origin).map(|origin| (Some(origin), Ok(value)))
-                }) {
-                    Ok((origin, result)) => (origin, result),
-                    Err(error) => (None, Err(error)),
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::InvokeRegex {
-                name,
-                arguments,
-                replacement,
-                input,
-                origin: _origin,
-                environment,
-                frames,
-                continuations,
-            } => 'regex: {
-                let flags_index = usize::from(matches!(name.as_ref(), "sub" | "gsub")) + 1;
-                let Some(pattern_value) = arguments.first() else {
-                    break 'regex regex_error_work(
-                        bytecode,
-                        &environment,
-                        &frames,
-                        &continuations,
-                        invalid("regex pattern argument missing"),
-                    );
-                };
-                let array_allowed = matches!(name.as_ref(), "test" | "match" | "capture")
-                    && arguments.get(flags_index).is_none();
-                let (pattern, array_flags) =
-                    match regex_pattern_argument(&name, pattern_value, array_allowed) {
-                        Ok(parsed) => parsed,
-                        Err(error) => {
-                            break 'regex regex_error_work(
-                                bytecode,
-                                &environment,
-                                &frames,
-                                &continuations,
-                                error,
-                            );
+                } => {
+                    if emitted_tail {
+                        continue;
+                    }
+                    let checkpoint_steps = Cell::new(observations.steps);
+                    let checkpoint = || {
+                        if stop.load(Ordering::Relaxed)
+                            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+                        {
+                            return Err(VmError::Interrupted);
                         }
+                        if checkpoint_steps.get() >= limits.steps {
+                            return Err(resource("vm-steps"));
+                        }
+                        checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
+                        Ok(())
                     };
-                let flags = match array_flags {
-                    Some(flags) => Ok(flags),
-                    None => match arguments.get(flags_index) {
-                        None | Some(Value::Null) => Ok(Arc::from("")),
-                        Some(Value::String(flags)) => Ok(Arc::clone(flags)),
-                        Some(value) => Err(type_error(&name, value)),
-                    },
-                };
-                let flags = match flags {
-                    Ok(flags) => flags,
-                    Err(error) => {
-                        break 'regex regex_error_work(
+                    let pull = cursor.borrow_mut().next(&checkpoint);
+                    observations.steps = checkpoint_steps.get();
+                    match pull {
+                        Ok(Some(stdlib::RegexPull::Span { start, end })) => 'split: {
+                            let value = match stdlib::regex_split_piece(
+                                &input[copied..start],
+                                limits,
+                                &checkpoint,
+                            ) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    observations.steps = checkpoint_steps.get();
+                                    break 'split regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            };
+                            observations.steps = checkpoint_steps.get();
+                            match fresh_origin(&mut next_origin) {
+                                Ok(origin) => {
+                                    pending.push(GeneratorTask::RegexSplitCursor {
+                                        cursor,
+                                        input: Arc::clone(&input),
+                                        copied: end,
+                                        emitted_tail: false,
+                                        environment: Arc::clone(&environment),
+                                        frames: Arc::clone(&frames),
+                                        continuations: continuations.clone(),
+                                    });
+                                    (
+                                        GeneratorWork {
+                                            node: bytecode.root(),
+                                            input: Value::Null,
+                                            origin: Some(origin),
+                                            environment,
+                                            frames,
+                                            continuations,
+                                        },
+                                        Some(Ok(value)),
+                                    )
+                                }
+                                Err(error) => regex_error_work(
+                                    bytecode,
+                                    &environment,
+                                    &frames,
+                                    &continuations,
+                                    error,
+                                ),
+                            }
+                        }
+                        Ok(None) => 'split: {
+                            let value = match stdlib::regex_split_piece(
+                                &input[copied..],
+                                limits,
+                                &checkpoint,
+                            ) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    observations.steps = checkpoint_steps.get();
+                                    break 'split regex_error_work(
+                                        bytecode,
+                                        &environment,
+                                        &frames,
+                                        &continuations,
+                                        error,
+                                    );
+                                }
+                            };
+                            observations.steps = checkpoint_steps.get();
+                            match fresh_origin(&mut next_origin) {
+                                Ok(origin) => {
+                                    pending.push(GeneratorTask::RegexSplitCursor {
+                                        cursor,
+                                        input: Arc::clone(&input),
+                                        copied,
+                                        emitted_tail: true,
+                                        environment: Arc::clone(&environment),
+                                        frames: Arc::clone(&frames),
+                                        continuations: continuations.clone(),
+                                    });
+                                    (
+                                        GeneratorWork {
+                                            node: bytecode.root(),
+                                            input: Value::Null,
+                                            origin: Some(origin),
+                                            environment,
+                                            frames,
+                                            continuations,
+                                        },
+                                        Some(Ok(value)),
+                                    )
+                                }
+                                Err(error) => regex_error_work(
+                                    bytecode,
+                                    &environment,
+                                    &frames,
+                                    &continuations,
+                                    error,
+                                ),
+                            }
+                        }
+                        Ok(Some(_)) => regex_error_work(
                             bytecode,
                             &environment,
                             &frames,
                             &continuations,
-                            error,
-                        );
-                    }
-                };
-                let Value::String(input) = &input else {
-                    break 'regex regex_error_work(
-                        bytecode,
-                        &environment,
-                        &frames,
-                        &continuations,
-                        type_error(&name, &input),
-                    );
-                };
-                let checkpoint_steps = Cell::new(observations.steps);
-                let checkpoint = || {
-                    if stop.load(Ordering::Relaxed)
-                        || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-                    {
-                        return Err(VmError::Interrupted);
-                    }
-                    if checkpoint_steps.get() >= limits.steps {
-                        return Err(resource("vm-steps"));
-                    }
-                    checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
-                    Ok(())
-                };
-                match name.as_ref() {
-                    "test" => {
-                        let test = stdlib::regex_test(input, &pattern, &flags, limits, &checkpoint);
-                        observations.steps = checkpoint_steps.get();
-                        let value = match test {
-                            Ok(value) => value,
-                            Err(error) => {
-                                break 'regex regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        };
-                        let origin = match fresh_origin(&mut next_origin) {
-                            Ok(origin) => Some(origin),
-                            Err(error) => {
-                                break 'regex regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        };
-                        (
-                            GeneratorWork {
-                                node: bytecode.root(),
-                                input: Value::Null,
-                                origin,
-                                environment,
-                                frames,
-                                continuations,
-                            },
-                            Some(Ok(value)),
-                        )
-                    }
-                    "match" | "capture" | "scan" => {
-                        let kind = match name.as_ref() {
-                            "match" => stdlib::RegexPullKind::Match,
-                            "capture" => stdlib::RegexPullKind::Capture,
-                            _ => stdlib::RegexPullKind::Scan,
-                        };
-                        match stdlib::regex_cursor(
-                            Arc::clone(input),
-                            &pattern,
-                            &flags,
-                            kind,
-                            name.as_ref() == "scan",
-                            limits,
-                        ) {
-                            Ok(cursor) => {
-                                pending.push(GeneratorTask::RegexCursor {
-                                    cursor: Rc::new(RefCell::new(cursor)),
-                                    environment,
-                                    frames,
-                                    continuations,
-                                });
-                                continue 'generator;
-                            }
-                            Err(error) => {
-                                break 'regex regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
+                            invalid("unexpected regex split cursor result"),
+                        ),
+                        Err(error) => {
+                            regex_error_work(bytecode, &environment, &frames, &continuations, error)
                         }
-                    }
-                    "splits" => {
-                        match stdlib::regex_cursor(
-                            Arc::clone(input),
-                            &pattern,
-                            &flags,
-                            stdlib::RegexPullKind::Span,
-                            true,
-                            limits,
-                        ) {
-                            Ok(cursor) => {
-                                pending.push(GeneratorTask::RegexSplitCursor {
-                                    cursor: Rc::new(RefCell::new(cursor)),
-                                    input: Arc::clone(input),
-                                    copied: 0,
-                                    emitted_tail: false,
-                                    environment,
-                                    frames,
-                                    continuations,
-                                });
-                                continue 'generator;
-                            }
-                            Err(error) => {
-                                break 'regex regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        }
-                    }
-                    "split" => {
-                        let split = stdlib::regex_split(
-                            input,
-                            &pattern,
-                            &flags,
-                            false,
-                            arguments.get(flags_index).is_none(),
-                            limits,
-                            &checkpoint,
-                        );
-                        observations.steps = checkpoint_steps.get();
-                        match split {
-                            Ok(values) => {
-                                let origin = match fresh_origin(&mut next_origin) {
-                                    Ok(origin) => Some(origin),
-                                    Err(error) => {
-                                        break 'regex regex_error_work(
-                                            bytecode,
-                                            &environment,
-                                            &frames,
-                                            &continuations,
-                                            error,
-                                        );
-                                    }
-                                };
-                                (
-                                    GeneratorWork {
-                                        node: bytecode.root(),
-                                        input: Value::Null,
-                                        origin,
-                                        environment,
-                                        frames,
-                                        continuations,
-                                    },
-                                    Some(Ok(values
-                                        .into_iter()
-                                        .next()
-                                        .unwrap_or_else(|| Value::array(Vec::new())))),
-                                )
-                            }
-                            Err(error) => {
-                                break 'regex regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        }
-                    }
-                    "sub" | "gsub" => {
-                        let Some(replacement) = replacement else {
-                            break 'regex regex_error_work(
-                                bytecode,
-                                &environment,
-                                &frames,
-                                &continuations,
-                                invalid("regex replacement argument missing"),
-                            );
-                        };
-                        match stdlib::regex_substitution(
-                            Arc::clone(input),
-                            &pattern,
-                            &flags,
-                            name.as_ref() == "gsub",
-                            limits,
-                        ) {
-                            Ok(state) => {
-                                pending.push(GeneratorTask::RegexSubstitution {
-                                    name: Arc::clone(&name),
-                                    state: Rc::new(RefCell::new(state)),
-                                    replacement,
-                                    environment,
-                                    frames,
-                                    continuations,
-                                });
-                                continue 'generator;
-                            }
-                            Err(error) => {
-                                break 'regex regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        }
-                    }
-                    _ => unreachable!("regex dispatch is exhaustive"),
-                }
-            }
-            GeneratorTask::RegexCursor {
-                cursor,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let checkpoint_steps = Cell::new(observations.steps);
-                let checkpoint = || {
-                    if stop.load(Ordering::Relaxed)
-                        || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-                    {
-                        return Err(VmError::Interrupted);
-                    }
-                    if checkpoint_steps.get() >= limits.steps {
-                        return Err(resource("vm-steps"));
-                    }
-                    checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
-                    Ok(())
-                };
-                let pull = cursor.borrow_mut().next(&checkpoint);
-                observations.steps = checkpoint_steps.get();
-                match pull {
-                    Ok(Some(pull)) => {
-                        let value = match pull {
-                            stdlib::RegexPull::Match { value }
-                            | stdlib::RegexPull::Capture { value }
-                            | stdlib::RegexPull::Scan { value } => value,
-                            stdlib::RegexPull::Replacement { .. }
-                            | stdlib::RegexPull::Span { .. } => {
-                                let _ = emit(
-                                    Err(invalid("unexpected regex cursor result")),
-                                    observations,
-                                );
-                                return observations;
-                            }
-                        };
-                        let origin = match fresh_origin(&mut next_origin) {
-                            Ok(origin) => Some(origin),
-                            Err(error) => {
-                                let _ = emit(Err(error), observations);
-                                return observations;
-                            }
-                        };
-                        pending.push(GeneratorTask::RegexCursor {
-                            cursor,
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
-                        (
-                            GeneratorWork {
-                                node: bytecode.root(),
-                                input: Value::Null,
-                                origin,
-                                environment,
-                                frames,
-                                continuations,
-                            },
-                            Some(Ok(value)),
-                        )
-                    }
-                    Ok(None) => continue,
-                    Err(error) => (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Err(error)),
-                    ),
-                }
-            }
-            GeneratorTask::RegexSplitCursor {
-                cursor,
-                input,
-                copied,
-                emitted_tail,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if emitted_tail {
-                    continue;
-                }
-                let checkpoint_steps = Cell::new(observations.steps);
-                let checkpoint = || {
-                    if stop.load(Ordering::Relaxed)
-                        || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-                    {
-                        return Err(VmError::Interrupted);
-                    }
-                    if checkpoint_steps.get() >= limits.steps {
-                        return Err(resource("vm-steps"));
-                    }
-                    checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
-                    Ok(())
-                };
-                let pull = cursor.borrow_mut().next(&checkpoint);
-                observations.steps = checkpoint_steps.get();
-                match pull {
-                    Ok(Some(stdlib::RegexPull::Span { start, end })) => 'split: {
-                        let value = match stdlib::regex_split_piece(
-                            &input[copied..start],
-                            limits,
-                            &checkpoint,
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                observations.steps = checkpoint_steps.get();
-                                break 'split regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        };
-                        observations.steps = checkpoint_steps.get();
-                        match fresh_origin(&mut next_origin) {
-                            Ok(origin) => {
-                                pending.push(GeneratorTask::RegexSplitCursor {
-                                    cursor,
-                                    input: Arc::clone(&input),
-                                    copied: end,
-                                    emitted_tail: false,
-                                    environment: Arc::clone(&environment),
-                                    frames: Arc::clone(&frames),
-                                    continuations: continuations.clone(),
-                                });
-                                (
-                                    GeneratorWork {
-                                        node: bytecode.root(),
-                                        input: Value::Null,
-                                        origin: Some(origin),
-                                        environment,
-                                        frames,
-                                        continuations,
-                                    },
-                                    Some(Ok(value)),
-                                )
-                            }
-                            Err(error) => regex_error_work(
-                                bytecode,
-                                &environment,
-                                &frames,
-                                &continuations,
-                                error,
-                            ),
-                        }
-                    }
-                    Ok(None) => 'split: {
-                        let value = match stdlib::regex_split_piece(
-                            &input[copied..],
-                            limits,
-                            &checkpoint,
-                        ) {
-                            Ok(value) => value,
-                            Err(error) => {
-                                observations.steps = checkpoint_steps.get();
-                                break 'split regex_error_work(
-                                    bytecode,
-                                    &environment,
-                                    &frames,
-                                    &continuations,
-                                    error,
-                                );
-                            }
-                        };
-                        observations.steps = checkpoint_steps.get();
-                        match fresh_origin(&mut next_origin) {
-                            Ok(origin) => {
-                                pending.push(GeneratorTask::RegexSplitCursor {
-                                    cursor,
-                                    input: Arc::clone(&input),
-                                    copied,
-                                    emitted_tail: true,
-                                    environment: Arc::clone(&environment),
-                                    frames: Arc::clone(&frames),
-                                    continuations: continuations.clone(),
-                                });
-                                (
-                                    GeneratorWork {
-                                        node: bytecode.root(),
-                                        input: Value::Null,
-                                        origin: Some(origin),
-                                        environment,
-                                        frames,
-                                        continuations,
-                                    },
-                                    Some(Ok(value)),
-                                )
-                            }
-                            Err(error) => regex_error_work(
-                                bytecode,
-                                &environment,
-                                &frames,
-                                &continuations,
-                                error,
-                            ),
-                        }
-                    }
-                    Ok(Some(_)) => regex_error_work(
-                        bytecode,
-                        &environment,
-                        &frames,
-                        &continuations,
-                        invalid("unexpected regex split cursor result"),
-                    ),
-                    Err(error) => {
-                        regex_error_work(bytecode, &environment, &frames, &continuations, error)
                     }
                 }
-            }
-            GeneratorTask::RegexSubstitution {
-                name,
-                state,
-                replacement,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let checkpoint_steps = Cell::new(observations.steps);
-                let checkpoint = || {
-                    if stop.load(Ordering::Relaxed)
-                        || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-                    {
-                        return Err(VmError::Interrupted);
-                    }
-                    if checkpoint_steps.get() >= limits.steps {
-                        return Err(resource("vm-steps"));
-                    }
-                    checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
-                    Ok(())
-                };
-                let next = state.borrow_mut().next(&checkpoint);
-                observations.steps = checkpoint_steps.get();
-                match next {
-                    Ok(Some(stdlib::RegexSubstitutionEvent::Replace { context })) => {
-                        pending.push(GeneratorTask::RegexReplacementFinish {
-                            name: Arc::clone(&name),
-                            state: Rc::clone(&state),
-                            replacement,
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
-                        let mut replacement_continuations = continuations;
-                        replacement_continuations.push(
-                            GeneratorContinuation::RegexReplacementItem {
+                GeneratorTask::RegexSubstitution {
+                    name,
+                    state,
+                    replacement,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let checkpoint_steps = Cell::new(observations.steps);
+                    let checkpoint = || {
+                        if stop.load(Ordering::Relaxed)
+                            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+                        {
+                            return Err(VmError::Interrupted);
+                        }
+                        if checkpoint_steps.get() >= limits.steps {
+                            return Err(resource("vm-steps"));
+                        }
+                        checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
+                        Ok(())
+                    };
+                    let next = state.borrow_mut().next(&checkpoint);
+                    observations.steps = checkpoint_steps.get();
+                    match next {
+                        Ok(Some(stdlib::RegexSubstitutionEvent::Replace { context })) => {
+                            pending.push(GeneratorTask::RegexReplacementFinish {
                                 name: Arc::clone(&name),
+                                state: Rc::clone(&state),
+                                replacement,
+                                environment: Arc::clone(&environment),
+                                frames: Arc::clone(&frames),
+                                continuations: continuations.clone(),
+                            });
+                            let mut replacement_continuations = continuations;
+                            replacement_continuations.push(
+                                GeneratorContinuation::RegexReplacementItem {
+                                    name: Arc::clone(&name),
+                                    state,
+                                },
+                            );
+                            pending.push(GeneratorTask::Eval(GeneratorWork {
+                                node: replacement,
+                                input: context,
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations: replacement_continuations,
+                            }));
+                            continue;
+                        }
+                        Ok(Some(stdlib::RegexSubstitutionEvent::Output(value))) => {
+                            let origin = match fresh_origin(&mut next_origin) {
+                                Ok(origin) => Some(origin),
+                                Err(error) => {
+                                    let _ = emit(Err(error), observations);
+                                    return observations;
+                                }
+                            };
+                            pending.push(GeneratorTask::RegexSubstitution {
+                                name,
                                 state,
-                            },
-                        );
-                        pending.push(GeneratorTask::Eval(GeneratorWork {
-                            node: replacement,
-                            input: context,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations: replacement_continuations,
-                        }));
-                        continue;
-                    }
-                    Ok(Some(stdlib::RegexSubstitutionEvent::Output(value))) => {
-                        let origin = match fresh_origin(&mut next_origin) {
-                            Ok(origin) => Some(origin),
-                            Err(error) => {
-                                let _ = emit(Err(error), observations);
-                                return observations;
-                            }
-                        };
-                        pending.push(GeneratorTask::RegexSubstitution {
-                            name,
-                            state,
-                            replacement,
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
-                        (
+                                replacement,
+                                environment: Arc::clone(&environment),
+                                frames: Arc::clone(&frames),
+                                continuations: continuations.clone(),
+                            });
+                            (
+                                GeneratorWork {
+                                    node: bytecode.root(),
+                                    input: Value::Null,
+                                    origin,
+                                    environment,
+                                    frames,
+                                    continuations,
+                                },
+                                Some(Ok(value)),
+                            )
+                        }
+                        Ok(None) => continue,
+                        Err(error) => (
                             GeneratorWork {
                                 node: bytecode.root(),
                                 input: Value::Null,
-                                origin,
+                                origin: None,
                                 environment,
                                 frames,
                                 continuations,
                             },
-                            Some(Ok(value)),
-                        )
+                            Some(Err(error)),
+                        ),
                     }
-                    Ok(None) => continue,
-                    Err(error) => (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Err(error)),
-                    ),
                 }
-            }
-            GeneratorTask::RegexReplacementFinish {
-                name,
-                state,
-                replacement,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let checkpoint_steps = Cell::new(observations.steps);
-                let checkpoint = || {
-                    if stop.load(Ordering::Relaxed)
-                        || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-                    {
-                        return Err(VmError::Interrupted);
+                GeneratorTask::RegexReplacementFinish {
+                    name,
+                    state,
+                    replacement,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let checkpoint_steps = Cell::new(observations.steps);
+                    let checkpoint = || {
+                        if stop.load(Ordering::Relaxed)
+                            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+                        {
+                            return Err(VmError::Interrupted);
+                        }
+                        if checkpoint_steps.get() >= limits.steps {
+                            return Err(resource("vm-steps"));
+                        }
+                        checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
+                        Ok(())
+                    };
+                    let finish = state.borrow_mut().finish_replacement_stream(&checkpoint);
+                    observations.steps = checkpoint_steps.get();
+                    match finish {
+                        Ok(()) => {
+                            pending.push(GeneratorTask::RegexSubstitution {
+                                name,
+                                state,
+                                replacement,
+                                environment,
+                                frames,
+                                continuations,
+                            });
+                            continue;
+                        }
+                        Err(error) => (
+                            GeneratorWork {
+                                node: bytecode.root(),
+                                input: Value::Null,
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations,
+                            },
+                            Some(Err(error)),
+                        ),
                     }
-                    if checkpoint_steps.get() >= limits.steps {
-                        return Err(resource("vm-steps"));
+                }
+                GeneratorTask::BuiltinGenerator {
+                    mut state,
+                    environment,
+                    frames,
+                    continuations,
+                    ..
+                } => {
+                    let mut charge = || {
+                        if stop.load(Ordering::Relaxed)
+                            || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
+                        {
+                            return Err(VmError::Interrupted);
+                        }
+                        if observations.steps >= limits.steps {
+                            return Err(resource("vm-steps"));
+                        }
+                        observations.steps += 1;
+                        Ok(())
+                    };
+                    match state.next(&mut charge) {
+                        Ok(Some(value)) => match fresh_origin(&mut next_origin) {
+                            Ok(origin) => {
+                                pending.push(GeneratorTask::BuiltinGenerator {
+                                    state,
+                                    environment: Arc::clone(&environment),
+                                    frames: Arc::clone(&frames),
+                                    continuations: continuations.clone(),
+                                });
+                                (
+                                    GeneratorWork {
+                                        node: bytecode.root(),
+                                        input: Value::Null,
+                                        origin: Some(origin),
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    },
+                                    Some(Ok(value)),
+                                )
+                            }
+                            Err(error) => (
+                                GeneratorWork {
+                                    node: bytecode.root(),
+                                    input: Value::Null,
+                                    origin: None,
+                                    environment,
+                                    frames,
+                                    continuations,
+                                },
+                                Some(Err(error)),
+                            ),
+                        },
+                        Ok(None) => continue,
+                        Err(error) => (
+                            GeneratorWork {
+                                node: bytecode.root(),
+                                input: Value::Null,
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations,
+                            },
+                            Some(Err(error)),
+                        ),
                     }
-                    checkpoint_steps.set(checkpoint_steps.get().saturating_add(1));
-                    Ok(())
-                };
-                let finish = state.borrow_mut().finish_replacement_stream(&checkpoint);
-                observations.steps = checkpoint_steps.get();
-                match finish {
-                    Ok(()) => {
-                        pending.push(GeneratorTask::RegexSubstitution {
-                            name,
-                            state,
-                            replacement,
-                            environment,
-                            frames,
-                            continuations,
-                        });
+                }
+                GeneratorTask::Iterate {
+                    values,
+                    next,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let Some(value) = values.get(next).cloned() else {
                         continue;
+                    };
+                    if next + 1 < values.len() {
+                        pending.push(GeneratorTask::Iterate {
+                            values,
+                            next: next + 1,
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                            continuations: continuations.clone(),
+                        });
                     }
-                    Err(error) => (
+                    (
                         GeneratorWork {
                             node: bytecode.root(),
                             input: Value::Null,
@@ -4109,34 +4213,82 @@ fn evaluate_generator_stream(
                             frames,
                             continuations,
                         },
-                        Some(Err(error)),
-                    ),
+                        Some(Ok(value)),
+                    )
                 }
-            }
-            GeneratorTask::BuiltinGenerator {
-                mut state,
-                environment,
-                frames,
-                continuations,
-                ..
-            } => {
-                let mut charge = || {
-                    if stop.load(Ordering::Relaxed)
-                        || cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed))
-                    {
-                        return Err(VmError::Interrupted);
+                GeneratorTask::IterateCursor {
+                    mut cursor,
+                    origin,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let mut charge =
+                        || charge_managed_step(&mut observations, limits, cancellation, stop);
+                    match cursor.next_child(&mut charge) {
+                        Ok(Some((value, component))) => {
+                            match origin
+                                .as_ref()
+                                .map(|origin| origin.child_bounded(component, limits, &mut charge))
+                                .transpose()
+                            {
+                                Ok(child_origin) => {
+                                    pending.push(GeneratorTask::IterateCursor {
+                                        cursor,
+                                        origin,
+                                        environment: Arc::clone(&environment),
+                                        frames: Arc::clone(&frames),
+                                        continuations: continuations.clone(),
+                                    });
+                                    (
+                                        GeneratorWork {
+                                            node: bytecode.root(),
+                                            input: Value::Null,
+                                            origin: child_origin,
+                                            environment,
+                                            frames,
+                                            continuations,
+                                        },
+                                        Some(Ok(value)),
+                                    )
+                                }
+                                Err(error) => (
+                                    GeneratorWork {
+                                        node: bytecode.root(),
+                                        input: Value::Null,
+                                        origin: None,
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    },
+                                    Some(Err(error)),
+                                ),
+                            }
+                        }
+                        Ok(None) => continue,
+                        Err(error) => (
+                            GeneratorWork {
+                                node: bytecode.root(),
+                                input: Value::Null,
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations,
+                            },
+                            Some(Err(error)),
+                        ),
                     }
-                    if observations.steps >= limits.steps {
-                        return Err(resource("vm-steps"));
-                    }
-                    observations.steps += 1;
-                    Ok(())
-                };
-                match state.next(&mut charge) {
+                }
+                GeneratorTask::InputValues {
+                    cursor,
+                    environment,
+                    frames,
+                    continuations,
+                } => match cursor.next_value() {
                     Ok(Some(value)) => match fresh_origin(&mut next_origin) {
                         Ok(origin) => {
-                            pending.push(GeneratorTask::BuiltinGenerator {
-                                state,
+                            pending.push(GeneratorTask::InputValues {
+                                cursor,
                                 environment: Arc::clone(&environment),
                                 frames: Arc::clone(&frames),
                                 continuations: continuations.clone(),
@@ -4177,218 +4329,13 @@ fn evaluate_generator_stream(
                         },
                         Some(Err(error)),
                     ),
-                }
-            }
-            GeneratorTask::Iterate {
-                values,
-                next,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let Some(value) = values.get(next).cloned() else {
-                    continue;
-                };
-                if next + 1 < values.len() {
-                    pending.push(GeneratorTask::Iterate {
-                        values,
-                        next: next + 1,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                }
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(value)),
-                )
-            }
-            GeneratorTask::IterateCursor {
-                mut cursor,
-                origin,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let mut charge =
-                    || charge_managed_step(&mut observations, limits, cancellation, stop);
-                match cursor.next_child(&mut charge) {
-                    Ok(Some((value, component))) => {
-                        match origin
-                            .as_ref()
-                            .map(|origin| origin.child_bounded(component, limits, &mut charge))
-                            .transpose()
-                        {
-                            Ok(child_origin) => {
-                                pending.push(GeneratorTask::IterateCursor {
-                                    cursor,
-                                    origin,
-                                    environment: Arc::clone(&environment),
-                                    frames: Arc::clone(&frames),
-                                    continuations: continuations.clone(),
-                                });
-                                (
-                                    GeneratorWork {
-                                        node: bytecode.root(),
-                                        input: Value::Null,
-                                        origin: child_origin,
-                                        environment,
-                                        frames,
-                                        continuations,
-                                    },
-                                    Some(Ok(value)),
-                                )
-                            }
-                            Err(error) => (
-                                GeneratorWork {
-                                    node: bytecode.root(),
-                                    input: Value::Null,
-                                    origin: None,
-                                    environment,
-                                    frames,
-                                    continuations,
-                                },
-                                Some(Err(error)),
-                            ),
-                        }
-                    }
-                    Ok(None) => continue,
-                    Err(error) => (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Err(error)),
-                    ),
-                }
-            }
-            GeneratorTask::InputValues {
-                cursor,
-                environment,
-                frames,
-                continuations,
-            } => match cursor.next_value() {
-                Ok(Some(value)) => match fresh_origin(&mut next_origin) {
-                    Ok(origin) => {
-                        pending.push(GeneratorTask::InputValues {
-                            cursor,
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
-                        (
-                            GeneratorWork {
-                                node: bytecode.root(),
-                                input: Value::Null,
-                                origin: Some(origin),
-                                environment,
-                                frames,
-                                continuations,
-                            },
-                            Some(Ok(value)),
-                        )
-                    }
-                    Err(error) => (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Err(error)),
-                    ),
                 },
-                Ok(None) => continue,
-                Err(error) => (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Err(error)),
-                ),
-            },
-            GeneratorTask::FinishArray {
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let (origin, result) = match fresh_origin(&mut next_origin) {
-                    Ok(origin) => (Some(origin), Ok(Value::array(values.take()))),
-                    Err(error) => (None, Err(error)),
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::MapArray {
-                inputs,
-                next,
-                argument,
-                values,
-                first_only,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some(value) = inputs.get(next) {
-                    pending.push(GeneratorTask::MapArray {
-                        inputs: Arc::clone(&inputs),
-                        next: next + 1,
-                        argument,
-                        values: Rc::clone(&values),
-                        first_only,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut callback_continuations = continuations;
-                    if first_only {
-                        callback_continuations.push(GeneratorContinuation::IgnoreError);
-                        callback_continuations.push(GeneratorContinuation::ArrayUpdateItem {
-                            values,
-                            accepted: Rc::new(Cell::new(false)),
-                        });
-                    } else {
-                        callback_continuations.push(GeneratorContinuation::ArrayItem(values));
-                    }
-                    (
-                        GeneratorWork {
-                            node: argument,
-                            input: value.clone(),
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
+                GeneratorTask::FinishArray {
+                    values,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
                     let (origin, result) = match fresh_origin(&mut next_origin) {
                         Ok(origin) => (Some(origin), Ok(Value::array(values.take()))),
                         Err(error) => (None, Err(error)),
@@ -4405,625 +4352,287 @@ fn evaluate_generator_stream(
                         Some(result),
                     )
                 }
-            }
-            GeneratorTask::MapObject {
-                entries,
-                next,
-                argument,
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some((key, value)) = entries.get(next) {
-                    pending.push(GeneratorTask::MapObject {
-                        entries: Arc::clone(&entries),
-                        next: next + 1,
-                        argument,
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut callback_continuations = continuations;
-                    callback_continuations.push(GeneratorContinuation::IgnoreError);
-                    callback_continuations.push(GeneratorContinuation::ObjectItem {
-                        key: Arc::clone(key),
-                        values,
-                        accepted: Rc::new(Cell::new(false)),
-                    });
-                    (
-                        GeneratorWork {
-                            node: argument,
-                            input: value.clone(),
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
-                    let output = std::mem::take(&mut *values.borrow_mut());
-                    let (origin, result) = match fresh_origin(&mut next_origin) {
-                        Ok(origin) => (Some(origin), Ok(Value::object(output))),
-                        Err(error) => (None, Err(error)),
-                    };
-                    (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(result),
-                    )
-                }
-            }
-            GeneratorTask::CollectSortKeys {
-                values,
-                next,
-                argument,
-                keyed_values,
-                mode,
-                origin,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some(value) = values.get(next) {
-                    let mut charge =
-                        || charge_managed_step(&mut observations, limits, cancellation, stop);
-                    let callback_origin = origin
-                        .as_ref()
-                        .map(|origin| {
-                            origin.child_bounded(PathComponent::Index(next), limits, &mut charge)
-                        })
-                        .transpose();
-                    match callback_origin {
-                        Err(error) => (
+                GeneratorTask::MapArray {
+                    inputs,
+                    next,
+                    argument,
+                    values,
+                    first_only,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if let Some(value) = inputs.get(next) {
+                        pending.push(GeneratorTask::MapArray {
+                            inputs: Arc::clone(&inputs),
+                            next: next + 1,
+                            argument,
+                            values: Rc::clone(&values),
+                            first_only,
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                            continuations: continuations.clone(),
+                        });
+                        let mut callback_continuations = continuations;
+                        if first_only {
+                            callback_continuations.push(GeneratorContinuation::IgnoreError);
+                            callback_continuations.push(GeneratorContinuation::ArrayUpdateItem {
+                                values,
+                                accepted: Rc::new(Cell::new(false)),
+                            });
+                        } else {
+                            callback_continuations.push(GeneratorContinuation::ArrayItem(values));
+                        }
+                        (
+                            GeneratorWork {
+                                node: argument,
+                                input: value.clone(),
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations: callback_continuations,
+                            },
+                            None,
+                        )
+                    } else {
+                        let (origin, result) = match fresh_origin(&mut next_origin) {
+                            Ok(origin) => (Some(origin), Ok(Value::array(values.take()))),
+                            Err(error) => (None, Err(error)),
+                        };
+                        (
                             GeneratorWork {
                                 node: bytecode.root(),
                                 input: Value::Null,
-                                origin: None,
+                                origin,
                                 environment,
                                 frames,
                                 continuations,
                             },
-                            Some(Err(error)),
-                        ),
-                        Ok(callback_origin) => {
-                            pending.push(GeneratorTask::CollectSortKeys {
-                                values: Arc::clone(&values),
-                                next: next + 1,
-                                argument,
-                                keyed_values: Rc::clone(&keyed_values),
-                                mode,
-                                origin: origin.clone(),
-                                environment: Arc::clone(&environment),
-                                frames: Arc::clone(&frames),
-                                continuations: continuations.clone(),
-                            });
-                            let keys = Rc::new(RefCell::new(Vec::new()));
-                            pending.push(GeneratorTask::FinishSortKey {
+                            Some(result),
+                        )
+                    }
+                }
+                GeneratorTask::MapObject {
+                    entries,
+                    next,
+                    argument,
+                    values,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if let Some((key, value)) = entries.get(next) {
+                        pending.push(GeneratorTask::MapObject {
+                            entries: Arc::clone(&entries),
+                            next: next + 1,
+                            argument,
+                            values: Rc::clone(&values),
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                            continuations: continuations.clone(),
+                        });
+                        let mut callback_continuations = continuations;
+                        callback_continuations.push(GeneratorContinuation::IgnoreError);
+                        callback_continuations.push(GeneratorContinuation::ObjectItem {
+                            key: Arc::clone(key),
+                            values,
+                            accepted: Rc::new(Cell::new(false)),
+                        });
+                        (
+                            GeneratorWork {
+                                node: argument,
                                 input: value.clone(),
-                                origin: callback_origin.clone(),
-                                keys: Rc::clone(&keys),
-                                keyed_values,
-                                continuations: continuations.clone(),
-                            });
-                            let mut callback_continuations = continuations;
-                            callback_continuations
-                                .push(GeneratorContinuation::SortKeyItem(Rc::clone(&keys)));
-                            (
-                                GeneratorWork {
-                                    node: argument,
-                                    input: value.clone(),
-                                    origin: callback_origin,
-                                    environment,
-                                    frames,
-                                    continuations: callback_continuations,
-                                },
-                                None,
-                            )
-                        }
-                    }
-                } else {
-                    let keyed_values = std::mem::take(&mut *keyed_values.borrow_mut());
-                    let mut charge =
-                        || charge_managed_step(&mut observations, limits, cancellation, stop);
-                    let (origin, result) = match project_managed_keyed_values(
-                        mode,
-                        keyed_values,
-                        limits,
-                        &mut charge,
-                        &mut next_origin,
-                    ) {
-                        Ok((origin, output)) => (origin, Ok(output)),
-                        Err(error) => (None, Err(error)),
-                    };
-                    (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(result),
-                    )
-                }
-            }
-            GeneratorTask::FinishSortKey {
-                input,
-                origin,
-                keys,
-                keyed_values,
-                continuations: _,
-            } => {
-                let keys = std::mem::take(&mut *keys.borrow_mut());
-                keyed_values.borrow_mut().push(ManagedKeyedValue {
-                    key: Value::array(keys),
-                    value: input,
-                    origin,
-                });
-                continue;
-            }
-            GeneratorTask::FinishAlternative {
-                matched,
-                right,
-                input,
-                origin,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if matched.get() {
-                    continue;
-                }
-                (
-                    GeneratorWork {
-                        node: right,
-                        input,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    None,
-                )
-            }
-            GeneratorTask::FinishPullConsumer {
-                state,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let (result, origin) = {
-                    let mut state = state.borrow_mut();
-                    match state.kind {
-                        PullConsumerKind::First | PullConsumerKind::Skip => (None, None),
-                        PullConsumerKind::Last | PullConsumerKind::Nth => {
-                            (state.latest.take().map(Ok), state.latest_origin.take())
-                        }
-                        PullConsumerKind::IsEmpty => (Some(Ok(Value::Bool(!state.seen))), None),
-                        PullConsumerKind::Any | PullConsumerKind::All => (
-                            Some(Ok(Value::Bool(
-                                state
-                                    .decision
-                                    .unwrap_or(matches!(state.kind, PullConsumerKind::All)),
-                            ))),
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations: callback_continuations,
+                            },
                             None,
-                        ),
-                    }
-                };
-                let Some(result) = result else {
-                    continue;
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::FinishAdd {
-                state,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let value = state.borrow().accumulator.clone().unwrap_or(Value::Null);
-                let origin = match fresh_origin(&mut next_origin) {
-                    Ok(origin) => Some(origin),
-                    Err(error) => {
-                        return {
-                            let _ = emit(Err(error), observations);
-                            observations
+                        )
+                    } else {
+                        let output = std::mem::take(&mut *values.borrow_mut());
+                        let (origin, result) = match fresh_origin(&mut next_origin) {
+                            Ok(origin) => (Some(origin), Ok(Value::object(output))),
+                            Err(error) => (None, Err(error)),
                         };
+                        (
+                            GeneratorWork {
+                                node: bytecode.root(),
+                                input: Value::Null,
+                                origin,
+                                environment,
+                                frames,
+                                continuations,
+                            },
+                            Some(result),
+                        )
                     }
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(value)),
-                )
-            }
-            GeneratorTask::FinishDebug {
-                input,
-                origin,
-                environment,
-                frames,
-                continuations,
-            } => (
-                GeneratorWork {
-                    node: bytecode.root(),
-                    input: Value::Null,
+                }
+                GeneratorTask::CollectSortKeys {
+                    values,
+                    next,
+                    argument,
+                    keyed_values,
+                    mode,
                     origin,
                     environment,
                     frames,
                     continuations,
-                },
-                Some(Ok(input)),
-            ),
-            GeneratorTask::FoldGenerator {
-                generator,
-                pattern,
-                update,
-                extract,
-                emit_each_update,
-                state,
-                input,
-                environment,
-                frames,
-                continuations,
-            } => {
-                pending.push(GeneratorTask::FinishFold {
-                    state: Rc::clone(&state),
-                    emit_final: !emit_each_update,
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                let mut generator_continuations = continuations;
-                generator_continuations.push(GeneratorContinuation::FoldItem {
-                    state,
-                    pattern,
-                    update,
-                    extract,
-                    emit_each_update,
-                    environment: Arc::clone(&environment),
-                });
-                pending.push(GeneratorTask::Eval(GeneratorWork {
-                    node: generator,
-                    input,
-                    origin: None,
-                    environment,
-                    frames,
-                    continuations: generator_continuations,
-                }));
-                continue;
-            }
-            GeneratorTask::FinishFold {
-                state,
-                emit_final,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if !emit_final {
-                    continue;
-                }
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(state.borrow().accumulator.clone())),
-                )
-            }
-            GeneratorTask::PathEval(path_work) => {
-                delivered_from_path = true;
-                let environment = Arc::clone(&path_work.environment);
-                let frames = Arc::clone(&path_work.frames);
-                let origin = path_work.origin.clone();
-                let continuations = path_work.continuations.clone();
-                let Some(result) =
-                    schedule_path_eval(bytecode, path_work, &mut pending, &mut next_boundary)
-                else {
-                    continue;
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::PathChildren {
-                value,
-                path,
-                next,
-                environment,
-                frames,
-                continuations,
-            } => {
-                delivered_from_path = true;
-                let child = match &value {
-                    Value::Array(values) => values
-                        .get(next)
-                        .cloned()
-                        .map(|child| (PathComponent::Index(next), child)),
-                    Value::Object(values) => values
-                        .get_index(next)
-                        .map(|(key, child)| (PathComponent::Key(Arc::clone(key)), child.clone())),
-                    _ => None,
-                };
-                let Some((component, _)) = child else {
-                    continue;
-                };
-                pending.push(GeneratorTask::PathChildren {
-                    value,
-                    path: path.clone(),
-                    next: next.saturating_add(1),
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                let mut components = path.components().to_vec();
-                components.push(component);
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(path_value(&Path::new(components)))),
-                )
-            }
-            GeneratorTask::PathTraverse {
-                mut cursor,
-                environment,
-                frames,
-                continuations,
-            } => {
-                delivered_from_path = true;
-                if cursor.depth() > limits.path_stack {
-                    (
-                        GeneratorWork {
-                            node: bytecode.root(),
-                            input: Value::Null,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations,
-                        },
-                        Some(Err(resource("path-stack"))),
-                    )
-                } else {
-                    let mut charge =
-                        || charge_managed_step(&mut observations, limits, cancellation, stop);
-                    match cursor.next(limits.path_stack, &mut charge) {
-                        Ok(Some(path)) => {
-                            pending.push(GeneratorTask::PathTraverse {
-                                cursor,
-                                environment: Arc::clone(&environment),
-                                frames: Arc::clone(&frames),
-                                continuations: continuations.clone(),
-                            });
-                            let (origin, result) = match fresh_origin(&mut next_origin) {
-                                Ok(origin) => (Some(origin), Ok(path_value(&path))),
-                                Err(error) => (None, Err(error)),
-                            };
-                            (
+                } => {
+                    if let Some(value) = values.get(next) {
+                        let mut charge =
+                            || charge_managed_step(&mut observations, limits, cancellation, stop);
+                        let callback_origin = origin
+                            .as_ref()
+                            .map(|origin| {
+                                origin.child_bounded(
+                                    PathComponent::Index(next),
+                                    limits,
+                                    &mut charge,
+                                )
+                            })
+                            .transpose();
+                        match callback_origin {
+                            Err(error) => (
                                 GeneratorWork {
                                     node: bytecode.root(),
                                     input: Value::Null,
-                                    origin,
+                                    origin: None,
                                     environment,
                                     frames,
                                     continuations,
                                 },
-                                Some(result),
-                            )
+                                Some(Err(error)),
+                            ),
+                            Ok(callback_origin) => {
+                                pending.push(GeneratorTask::CollectSortKeys {
+                                    values: Arc::clone(&values),
+                                    next: next + 1,
+                                    argument,
+                                    keyed_values: Rc::clone(&keyed_values),
+                                    mode,
+                                    origin: origin.clone(),
+                                    environment: Arc::clone(&environment),
+                                    frames: Arc::clone(&frames),
+                                    continuations: continuations.clone(),
+                                });
+                                let keys = Rc::new(RefCell::new(Vec::new()));
+                                pending.push(GeneratorTask::FinishSortKey {
+                                    input: value.clone(),
+                                    origin: callback_origin.clone(),
+                                    keys: Rc::clone(&keys),
+                                    keyed_values,
+                                    continuations: continuations.clone(),
+                                });
+                                let mut callback_continuations = continuations;
+                                callback_continuations
+                                    .push(GeneratorContinuation::SortKeyItem(Rc::clone(&keys)));
+                                (
+                                    GeneratorWork {
+                                        node: argument,
+                                        input: value.clone(),
+                                        origin: callback_origin,
+                                        environment,
+                                        frames,
+                                        continuations: callback_continuations,
+                                    },
+                                    None,
+                                )
+                            }
                         }
-                        Ok(None) => continue,
-                        Err(error) => (
+                    } else {
+                        let keyed_values = std::mem::take(&mut *keyed_values.borrow_mut());
+                        let mut charge =
+                            || charge_managed_step(&mut observations, limits, cancellation, stop);
+                        let (origin, result) = match project_managed_keyed_values(
+                            mode,
+                            keyed_values,
+                            limits,
+                            &mut charge,
+                            &mut next_origin,
+                        ) {
+                            Ok((origin, output)) => (origin, Ok(output)),
+                            Err(error) => (None, Err(error)),
+                        };
+                        (
                             GeneratorWork {
                                 node: bytecode.root(),
                                 input: Value::Null,
-                                origin: None,
+                                origin,
                                 environment,
                                 frames,
                                 continuations,
                             },
-                            Some(Err(error)),
-                        ),
+                            Some(result),
+                        )
                     }
                 }
-            }
-            GeneratorTask::FinishPathCollection {
-                boundary: _,
-                kind,
-                input,
-                paths,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let accumulator = std::mem::replace(
-                    &mut *paths.borrow_mut(),
-                    path_builtin::PathAccumulator::new(),
-                );
-                let mut charge =
-                    || charge_managed_step(&mut observations, limits, cancellation, stop);
-                let result = match kind {
-                    PathCollectionKind::Delete => {
-                        path_builtin::delete_paths_bounded(&input, accumulator, limits, &mut charge)
-                    }
-                    PathCollectionKind::Pick => {
-                        path_builtin::pick_paths_bounded(&input, accumulator, limits, &mut charge)
-                    }
-                };
-                let (origin, result) = match result {
-                    Ok(value) => match fresh_origin(&mut next_origin) {
-                        Ok(origin) => (Some(origin), Ok(value)),
-                        Err(error) => (None, Err(error)),
-                    },
-                    Err(error) => (None, Err(error)),
-                };
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
+                GeneratorTask::FinishSortKey {
+                    input,
+                    origin,
+                    keys,
+                    keyed_values,
+                    continuations: _,
+                } => {
+                    let keys = std::mem::take(&mut *keys.borrow_mut());
+                    keyed_values.borrow_mut().push(ManagedKeyedValue {
+                        key: Value::array(keys),
+                        value: input,
                         origin,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(result),
-                )
-            }
-            GeneratorTask::PathSlice {
-                path,
-                start,
-                end,
-                next,
-                assignment,
-                environment,
-                frames,
-                continuations,
-            } => {
-                delivered_from_path = true;
-                if let Some(state) = assignment {
-                    state
-                        .borrow_mut()
-                        .targets
-                        .push(AssignmentTarget::Slice { path, start, end });
-                    state.borrow_mut().target_origins.push(None);
-                    continue;
-                }
-                if next >= end {
-                    continue;
-                }
-                pending.push(GeneratorTask::PathSlice {
-                    path: path.clone(),
-                    start,
-                    end,
-                    next: next.saturating_add(1),
-                    assignment: None,
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                let mut components = path.components().to_vec();
-                components.push(PathComponent::Index(next));
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    Some(Ok(path_value(&Path::new(components)))),
-                )
-            }
-            GeneratorTask::FinishAssignmentPaths {
-                state,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let (operator, value_node, input) = {
-                    let state = state.borrow();
-                    (state.operator, state.value_node, state.input.clone())
-                };
-                if operator == AssignmentOperator::Update {
-                    pending.push(GeneratorTask::AssignmentUpdate {
-                        state,
-                        next: 0,
-                        environment,
-                        frames,
-                        continuations,
                     });
                     continue;
                 }
-                let mut continuations = continuations;
-                continuations.push(GeneratorContinuation::AssignmentRhs(state));
-                pending.push(GeneratorTask::Eval(GeneratorWork {
-                    node: value_node,
+                GeneratorTask::FinishAlternative {
+                    matched,
+                    right,
                     input,
-                    origin: None,
+                    origin,
                     environment,
                     frames,
                     continuations,
-                }));
-                continue;
-            }
-            GeneratorTask::AssignmentUpdate {
-                state,
-                next,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if next >= state.borrow().targets.len() {
-                    let document = state.borrow().document.clone();
-                    let deletions = std::mem::replace(
-                        &mut state.borrow_mut().deletions,
-                        path_builtin::PathAccumulator::new(),
-                    );
-                    let mut charge =
-                        || charge_managed_step(&mut observations, limits, cancellation, stop);
-                    let result = path_builtin::delete_paths_bounded(
-                        &document,
-                        deletions,
-                        limits,
-                        &mut charge,
-                    );
-                    let mut result = result;
-                    let origin = if result.is_ok() {
-                        match fresh_origin(&mut next_origin) {
-                            Ok(origin) => Some(origin),
-                            Err(error) => {
-                                result = Err(error);
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
-                    if let Ok(document) = &result {
-                        state.borrow_mut().document = document.clone();
+                } => {
+                    if matched.get() {
+                        continue;
                     }
+                    (
+                        GeneratorWork {
+                            node: right,
+                            input,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        None,
+                    )
+                }
+                GeneratorTask::FinishPullConsumer {
+                    state,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let (result, origin) = {
+                        let mut state = state.borrow_mut();
+                        match state.kind {
+                            PullConsumerKind::First | PullConsumerKind::Skip => (None, None),
+                            PullConsumerKind::Last | PullConsumerKind::Nth => {
+                                (state.latest.take().map(Ok), state.latest_origin.take())
+                            }
+                            PullConsumerKind::IsEmpty => (Some(Ok(Value::Bool(!state.seen))), None),
+                            PullConsumerKind::Any | PullConsumerKind::All => (
+                                Some(Ok(Value::Bool(
+                                    state
+                                        .decision
+                                        .unwrap_or(matches!(state.kind, PullConsumerKind::All)),
+                                ))),
+                                None,
+                            ),
+                        }
+                    };
+                    let Some(result) = result else {
+                        continue;
+                    };
                     (
                         GeneratorWork {
                             node: bytecode.root(),
@@ -5035,25 +4644,16 @@ fn evaluate_generator_stream(
                         },
                         Some(result),
                     )
-                } else {
-                    let target = state
-                        .borrow()
-                        .targets
-                        .get(next)
-                        .cloned()
-                        .expect("target index checked above");
-                    let (value_node, root, origin) = {
-                        let state_ref = state.borrow();
-                        (
-                            state_ref.value_node,
-                            state_ref.document.clone(),
-                            state_ref.target_origins.get(next).cloned().flatten(),
-                        )
-                    };
-                    let mut charge =
-                        || charge_managed_step(&mut observations, limits, cancellation, stop);
-                    let old = match assignment_target_value(&root, &target, limits, &mut charge) {
-                        Ok(old) => old,
+                }
+                GeneratorTask::FinishAdd {
+                    state,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let value = state.borrow().accumulator.clone().unwrap_or(Value::Null);
+                    let origin = match fresh_origin(&mut next_origin) {
+                        Ok(origin) => Some(origin),
                         Err(error) => {
                             return {
                                 let _ = emit(Err(error), observations);
@@ -5061,100 +4661,170 @@ fn evaluate_generator_stream(
                             };
                         }
                     };
-                    let input = old.clone();
-                    let boundary = next_boundary;
-                    next_boundary = next_boundary.saturating_add(1);
-                    let accepted = Rc::new(Cell::new(false));
-                    pending.push(GeneratorTask::AssignmentUpdateContinue {
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(value)),
+                    )
+                }
+                GeneratorTask::FinishDebug {
+                    input,
+                    origin,
+                    environment,
+                    frames,
+                    continuations,
+                } => (
+                    GeneratorWork {
+                        node: bytecode.root(),
+                        input: Value::Null,
+                        origin,
+                        environment,
+                        frames,
+                        continuations,
+                    },
+                    Some(Ok(input)),
+                ),
+                GeneratorTask::FoldGenerator {
+                    generator,
+                    pattern,
+                    update,
+                    extract,
+                    emit_each_update,
+                    state,
+                    input,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    pending.push(GeneratorTask::FinishFold {
                         state: Rc::clone(&state),
-                        next: next.saturating_add(1),
-                        boundary,
-                        accepted: Rc::clone(&accepted),
+                        emit_final: !emit_each_update,
                         environment: Arc::clone(&environment),
                         frames: Arc::clone(&frames),
                         continuations: continuations.clone(),
                     });
-                    let mut rhs_continuations = continuations;
-                    rhs_continuations.push(GeneratorContinuation::AssignmentUpdateRhs {
+                    let mut generator_continuations = continuations;
+                    generator_continuations.push(GeneratorContinuation::FoldItem {
                         state,
-                        target,
-                        old,
-                        next: next.saturating_add(1),
-                        boundary,
-                        accepted,
+                        pattern,
+                        update,
+                        extract,
+                        emit_each_update,
+                        environment: Arc::clone(&environment),
                     });
                     pending.push(GeneratorTask::Eval(GeneratorWork {
-                        node: value_node,
+                        node: generator,
                         input,
-                        origin,
+                        origin: None,
                         environment,
                         frames,
-                        continuations: rhs_continuations,
+                        continuations: generator_continuations,
                     }));
                     continue;
                 }
-            }
-            GeneratorTask::AssignmentUpdateContinue {
-                state,
-                next,
-                boundary: _,
-                accepted,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if accepted.get() {
-                    continue;
-                }
-                let Some(target) = state.borrow().targets.get(next - 1).cloned() else {
-                    continue;
-                };
-                let mut charge =
-                    || charge_managed_step(&mut observations, limits, cancellation, stop);
-                if let Err(error) = retain_assignment_deletion_target(
-                    &mut state.borrow_mut().deletions,
-                    &target,
-                    limits,
-                    &mut charge,
-                ) {
-                    return {
-                        let _ = emit(Err(error), observations);
-                        observations
-                    };
-                }
-                pending.push(GeneratorTask::AssignmentUpdate {
+                GeneratorTask::FinishFold {
                     state,
+                    emit_final,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if !emit_final {
+                        continue;
+                    }
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin: None,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(state.borrow().accumulator.clone())),
+                    )
+                }
+                GeneratorTask::PathEval(path_work) => {
+                    delivered_from_path = true;
+                    let environment = Arc::clone(&path_work.environment);
+                    let frames = Arc::clone(&path_work.frames);
+                    let origin = path_work.origin.clone();
+                    let continuations = path_work.continuations.clone();
+                    let Some(result) =
+                        schedule_path_eval(bytecode, path_work, &mut pending, &mut next_boundary)
+                    else {
+                        continue;
+                    };
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(result),
+                    )
+                }
+                GeneratorTask::PathChildren {
+                    value,
+                    path,
                     next,
                     environment,
                     frames,
                     continuations,
-                });
-                continue;
-            }
-            GeneratorTask::Traverse {
-                mut cursor,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if cursor.depth() > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
+                } => {
+                    delivered_from_path = true;
+                    let child = match &value {
+                        Value::Array(values) => values
+                            .get(next)
+                            .cloned()
+                            .map(|child| (PathComponent::Index(next), child)),
+                        Value::Object(values) => values.get_index(next).map(|(key, child)| {
+                            (PathComponent::Key(Arc::clone(key)), child.clone())
+                        }),
+                        _ => None,
+                    };
+                    let Some((component, _)) = child else {
+                        continue;
+                    };
+                    pending.push(GeneratorTask::PathChildren {
+                        value,
+                        path: path.clone(),
+                        next: next.saturating_add(1),
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut components = path.components().to_vec();
+                    components.push(component);
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin: None,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(path_value(&Path::new(components)))),
+                    )
                 }
-                observations.path_stack_high_water =
-                    observations.path_stack_high_water.max(cursor.depth());
-                match cursor.next(limits.path_stack) {
-                    Ok(Some(value)) => {
-                        if pending.len() >= limits.fork_stack {
-                            let _ = emit(Err(resource("fork-stack")), observations);
-                            break;
-                        }
-                        pending.push(GeneratorTask::Traverse {
-                            cursor,
-                            environment: Arc::clone(&environment),
-                            frames: Arc::clone(&frames),
-                            continuations: continuations.clone(),
-                        });
+                GeneratorTask::PathTraverse {
+                    mut cursor,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    delivered_from_path = true;
+                    if cursor.depth() > limits.path_stack {
                         (
                             GeneratorWork {
                                 node: bytecode.root(),
@@ -5164,312 +4834,663 @@ fn evaluate_generator_stream(
                                 frames,
                                 continuations,
                             },
-                            Some(Ok(value)),
+                            Some(Err(resource("path-stack"))),
                         )
+                    } else {
+                        let mut charge =
+                            || charge_managed_step(&mut observations, limits, cancellation, stop);
+                        match cursor.next(limits.path_stack, &mut charge) {
+                            Ok(Some(path)) => {
+                                pending.push(GeneratorTask::PathTraverse {
+                                    cursor,
+                                    environment: Arc::clone(&environment),
+                                    frames: Arc::clone(&frames),
+                                    continuations: continuations.clone(),
+                                });
+                                let (origin, result) = match fresh_origin(&mut next_origin) {
+                                    Ok(origin) => (Some(origin), Ok(path_value(&path))),
+                                    Err(error) => (None, Err(error)),
+                                };
+                                (
+                                    GeneratorWork {
+                                        node: bytecode.root(),
+                                        input: Value::Null,
+                                        origin,
+                                        environment,
+                                        frames,
+                                        continuations,
+                                    },
+                                    Some(result),
+                                )
+                            }
+                            Ok(None) => continue,
+                            Err(error) => (
+                                GeneratorWork {
+                                    node: bytecode.root(),
+                                    input: Value::Null,
+                                    origin: None,
+                                    environment,
+                                    frames,
+                                    continuations,
+                                },
+                                Some(Err(error)),
+                            ),
+                        }
                     }
-                    Ok(None) => continue,
-                    Err(error) => {
-                        let _ = emit(Err(error), observations);
-                        break;
-                    }
                 }
-            }
-            GeneratorTask::RecurseExpand {
-                input,
-                filter,
-                condition,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if depth > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
-                }
-                observations.path_stack_high_water = observations.path_stack_high_water.max(depth);
-                if let Some(filter) = filter {
-                    let structural = matches!(input, Value::Array(_) | Value::Object(_));
-                    let mut callback_continuations = continuations;
-                    callback_continuations.push(GeneratorContinuation::RecurseChild {
-                        filter,
-                        condition,
-                        depth,
-                        structural,
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                    });
-                    (
-                        GeneratorWork {
-                            node: filter,
-                            input,
-                            origin: None,
-                            environment,
-                            frames,
-                            continuations: callback_continuations,
-                        },
-                        None,
-                    )
-                } else {
-                    pending.push(GeneratorTask::RecurseChildren {
-                        input,
-                        next: 0,
-                        depth,
-                        environment,
-                        frames,
-                        continuations,
-                    });
-                    continue;
-                }
-            }
-            GeneratorTask::RecurseChildren {
-                input,
-                next,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                let Some(child) = recursive_child(&input, next) else {
-                    continue;
-                };
-                pending.push(GeneratorTask::RecurseChildren {
+                GeneratorTask::FinishPathCollection {
+                    boundary: _,
+                    kind,
                     input,
-                    next: next.saturating_add(1),
-                    depth,
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                pending.push(GeneratorTask::RecurseValue {
-                    value: child,
-                    filter: None,
-                    condition: None,
-                    depth: depth.saturating_add(1),
+                    paths,
                     environment,
                     frames,
                     continuations,
-                });
-                continue;
-            }
-            GeneratorTask::RecurseValue {
-                value,
-                filter,
-                condition,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if depth > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
+                } => {
+                    let accumulator = std::mem::replace(
+                        &mut *paths.borrow_mut(),
+                        path_builtin::PathAccumulator::new(),
+                    );
+                    let mut charge =
+                        || charge_managed_step(&mut observations, limits, cancellation, stop);
+                    let result = match kind {
+                        PathCollectionKind::Delete => path_builtin::delete_paths_bounded(
+                            &input,
+                            accumulator,
+                            limits,
+                            &mut charge,
+                        ),
+                        PathCollectionKind::Pick => path_builtin::pick_paths_bounded(
+                            &input,
+                            accumulator,
+                            limits,
+                            &mut charge,
+                        ),
+                    };
+                    let (origin, result) = match result {
+                        Ok(value) => match fresh_origin(&mut next_origin) {
+                            Ok(origin) => (Some(origin), Ok(value)),
+                            Err(error) => (None, Err(error)),
+                        },
+                        Err(error) => (None, Err(error)),
+                    };
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(result),
+                    )
                 }
-                pending.push(GeneratorTask::RecurseExpand {
-                    input: value.clone(),
-                    filter,
-                    condition,
-                    depth,
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                (
-                    GeneratorWork {
-                        node: bytecode.root(),
-                        input: Value::Null,
+                GeneratorTask::PathSlice {
+                    path,
+                    start,
+                    end,
+                    next,
+                    assignment,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    delivered_from_path = true;
+                    if let Some(state) = assignment {
+                        state.borrow_mut().targets.push(AssignmentTarget::Slice {
+                            path,
+                            start,
+                            end,
+                        });
+                        state.borrow_mut().target_origins.push(None);
+                        continue;
+                    }
+                    if next >= end {
+                        continue;
+                    }
+                    pending.push(GeneratorTask::PathSlice {
+                        path: path.clone(),
+                        start,
+                        end,
+                        next: next.saturating_add(1),
+                        assignment: None,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut components = path.components().to_vec();
+                    components.push(PathComponent::Index(next));
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin: None,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(path_value(&Path::new(components)))),
+                    )
+                }
+                GeneratorTask::FinishAssignmentPaths {
+                    state,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let (operator, value_node, input) = {
+                        let state = state.borrow();
+                        (state.operator, state.value_node, state.input.clone())
+                    };
+                    if operator == AssignmentOperator::Update {
+                        pending.push(GeneratorTask::AssignmentUpdate {
+                            state,
+                            next: 0,
+                            environment,
+                            frames,
+                            continuations,
+                        });
+                        continue;
+                    }
+                    let mut continuations = continuations;
+                    continuations.push(GeneratorContinuation::AssignmentRhs(state));
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: value_node,
+                        input,
                         origin: None,
                         environment,
                         frames,
                         continuations,
-                    },
-                    Some(Ok(value)),
-                )
-            }
-            GeneratorTask::Repeat {
-                expression,
-                input,
-                environment,
-                frames,
-                continuations,
-            } => {
-                // jq defines repeat(exp) as `exp, _repeat`: the recursive
-                // call is a sibling of exp and therefore receives the same
-                // input, rather than the values emitted by exp.  Queue the
-                // next iteration before evaluating exp so all of exp's
-                // results are emitted first.  The VM's step budget bounds an
-                // empty or otherwise unbounded repeat without native stack
-                // growth.
-                pending.push(GeneratorTask::Repeat {
-                    expression,
-                    input: input.clone(),
-                    environment: Arc::clone(&environment),
-                    frames: Arc::clone(&frames),
-                    continuations: continuations.clone(),
-                });
-                let mut item_continuations = continuations;
-                item_continuations.push(GeneratorContinuation::RepeatItem);
-                pending.push(GeneratorTask::Eval(GeneratorWork {
-                    node: expression,
-                    input,
-                    origin: None,
+                    }));
+                    continue;
+                }
+                GeneratorTask::AssignmentUpdate {
+                    state,
+                    next,
                     environment,
                     frames,
-                    continuations: item_continuations,
-                }));
-                continue;
-            }
-            GeneratorTask::WalkValue {
-                input,
-                callback,
-                depth,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if depth > limits.path_stack {
-                    let _ = emit(Err(resource("path-stack")), observations);
-                    break;
+                    continuations,
+                } => {
+                    if next >= state.borrow().targets.len() {
+                        let document = state.borrow().document.clone();
+                        let deletions = std::mem::replace(
+                            &mut state.borrow_mut().deletions,
+                            path_builtin::PathAccumulator::new(),
+                        );
+                        let mut charge =
+                            || charge_managed_step(&mut observations, limits, cancellation, stop);
+                        let result = path_builtin::delete_paths_bounded(
+                            &document,
+                            deletions,
+                            limits,
+                            &mut charge,
+                        );
+                        let mut result = result;
+                        let origin = if result.is_ok() {
+                            match fresh_origin(&mut next_origin) {
+                                Ok(origin) => Some(origin),
+                                Err(error) => {
+                                    result = Err(error);
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+                        if let Ok(document) = &result {
+                            state.borrow_mut().document = document.clone();
+                        }
+                        (
+                            GeneratorWork {
+                                node: bytecode.root(),
+                                input: Value::Null,
+                                origin,
+                                environment,
+                                frames,
+                                continuations,
+                            },
+                            Some(result),
+                        )
+                    } else {
+                        let target = state
+                            .borrow()
+                            .targets
+                            .get(next)
+                            .cloned()
+                            .expect("target index checked above");
+                        let (value_node, root, origin) = {
+                            let state_ref = state.borrow();
+                            (
+                                state_ref.value_node,
+                                state_ref.document.clone(),
+                                state_ref.target_origins.get(next).cloned().flatten(),
+                            )
+                        };
+                        let mut charge =
+                            || charge_managed_step(&mut observations, limits, cancellation, stop);
+                        let old = match assignment_target_value(&root, &target, limits, &mut charge)
+                        {
+                            Ok(old) => old,
+                            Err(error) => {
+                                return {
+                                    let _ = emit(Err(error), observations);
+                                    observations
+                                };
+                            }
+                        };
+                        let input = old.clone();
+                        let boundary = next_boundary;
+                        next_boundary = next_boundary.saturating_add(1);
+                        let accepted = Rc::new(Cell::new(false));
+                        pending.push(GeneratorTask::AssignmentUpdateContinue {
+                            state: Rc::clone(&state),
+                            next: next.saturating_add(1),
+                            boundary,
+                            accepted: Rc::clone(&accepted),
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                            continuations: continuations.clone(),
+                        });
+                        let mut rhs_continuations = continuations;
+                        rhs_continuations.push(GeneratorContinuation::AssignmentUpdateRhs {
+                            state,
+                            target,
+                            old,
+                            next: next.saturating_add(1),
+                            boundary,
+                            accepted,
+                        });
+                        pending.push(GeneratorTask::Eval(GeneratorWork {
+                            node: value_node,
+                            input,
+                            origin,
+                            environment,
+                            frames,
+                            continuations: rhs_continuations,
+                        }));
+                        continue;
+                    }
                 }
-                observations.path_stack_high_water = observations.path_stack_high_water.max(depth);
-                match input {
-                    Value::Array(values) => {
+                GeneratorTask::AssignmentUpdateContinue {
+                    state,
+                    next,
+                    boundary: _,
+                    accepted,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if accepted.get() {
+                        continue;
+                    }
+                    let Some(target) = state.borrow().targets.get(next - 1).cloned() else {
+                        continue;
+                    };
+                    let mut charge =
+                        || charge_managed_step(&mut observations, limits, cancellation, stop);
+                    if let Err(error) = retain_assignment_deletion_target(
+                        &mut state.borrow_mut().deletions,
+                        &target,
+                        limits,
+                        &mut charge,
+                    ) {
+                        return {
+                            let _ = emit(Err(error), observations);
+                            observations
+                        };
+                    }
+                    pending.push(GeneratorTask::AssignmentUpdate {
+                        state,
+                        next,
+                        environment,
+                        frames,
+                        continuations,
+                    });
+                    continue;
+                }
+                GeneratorTask::Traverse {
+                    mut cursor,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if cursor.depth() > limits.path_stack {
+                        let _ = emit(Err(resource("path-stack")), observations);
+                        break;
+                    }
+                    observations.path_stack_high_water =
+                        observations.path_stack_high_water.max(cursor.depth());
+                    match cursor.next(limits.path_stack) {
+                        Ok(Some(value)) => {
+                            if pending.len() >= limits.fork_stack {
+                                let _ = emit(Err(resource("fork-stack")), observations);
+                                break;
+                            }
+                            pending.push(GeneratorTask::Traverse {
+                                cursor,
+                                environment: Arc::clone(&environment),
+                                frames: Arc::clone(&frames),
+                                continuations: continuations.clone(),
+                            });
+                            (
+                                GeneratorWork {
+                                    node: bytecode.root(),
+                                    input: Value::Null,
+                                    origin: None,
+                                    environment,
+                                    frames,
+                                    continuations,
+                                },
+                                Some(Ok(value)),
+                            )
+                        }
+                        Ok(None) => continue,
+                        Err(error) => {
+                            let _ = emit(Err(error), observations);
+                            break;
+                        }
+                    }
+                }
+                GeneratorTask::RecurseExpand {
+                    input,
+                    filter,
+                    condition,
+                    depth,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if depth > limits.path_stack {
+                        let _ = emit(Err(resource("path-stack")), observations);
+                        break;
+                    }
+                    observations.path_stack_high_water =
+                        observations.path_stack_high_water.max(depth);
+                    if let Some(filter) = filter {
+                        let structural = matches!(input, Value::Array(_) | Value::Object(_));
+                        let mut callback_continuations = continuations;
+                        callback_continuations.push(GeneratorContinuation::RecurseChild {
+                            filter,
+                            condition,
+                            depth,
+                            structural,
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                        });
+                        (
+                            GeneratorWork {
+                                node: filter,
+                                input,
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations: callback_continuations,
+                            },
+                            None,
+                        )
+                    } else {
+                        pending.push(GeneratorTask::RecurseChildren {
+                            input,
+                            next: 0,
+                            depth,
+                            environment,
+                            frames,
+                            continuations,
+                        });
+                        continue;
+                    }
+                }
+                GeneratorTask::RecurseChildren {
+                    input,
+                    next,
+                    depth,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    let Some(child) = recursive_child(&input, next) else {
+                        continue;
+                    };
+                    pending.push(GeneratorTask::RecurseChildren {
+                        input,
+                        next: next.saturating_add(1),
+                        depth,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    pending.push(GeneratorTask::RecurseValue {
+                        value: child,
+                        filter: None,
+                        condition: None,
+                        depth: depth.saturating_add(1),
+                        environment,
+                        frames,
+                        continuations,
+                    });
+                    continue;
+                }
+                GeneratorTask::RecurseValue {
+                    value,
+                    filter,
+                    condition,
+                    depth,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if depth > limits.path_stack {
+                        let _ = emit(Err(resource("path-stack")), observations);
+                        break;
+                    }
+                    pending.push(GeneratorTask::RecurseExpand {
+                        input: value.clone(),
+                        filter,
+                        condition,
+                        depth,
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    (
+                        GeneratorWork {
+                            node: bytecode.root(),
+                            input: Value::Null,
+                            origin: None,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        Some(Ok(value)),
+                    )
+                }
+                GeneratorTask::Repeat {
+                    expression,
+                    input,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    // jq defines repeat(exp) as `exp, _repeat`: the recursive
+                    // call is a sibling of exp and therefore receives the same
+                    // input, rather than the values emitted by exp.  Queue the
+                    // next iteration before evaluating exp so all of exp's
+                    // results are emitted first.  The VM's step budget bounds an
+                    // empty or otherwise unbounded repeat without native stack
+                    // growth.
+                    pending.push(GeneratorTask::Repeat {
+                        expression,
+                        input: input.clone(),
+                        environment: Arc::clone(&environment),
+                        frames: Arc::clone(&frames),
+                        continuations: continuations.clone(),
+                    });
+                    let mut item_continuations = continuations;
+                    item_continuations.push(GeneratorContinuation::RepeatItem);
+                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                        node: expression,
+                        input,
+                        origin: None,
+                        environment,
+                        frames,
+                        continuations: item_continuations,
+                    }));
+                    continue;
+                }
+                GeneratorTask::WalkValue {
+                    input,
+                    callback,
+                    depth,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if depth > limits.path_stack {
+                        let _ = emit(Err(resource("path-stack")), observations);
+                        break;
+                    }
+                    observations.path_stack_high_water =
+                        observations.path_stack_high_water.max(depth);
+                    match input {
+                        Value::Array(values) => {
+                            pending.push(GeneratorTask::WalkArray {
+                                inputs: values,
+                                next: 0,
+                                callback,
+                                depth,
+                                values: Rc::new(RefCell::new(Vec::new())),
+                                environment,
+                                frames,
+                                continuations,
+                            });
+                            continue;
+                        }
+                        Value::Object(values) => {
+                            let entries = values
+                                .iter()
+                                .map(|(key, value)| (Arc::clone(key), value.clone()))
+                                .collect::<Vec<_>>();
+                            pending.push(GeneratorTask::WalkObject {
+                                entries: Arc::from(entries),
+                                next: 0,
+                                callback,
+                                depth,
+                                values: Rc::new(RefCell::new(Object::new())),
+                                environment,
+                                frames,
+                                continuations,
+                            });
+                            continue;
+                        }
+                        input => (
+                            GeneratorWork {
+                                node: callback,
+                                input,
+                                origin: None,
+                                environment,
+                                frames,
+                                continuations,
+                            },
+                            None,
+                        ),
+                    }
+                }
+                GeneratorTask::WalkArray {
+                    inputs,
+                    next,
+                    callback,
+                    depth,
+                    values,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if let Some(value) = inputs.get(next).cloned() {
                         pending.push(GeneratorTask::WalkArray {
-                            inputs: values,
-                            next: 0,
+                            inputs,
+                            next: next + 1,
                             callback,
                             depth,
-                            values: Rc::new(RefCell::new(Vec::new())),
+                            values: Rc::clone(&values),
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                            continuations: continuations.clone(),
+                        });
+                        let mut child_continuations = continuations;
+                        child_continuations.push(GeneratorContinuation::ArrayItem(values));
+                        pending.push(GeneratorTask::WalkValue {
+                            input: value,
+                            callback,
+                            depth: depth.saturating_add(1),
                             environment,
                             frames,
-                            continuations,
+                            continuations: child_continuations,
                         });
                         continue;
                     }
-                    Value::Object(values) => {
-                        let entries = values
-                            .iter()
-                            .map(|(key, value)| (Arc::clone(key), value.clone()))
-                            .collect::<Vec<_>>();
-                        pending.push(GeneratorTask::WalkObject {
-                            entries: Arc::from(entries),
-                            next: 0,
-                            callback,
-                            depth,
-                            values: Rc::new(RefCell::new(Object::new())),
-                            environment,
-                            frames,
-                            continuations,
-                        });
-                        continue;
-                    }
-                    input => (
+                    (
                         GeneratorWork {
                             node: callback,
-                            input,
+                            input: Value::array(values.take()),
                             origin: None,
                             environment,
                             frames,
                             continuations,
                         },
                         None,
-                    ),
+                    )
                 }
-            }
-            GeneratorTask::WalkArray {
-                inputs,
-                next,
-                callback,
-                depth,
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some(value) = inputs.get(next).cloned() {
-                    pending.push(GeneratorTask::WalkArray {
-                        inputs,
-                        next: next + 1,
-                        callback,
-                        depth,
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut child_continuations = continuations;
-                    child_continuations.push(GeneratorContinuation::ArrayItem(values));
-                    pending.push(GeneratorTask::WalkValue {
-                        input: value,
-                        callback,
-                        depth: depth.saturating_add(1),
-                        environment,
-                        frames,
-                        continuations: child_continuations,
-                    });
-                    continue;
+                GeneratorTask::WalkObject {
+                    entries,
+                    next,
+                    callback,
+                    depth,
+                    values,
+                    environment,
+                    frames,
+                    continuations,
+                } => {
+                    if let Some((key, value)) = entries.get(next).cloned() {
+                        pending.push(GeneratorTask::WalkObject {
+                            entries,
+                            next: next + 1,
+                            callback,
+                            depth,
+                            values: Rc::clone(&values),
+                            environment: Arc::clone(&environment),
+                            frames: Arc::clone(&frames),
+                            continuations: continuations.clone(),
+                        });
+                        let mut child_continuations = continuations;
+                        child_continuations.push(GeneratorContinuation::ObjectItem {
+                            key,
+                            values,
+                            accepted: Rc::new(Cell::new(false)),
+                        });
+                        pending.push(GeneratorTask::WalkValue {
+                            input: value,
+                            callback,
+                            depth: depth.saturating_add(1),
+                            environment,
+                            frames,
+                            continuations: child_continuations,
+                        });
+                        continue;
+                    }
+                    let rebuilt = std::mem::take(&mut *values.borrow_mut());
+                    (
+                        GeneratorWork {
+                            node: callback,
+                            input: Value::object(rebuilt),
+                            origin: None,
+                            environment,
+                            frames,
+                            continuations,
+                        },
+                        None,
+                    )
                 }
-                (
-                    GeneratorWork {
-                        node: callback,
-                        input: Value::array(values.take()),
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    None,
-                )
-            }
-            GeneratorTask::WalkObject {
-                entries,
-                next,
-                callback,
-                depth,
-                values,
-                environment,
-                frames,
-                continuations,
-            } => {
-                if let Some((key, value)) = entries.get(next).cloned() {
-                    pending.push(GeneratorTask::WalkObject {
-                        entries,
-                        next: next + 1,
-                        callback,
-                        depth,
-                        values: Rc::clone(&values),
-                        environment: Arc::clone(&environment),
-                        frames: Arc::clone(&frames),
-                        continuations: continuations.clone(),
-                    });
-                    let mut child_continuations = continuations;
-                    child_continuations.push(GeneratorContinuation::ObjectItem {
-                        key,
-                        values,
-                        accepted: Rc::new(Cell::new(false)),
-                    });
-                    pending.push(GeneratorTask::WalkValue {
-                        input: value,
-                        callback,
-                        depth: depth.saturating_add(1),
-                        environment,
-                        frames,
-                        continuations: child_continuations,
-                    });
-                    continue;
-                }
-                let rebuilt = std::mem::take(&mut *values.borrow_mut());
-                (
-                    GeneratorWork {
-                        node: callback,
-                        input: Value::object(rebuilt),
-                        origin: None,
-                        environment,
-                        frames,
-                        continuations,
-                    },
-                    None,
-                )
             }
         };
         let mut result_origin = work.origin.clone();
@@ -5567,7 +5588,7 @@ fn evaluate_generator_stream(
                         work.continuations
                             .push(GeneratorContinuation::AccessField(Arc::clone(key)));
                         work.node = *base;
-                        pending.push(GeneratorTask::Eval(work));
+                        current = Some(work);
                         continue 'generator;
                     }
                     None => Some(Err(invalid("string missing after validation"))),
@@ -5580,7 +5601,7 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *base;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Slice { base, start, end } => {
@@ -5593,13 +5614,13 @@ fn evaluate_generator_stream(
                         frames: Arc::clone(&work.frames),
                     });
                     work.node = *base;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Iterate(base) => {
                     work.continuations.push(GeneratorContinuation::Iterate);
                     work.node = *base;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Optional(child) => {
@@ -5608,7 +5629,7 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::OptionalBoundary { boundary });
                     work.node = *child;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Pipe { left, right } => {
@@ -5617,7 +5638,7 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *left;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Comma { left, right } => {
@@ -5651,7 +5672,7 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::ArrayItem(values));
                     work.node = *child;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Object(entries) => {
@@ -5671,7 +5692,7 @@ fn evaluate_generator_stream(
                         bytecode,
                         &entries,
                         0,
-                        Object::new(),
+                        Arc::new(Object::new()),
                         work.input.clone(),
                         work.origin.clone(),
                         Arc::clone(&work.environment),
@@ -5684,7 +5705,7 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::Unary(*operator));
                     work.node = *child;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Binary {
@@ -5715,7 +5736,7 @@ fn evaluate_generator_stream(
                         });
                     }
                     work.node = *left;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Bind {
@@ -5732,7 +5753,7 @@ fn evaluate_generator_stream(
                         origin: None,
                     });
                     work.node = *value;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::BindAlternatives {
@@ -5748,7 +5769,7 @@ fn evaluate_generator_stream(
                             environment: Arc::clone(&work.environment),
                         });
                     work.node = *value;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Reduce {
@@ -5767,7 +5788,7 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *initial;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Foreach {
@@ -5787,7 +5808,7 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *initial;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Assignment {
@@ -5840,7 +5861,7 @@ fn evaluate_generator_stream(
                     } else {
                         work.node = *alternative;
                     }
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::UserCall { symbol, arguments } => schedule_user_call(
@@ -5878,7 +5899,7 @@ fn evaluate_generator_stream(
                             work.node = argument.node;
                             work.environment = argument.environment;
                             work.frames = argument.frames;
-                            pending.push(GeneratorTask::Eval(work));
+                            current = Some(work);
                             continue 'generator;
                         }
                         None => Some(Err(invalid(
@@ -5896,14 +5917,14 @@ fn evaluate_generator_stream(
                         environment: Arc::clone(&work.environment),
                     });
                     work.node = *expression;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Label { symbol, body } => {
                     work.continuations
                         .push(GeneratorContinuation::Label(*symbol));
                     work.node = *body;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Break(symbol) => Some(Err(VmError::Break { label: *symbol })),
@@ -6332,7 +6353,7 @@ fn evaluate_generator_stream(
                     if let Some(argument) = arguments.first() {
                         work.continuations.push(GeneratorContinuation::Raise);
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work));
+                        current = Some(work);
                         continue 'generator;
                     }
                     Some(Err(VmError::Raised {
@@ -6472,7 +6493,7 @@ fn evaluate_generator_stream(
                         });
                         work.continuations.push(GeneratorContinuation::DebugItem);
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work));
+                        current = Some(work);
                         continue 'generator;
                     }
                     match debug_effect(&work.input, limits.output_bytes)
@@ -6498,7 +6519,7 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::AddItem(state));
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Call { name, .. }
@@ -6521,7 +6542,7 @@ fn evaluate_generator_stream(
                             input: work.input.clone(),
                         });
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work));
+                        current = Some(work);
                         continue 'generator;
                     }
                     match halt_error_text(&work.input, limits.output_bytes) {
@@ -6563,7 +6584,7 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::PullConsumer { state });
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Call { name, arguments }
@@ -6648,7 +6669,7 @@ fn evaluate_generator_stream(
                         frames: Arc::clone(&work.frames),
                     });
                     work.node = count;
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Call { name, arguments }
@@ -6661,7 +6682,7 @@ fn evaluate_generator_stream(
                     work.continuations
                         .push(GeneratorContinuation::FromStreamItem(state));
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Call { name, arguments }
@@ -6675,7 +6696,7 @@ fn evaluate_generator_stream(
                             count: work.input.clone(),
                         });
                     work.node = arguments[0];
-                    pending.push(GeneratorTask::Eval(work));
+                    current = Some(work);
                     continue 'generator;
                 }
                 Operation::Call { name, arguments }
@@ -6715,7 +6736,7 @@ fn evaluate_generator_stream(
                                     frames: Arc::clone(&work.frames),
                                 });
                             work.node = *condition;
-                            pending.push(GeneratorTask::Eval(work));
+                            current = Some(work);
                             continue 'generator;
                         }
                         _ => Some(Err(invalid("loop arguments missing"))),
@@ -6754,7 +6775,7 @@ fn evaluate_generator_stream(
                                 frames: Arc::clone(&work.frames),
                             });
                             work.node = *count;
-                            pending.push(GeneratorTask::Eval(work));
+                            current = Some(work);
                             continue 'generator;
                         }
                         _ => Some(Err(invalid("limit arguments missing"))),
@@ -6906,7 +6927,7 @@ fn evaluate_generator_stream(
                             origin: work.origin.clone(),
                         });
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work));
+                        current = Some(work);
                         continue 'generator;
                     }
                     Some(Err(invalid("select argument missing")))
@@ -6925,7 +6946,7 @@ fn evaluate_generator_stream(
                             container_from_result,
                         });
                         work.node = *argument;
-                        pending.push(GeneratorTask::Eval(work));
+                        current = Some(work);
                         continue 'generator;
                     }
                     Some(Err(invalid("has/in argument missing")))
@@ -7357,17 +7378,17 @@ fn evaluate_generator_stream(
                     environment,
                 } => {
                     work.continuations.push(GeneratorContinuation::ApplyIndex {
-                        base: value.clone(),
-                        origin: result_origin.clone(),
+                        base: value,
+                        origin: result_origin,
                     });
-                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                    current = Some(GeneratorWork {
                         node,
                         input,
                         origin,
                         environment,
                         frames: work.frames,
                         continuations: work.continuations,
-                    }));
+                    });
                     break;
                 }
                 GeneratorContinuation::SliceBase {
@@ -7510,7 +7531,7 @@ fn evaluate_generator_stream(
                     environment,
                     frames,
                 } => {
-                    object.insert(key, value);
+                    Arc::make_mut(&mut object).insert(key, value);
                     if let Some(next_result) = schedule_object_entry(
                         bytecode,
                         &entries,
@@ -8525,14 +8546,14 @@ fn evaluate_generator_stream(
                     break;
                 }
                 GeneratorContinuation::Pipe { node, environment } => {
-                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                    current = Some(GeneratorWork {
                         node,
                         input: value,
-                        origin: result_origin.clone(),
+                        origin: result_origin,
                         environment,
                         frames: work.frames,
                         continuations: work.continuations,
-                    }));
+                    });
                     break;
                 }
                 GeneratorContinuation::BinaryLeft {
@@ -8559,14 +8580,14 @@ fn evaluate_generator_stream(
                         operator,
                         left: value,
                     });
-                    pending.push(GeneratorTask::Eval(GeneratorWork {
+                    current = Some(GeneratorWork {
                         node: right,
                         input,
                         origin,
                         environment,
                         frames: work.frames,
                         continuations: work.continuations,
-                    }));
+                    });
                     break;
                 }
                 GeneratorContinuation::BinaryRight { operator, left } => {
@@ -10234,7 +10255,7 @@ fn generator_builtin(
         "type" => return Ok(Some(Value::string(type_name(input)))),
         "unique" => return unique_values(input).into_iter().next().transpose(),
         "utf8bytelength" => match input {
-            Value::String(value) => return number_usize(value.len()).map(Some),
+            Value::String(value) => return Ok(Some(number_usize(value.len()))),
             value => return Err(type_error("utf8bytelength", value)),
         },
         "trim" => return string_compat::trim(input).map(Some),
@@ -12368,7 +12389,7 @@ impl Evaluator<'_> {
             "length" => vec![length(input)],
             "abs" => vec![absolute_value(input)],
             "utf8bytelength" => match input {
-                Value::String(value) => vec![number_usize(value.len())],
+                Value::String(value) => vec![Ok(number_usize(value.len()))],
                 value => one_error(type_error("utf8bytelength", value)),
             },
             "keys" | "keys_unsorted" => vec![keys(input, name == "keys")],
@@ -15353,19 +15374,17 @@ fn number_value(number: f64) -> Outcomes {
         )
 }
 
-fn number_usize(number: usize) -> Result<Value, VmError> {
-    Number::parse(&number.to_string())
-        .map(Value::Number)
-        .map_err(|error| runtime(error.to_string()))
+fn number_usize(number: usize) -> Value {
+    Value::Number(Number::from_usize(number))
 }
 
 fn length(value: &Value) -> Result<Value, VmError> {
     let length = match value {
         Value::Null => 0.0,
         Value::Number(number) => number.as_f64().abs(),
-        Value::String(value) => return number_usize(value.chars().count()),
-        Value::Array(value) => return number_usize(value.len()),
-        Value::Object(value) => return number_usize(value.len()),
+        Value::String(value) => return Ok(number_usize(value.chars().count())),
+        Value::Array(value) => return Ok(number_usize(value.len())),
+        Value::Object(value) => return Ok(number_usize(value.len())),
         Value::Bool(_) => return Err(type_error("length", value)),
     };
     Number::from_f64(length)
@@ -15385,10 +15404,7 @@ fn absolute_value(value: &Value) -> Result<Value, VmError> {
 
 fn keys(value: &Value, sorted: bool) -> Result<Value, VmError> {
     let mut keys = match value {
-        Value::Array(values) => (0..values.len())
-            .map(|index| Number::parse(&index.to_string()).map(Value::Number))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| runtime(error.to_string()))?,
+        Value::Array(values) => (0..values.len()).map(number_usize).collect::<Vec<_>>(),
         Value::Object(values) => values
             .keys()
             .map(|key| Value::String(Arc::clone(key)))
@@ -15435,12 +15451,12 @@ fn to_entries(input: &Value) -> Result<Value, VmError> {
             .iter()
             .enumerate()
             .map(|(index, value)| {
-                Ok(Value::object(Object::from_iter([
-                    (Arc::from("key"), number_usize(index)?),
+                Value::object(Object::from_iter([
+                    (Arc::from("key"), number_usize(index)),
                     (Arc::from("value"), value.clone()),
-                ])))
+                ]))
             })
-            .collect::<Result<Vec<_>, VmError>>()?,
+            .collect::<Vec<_>>(),
         Value::Object(values) => values
             .iter()
             .map(|(key, value)| {
@@ -15484,11 +15500,12 @@ fn explode(input: &Value) -> Result<Value, VmError> {
     let Value::String(input) = input else {
         return Err(type_error("explode", input));
     };
-    input
-        .chars()
-        .map(|character| number_usize(character as usize))
-        .collect::<Result<Vec<_>, _>>()
-        .map(Value::array)
+    Ok(Value::array(
+        input
+            .chars()
+            .map(|character| number_usize(character as usize))
+            .collect::<Vec<_>>(),
+    ))
 }
 
 fn implode(input: &Value) -> Result<Value, VmError> {
@@ -16236,11 +16253,10 @@ fn path_value(path: &Path) -> Value {
         path.components()
             .iter()
             .map(|component| match component {
-                PathComponent::Key(key) => Ok(Value::String(Arc::clone(key))),
+                PathComponent::Key(key) => Value::String(Arc::clone(key)),
                 PathComponent::Index(index) => number_usize(*index),
             })
-            .collect::<Result<Vec<_>, _>>()
-            .expect("usize path indices are representable jq numbers"),
+            .collect::<Vec<_>>(),
     )
 }
 
@@ -16264,7 +16280,7 @@ fn getpath(input: &Value, path: &[PathComponent]) -> Result<Value, VmError> {
     for component in path {
         current = match component {
             PathComponent::Key(key) => access_index(&current, &Value::String(Arc::clone(key)))?,
-            PathComponent::Index(index) => access_index(&current, &number_usize(*index)?)?,
+            PathComponent::Index(index) => access_index(&current, &number_usize(*index))?,
         };
     }
     Ok(current)

@@ -3060,7 +3060,7 @@ fn run_event_filter<R: Read, W: Write, E: Write>(
 ) -> Result<ExitStatus, RunError> {
     let mut executor = StreamExecutor {
         plan,
-        variables,
+        variables: Arc::new(variables.clone()),
         output: ResultOutput::with_capture(stdout, options, capture),
         stderr,
         trace_remaining: options.trace_limit,
@@ -5490,7 +5490,7 @@ impl<R: Read> Read for LimitedReader<R> {
 
 struct StreamExecutor<'a, W, E> {
     plan: &'a Plan<Compiled, Events>,
-    variables: &'a BTreeMap<Arc<str>, Value>,
+    variables: Arc<BTreeMap<Arc<str>, Value>>,
     output: ResultOutput<'a, W>,
     stderr: &'a mut E,
     trace_remaining: usize,
@@ -5505,7 +5505,7 @@ impl<W: Write, E: Write> StreamExecutor<'_, W, E> {
             self.plan,
             input,
             vm_limits(self.output.options),
-            self.variables.clone(),
+            Arc::clone(&self.variables),
         )
         .with_trace_limit(self.trace_remaining);
         if let Some(flag) = cancellation() {
