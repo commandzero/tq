@@ -37,7 +37,7 @@ pub(crate) fn available_memory_bytes() -> Option<u64> {
             );
             system
                 .process(pid)
-                .and_then(|process| process.cgroup_limits())
+                .and_then(sysinfo::Process::cgroup_limits)
         });
         process_limits
             .or_else(|| system.cgroup_limits())
