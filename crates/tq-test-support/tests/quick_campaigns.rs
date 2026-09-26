@@ -36,14 +36,20 @@ if [ "$1" = build ]; then
     printf '{}\n'
     exit 0
 fi
-binary=
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --bin) binary=$2; shift 2 ;;
-        --) shift; exec "$TEST_BIN/$binary" "$@" ;;
-        *) shift ;;
-    esac
-done
+if [ "$1" = install ]; then
+    shift
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --root) mkdir -p "$2/bin"; cp -L "$TEST_BIN/tq-quick" "$2/bin/tq-quick"; exit 0 ;;
+            *) shift ;;
+        esac
+    done
+    exit 2
+fi
+if [ "$1" = run ]; then
+    : > "$TEST_ROOT/unexpected-cargo-run"
+    exec sleep 10
+fi
 exit 2
 "#,
     );
@@ -67,7 +73,7 @@ exit 2
     );
     executable(
         &bin.join("tq-corpus"),
-        "#!/bin/sh\n: > \"$TEST_ROOT/preparation-started\"\nexec sleep 10\n",
+        "#!/bin/sh\nfor root in \"${TMPDIR:-/tmp}\"/tq-quick-install.*; do\n    if [ -e \"$root\" ]; then : > \"$TEST_ROOT/install-present-during-preparation\"; fi\ndone\n: > \"$TEST_ROOT/preparation-started\"\nexec sleep 10\n",
     );
     executable(
         &bin.join("tq-bench"),
@@ -105,6 +111,54 @@ fn quick_deadline_includes_preparation_but_excludes_compilation() {
     assert!(start.elapsed() < std::time::Duration::from_secs(10));
     assert!(root.join("preparation-started").exists());
     assert!(!root.join("measurement-started").exists());
+}
+
+#[test]
+fn quick_guard_uses_installed_binary_without_postcompile_cargo_run() {
+    let directory = quick_dispatcher_fixture();
+    let root = directory.path();
+    let bin = root.join("bin");
+    let temporary = root.join("temporary");
+    fs::create_dir(&temporary).unwrap();
+    let started = std::time::Instant::now();
+    let output = Command::new("/bin/sh")
+        .arg(root.join("scripts/campaign-run.sh"))
+        .args(["benchmark", "natural-corpus", "quick"])
+        .current_dir(root)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("CARGO", bin.join("cargo"))
+        .env("TQ_HOST_TQ", bin.join("tq"))
+        .env("TEST_ROOT", root)
+        .env("TEST_BIN", &bin)
+        .env("TEST_COMPILE_DELAY", "0")
+        .env("TMPDIR", &temporary)
+        .env("TQ_BENCHMARK_ARCHIVE_ROOT", root.join("archive"))
+        .env("CAMPAIGN_BUDGET_SECONDS", "3")
+        .env_remove("TQ_BIN")
+        .env_remove("TQ_BENCH_WORKER")
+        .env_remove("TQ_CAMPAIGN_COMPILED")
+        .env_remove("TQ_BENCH_MANIFESTS")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(124), "{output:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(7),
+        "{output:?}"
+    );
+    assert!(root.join("preparation-started").exists());
+    assert!(!root.join("install-present-during-preparation").exists());
+    assert!(!root.join("unexpected-cargo-run").exists());
+    assert!(
+        !fs::read_dir(temporary)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("tq-quick-install.")
+            })
+    );
 }
 
 #[test]

@@ -66,6 +66,9 @@ campaign budgets are allowed; quick campaign/case overrides above 50 seconds
 are rejected.
 Expiry returns status 124 and leaves results incomplete. SIGINT and SIGTERM
 retain process-group cleanup ownership and return 130 and 143 respectively.
+Cleanup targets both the process group and the exact coordinator child. An
+unreaped child at the hard cutoff remains owned by a reserved reaper; after the
+guard process exits, the OS takes over reaping.
 Only the supervisor accepts a completed checkpoint, after terminal reporting
 and child cleanup finish; blocked output cannot leave a successful checkpoint.
 Retained checkpoints show observations available before interruption, which
@@ -473,6 +476,12 @@ that parser explicitly; it is separate from the measured `TQ_BIN`. Install a
 host-native parser before running the script, especially when Cargo is configured
 for cross-compilation. Explicit `TQ_BIN` and `TQ_BENCH_WORKER` selections remain
 unchanged.
+
+Quick compilation stages `tq-quick` with `cargo install --path` in a private
+installation root, retaining Cargo's workspace build cache and target
+configuration. The script executes that binary directly, without a post-build
+Cargo invocation. A supervised reentry removes the private installation before
+artifact discovery; installation cleanup shares the quick deadline.
 
 Before a full review, verify that jq, yq, and tq are all discoverable and that
 their recorded paths, versions, and build identities match that campaign's

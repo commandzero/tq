@@ -2,7 +2,7 @@
 type: Guide
 title: "Benchmark suites"
 description: "Choose a benchmark campaign, in-process microbenchmark, or focused regression probe."
-generated: { by: codex/gpt-6-astra, at: 2026-09-26T05:34:45Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-26T08:18:37Z }
 ---
 
 # Benchmark suites
@@ -78,15 +78,20 @@ cleanup may extend that deadline. The dispatcher runs a single `WORKERS`
 setting for the selected-sort wrapper, not an automatic thread-count matrix.
 
 **Quick must finish in less than one minute, excluding only compilation.**
-Compilation is excluded, but executable artifact discovery is guarded and
-non-compilation dispatcher setup reduces the remaining 50-second work budget.
+Compilation stages the native guard in a private installation root. The script
+executes it directly, without invoking Cargo again. Installation cleanup and
+executable artifact discovery are guarded; non-compilation dispatcher setup
+reduces the remaining 50-second work budget.
 That budget covers corpus preparation, tool discovery, preflight, correctness,
 measurements, reporting, and cleanup. The supervisor imposes a 55-second hard
 cutoff. Direct CLI runs and `--sampling quick` use the same guard.
 Budget expiry returns status 124 with incomplete coverage; SIGINT and SIGTERM
-clean up owned children before returning 130 and 143. A completed checkpoint is
-accepted only after terminal reporting and child cleanup finish. Preparation
-can consume the budget before any measurement exists.
+clean up owned children before returning 130 and 143. Cleanup targets the exact
+coordinator child as well as its process group; a reserved reaper retains any
+unreaped child at the hard cutoff without extending the deadline. The OS takes
+over reaping after guard exit. A completed checkpoint is accepted only after
+terminal reporting and child cleanup finish. Preparation can consume the budget
+before any measurement exists.
 
 Quick reports are session-only summary evidence, including `SAMPLING=quick`
 with an extended positional profile. Explicit `--output` selects a session

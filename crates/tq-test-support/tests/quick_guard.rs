@@ -1,3 +1,5 @@
+#![cfg(any(target_os = "macos", target_os = "linux"))]
+
 //! End-to-end quick guard behavior with real sleeping processes.
 
 use std::{
@@ -27,6 +29,39 @@ fn blocked_preparation_expires_without_waiting_for_the_child() {
     let (output, elapsed) = run_quick("1", "/bin/sh", &["-c", "sleep 10"]);
     assert_eq!(output.status.code(), Some(124));
     assert!(elapsed < Duration::from_secs(3), "elapsed: {elapsed:?}");
+}
+
+#[test]
+fn coordinator_in_supervisor_group_is_killed_before_guard_returns() {
+    let temp = tempfile::tempdir().unwrap();
+    let pid_file = temp.path().join("coordinator.pid");
+    let started = Instant::now();
+    let output = Command::new(quick())
+        .args(["--budget-seconds", "1", "--"])
+        .arg(env::current_exe().unwrap())
+        .args(["--exact", "joined_supervisor_group_helper", "--nocapture"])
+        .env("TQ_QUICK_TEST_JOINED_GROUP_PID", &pid_file)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(124));
+    assert!(started.elapsed() < Duration::from_secs(3));
+    let pid = fs::read_to_string(pid_file).unwrap().parse().unwrap();
+    assert!(
+        !process_is_running(pid),
+        "coordinator {pid} survived the guard"
+    );
+}
+
+#[test]
+fn joined_supervisor_group_helper() {
+    use nix::unistd::{Pid, getpgid, getppid, setpgid};
+    let Ok(pid_file) = env::var("TQ_QUICK_TEST_JOINED_GROUP_PID") else {
+        return;
+    };
+    let supervisor_group = getpgid(Some(getppid())).unwrap();
+    setpgid(Pid::from_raw(0), supervisor_group).unwrap();
+    fs::write(pid_file, std::process::id().to_string()).unwrap();
+    thread::sleep(Duration::from_secs(10));
 }
 
 #[test]

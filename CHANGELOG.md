@@ -48,7 +48,7 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
-- Quick benchmark deadlines now cover executable discovery, and interruptions retain child-process cleanup ownership.
+- Quick benchmark deadlines now cover executable discovery and private guard-installation cleanup without a post-build Cargo invocation; interruptions and hard cutoffs retain exact-child cleanup ownership (#60).
 - Quick benchmark reports remain incomplete when terminal reporting or cleanup cannot finish.
 - Benchmark wrappers honor quick sampling and its budget defaults without replacing extended archive reports.
 - Formal regression comparisons reject quick evidence and mark cross-suite baselines unavailable rather than regressed.
