@@ -16,6 +16,16 @@ native accounting path separately. They are helper controls, not jq/yq/tq
 workload measurements. Every workload table below comes from the full native
 rerun; no wrapper-based measurements are included.
 
+## Current allocator diagnostic
+
+The [mimalloc versus system allocator summary](mimalloc-vs-devault.md) records
+the 2026-09-26 extended comparison with jq 1.8.1 and the default mimalloc
+build of tq 0.4.0. Its timing and memory measurements are diagnostic: the
+campaigns lack linked native timing-calibration and launch-isolation evidence.
+The publication renderer rejects them, so they do not replace the historical
+workload tables below. The allocator summary includes the measured benefits,
+memory costs, unchanged failures, and retained raw-report identities.
+
 ## Findings
 
 The standard review covers 846 adapter observations: 703 timed, 134
