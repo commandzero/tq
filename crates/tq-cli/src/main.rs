@@ -2,6 +2,10 @@
 
 use std::ffi::OsStr;
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> std::process::ExitCode {
     let status = match tq_cli::parse_args(std::env::args_os().skip(1)) {
         Ok(mut command) => {

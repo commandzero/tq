@@ -15,6 +15,7 @@ Historical release entries retain their original ordering.
 
 ### Changed
 
+- The CLI now uses mimalloc by default for faster allocation-heavy queries at the cost of higher memory usage; build with `--no-default-features` to use the system allocator.
 - Bumped the shared workspace version to 0.4.0 for incompatible Rust API changes. Downstream `tq-formats::Document` literals must now supply `line_number`; see the [migration notes](docs/jq-parity-migration.md#rust-library-migration-to-040) (#35).
 - Changed benchmark filesystem identity parsing to exclude optional macOS inode counters while preserving Linux and inode-free layouts (#43).
 - Changed terminal colors to a shared palette across all output formats, with light-blue booleans and delimiter-colored quotes while retaining seven/eight-slot `JQ_COLORS` customization (#38).
