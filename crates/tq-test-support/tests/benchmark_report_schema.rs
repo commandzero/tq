@@ -6,6 +6,30 @@ use serde_json::json;
 use tq_test_support::benchmark::BenchmarkRow;
 
 #[test]
+fn suite_identity_is_required_and_independent_of_run_profile() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("schemas/benchmark-campaign-v1.schema.json")).expect("campaign schema"),
+    )
+    .expect("schema JSON");
+    let validator = jsonschema::Validator::new(&schema).expect("campaign validator");
+    let mut report = report_with_cases(&json!([]));
+    report["suite"] = json!("large-input");
+    report["profile"] = json!("extended");
+    assert!(validator.is_valid(&report));
+    report
+        .as_object_mut()
+        .expect("report object")
+        .remove("suite");
+    assert!(!validator.is_valid(&report));
+    report["suite"] = json!("stack-overflow");
+    report["profile"] = json!("standard");
+    assert!(validator.is_valid(&report));
+    report["profile"] = json!("stack-overflow");
+    assert!(!validator.is_valid(&report));
+}
+
+#[test]
 fn campaign_schema_accepts_optional_bounded_row_diagnostics() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema: serde_json::Value = serde_json::from_slice(
@@ -34,6 +58,27 @@ fn campaign_schema_accepts_optional_bounded_row_diagnostics() {
     let mut empty = report_with_cases(&json!([]));
     empty["cases"] = json!([{}]);
     assert!(!validator.is_valid(&empty));
+}
+
+#[test]
+fn incomplete_checkpoint_cannot_claim_a_passing_campaign() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(root.join("schemas/benchmark-campaign-v1.schema.json")).expect("schema"),
+    )
+    .expect("JSON");
+    let validator = jsonschema::Validator::new(&schema).expect("validator");
+    let mut report = report_with_cases(&json!([]));
+    report["execution"] = json!({
+        "mode": "fast", "sampling": "screen", "instrument_rss": false,
+        "campaign_budget_seconds": 900, "case_budget_seconds": 300,
+        "planned_rows": 6, "elapsed_seconds": 3.5, "complete": false,
+        "interruptions": ["campaign cancelled"]
+    });
+    report["final_status"] = json!("incomplete");
+    assert!(validator.is_valid(&report));
+    report["final_status"] = json!("passed");
+    assert!(!validator.is_valid(&report));
 }
 
 #[test]
@@ -164,7 +209,7 @@ fn campaign_schema_accepts_stack_overflow_output_report_and_rejects_invalid_capt
     .expect("campaign schema JSON");
     let validator = jsonschema::Validator::new(&schema).expect("campaign validator");
     let mut report = report_with_cases(&json!([]));
-    report["profile"] = json!("stack-overflow");
+    report["suite"] = json!("stack-overflow");
     report["output_comparison"] = json!({
         "captured_at": "2026-09-11T00:00:00Z",
         "tools": [],
@@ -235,7 +280,7 @@ fn campaign_schema_accepts_profiled_color_captures_and_requires_provenance() {
         })
     };
     let mut report = report_with_cases(&json!([]));
-    report["profile"] = json!("stack-overflow");
+    report["suite"] = json!("stack-overflow");
     report["output_comparison"] = json!({
         "captured_at": "2026-09-11T00:00:00Z",
         "tools": [],
@@ -443,7 +488,8 @@ fn report_with_cases(cases: &serde_json::Value) -> serde_json::Value {
     json!({
         "schema_version": 1,
         "campaign_id": "local",
-        "profile": "rapid",
+        "suite": "natural-corpus",
+        "profile": "standard",
         "environment": {
             "collected_at": "2026-09-10T00:00:00Z",
             "os": "test", "kernel": "test", "architecture": "test",

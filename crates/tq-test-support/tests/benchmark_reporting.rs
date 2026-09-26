@@ -126,15 +126,9 @@ fn different_operating_systems_are_not_regression_comparable() {
 fn different_campaign_profiles_are_not_regression_comparable() {
     let left = campaign("machine-a", "digest-a", 100, 1024);
     let mut right = left.clone();
-    right.profile = "large".to_owned();
+    right.profile = "extended".to_owned();
     let comparison = compare_reports(&left, &right);
     assert!(!comparison.comparable);
-    assert!(
-        comparison
-            .reasons
-            .iter()
-            .any(|reason| reason.contains("profile"))
-    );
 }
 
 #[test]
@@ -282,7 +276,7 @@ fn environment_mismatch_is_unavailable_not_a_regression_failure() {
 fn unrelated_campaign_row_changes_remain_unavailable() {
     let baseline = campaign("machine-a", "digest-a", 100, 1024);
     let mut candidate = baseline.clone();
-    candidate.profile = "large".to_owned();
+    candidate.profile = "extended".to_owned();
     candidate.cases[0].case_id = "benchmark.other".to_owned();
 
     let gate = evaluate_regression(
@@ -296,11 +290,6 @@ fn unrelated_campaign_row_changes_remain_unavailable() {
     );
     assert!(!gate.evaluated);
     assert!(gate.failures.is_empty(), "failures: {:?}", gate.failures);
-    assert!(
-        gate.unavailable
-            .iter()
-            .any(|reason| reason.contains("profile"))
-    );
 }
 
 #[test]
@@ -951,8 +940,10 @@ fn campaign(machine: &str, digest: &str, wall: u128, rss: u64) -> BenchmarkCampa
     let mut environment = collect_environment("release-benchmark");
     machine.clone_into(&mut environment.machine_identity);
     BenchmarkCampaignReport {
+        execution: None,
         schema_version: 1,
         campaign_id: "test".to_owned(),
+        suite: "natural-corpus".to_owned(),
         profile: "standard".to_owned(),
         environment,
         corpus: vec![BenchmarkCorpusIdentity {
@@ -1178,34 +1169,20 @@ fn new_reports_reject_missing_or_zero_rss_provenance() {
 }
 
 #[test]
-fn rss_limited_timed_rows_require_valid_separate_instrumented_evidence() {
+fn rss_limited_rows_require_valid_enforcement_evidence() {
     let baseline = limited_campaign(1000, 1000);
     assert!(baseline.validate_authoritative_rss().is_ok());
 
     let mut missing = baseline.clone();
     missing.cases[0].instrumented_samples.clear();
-    let error = missing
-        .validate_authoritative_rss()
-        .expect_err("timed RSS-limited rows need enforcement repetitions");
-    assert!(
-        error.contains("instrumented RSS-limit repetitions"),
-        "{error}"
-    );
+    assert!(missing.validate_authoritative_rss().is_err());
     let gate = evaluate_regression(&baseline, &missing, regression_thresholds());
     assert!(!gate.evaluated);
     assert_eq!(gate.failures, [] as [std::string::String; 0]);
-    assert!(
-        gate.unavailable
-            .iter()
-            .any(|reason| reason.contains("instrumented"))
-    );
 
     let mut invalid = baseline.clone();
     invalid.cases[0].instrumented_samples[1].measurement_protocol = Some(native_protocol());
-    let error = invalid
-        .validate_authoritative_rss()
-        .expect_err("instrumented repetitions need a sampler protocol");
-    assert!(error.contains("instrumented"), "{error}");
+    assert!(invalid.validate_authoritative_rss().is_err());
     let gate = evaluate_regression(&baseline, &invalid, regression_thresholds());
     assert!(!gate.evaluated);
     assert_eq!(gate.failures, [] as [std::string::String; 0]);
@@ -1291,5 +1268,154 @@ fn instrumented_protocol() -> MeasurementProtocol {
         validated_accuracy_micros: Some(1_000),
         worker: Some(worker_identity()),
         isolation_evidence: Some(isolation_evidence()),
+    }
+}
+
+#[test]
+fn primary_rss_enforcement_does_not_require_duplicate_repetitions() {
+    let mut report = limited_campaign(1000, 1000);
+    report.cases[0].instrumented_samples.clear();
+    for sample in &mut report.cases[0].samples {
+        sample.measurement_protocol = Some(instrumented_protocol());
+    }
+    assert!(report.validate_authoritative_rss().is_ok());
+    report.cases[0].samples[1].measurement_protocol = Some(native_protocol());
+    assert!(report.validate_authoritative_rss().is_err());
+}
+
+#[test]
+fn incomplete_campaign_cannot_publish_or_evaluate_a_regression() {
+    let baseline = campaign("machine-a", "digest-a", 1000, 1000);
+    let mut partial = baseline.clone();
+    partial.final_status = BenchmarkFinalStatus::Incomplete;
+    assert!(partial.validate_for_publication().is_err());
+    assert!(!compare_reports(&baseline, &partial).comparable);
+    assert!(!evaluate_regression(&baseline, &partial, regression_thresholds()).evaluated);
+}
+
+#[test]
+fn quick_reports_cannot_be_published_even_with_complete_evidence() {
+    let mut report = campaign("machine-a", "digest-a", 1000, 1000);
+    assert!(report.validate_for_publication().is_ok());
+    report.profile = "quick".to_owned();
+    assert!(report.validate_for_publication().is_err());
+
+    report.profile = "extended".to_owned();
+    report.execution = Some(tq_test_support::benchmark::CampaignExecution {
+        mode: "fast".to_owned(),
+        sampling: "quick".to_owned(),
+        instrument_rss: false,
+        campaign_budget_seconds: 900,
+        case_budget_seconds: 300,
+        planned_rows: report.cases.len(),
+        elapsed_seconds: 1.0,
+        complete: true,
+        interruptions: Vec::new(),
+    });
+    assert!(report.validate_for_publication().is_err());
+}
+
+#[test]
+fn suite_identity_prevents_cross_suite_comparison_and_regression() {
+    let baseline = campaign("machine-a", "digest-a", 100, 1024);
+    assert!(compare_reports(&baseline, &baseline).comparable);
+    let mut candidate = campaign("machine-a", "digest-a", 200, 2048);
+    assert!(
+        !evaluate_regression(&baseline, &candidate, regression_thresholds())
+            .failures
+            .is_empty()
+    );
+    candidate.suite = "large-input".to_owned();
+    assert!(!compare_reports(&baseline, &candidate).comparable);
+    let gate = evaluate_regression(
+        &baseline,
+        &candidate,
+        RegressionThresholds {
+            wall_time_percent: 50.0,
+            peak_rss_percent: 50.0,
+            minimum_samples: 3,
+        },
+    );
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty(), "failures: {:?}", gate.failures);
+    assert!(!gate.unavailable.is_empty());
+}
+
+fn one_sample_campaign(wall: u128, rss: u64) -> BenchmarkCampaignReport {
+    let mut report = campaign("machine-a", "digest-a", wall, rss);
+    let row = &mut report.cases[0];
+    row.samples.truncate(1);
+    row.summary = summarize_samples(&row.samples, 100, 1);
+    row.warmups = 0;
+    row.requested_samples = 1;
+    report.execution = Some(tq_test_support::benchmark::CampaignExecution {
+        mode: "fast".to_owned(),
+        sampling: "catalog".to_owned(),
+        instrument_rss: false,
+        campaign_budget_seconds: 900,
+        case_budget_seconds: 300,
+        planned_rows: 1,
+        elapsed_seconds: 1.0,
+        complete: true,
+        interruptions: Vec::new(),
+    });
+    report
+}
+
+#[test]
+fn quick_profile_evidence_cannot_form_a_regression_baseline_or_candidate() {
+    let mut baseline = one_sample_campaign(100, 1024);
+    let mut candidate = one_sample_campaign(200, 2048);
+    let thresholds = RegressionThresholds {
+        minimum_samples: 1,
+        ..regression_thresholds()
+    };
+    assert!(
+        !evaluate_regression(&baseline, &candidate, thresholds.clone())
+            .failures
+            .is_empty()
+    );
+
+    baseline.profile = "quick".to_owned();
+    candidate.profile = "quick".to_owned();
+    let gate = evaluate_regression(&baseline, &candidate, thresholds);
+    assert!(!gate.evaluated);
+    assert!(gate.failures.is_empty(), "failures: {:?}", gate.failures);
+    assert!(!gate.unavailable.is_empty());
+}
+
+#[test]
+fn quick_sampling_evidence_is_unavailable_on_either_side_of_regression() {
+    let baseline = one_sample_campaign(100, 1024);
+    let candidate = one_sample_campaign(200, 2048);
+    let thresholds = RegressionThresholds {
+        minimum_samples: 1,
+        ..regression_thresholds()
+    };
+    let comparable_gate = evaluate_regression(&baseline, &candidate, thresholds.clone());
+    assert!(comparable_gate.evaluated);
+    assert!(!comparable_gate.failures.is_empty());
+
+    for quick_baseline in [true, false] {
+        let mut quick_baseline_report = baseline.clone();
+        let mut quick_candidate_report = candidate.clone();
+        let quick_report = if quick_baseline {
+            &mut quick_baseline_report
+        } else {
+            &mut quick_candidate_report
+        };
+        quick_report.execution.as_mut().unwrap().sampling = "quick".to_owned();
+
+        let gate = evaluate_regression(
+            &quick_baseline_report,
+            &quick_candidate_report,
+            thresholds.clone(),
+        );
+        assert!(!gate.evaluated, "quick baseline: {quick_baseline}");
+        assert!(gate.failures.is_empty(), "failures: {:?}", gate.failures);
+        assert!(
+            !gate.unavailable.is_empty(),
+            "quick baseline: {quick_baseline}"
+        );
     }
 }

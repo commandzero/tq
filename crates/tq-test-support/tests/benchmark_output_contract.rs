@@ -42,6 +42,7 @@ fn default_toon_values_match_in_order_and_consume_all_output() {
             DatasetTier::Startup,
             &invocation(executable, Vec::new()),
             &reference_values(&[json!(1), json!(2)]),
+            false,
         )
         .expect("gated row");
 
@@ -61,6 +62,7 @@ fn json_sequence_requires_lf_on_every_record() {
         DatasetTier::Startup,
         &invocation(executable, args.map(str::to_owned).to_vec()),
         &reference_values(&[json!(1)]),
+        false,
     )
     .expect("gated row");
 
@@ -79,6 +81,7 @@ fn last_toon_framing_option_controls_normalization() {
         DatasetTier::Startup,
         &invocation(executable, args.map(str::to_owned).to_vec()),
         &reference_values(&[json!({"a": 1})]),
+        false,
     )
     .expect("gated row");
 
@@ -98,6 +101,7 @@ fn unframed_empty_object_uses_exact_reference_cardinality() {
             DatasetTier::Startup,
             &invocation(executable, args.map(str::to_owned).to_vec()),
             &reference_values(values),
+            false,
         )
         .expect("gated row")
         .outcome
@@ -137,6 +141,7 @@ fn nonzero_candidate_process_is_not_timed_when_reference_has_same_error() {
             DatasetTier::Startup,
             &invocation(executable.clone(), Vec::new()),
             &reference,
+            false,
         )
         .expect("gated row");
         assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);

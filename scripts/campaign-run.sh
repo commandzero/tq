@@ -1,11 +1,31 @@
 #!/bin/sh
 set -eu
+quick_entry_seconds=$(date +%s)
+quick_compile_seconds=0
 
 campaign="${1:-}"
+suite="${2:-}"
 if [ "$campaign" = benchmark ]; then
-    profile="${2:-rapid}"
+    suite="${suite:-natural-corpus}"
+    profile="${3:-standard}"
+elif [ "$campaign:$suite" = compatibility:stack-overflow ]; then
+    profile="${3:-standard}"
 else
-    profile="${2:-}"
+    profile="$suite"
+fi
+
+if [ "$campaign" = benchmark ] || [ "$campaign:$suite" = compatibility:stack-overflow ]; then
+    case "$profile" in
+        quick|standard|extended) ;;
+        *)
+            echo "campaign runner: unsupported profile '$profile' (quick|standard|extended)" >&2
+            exit 64
+            ;;
+    esac
+    if [ -n "${4:-}" ]; then
+        echo "campaign runner: usage: campaign-run.sh $campaign SUITE [quick|standard|extended]" >&2
+        exit 64
+    fi
 fi
 
 # Keep benchmark outputs in the sibling archive checkout when it is present.
@@ -29,9 +49,13 @@ work_root="$benchmark_archive_root/.work"
 
 cargo_bin=${CARGO:-cargo}
 host_tq=${TQ_HOST_TQ:-}
+quick_install_root=
 
 cleanup_cargo_output() {
     rm -f "${cargo_output:-}"
+    if [ -n "${quick_install_root:-}" ]; then
+        rm -rf "$quick_install_root"
+    fi
 }
 
 cleanup_cargo_output_and_exit() {
@@ -78,8 +102,13 @@ cargo_artifact_path() {
 }
 
 build_tq_cli() {
+    if [ "${TQ_CAMPAIGN_COMPILED:-}" = 1 ]; then
+        return
+    fi
     if [ -n "${TQ_BIN:-}" ]; then
+        cargo_started=$(date +%s)
         "$cargo_bin" build --quiet --release --locked -p tq-cli
+        quick_compile_seconds=$((quick_compile_seconds + $(date +%s) - cargo_started))
         export TQ_BIN
         return
     fi
@@ -88,14 +117,22 @@ build_tq_cli() {
     trap 'cleanup_cargo_output_and_exit 129' HUP
     trap 'cleanup_cargo_output_and_exit 130' INT
     trap 'cleanup_cargo_output_and_exit 143' TERM
+    cargo_started=$(date +%s)
     if "$cargo_bin" build --release --locked -p tq-cli --bin tq \
         --message-format=json-render-diagnostics >"$cargo_output"; then
+        quick_compile_seconds=$((quick_compile_seconds + $(date +%s) - cargo_started))
         :
     else
         status=$?
         cleanup_cargo_output
         trap - EXIT HUP INT TERM
         return "$status"
+    fi
+    if [ "${TQ_CAMPAIGN_QUICK_BUILD:-}" = 1 ]; then
+        TQ_CLI_CARGO_OUTPUT=$cargo_output
+        export TQ_CLI_CARGO_OUTPUT
+        trap - EXIT HUP INT TERM
+        return
     fi
     if TQ_BIN=$(cargo_artifact_path "$cargo_output" tq); then
         :
@@ -113,6 +150,9 @@ build_tq_cli() {
 # The coordinator and worker must come from the same collector build. Cargo
 # running a selected coordinator binary does not build its sibling worker.
 build_benchmark_worker() {
+    if [ "${TQ_CAMPAIGN_COMPILED:-}" = 1 ]; then
+        return
+    fi
     if [ -n "${TQ_BENCH_WORKER:-}" ]; then
         "$cargo_bin" build --quiet --release --locked -p tq-test-support --bin tq-bench-worker
         export TQ_BENCH_WORKER
@@ -145,7 +185,111 @@ build_benchmark_worker() {
     export TQ_BENCH_WORKER
 }
 
-case "$campaign:$profile" in
+# Compile every executable before starting quick's shared wall-clock budget.
+# Install the guard into an owned staging root using Cargo's workspace cache,
+# then transfer cleanup of that root to the guard on exec.
+build_quick_support() {
+    cargo_output=$(mktemp "${TMPDIR:-/tmp}/tq-cargo-quick-build.XXXXXX")
+    trap cleanup_cargo_output EXIT
+    trap 'cleanup_cargo_output_and_exit 129' HUP
+    trap 'cleanup_cargo_output_and_exit 130' INT
+    trap 'cleanup_cargo_output_and_exit 143' TERM
+    set -- --bin tq-quick --bin tq-bench --bin tq-corpus --bin tq-bench-worker
+    if [ "$suite" = stack-overflow ]; then
+        set -- "$@" --bin tq-stack-overflow
+    fi
+    cargo_started=$(date +%s)
+    "$cargo_bin" build --release --locked -p tq-test-support "$@" \
+        --message-format=json-render-diagnostics >"$cargo_output"
+    quick_compile_seconds=$((quick_compile_seconds + $(date +%s) - cargo_started))
+    TQ_SUPPORT_CARGO_OUTPUT=$cargo_output
+    export TQ_SUPPORT_CARGO_OUTPUT
+}
+
+discover_quick_support() {
+    if [ -n "${TQ_CLI_CARGO_OUTPUT:-}" ]; then
+        TQ_BIN=$(cargo_artifact_path "$TQ_CLI_CARGO_OUTPUT" tq)
+    fi
+    TQ_BENCH_BIN=$(cargo_artifact_path "$TQ_SUPPORT_CARGO_OUTPUT" tq-bench)
+    TQ_CORPUS_BIN=$(cargo_artifact_path "$TQ_SUPPORT_CARGO_OUTPUT" tq-corpus)
+    TQ_BENCH_WORKER=${TQ_BENCH_WORKER:-$(cargo_artifact_path "$TQ_SUPPORT_CARGO_OUTPUT" tq-bench-worker)}
+    if [ "$suite" = stack-overflow ]; then
+        TQ_STACK_OVERFLOW_BIN=$(cargo_artifact_path "$TQ_SUPPORT_CARGO_OUTPUT" tq-stack-overflow)
+        export TQ_STACK_OVERFLOW_BIN
+    fi
+    rm -f "${TQ_CLI_CARGO_OUTPUT:-}" "$TQ_SUPPORT_CARGO_OUTPUT"
+    export TQ_BIN TQ_BENCH_BIN TQ_CORPUS_BIN TQ_BENCH_WORKER
+}
+
+run_support() {
+    support_binary=$1
+    shift
+    if [ "${TQ_CAMPAIGN_COMPILED:-}" = 1 ]; then
+        case "$support_binary" in
+            tq-bench) "$TQ_BENCH_BIN" "$@" ;;
+            tq-corpus) "$TQ_CORPUS_BIN" "$@" ;;
+            tq-stack-overflow) "$TQ_STACK_OVERFLOW_BIN" "$@" ;;
+            *) echo "unsupported precompiled helper: $support_binary" >&2; return 64 ;;
+        esac
+    else
+        "$cargo_bin" run --quiet --release --locked -p tq-test-support \
+            --bin "$support_binary" -- "$@"
+    fi
+}
+
+if [ "${TQ_CAMPAIGN_COMPILED:-}" = 1 ] && [ "${TQ_CAMPAIGN_QUICK_BUILD:-}" = 1 ]; then
+    echo "campaign runner: compilation complete; starting bounded quick execution" >&2
+    discover_quick_support
+fi
+
+if [ "${TQ_CAMPAIGN_COMPILED:-}" != 1 ]; then
+    case "$campaign:$suite" in
+        benchmark:smoke|benchmark:natural-corpus|benchmark:large-input|compatibility:stack-overflow)
+            if [ "$profile" = quick ] || { [ "$campaign" = benchmark ] && [ "${SAMPLING:-}" = quick ]; }; then
+                TQ_CAMPAIGN_QUICK_BUILD=1
+                export TQ_CAMPAIGN_QUICK_BUILD
+                build_tq_cli
+                quick_install_root=$(mktemp -d "${TMPDIR:-/tmp}/tq-quick-install.XXXXXX")
+                trap cleanup_cargo_output EXIT
+                trap 'cleanup_cargo_output_and_exit 129' HUP
+                trap 'cleanup_cargo_output_and_exit 130' INT
+                trap 'cleanup_cargo_output_and_exit 143' TERM
+                : > "$quick_install_root/.tq-quick-install"
+                cargo_started=$(date +%s)
+                "$cargo_bin" install --path crates/tq-test-support --locked --bin tq-quick \
+                    --root "$quick_install_root" --no-track
+                quick_compile_seconds=$((quick_compile_seconds + $(date +%s) - cargo_started))
+                build_quick_support
+                TQ_CAMPAIGN_COMPILED=1
+                export TQ_CAMPAIGN_COMPILED
+                quick_budget=${CAMPAIGN_BUDGET_SECONDS:-50}
+                case "$quick_budget" in
+                    *[!0-9]*|"") echo "campaign runner: invalid quick budget" >&2; exit 64 ;;
+                esac
+                if [ "$quick_budget" -lt 1 ] || [ "$quick_budget" -gt 50 ]; then
+                    echo "campaign runner: quick budget must be between 1 and 50 seconds" >&2
+                    exit 64
+                fi
+                if [ "$campaign" = benchmark ]; then
+                    session_dir=$(mktemp -d "${TMPDIR:-/tmp}/tq-benchmark-${suite}-quick.XXXXXX")
+                else
+                    session_dir=$(mktemp -d "${TMPDIR:-/tmp}/tq-stack-overflow-quick.XXXXXX")
+                fi
+                TQ_QUICK_REPORT_PATH=$session_dir/report.json
+                export TQ_QUICK_REPORT_PATH
+                quick_elapsed=$(( $(date +%s) - quick_entry_seconds - quick_compile_seconds ))
+                quick_remaining=$((quick_budget - quick_elapsed))
+                if [ "$quick_remaining" -lt 1 ]; then
+                    exit 124
+                fi
+                exec "$quick_install_root/bin/tq-quick" --cleanup-install-root "$quick_install_root" \
+                    --budget-seconds "$quick_remaining" -- "$0" "$campaign" "$suite" "$profile"
+            fi
+            ;;
+    esac
+fi
+
+case "$campaign:$suite" in
     compatibility:strict)
         mkdir -p target/compatibility
         build_tq_cli
@@ -168,29 +312,41 @@ case "$campaign:$profile" in
         mkdir -p "$work_root"
         build_tq_cli
         build_benchmark_worker
+        if [ -n "${TQ_QUICK_REPORT_PATH:-}" ]; then
+            report_path=$TQ_QUICK_REPORT_PATH
+        elif [ "$profile" = quick ] || [ "$profile" = standard ] || [ "${SAMPLING:-}" = quick ]; then
+            session_dir="$(mktemp -d "${TMPDIR:-/tmp}/tq-benchmark-smoke-${profile}.XXXXXX")"
+            report_path="$session_dir/report.json"
+        else
+            report_path="$work_root/smoke-extended.json"
+        fi
         set --
         if [ -n "${TQ_TIMING_CALIBRATION:-}" ]; then
-            set -- --timing-calibration "$TQ_TIMING_CALIBRATION"
+            set -- "$@" --timing-calibration "$TQ_TIMING_CALIBRATION"
         fi
-        exec "$cargo_bin" run --quiet --release -p tq-test-support --bin tq-bench -- run \
-            --profile smoke --output "$work_root/smoke.json" --max-samples 1 \
+        if [ -n "${SAMPLING:-}" ]; then
+            set -- "$@" --sampling "$SAMPLING"
+        fi
+        if [ -n "${CAMPAIGN_BUDGET_SECONDS:-}" ]; then
+            set -- "$@" --campaign-budget-seconds "$CAMPAIGN_BUDGET_SECONDS"
+        fi
+        if [ -n "${CASE_BUDGET_SECONDS:-}" ]; then
+            set -- "$@" --case-budget-seconds "$CASE_BUDGET_SECONDS"
+        fi
+        run_support tq-bench run \
+            --suite smoke --profile "$profile" --output "$report_path" \
             --case benchmark.startup --case benchmark.parse-discard \
             --case benchmark.scalar-extraction --case benchmark.event-stream \
             --case benchmark.object-deep-merge "$@"
         ;;
-    benchmark:rapid|benchmark:standard|benchmark:large)
-        if [ "$profile" = standard ] && [ -z "${TQ_TIMING_CALIBRATION:-}" ]; then
-            echo "standard publication requires TQ_TIMING_CALIBRATION pointing to a verified native validation summary" >&2
-            exit 64
-        fi
+    benchmark:natural-corpus|benchmark:large-input)
         mkdir -p "$work_root"
         cache_root="${TQ_CORPUS_CACHE:-$work_root/corpus}"
         corpus_origin="${TQ_CORPUS_ORIGIN:-frozen}"
-        corpus_profile="$profile"
+        corpus_suite="$suite"
         build_tq_cli
         build_benchmark_worker
-        "$cargo_bin" run --quiet --release --locked -p tq-test-support --bin tq-bench -- \
-            --preflight-only --profile "$profile"
+        run_support tq-bench --preflight-only --suite "$suite" --profile "$profile"
         if [ -z "${TQ_BENCH_MANIFESTS:-}" ]; then
             refresh_json="$(mktemp "${TMPDIR:-/tmp}/tq-corpus.XXXXXX")"
             trap 'rm -f "$refresh_json"' EXIT HUP INT TERM
@@ -199,90 +355,59 @@ case "$campaign:$profile" in
             else
                 corpus_command=prepare
             fi
-            "$cargo_bin" run --quiet --release -p tq-test-support --bin tq-corpus -- \
-                "$corpus_command" tests/corpus/sources "$cache_root" "$corpus_profile" >"$refresh_json"
+            run_support tq-corpus \
+                "$corpus_command" tests/corpus/sources "$cache_root" "$corpus_suite" >"$refresh_json"
             TQ_BENCH_MANIFESTS="$("$(host_tq_parser)" -r '.manifests | join(":")' "$refresh_json")"
             export TQ_BENCH_MANIFESTS
             rm -f "$refresh_json"
             trap - EXIT HUP INT TERM
         fi
         set --
-        if [ "$profile" = standard ]; then
-            set -- --markdown-dir "$PWD/docs/tests/comparison"
+        if [ -n "${TQ_QUICK_REPORT_PATH:-}" ]; then
+            report_path=$TQ_QUICK_REPORT_PATH
+        elif [ "$profile" = quick ] || [ "$profile" = standard ] || [ "${SAMPLING:-}" = quick ]; then
+            session_dir="$(mktemp -d "${TMPDIR:-/tmp}/tq-benchmark-${suite}-${profile}.XXXXXX")"
+            report_path="$session_dir/report.json"
+        else
+            report_path="$work_root/$suite-$profile.json"
         fi
         if [ -n "${TQ_TIMING_CALIBRATION:-}" ]; then
             set -- "$@" --timing-calibration "$TQ_TIMING_CALIBRATION"
         fi
-        exec "$cargo_bin" run --quiet --release -p tq-test-support --bin tq-bench -- run \
-            --profile "$profile" --output "$work_root/$profile.json" \
+        if [ -n "${BENCHMARK_MODE:-}" ]; then
+            set -- "$@" --mode "$BENCHMARK_MODE"
+        fi
+        if [ -n "${SAMPLING:-}" ]; then
+            set -- "$@" --sampling "$SAMPLING"
+        fi
+        if [ -n "${CAMPAIGN_BUDGET_SECONDS:-}" ]; then
+            set -- "$@" --campaign-budget-seconds "$CAMPAIGN_BUDGET_SECONDS"
+        fi
+        if [ -n "${CASE_BUDGET_SECONDS:-}" ]; then
+            set -- "$@" --case-budget-seconds "$CASE_BUDGET_SECONDS"
+        fi
+        run_support tq-bench run \
+            --suite "$suite" --profile "$profile" --output "$report_path" \
             --cache-root "$cache_root" \
             --origin "$corpus_origin" "$@"
         ;;
-    benchmark:extra-large)
-        mkdir -p "$work_root"
-        cache_root="${TQ_CORPUS_CACHE:-$work_root/corpus}"
-        corpus_origin="${TQ_CORPUS_ORIGIN:-frozen}"
-        build_tq_cli
-
-        if [ -n "${TQ_BENCH_MANIFEST:-}" ]; then
-            manifest="$TQ_BENCH_MANIFEST"
-        elif [ -n "${TQ_BENCH_MANIFESTS:-}" ]; then
-            manifest=""
-            old_ifs=$IFS
-            IFS=:
-            for candidate in $TQ_BENCH_MANIFESTS; do
-                if [ "$("$(host_tq_parser)" -r '.source_id' "$candidate")" = microsoft-us-buildings-georgia ]; then
-                    manifest="$candidate"
-                    break
-                fi
-            done
-            IFS=$old_ifs
-        else
-            refresh_json="$(mktemp "${TMPDIR:-/tmp}/tq-corpus.XXXXXX")"
-            trap 'rm -f "$refresh_json"' EXIT HUP INT TERM
-            if [ "$corpus_origin" = refreshed ]; then
-                corpus_command=refresh
-            else
-                corpus_command=prepare
-            fi
-            "$cargo_bin" run --quiet --release -p tq-test-support --bin tq-corpus -- \
-                "$corpus_command" tests/corpus/sources "$cache_root" large >"$refresh_json"
-            manifest="$("$(host_tq_parser)" -r '.manifests[] | select(endswith("/microsoft-us-buildings-georgia/manifest.json"))' "$refresh_json" | head -n 1)"
-            rm -f "$refresh_json"
-            trap - EXIT HUP INT TERM
-        fi
-
-        if [ -z "${manifest:-}" ] || [ ! -f "$manifest" ]; then
-            echo "extra-large benchmark requires the microsoft-us-buildings-georgia manifest" >&2
-            exit 69
-        fi
-        if [ "$("$(host_tq_parser)" -r '.source_id' "$manifest")" != microsoft-us-buildings-georgia ]; then
-            echo "extra-large benchmark manifest is not microsoft-us-buildings-georgia: $manifest" >&2
-            exit 69
-        fi
-        source_path="$("$(host_tq_parser)" -r '.artifacts.source_json.path' "$manifest")"
-        if [ -z "$source_path" ] || [ "$source_path" = null ]; then
-            echo "extra-large benchmark manifest has no source JSON artifact: $manifest" >&2
-            exit 69
-        fi
-        input="$cache_root/$source_path"
-        if [ ! -f "$input" ]; then
-            echo "extra-large benchmark source is missing: $input" >&2
-            exit 69
-        fi
-        exec benchmarks/cases/parallel-selected-json.sh \
-            "$input" "$TQ_BIN" "$work_root/parallel-selected-json/$(date +%Y-%m-%d)"
-        ;;
-    benchmark:stack-overflow)
+    compatibility:stack-overflow)
         mkdir -p "$work_root"
         build_tq_cli
         build_benchmark_worker
-        # This runner currently records RSS controls but has no calibrated
-        # publication gate. Keep its diagnostic pages in the evidence archive.
-        exec "$cargo_bin" run --quiet --release --locked -p tq-test-support --bin tq-stack-overflow -- run \
-            --scenario-dir tests/stack-overflow \
-            --output "$work_root/stack-overflow.json" \
-            --report-dir "$work_root/stack-overflow-pages"
+        set --
+        if [ -n "${TQ_QUICK_REPORT_PATH:-}" ]; then
+            set -- --output "$TQ_QUICK_REPORT_PATH"
+        elif [ "$profile" = standard ]; then
+            session_dir="$(mktemp -d "${TMPDIR:-/tmp}/tq-stack-overflow-standard.XXXXXX")"
+            set -- --output "$session_dir/report.json"
+        elif [ "$profile" = extended ]; then
+            # Uncalibrated pages remain diagnostic evidence in the archive.
+            set -- --output "$work_root/stack-overflow.json" \
+                --report-dir "$work_root/stack-overflow-pages"
+        fi
+        run_support tq-stack-overflow run \
+            --profile "$profile" --scenario-dir tests/stack-overflow "$@"
         ;;
     fuzz:default)
         seconds="${TQ_FUZZ_SECONDS:-10}"
@@ -305,7 +430,7 @@ case "$campaign:$profile" in
         exit 0
         ;;
     *)
-        echo "campaign runner: unsupported campaign '$campaign' profile '$profile'" >&2
+        echo "campaign runner: unsupported campaign '$campaign' suite '$suite' profile '$profile'" >&2
         exit 64
         ;;
 esac

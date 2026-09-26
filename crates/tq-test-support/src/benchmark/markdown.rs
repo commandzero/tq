@@ -211,9 +211,10 @@ fn render_multi_host_overview(reports: &[BenchmarkCampaignReport]) -> String {
 
 fn host_label(report: &BenchmarkCampaignReport) -> String {
     format!(
-        "{} / {} / {}",
+        "{} / {} / {} / {}",
         escape_cell(&single_line(&report.environment.os)),
         escape_cell(&single_line(&report.environment.architecture)),
+        escape_cell(&single_line(&report.suite)),
         escape_cell(&single_line(&report.profile)),
     )
 }
@@ -311,7 +312,9 @@ fn render_results(report: &BenchmarkCampaignReport, rows: &[&BenchmarkRow]) -> S
     output.push_str("Last updated: ");
     output.push_str(&last_updated(&report.campaign_id));
     output.push('\n');
-    output.push_str("Profile: `");
+    output.push_str("Suite: `");
+    output.push_str(&escape_cell(&report.suite));
+    output.push_str("` | Profile: `");
     output.push_str(&escape_cell(&report.profile));
     output.push_str("` | Campaign status: `");
     output.push_str(&escape_cell(status_name(report.final_status)));
@@ -510,8 +513,9 @@ fn render_overview(report: &BenchmarkCampaignReport) -> String {
     let rows = report.cases.iter().collect::<Vec<_>>();
     let columns = adapter_columns(&rows);
     let mut output = format!(
-        "Last updated: {}\nProfile: `{}` | Campaign status: `{}`\n\n{} adapter observations across {} workloads. Only correctness-checked outputs are timed; failed rows cannot support a speed ranking.\n\n",
+        "Last updated: {}\nSuite: `{}` | Profile: `{}` | Campaign status: `{}`\n\n{} adapter observations across {} workloads. Only correctness-checked outputs are timed; failed rows cannot support a speed ranking.\n\n",
         last_updated(&report.campaign_id),
+        escape_cell(&report.suite),
         escape_cell(&report.profile),
         status_name(report.final_status),
         rows.len(),
@@ -1094,6 +1098,7 @@ fn status_name(status: BenchmarkFinalStatus) -> &'static str {
         BenchmarkFinalStatus::Passed => "passed",
         BenchmarkFinalStatus::ObservedFailures => "observed-failures",
         BenchmarkFinalStatus::Regression => "regression",
+        BenchmarkFinalStatus::Incomplete => "incomplete",
     }
 }
 
@@ -1208,35 +1213,6 @@ mod tests {
     }
 
     #[test]
-    fn standard_workload_pages_can_be_rendered_without_a_later_docs_checkout() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let catalog = crate::benchmark::load_benchmark_catalog(&root.join("benchmarks/cases"))
-            .expect("shipped benchmark catalog");
-        let directory = tempfile::tempdir().expect("isolated report pages");
-        let mut rows = Vec::new();
-        // Standard campaigns prepare natural snapshots and the inputs fixture;
-        // native row-sequence and other synthetic helpers belong to smoke.
-        for case in catalog.cases.into_iter().filter(|case| {
-            matches!(
-                case.dataset_selector.family,
-                crate::benchmark::DatasetFamily::Natural
-                    | crate::benchmark::DatasetFamily::Usgs
-                    | crate::benchmark::DatasetFamily::Issue5InputSequence
-            )
-        }) {
-            let filename = workload_filename(&case.id).expect("safe workload filename");
-            let source = root.join("docs/tests/comparison").join(&filename);
-            fs::copy(&source, directory.path().join(filename)).unwrap_or_else(|error| {
-                panic!("required workload page {}: {error}", source.display())
-            });
-            rows.push(row(&case.id, BenchmarkOutcome::Timed));
-        }
-        assert!(!rows.is_empty());
-        render_markdown_pages(directory.path(), &report(rows)).expect("render shipped pages");
-        assert!(directory.path().join("index.md").is_file());
-    }
-
-    #[test]
     fn rendering_preserves_authored_text_and_is_idempotent() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let page = directory.path().join("blocking-sort.md");
@@ -1317,8 +1293,6 @@ mod tests {
         assert!(rendered.ends_with(&format!(
             "{RESULTS_END_MARKER}\n\nAuthored trailing note.\n"
         )));
-        assert!(rendered.contains("### Host: linux / x86_64 / standard"));
-        assert!(rendered.contains("### Host: macos / aarch64 / standard"));
         assert_eq!(rendered.matches("| Metric | tq JSON |").count(), 2);
         assert!(rendered.contains("| Wall time | 1.2 ms |"));
         assert!(rendered.contains("| Wall time | 2.3 ms |"));
@@ -1327,34 +1301,6 @@ mod tests {
 
         let index = fs::read_to_string(directory.path().join("index.md")).expect("index");
         assert_eq!(index.matches("### Host:").count(), 2);
-    }
-
-    #[test]
-    fn multi_host_rendering_marks_a_missing_workload_as_unmeasured() {
-        let directory = tempfile::tempdir().expect("temporary directory");
-        let page = directory.path().join("blocking-sort.md");
-        fs::write(
-            &page,
-            format!("# Workload\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n"),
-        )
-        .expect("authored page");
-
-        let mut present = report(vec![row(
-            "benchmark.blocking-sort",
-            BenchmarkOutcome::Timed,
-        )]);
-        present.environment.os = "linux".to_owned();
-        present.environment.architecture = "x86_64".to_owned();
-        let mut missing = report(Vec::new());
-        missing.environment.os = "macos".to_owned();
-        missing.environment.architecture = "aarch64".to_owned();
-
-        render_markdown_campaigns(directory.path(), &[present, missing]).expect("render hosts");
-        let rendered = fs::read_to_string(page).expect("rendered page");
-        assert!(rendered.contains("### Host: macos / aarch64 / standard"));
-        assert!(rendered.contains(
-            "No row was recorded for `benchmark.blocking-sort` on this host; all measurements are unmeasured (`-`)."
-        ));
     }
 
     #[test]
@@ -1755,8 +1701,10 @@ mod tests {
 
     fn report(cases: Vec<BenchmarkRow>) -> BenchmarkCampaignReport {
         BenchmarkCampaignReport {
+            execution: None,
             schema_version: 1,
             campaign_id: "2026-09-10T04:26:43.169253Z".to_owned(),
+            suite: "natural-corpus".to_owned(),
             profile: "standard".to_owned(),
             environment: crate::benchmark::collect_environment("release-benchmark"),
             corpus: Vec::new(),

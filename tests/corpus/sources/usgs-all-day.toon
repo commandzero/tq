@@ -2,7 +2,7 @@ schema_version: 1
 id: usgs-all-day
 kind: geojson
 format: json
-campaigns[1]: standard
+campaigns[1]: natural-corpus
 fetch:
   url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
   refresh: mutable

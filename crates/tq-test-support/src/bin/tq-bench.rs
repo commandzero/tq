@@ -10,21 +10,17 @@ use std::{
     path::{Path, PathBuf},
     process::ExitCode,
     sync::{Arc, atomic::AtomicBool},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use tq_test_support::{
     benchmark::{
-        BenchmarkAdapter, BenchmarkCampaignReport, BenchmarkCase, BenchmarkCorpusIdentity,
-        BenchmarkFinalStatus, BenchmarkInvocation, BenchmarkOutcome, BenchmarkRow,
-        BenchmarkRunnerError, BenchmarkSampling, BenchmarkTool, Comparability, DatasetTier,
-        InputFormat, RegressionGate, RegressionThresholds, collect_environment, compare_reports,
-        correctness_witness_limit_row, evaluate_regression, is_correctness_output_limit,
-        load_benchmark_catalog, normalize_correctness_run, populate_reference_ratios,
-        preflight_rss, render_markdown_campaigns, render_markdown_pages,
-        run_correctness_limit_probe, run_gated_row, unsupported_row,
+        BenchmarkCampaignReport, BenchmarkCase, BenchmarkCorpusIdentity, BenchmarkFinalStatus,
+        BenchmarkInvocation, BenchmarkRow, BenchmarkTool, DatasetTier, InputFormat, RegressionGate,
+        RegressionThresholds, compare_reports, evaluate_regression, preflight_rss,
+        render_markdown_campaigns, render_markdown_pages,
     },
     compatibility::{ExecutableConfig, ToolIdentity, ToolKind, discover_tool},
     corpus::{
@@ -33,21 +29,54 @@ use tq_test_support::{
     },
 };
 
-const RAPID_CASES: &[&str] = &[
-    "benchmark.identity-reencode",
-    "benchmark.parse-discard",
-    "benchmark.scalar-extraction",
-    "benchmark.path-update",
-    "benchmark.event-stream",
-];
-const RAPID_SOURCE: &str = "usgs-all-month";
 const DEEP_MERGE_ENTRIES: usize = 10_000;
 
 #[path = "tq-bench/native_rows.rs"]
 mod native_rows;
 
+#[path = "tq-bench/campaign.rs"]
+mod campaign;
+#[path = "tq-bench/deadline.rs"]
+mod deadline;
+#[path = "tq-bench/large_input.rs"]
+mod large_input;
+#[path = "tq-bench/policy.rs"]
+mod policy;
+
+use policy::{Mode, Sampling};
+
 fn main() -> ExitCode {
-    match run() {
+    if matches!(
+        env::args().nth(1).as_deref(),
+        Some("--internal-rss-control" | "--internal-rss-probe")
+    ) {
+        return finish_run(run_internal());
+    }
+    let options = match options() {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("tq-bench: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    match tq_test_support::benchmark::quick::supervise_current_if_quick(
+        options.is_quick(),
+        Duration::from_secs(options.campaign_budget_seconds),
+        (!options.preflight_only && options.render_only.is_empty())
+            .then_some(options.output.as_path()),
+    ) {
+        Ok(Some(code)) => return ExitCode::from(u8::try_from(code).unwrap_or(2)),
+        Err(error) => {
+            eprintln!("tq-bench: quick supervisor: {error}");
+            return ExitCode::from(2);
+        }
+        Ok(None) => {}
+    }
+    finish_run(run(options))
+}
+
+fn finish_run(result: Result<ExitCode, Box<dyn std::error::Error>>) -> ExitCode {
+    match result {
         Ok(status) => status,
         Err(error) => {
             eprintln!("tq-bench: {error}");
@@ -56,8 +85,17 @@ fn main() -> ExitCode {
     }
 }
 
+fn run_internal() -> Result<ExitCode, Box<dyn std::error::Error>> {
+    if env::args().nth(1).as_deref() == Some("--internal-rss-probe") {
+        tq_test_support::benchmark::run_allocation_probe(64 * 1024 * 1024, 1)?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 struct Options {
+    suite: String,
     profile: String,
+    input: Option<PathBuf>,
     output: PathBuf,
     manifests: Vec<PathBuf>,
     cache_root: PathBuf,
@@ -72,6 +110,18 @@ struct Options {
     preflight_only: bool,
     timing_calibrations: Vec<PathBuf>,
     regression_thresholds: RegressionThresholds,
+    mode: Mode,
+    sampling: Sampling,
+    selected_adapters: Vec<String>,
+    instrument_rss: bool,
+    campaign_budget_seconds: u64,
+    case_budget_seconds: u64,
+}
+
+impl Options {
+    fn is_quick(&self) -> bool {
+        self.sampling == Sampling::Quick
+    }
 }
 
 struct PreparedDataset {
@@ -92,16 +142,23 @@ struct PreparedCampaign {
     clippy::too_many_lines,
     reason = "campaign orchestration is intentionally linear and delegates measurement details"
 )]
-fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
-    if env::args().nth(1).as_deref() == Some("--internal-rss-control") {
-        return Ok(ExitCode::SUCCESS);
-    }
-    if env::args().nth(1).as_deref() == Some("--internal-rss-probe") {
-        tq_test_support::benchmark::run_allocation_probe(64 * 1024 * 1024, 1)?;
-        return Ok(ExitCode::SUCCESS);
-    }
+fn run(mut options: Options) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let options = options()?;
+    if options.render_only.is_empty()
+        && !options.preflight_only
+        && options.suite != "smoke"
+        && options.input.is_none()
+        && options.manifests.is_empty()
+    {
+        if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
+            options.manifests.extend(env::split_paths(&paths));
+        } else {
+            options.manifests = discover_latest_validated_manifests(&options.cache_root)?;
+        }
+        if options.manifests.is_empty() {
+            return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
+        }
+    }
     if options.preflight_only && !options.render_only.is_empty() {
         return Err("--preflight-only cannot be combined with --render-only".into());
     }
@@ -123,7 +180,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             if index > 0 {
                 println!();
             }
-            print!("{}", report.render_human());
+            print_report(report)?;
         }
         return Ok(ExitCode::SUCCESS);
     }
@@ -133,11 +190,82 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, Arc::clone(&cancellation))?;
     }
-    let rss_preflight = preflight_rss(Some(Arc::clone(&cancellation)))?;
-    eprintln!(
-        "tq-bench: RSS preflight passed ({})",
-        rss_preflight.provenance.label()
-    );
+    let started = Instant::now();
+    if options.is_quick() && !options.preflight_only {
+        let provisional = campaign::initial_report(
+            &options,
+            &PreparedCampaign {
+                temporary: None,
+                datasets: Vec::new(),
+            },
+            &BTreeMap::new(),
+            0,
+        );
+        write_report(&options.output, &provisional)?;
+        eprintln!("tq-bench: report checkpoint: {}", options.output.display());
+    }
+    let work_budget = Duration::from_secs(options.campaign_budget_seconds);
+    let work_budget = if options.is_quick() {
+        work_budget
+            .min(tq_test_support::benchmark::quick::remaining_work_budget().unwrap_or(work_budget))
+    } else {
+        work_budget
+    };
+    let deadline = deadline::Deadline::start(Arc::clone(&cancellation), None, work_budget)?;
+    let result = run_campaign(&options, &root, &deadline, &cancellation, started);
+    if options.is_quick() && (deadline.cancelled() || result.is_err()) && !options.preflight_only {
+        let mut report: BenchmarkCampaignReport =
+            serde_json::from_reader(fs::File::open(&options.output)?)?;
+        if report.final_status == BenchmarkFinalStatus::Incomplete || deadline.cancelled() {
+            report.final_status = BenchmarkFinalStatus::Incomplete;
+            if let Some(execution) = &mut report.execution {
+                execution.complete = false;
+                execution.elapsed_seconds = started.elapsed().as_secs_f64();
+                execution.interruptions.push(
+                    if deadline.expired()
+                        || tq_test_support::benchmark::quick::remaining_work_budget()
+                            .is_some_and(|duration| duration.is_zero())
+                    {
+                        "campaign work budget exhausted".to_owned()
+                    } else if deadline.cancelled() {
+                        "cancelled by signal".to_owned()
+                    } else {
+                        format!(
+                            "campaign preparation failed: {}",
+                            result.as_ref().unwrap_err()
+                        )
+                    },
+                );
+            }
+            write_report(&options.output, &report)?;
+            print_report(&report)?;
+            return Ok(ExitCode::from(2));
+        }
+    }
+    result
+}
+
+#[allow(
+    clippy::too_many_lines,
+    reason = "campaign orchestration is intentionally linear and delegates measurement details"
+)]
+fn run_campaign(
+    options: &Options,
+    root: &Path,
+    deadline: &deadline::Deadline,
+    cancellation: &Arc<AtomicBool>,
+    started: Instant,
+) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    if deadline.cancelled() {
+        return Err("campaign work budget exhausted before preflight".into());
+    }
+    let rss_preflight = preflight_rss(Some(Arc::clone(cancellation)))?;
+    if !options.is_quick() {
+        eprintln!(
+            "tq-bench: RSS preflight passed ({})",
+            rss_preflight.provenance.label()
+        );
+    }
     if options.preflight_only {
         return Ok(ExitCode::SUCCESS);
     }
@@ -149,18 +277,44 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    let tools = discover_tools(&root)?;
-    require_campaign_tools(&tools)?;
-    let mut prepared = if options.profile == "smoke" {
-        prepare_smoke(&root.join("examples"))?
+    let tools = discover_tools(root)?;
+    if deadline.cancelled() {
+        return Err("campaign work budget exhausted during tool discovery".into());
+    }
+    if options.suite == "large-input" {
+        for tool in [BenchmarkTool::Jq, BenchmarkTool::Tq, BenchmarkTool::Yq] {
+            if tool == BenchmarkTool::Yq
+                && !options
+                    .selected_adapters
+                    .iter()
+                    .any(|adapter| adapter == "yq-json")
+            {
+                continue;
+            }
+            if !tools.contains_key(&tool) {
+                return Err(format!(
+                    "required large-input executable unavailable: {}",
+                    tool_name(tool)
+                )
+                .into());
+            }
+        }
     } else {
-        prepare_manifests(&options)?
+        require_campaign_tools(&tools)?;
+    }
+    let mut prepared = if options.suite == "smoke" {
+        prepare_smoke(&root.join("examples"))?
+    } else if let Some(input) = options.input.as_deref() {
+        large_input::prepare(input, cancellation)?
+    } else {
+        prepare_manifests(options)?
     };
-    if options
-        .selected_cases
-        .iter()
-        .any(|id| id.starts_with("benchmark.native-"))
-        || options.selected_cases.is_empty()
+    if options.suite != "large-input"
+        && (options
+            .selected_cases
+            .iter()
+            .any(|id| id.starts_with("benchmark.native-"))
+            || options.selected_cases.is_empty())
     {
         let directory = prepared
             .temporary
@@ -170,254 +324,118 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             .datasets
             .extend(native_rows::prepare(directory.path())?);
     }
-    let catalog = load_benchmark_catalog(&root.join("benchmarks/cases"))?;
-    let planned_rows = plan_rows(&catalog.cases, &options.selected_cases, &prepared.datasets)?;
-    let mut corpus = Vec::new();
-    for dataset in &prepared.datasets {
-        for (format, (_, artifact)) in &dataset.formats {
-            corpus.push(corpus_identity(dataset, format, artifact));
-        }
+    if deadline.cancelled() {
+        return Err("campaign work budget exhausted during preparation".into());
     }
-
-    let mut rows = Vec::new();
-    for original_case in &catalog.cases {
-        if !options.selected_cases.is_empty() && !options.selected_cases.contains(&original_case.id)
-        {
-            continue;
-        }
-        let mut case = original_case.clone();
-        if let Some(samples) = options.max_samples {
-            case.sampling = BenchmarkSampling {
-                warmups: usize::from(samples > 1),
-                small: samples,
-                medium: samples,
-                large: samples,
-            };
-        }
-        if let Some(timeout_seconds) = options.timeout_seconds {
-            case.timeout_seconds = timeout_seconds;
-        }
-        if let Some(rss_limit_bytes) = options.rss_limit_bytes {
-            case.limits.rss_bytes = Some(
-                case.limits
-                    .rss_bytes
-                    .map_or(rss_limit_bytes, |limit| limit.min(rss_limit_bytes)),
-            );
-        }
-        for dataset in prepared.datasets.iter().filter(|dataset| {
-            case.dataset_selector.tiers.contains(&dataset.tier)
-                && family_matches(case.dataset_selector.family, dataset)
-        }) {
-            let reference_adapter = case
-                .adapters
-                .iter()
-                .find(|adapter| adapter.id == case.output_contract.reference_adapter)
-                .ok_or_else(|| format!("{} has no reference adapter", case.id))?;
-            let reference_identity = tools
-                .get(&reference_adapter.tool)
-                .ok_or("reference executable is unavailable")?;
-            let reference_invocation = invocation(
-                &case,
-                reference_adapter,
-                dataset,
-                reference_identity,
-                &cancellation,
-            )?;
-            let mut reference_witness_limit = None;
-            let reference = match normalize_correctness_run(
-                &reference_invocation,
-                match reference_adapter.tool {
-                    BenchmarkTool::Jq => ToolKind::Jq,
-                    BenchmarkTool::Yq => ToolKind::Yq,
-                    BenchmarkTool::Tq => ToolKind::Tq,
-                },
-                case.output_contract.kind,
-            ) {
-                Ok(reference) => Some(reference),
-                Err(error) if is_correctness_output_limit(&error) => None,
-                Err(BenchmarkRunnerError::CorrectnessWitnessLimit { limit }) => {
-                    reference_witness_limit = Some(limit);
-                    None
-                }
-                Err(error) => return Err(error.into()),
-            };
-            for adapter in &case.adapters {
-                let corpus_identity = corpus_identity(
-                    dataset,
-                    format_name(adapter.input_format),
-                    &dataset
-                        .formats
-                        .get(format_name(adapter.input_format))
-                        .ok_or("missing prepared representation")?
-                        .1,
-                );
-                let placeholder = BenchmarkInvocation {
-                    cancellation: Some(Arc::clone(&cancellation)),
-                    executable: PathBuf::from(tool_name(adapter.tool)),
-                    args: Vec::new(),
-                    stdin: Vec::new(),
-                    current_dir: Some(root.clone()),
-                    timeout: Duration::from_secs(case.timeout_seconds),
-                    output_limit: case.limits.output_bytes,
-                    rss_limit: case.limits.rss_bytes,
-                    retain_output: false,
-                };
-                let Some(identity) = tools.get(&adapter.tool) else {
-                    record_row(
-                        &mut rows,
-                        &case,
-                        dataset,
-                        adapter,
-                        unsupported_row(
-                            &case,
-                            adapter,
-                            &corpus_identity,
-                            dataset.tier,
-                            &placeholder,
-                        ),
-                    );
-                    continue;
-                };
-                let invocation = invocation(&case, adapter, dataset, identity, &cancellation)?;
-                if !adapter.applicable {
-                    record_row(
-                        &mut rows,
-                        &case,
-                        dataset,
-                        adapter,
-                        unsupported_row(
-                            &case,
-                            adapter,
-                            &corpus_identity,
-                            dataset.tier,
-                            &invocation,
-                        ),
-                    );
-                    continue;
-                }
-                let row = if let Some(reference) = &reference {
-                    run_gated_row(
-                        &case,
-                        adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &invocation,
-                        reference,
-                    )?
-                } else if let Some(limit) = reference_witness_limit {
-                    correctness_witness_limit_row(
-                        &case,
-                        adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &invocation,
-                        limit,
-                    )
-                } else {
-                    run_correctness_limit_probe(
-                        &case,
-                        adapter,
-                        &corpus_identity,
-                        dataset.tier,
-                        &invocation,
-                    )?
-                };
-                record_row(&mut rows, &case, dataset, adapter, row);
-            }
-        }
-    }
-    validate_rows_against_plan(&planned_rows, &rows)?;
-    for row in &mut rows {
-        for sample in row
-            .samples
-            .iter_mut()
-            .chain(row.instrumented_samples.iter_mut())
-        {
-            if !calibrations.is_empty() {
-                let protocol = sample
-                    .measurement_protocol
-                    .as_mut()
-                    .ok_or("measured sample has no protocol for timing calibration")?;
-                calibrations
-                    .iter()
-                    .find(|calibration| calibration.matches(protocol))
-                    .ok_or("no matching timing calibration for sample instrumentation")?
-                    .apply(protocol)?;
-            }
-        }
-    }
-    populate_reference_ratios(
-        &mut rows,
-        &[
-            "jq-json",
-            "yq-json",
-            "yq-yaml",
-            "jq-json-seq",
-            "yq-csv",
-            "yq-tsv",
-        ],
-    );
-    let has_failure = rows.iter().any(|row| {
-        !matches!(
-            row.outcome,
-            BenchmarkOutcome::Timed | BenchmarkOutcome::Unsupported
-        )
-    });
-    let mut report = BenchmarkCampaignReport {
-        schema_version: 1,
-        campaign_id: jiff::Timestamp::now().to_string(),
-        profile: options.profile,
-        environment: collect_environment(if cfg!(debug_assertions) {
-            "debug-benchmark"
-        } else {
-            "release-benchmark"
-        }),
-        corpus,
-        tools: tools.into_values().collect(),
-        cases: rows,
-        comparability: Comparability::default(),
-        regression_gate: RegressionGate::default(),
-        final_status: if has_failure {
-            BenchmarkFinalStatus::ObservedFailures
-        } else {
-            BenchmarkFinalStatus::Passed
-        },
-    };
+    let mut report = campaign::execute(
+        options,
+        &prepared,
+        &tools,
+        &calibrations,
+        deadline,
+        started,
+        root,
+    )?;
     if let Some(path) = &options.baseline {
         let baseline: BenchmarkCampaignReport = serde_json::from_reader(fs::File::open(path)?)?;
         report.comparability = compare_reports(&baseline, &report);
         report.regression_gate =
             evaluate_regression(&baseline, &report, options.regression_thresholds.clone());
-        if regression_gate_failed(&report.regression_gate) {
+        if report.final_status != BenchmarkFinalStatus::Incomplete
+            && regression_gate_failed(&report.regression_gate)
+        {
             report.final_status = BenchmarkFinalStatus::Regression;
         }
     }
     report
         .validate_authoritative_rss()
         .map_err(|error| format!("benchmark report RSS validation failed: {error}"))?;
-    // A report without linked native controls is useful diagnostic JSON, but
-    // it must not reach the stable Results renderer. Validate before writing
-    // either artifact so a failed publication cannot leave a misleading report
-    // beside the campaign output.
-    if options.markdown_dir.is_some() {
+    if !options.is_quick() || report.final_status == BenchmarkFinalStatus::Incomplete {
+        write_report(&options.output, &report)?;
+    }
+    if let Some(markdown_dir) = &options.markdown_dir {
         report
             .validate_for_publication()
             .map_err(|error| format!("benchmark report publication validation failed: {error}"))?;
-    }
-    if cancellation.load(std::sync::atomic::Ordering::Acquire) {
-        return Err("benchmark campaign cancelled; report not published".into());
-    }
-    write_report(&options.output, &report)?;
-    if let Some(markdown_dir) = &options.markdown_dir {
         render_markdown_pages(markdown_dir, &report)?;
     }
-    print!("{}", report.render_human());
+    let completion_stage =
+        if options.is_quick() && report.final_status != BenchmarkFinalStatus::Incomplete {
+            Some(
+                tq_test_support::benchmark::quick::completion_stage()
+                    .ok_or("quick completion requires a supervisor-owned report stage")?,
+            )
+        } else {
+            None
+        };
+    print_report(&report)?;
+    if let Some(stage) = completion_stage {
+        write_report(&stage, &report)?;
+    }
     Ok(exit_code_for_status(report.final_status))
+}
+
+fn print_report(report: &BenchmarkCampaignReport) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let mut output = std::io::stdout().lock();
+    let quick = report.profile == "quick"
+        || report
+            .execution
+            .as_ref()
+            .is_some_and(|execution| execution.sampling == "quick");
+    if !quick {
+        return write!(output, "{}", report.render_human());
+    }
+    let planned = report
+        .execution
+        .as_ref()
+        .map_or(report.cases.len(), |execution| execution.planned_rows);
+    let progress = if planned == 0 && report.final_status == BenchmarkFinalStatus::Incomplete {
+        format!("{} / plan pending", report.cases.len())
+    } else {
+        format!("{} / {planned}", report.cases.len())
+    };
+    writeln!(
+        output,
+        "| Suite | Profile | Status | Completed / planned | Evidence |"
+    )?;
+    writeln!(output, "| --- | --- | --- | ---: | --- |")?;
+    writeln!(
+        output,
+        "| {} | {} | {:?} | {progress} | Single-sample diagnostic; no warmup |",
+        report.suite, report.profile, report.final_status,
+    )?;
+    writeln!(output)?;
+    writeln!(
+        output,
+        "| Scenario | Input | Adapter | Outcome | Wall (us) | Peak RSS (bytes) |"
+    )?;
+    writeln!(output, "| --- | --- | --- | --- | ---: | ---: |")?;
+    for row in &report.cases {
+        write!(
+            output,
+            "| {} | {} | {} | {:?} | ",
+            row.case_id, row.source_id, row.adapter_id, row.outcome
+        )?;
+        if let Some(summary) = &row.summary {
+            write!(output, "{:.0} | ", summary.wall_time_micros.median)?;
+            if let Some(rss) = summary.peak_rss_bytes {
+                writeln!(output, "{rss} |")?;
+            } else {
+                writeln!(output, "unavailable |")?;
+            }
+        } else {
+            writeln!(output, "unavailable | unavailable |")?;
+        }
+    }
+    Ok(())
 }
 
 fn exit_code_for_status(status: BenchmarkFinalStatus) -> ExitCode {
     match status {
         BenchmarkFinalStatus::Passed => ExitCode::SUCCESS,
+        BenchmarkFinalStatus::Incomplete => ExitCode::from(2),
         BenchmarkFinalStatus::ObservedFailures | BenchmarkFinalStatus::Regression => {
             ExitCode::from(1)
         }
@@ -480,7 +498,7 @@ fn plan_rows(
         }
         if !matched && !selected_cases.is_empty() {
             return Err(format!(
-                "selected benchmark case {} has no prepared datasets for this profile",
+                "selected benchmark case {} has no prepared datasets for this suite",
                 case.id
             ));
         }
@@ -547,30 +565,18 @@ fn format_row_identity(identity: &PlannedRowIdentity) -> String {
     )
 }
 
-fn record_row(
-    rows: &mut Vec<BenchmarkRow>,
-    case: &BenchmarkCase,
-    dataset: &PreparedDataset,
-    adapter: &BenchmarkAdapter,
-    row: BenchmarkRow,
-) {
-    eprintln!(
-        "tq-bench: workload={} dataset={} adapter={} outcome={:?}",
-        case.id, dataset.source_id, adapter.id, row.outcome
-    );
-    rows.push(row);
-}
-
 #[allow(
     clippy::too_many_lines,
     reason = "the command-line grammar stays intentionally explicit and dependency-free"
 )]
 fn options() -> Result<Options, Box<dyn std::error::Error>> {
-    let mut profile = "rapid".to_owned();
+    let mut suite = "natural-corpus".to_owned();
+    let mut profile = "standard".to_owned();
     let archive_root = env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
         .map_or_else(|| PathBuf::from("benchmarks"), PathBuf::from);
-    let mut output = archive_root.join(".work/rapid.json");
+    let mut output = None;
     let mut manifests = Vec::new();
+    let mut input = None;
     let mut cache_root = archive_root.join(".work/corpus");
     let mut origin = "frozen".to_owned();
     let mut max_samples = None;
@@ -582,15 +588,60 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     let mut render_only = Vec::new();
     let mut preflight_only = false;
     let mut timing_calibrations = Vec::new();
+    let mut mode = None;
+    let mut sampling = None;
+    let mut selected_adapters = Vec::new();
+    let mut instrument_rss = false;
+    let mut campaign_budget_seconds = None;
+    let mut case_budget_seconds = None;
     let mut wall_time_percent: f64 = 50.0;
     let mut peak_rss_percent: f64 = 50.0;
     let mut minimum_samples = 5;
+    let mut regression_options_supplied = false;
     let mut arguments = env::args().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "run" => {}
+            "--suite" => suite = arguments.next().ok_or("--suite needs a value")?,
             "--profile" => profile = arguments.next().ok_or("--profile needs a value")?,
-            "--output" => output = PathBuf::from(arguments.next().ok_or("--output needs a path")?),
+            "--input" => {
+                input = Some(PathBuf::from(
+                    arguments.next().ok_or("--input needs a path")?,
+                ));
+            }
+            "--mode" => {
+                mode = Some(Mode::parse(
+                    &arguments.next().ok_or("--mode needs a value")?,
+                )?);
+            }
+            "--sampling" => {
+                sampling = Some(Sampling::parse(
+                    &arguments.next().ok_or("--sampling needs a value")?,
+                )?);
+            }
+            "--adapter" => selected_adapters.push(arguments.next().ok_or("--adapter needs an ID")?),
+            "--instrument-rss" => instrument_rss = true,
+            "--campaign-budget-seconds" => {
+                campaign_budget_seconds = Some(
+                    arguments
+                        .next()
+                        .ok_or("--campaign-budget-seconds needs a value")?
+                        .parse::<u64>()?,
+                );
+            }
+            "--case-budget-seconds" => {
+                case_budget_seconds = Some(
+                    arguments
+                        .next()
+                        .ok_or("--case-budget-seconds needs a value")?
+                        .parse::<u64>()?,
+                );
+            }
+            "--output" => {
+                output = Some(PathBuf::from(
+                    arguments.next().ok_or("--output needs a path")?,
+                ));
+            }
             "--manifest" => manifests.push(PathBuf::from(
                 arguments.next().ok_or("--manifest needs a path")?,
             )),
@@ -652,18 +703,21 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "--preflight-only" => preflight_only = true,
             "--wall-regression-percent" => {
+                regression_options_supplied = true;
                 wall_time_percent = arguments
                     .next()
                     .ok_or("--wall-regression-percent needs a value")?
                     .parse()?;
             }
             "--rss-regression-percent" => {
+                regression_options_supplied = true;
                 peak_rss_percent = arguments
                     .next()
                     .ok_or("--rss-regression-percent needs a value")?
                     .parse()?;
             }
             "--minimum-regression-samples" => {
+                regression_options_supplied = true;
                 minimum_samples = arguments
                     .next()
                     .ok_or("--minimum-regression-samples needs a value")?
@@ -671,36 +725,115 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
             }
             "-h" | "--help" => {
                 println!(
-                    "Usage: tq-bench [--preflight-only] run --profile smoke|rapid|standard|large --output PATH [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--case ID] [--timing-calibration SUMMARY ...] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N] [--markdown-dir DIRECTORY] [--render-only REPORT... --markdown-dir DIRECTORY] [native child accounting on macOS/Linux; platform time commands are independent validation only; Windows deferred]"
+                    "Usage: tq-bench [--preflight-only] run [--suite natural-corpus|large-input|smoke] [--profile quick|standard|extended] [--output PATH] [--input GEOJSON] [--mode fast|exhaustive] [--sampling quick|screen|compare|extended|catalog] [--case ID] [--adapter ID] [--campaign-budget-seconds N] [--case-budget-seconds N] [--instrument-rss] [--manifest PATH --cache-root PATH --origin refreshed|frozen] [--max-samples N] [--timeout-seconds N] [--rss-limit-bytes N] [--timing-calibration SUMMARY ...] [--baseline PATH --wall-regression-percent N --rss-regression-percent N --minimum-regression-samples N] [--markdown-dir DIRECTORY] [--render-only REPORT... --markdown-dir DIRECTORY]\nNatural-corpus and standard are the defaults; quick and standard default to retained temporary report.json checkpoints. Large-input defaults to JSON adapters and accepts either --input GEOJSON or admitted --manifest paths. Extended large-input adds selected-sort to parse-discard and dead-sort-length."
                 );
                 std::process::exit(0);
             }
             value => return Err(format!("unknown argument: {value}").into()),
         }
     }
-    if !matches!(profile.as_str(), "smoke" | "rapid" | "standard" | "large") {
+    if !matches!(suite.as_str(), "natural-corpus" | "large-input" | "smoke") {
+        return Err(format!("invalid suite: {suite}").into());
+    }
+    if !matches!(profile.as_str(), "quick" | "standard" | "extended") {
         return Err(format!("invalid profile: {profile}").into());
     }
-    if render_only.is_empty() && !preflight_only {
-        if profile == "rapid" {
-            if max_samples.is_none() {
-                max_samples = Some(1);
-            }
-            if selected_cases.is_empty() {
-                selected_cases.extend(RAPID_CASES.iter().map(|case| (*case).to_owned()));
-            }
+    let mode = mode.unwrap_or(if suite == "large-input" {
+        Mode::Fast
+    } else {
+        Mode::Exhaustive
+    });
+    let sampling = sampling.unwrap_or(if profile == "quick" {
+        Sampling::Quick
+    } else if profile == "standard" && max_samples.is_none() {
+        Sampling::Compare
+    } else if profile == "extended" && max_samples.is_none() {
+        Sampling::Extended
+    } else if max_samples.is_some() {
+        Sampling::Catalog
+    } else if mode == Mode::Fast {
+        Sampling::Screen
+    } else {
+        Sampling::Catalog
+    });
+    if profile == "quick" && sampling != Sampling::Quick {
+        return Err("--profile quick requires --sampling quick".into());
+    }
+    if sampling == Sampling::Quick {
+        if max_samples.is_some() {
+            return Err("--sampling quick does not accept --max-samples".into());
         }
-        if profile != "smoke" && manifests.is_empty() {
-            if let Some(paths) = env::var_os("TQ_BENCH_MANIFESTS") {
-                manifests.extend(env::split_paths(&paths));
-            } else {
-                manifests = discover_latest_validated_manifests(&cache_root)?;
-            }
+        if instrument_rss {
+            return Err("--sampling quick does not accept --instrument-rss".into());
         }
-        if profile != "smoke" && manifests.is_empty() {
-            return Err("no admitted machine-local corpus snapshots were found; run tq-corpus prepare or pass --manifest".into());
+        if baseline.is_some() || regression_options_supplied {
+            return Err("--sampling quick does not accept baseline or regression options".into());
+        }
+        if markdown_dir.is_some() {
+            return Err("--sampling quick cannot publish Markdown".into());
         }
     }
+    if sampling == Sampling::Compare && selected_cases.is_empty() && profile != "standard" {
+        return Err("--sampling compare requires at least one explicit --case".into());
+    }
+    if max_samples.is_some() && sampling != Sampling::Catalog {
+        return Err("--max-samples requires --sampling catalog; use screen, compare or extended for fixed sampling policies".into());
+    }
+    if max_samples == Some(0) {
+        return Err("--max-samples must be at least 1".into());
+    }
+    let quick_budget = tq_test_support::benchmark::quick::QUICK_WORK_BUDGET_SECONDS;
+    if sampling == Sampling::Quick
+        && (campaign_budget_seconds.is_some_and(|seconds| seconds > quick_budget)
+            || case_budget_seconds.is_some_and(|seconds| seconds > quick_budget))
+    {
+        return Err(
+            format!("quick campaign and case budgets cannot exceed {quick_budget}s").into(),
+        );
+    }
+    let campaign_budget_seconds =
+        campaign_budget_seconds.unwrap_or(if sampling == Sampling::Quick {
+            quick_budget
+        } else if mode == Mode::Fast {
+            900
+        } else {
+            3600
+        });
+    let case_budget_seconds = case_budget_seconds.unwrap_or(if sampling == Sampling::Quick {
+        quick_budget
+    } else if mode == Mode::Fast {
+        300
+    } else {
+        600
+    });
+    let case_budget_seconds = if sampling == Sampling::Quick {
+        case_budget_seconds.min(campaign_budget_seconds)
+    } else {
+        case_budget_seconds
+    };
+    if campaign_budget_seconds == 0 || case_budget_seconds == 0 {
+        return Err("campaign and case budgets must be at least 1 second".into());
+    }
+    if suite == "large-input" && mode == Mode::Fast && selected_cases.is_empty() {
+        selected_cases.extend(policy::FAST_LARGE_CASES.iter().map(|id| (*id).to_owned()));
+        if profile == "extended" {
+            selected_cases.push("benchmark.large-selected-sort".to_owned());
+        }
+    }
+    if suite == "large-input" && selected_adapters.is_empty() {
+        selected_adapters.extend(
+            policy::LARGE_JSON_ADAPTERS
+                .iter()
+                .map(|id| (*id).to_owned()),
+        );
+    }
+    if input.is_some() && suite != "large-input" {
+        return Err("--input is only supported by --suite large-input".into());
+    }
+    if input.is_some() && !manifests.is_empty() {
+        return Err("--input and --manifest cannot be combined".into());
+    }
+    // Filesystem discovery belongs to run(), after the quick guard is active.
     if !matches!(origin.as_str(), "refreshed" | "frozen") {
         return Err(format!("invalid origin: {origin}").into());
     }
@@ -722,9 +855,36 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
     if !render_only.is_empty() && markdown_dir.is_none() {
         return Err("--render-only requires --markdown-dir".into());
     }
+    let output = match output {
+        Some(path) => path,
+        None if !preflight_only
+            && render_only.is_empty()
+            && (matches!(profile.as_str(), "quick" | "standard")
+                || sampling == Sampling::Quick) =>
+        {
+            env::var_os("TQ_QUICK_DEFAULT_OUTPUT").map_or_else(
+                || {
+                    env::temp_dir()
+                        .join(format!(
+                            "tq-bench-{}-{}",
+                            std::process::id(),
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .expect("Unix epoch")
+                                .as_nanos()
+                        ))
+                        .join("report.json")
+                },
+                PathBuf::from,
+            )
+        }
+        None => archive_root.join(format!(".work/{suite}-{profile}.json")),
+    };
     Ok(Options {
+        suite,
         profile,
         output,
+        input,
         manifests,
         cache_root,
         origin,
@@ -737,6 +897,12 @@ fn options() -> Result<Options, Box<dyn std::error::Error>> {
         render_only,
         preflight_only,
         timing_calibrations,
+        mode,
+        sampling,
+        selected_adapters,
+        instrument_rss,
+        campaign_budget_seconds,
+        case_budget_seconds,
         regression_thresholds: RegressionThresholds {
             wall_time_percent,
             peak_rss_percent,
@@ -886,10 +1052,8 @@ fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std:
     for path in &options.manifests {
         let manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(path)?)?;
         let tier = source_tier(&manifest.source_id);
-        if (options.profile == "rapid" && manifest.source_id != RAPID_SOURCE)
-            || ((options.profile == "standard" || options.profile == "rapid")
-                && tier == DatasetTier::Large)
-            || (options.profile == "large" && tier != DatasetTier::Large)
+        if (options.suite == "natural-corpus" && tier == DatasetTier::Large)
+            || (options.suite == "large-input" && tier != DatasetTier::Large)
         {
             continue;
         }
@@ -933,10 +1097,15 @@ fn prepare_manifests(options: &Options) -> Result<PreparedCampaign, Box<dyn std:
             formats,
         });
     }
-    if options.profile == "rapid" && datasets.is_empty() {
-        return Err(format!("rapid profile requires a {RAPID_SOURCE} snapshot").into());
+    if options.suite == "natural-corpus"
+        && (options.selected_cases.is_empty()
+            || options
+                .selected_cases
+                .iter()
+                .any(|id| id == "benchmark.issue5-inputs"))
+    {
+        datasets.push(prepare_issue5_input_sequence(temporary.path())?);
     }
-    datasets.push(prepare_issue5_input_sequence(temporary.path())?);
     Ok(PreparedCampaign {
         temporary: Some(temporary),
         datasets,
@@ -1176,8 +1345,13 @@ fn write_report(
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    serde_json::to_writer_pretty(&mut temporary, report)?;
-    temporary.write_all(b"\n")?;
+    {
+        let mut writer = std::io::BufWriter::new(temporary.as_file_mut());
+        serde_json::to_writer_pretty(&mut writer, report)?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+    }
+    temporary.as_file().sync_all()?;
     temporary.persist(path)?;
     Ok(())
 }
@@ -1300,7 +1474,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_case_without_profile_dataset_fails_closed() {
+    fn selected_case_without_suite_dataset_fails_closed() {
         let error = plan_rows(
             &[selected_case(
                 DatasetFamily::LargeNatural,

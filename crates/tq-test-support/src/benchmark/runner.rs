@@ -5,17 +5,18 @@ use std::{
     fs::File,
     io::{BufRead as _, BufReader, Read as _, Seek as _},
     path::Path,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use thiserror::Error;
 
-use super::correctness::{SemanticDigestError, value_digest};
+use super::correctness::{SemanticDigestError, SemanticWitness, value_digest};
 use super::{
     BenchmarkAdapter, BenchmarkCase, BenchmarkCorpusIdentity, BenchmarkInvocation,
     BenchmarkOutcome, BenchmarkRow, BenchmarkSample, CorrectnessDecision, CorrectnessObservation,
-    CorrectnessPayload, DatasetTier, MeasuredOutcome, MeasuredStatus, OutputContractKind,
-    SemanticDigest, SemanticDigester, correctness_gate, measure_process, measure_process_worker,
-    measure_process_worker_uninstrumented, summarize_samples,
+    CorrectnessPayload, DatasetTier, MeasureError, MeasuredOutcome, MeasuredStatus,
+    OutputContractKind, SemanticDigest, SemanticDigester, correctness_gate, measure_process,
+    measure_process_worker, measure_process_worker_uninstrumented, summarize_samples,
 };
 use crate::compatibility::{
     ErrorClass, NormalizationError, ProcessError, ProcessOutcome, ProcessStatus, ToolKind,
@@ -31,14 +32,11 @@ pub const fn is_correctness_output_limit(error: &BenchmarkRunnerError) -> bool {
     matches!(error, BenchmarkRunnerError::CorrectnessOutputLimit { .. })
 }
 
-/// Returns whether a runner error represents any correctness resource limit.
+/// Returns whether a runner error represents a bounded correctness capture
+/// limit rather than an infrastructure failure.
 #[must_use]
 pub const fn is_correctness_resource_limit(error: &BenchmarkRunnerError) -> bool {
-    matches!(
-        error,
-        BenchmarkRunnerError::CorrectnessOutputLimit { .. }
-            | BenchmarkRunnerError::CorrectnessWitnessLimit { .. }
-    )
+    matches!(error, BenchmarkRunnerError::CorrectnessOutputLimit { .. })
 }
 
 /// Benchmark row construction failures at the harness boundary.
@@ -66,12 +64,6 @@ pub enum BenchmarkRunnerError {
         /// Deleted stderr capture path, retained for diagnostic identity.
         stderr: std::path::PathBuf,
     },
-    /// Correctness normalization exceeded its bounded per-value witness.
-    #[error("correctness semantic witness exceeded {limit} values")]
-    CorrectnessWitnessLimit {
-        /// Maximum number of values retained by the witness.
-        limit: u64,
-    },
 }
 
 type CandidateResult = Result<(CorrectnessObservation, MeasuredOutcome), BenchmarkRunnerError>;
@@ -80,16 +72,26 @@ type CandidateResult = Result<(CorrectnessObservation, MeasuredOutcome), Benchma
 enum DigestError {
     #[error(transparent)]
     Normalize(#[from] NormalizationError),
-    #[error("correctness semantic witness exceeded {limit} values")]
-    WitnessLimit { limit: u64 },
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("benchmark measurement cancelled")]
+    Cancelled,
 }
-
 impl From<DigestError> for BenchmarkRunnerError {
     fn from(error: DigestError) -> Self {
         match error {
             DigestError::Normalize(error) => Self::Normalize(error),
-            DigestError::WitnessLimit { limit } => Self::CorrectnessWitnessLimit { limit },
+            DigestError::Io(error) => Self::Io(error),
+            DigestError::Cancelled => Self::Measure(MeasureError::Cancelled),
         }
+    }
+}
+
+fn check_cancelled(cancellation: Option<&AtomicBool>) -> Result<(), DigestError> {
+    if cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        Err(DigestError::Cancelled)
+    } else {
+        Ok(())
     }
 }
 
@@ -104,9 +106,7 @@ fn push_digest(
             tool,
             error.to_string(),
         ))),
-        Err(SemanticDigestError::WitnessLimit { limit }) => {
-            Err(DigestError::WitnessLimit { limit })
-        }
+        Err(SemanticDigestError::Io(error)) => Err(DigestError::Io(error)),
     }
 }
 
@@ -162,13 +162,13 @@ fn measured_correctness_run(
         });
     }
     let normalized = correctness_observation(
-        &stdout_path,
-        &stderr_path,
+        (&stdout_path, &stderr_path),
         tool,
         contract,
         &measured,
         &invocation.args,
         expected,
+        invocation.cancellation.as_deref(),
     );
     let _ = std::fs::remove_file(stdout_path);
     let _ = std::fs::remove_file(stderr_path);
@@ -204,11 +204,6 @@ fn correctness_gate_row(
             case, adapter, corpus, tier, invocation, *limit,
         )));
     }
-    if let Err(BenchmarkRunnerError::CorrectnessWitnessLimit { limit }) = &candidate {
-        return Ok(Some(correctness_witness_limit_row(
-            case, adapter, corpus, tier, invocation, *limit,
-        )));
-    }
     if let Ok((observation, measured)) = &candidate {
         let process_failure = if measured.status == MeasuredStatus::RssLimit {
             Some(BenchmarkOutcome::ResourceLimit)
@@ -219,7 +214,7 @@ fn correctness_gate_row(
                 })
         };
         if let Some(outcome) = process_failure {
-            return Ok(Some(row_with_diagnostic(
+            let mut row = row_with_diagnostic(
                 case,
                 adapter,
                 corpus,
@@ -228,7 +223,15 @@ fn correctness_gate_row(
                 outcome,
                 vec![BenchmarkSample::from(measured)],
                 Some(process_diagnostic(observation, measured)),
-            )));
+            );
+            if measured
+                .measurement_protocol
+                .rss_poll_interval_micros
+                .is_some()
+            {
+                row.instrumented_samples = std::mem::take(&mut row.samples);
+            }
+            return Ok(Some(row));
         }
     }
     let decision = match &candidate {
@@ -296,9 +299,24 @@ pub fn run_gated_row(
     tier: DatasetTier,
     invocation: &BenchmarkInvocation,
     reference: &CorrectnessObservation,
+    instrument_rss: bool,
 ) -> Result<BenchmarkRow, BenchmarkRunnerError> {
+    if invocation
+        .cancellation
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    {
+        return Err(BenchmarkRunnerError::Measure(MeasureError::Cancelled));
+    }
     if let Some(row) = correctness_gate_row(case, adapter, corpus, tier, invocation, reference)? {
         return Ok(row);
+    }
+    if invocation
+        .cancellation
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    {
+        return Err(BenchmarkRunnerError::Measure(MeasureError::Cancelled));
     }
 
     for _ in 0..case.sampling.warmups {
@@ -320,10 +338,9 @@ pub fn run_gated_row(
     let mut samples = Vec::with_capacity(case.sampling.measured(tier));
     let mut instrumented_samples = Vec::new();
     for _ in 0..case.sampling.measured(tier) {
-        // First enforce the live limit in a separate repetition. Only then
-        // time the equivalent command without sampler interference. Native
-        // peak RSS still checks the limit at the end of the timing repetition.
-        if invocation.rss_limit.is_some() {
+        // Explicit comparison mode can retain a separate sampler repetition;
+        // the default uses one native wait4/sampler measurement per sample.
+        if instrument_rss && invocation.rss_limit.is_some() {
             let instrumented = measure_process_worker(invocation)?;
             instrumented_samples.push(BenchmarkSample::from(&instrumented));
             if let Some(outcome) = failed_outcome(case, &instrumented) {
@@ -342,7 +359,11 @@ pub fn run_gated_row(
                 return Ok(row);
             }
         }
-        let measured = measure_process_worker_uninstrumented(invocation)?;
+        let measured = if !instrument_rss && invocation.rss_limit.is_some() {
+            measure_process_worker(invocation)?
+        } else {
+            measure_process_worker_uninstrumented(invocation)?
+        };
         if let Some(outcome) = failed_outcome(case, &measured) {
             samples.push(BenchmarkSample::from(&measured));
             let diagnostic = measured_diagnostic(&outcome, &measured);
@@ -394,31 +415,6 @@ fn correctness_limit_row(
         Vec::new(),
         Some(format!(
             "candidate correctness output exceeded {limit} bytes"
-        )),
-    )
-}
-
-/// Constructs a resource row when a semantic comparison witness cannot be
-/// retained within its configured bound. No timing samples are recorded.
-#[must_use]
-pub fn correctness_witness_limit_row(
-    case: &BenchmarkCase,
-    adapter: &BenchmarkAdapter,
-    corpus: &BenchmarkCorpusIdentity,
-    tier: DatasetTier,
-    invocation: &BenchmarkInvocation,
-    limit: u64,
-) -> BenchmarkRow {
-    row_with_diagnostic(
-        case,
-        adapter,
-        corpus,
-        tier,
-        invocation,
-        BenchmarkOutcome::ResourceLimit,
-        Vec::new(),
-        Some(format!(
-            "semantic witness exceeded the bounded limit of {limit} values"
         )),
     )
 }
@@ -538,13 +534,6 @@ fn row_with_diagnostic(
     samples: Vec<BenchmarkSample>,
     diagnostic: Option<String>,
 ) -> BenchmarkRow {
-    let (instrumented_samples, samples): (Vec<_>, Vec<_>) =
-        samples.into_iter().partition(|sample| {
-            sample
-                .measurement_protocol
-                .as_ref()
-                .is_some_and(|protocol| protocol.rss_poll_interval_micros.is_some())
-        });
     let summary = (outcome == BenchmarkOutcome::Timed && !samples.is_empty())
         .then(|| summarize_samples(&samples, corpus.artifact.bytes, corpus.logical_records))
         .flatten();
@@ -565,7 +554,7 @@ fn row_with_diagnostic(
         timeout_seconds: case.timeout_seconds,
         limits: case.limits.clone(),
         samples,
-        instrumented_samples,
+        instrumented_samples: Vec::new(),
         summary,
         reference_ratios: BTreeMap::new(),
         reference_peak_rss_ratios: BTreeMap::new(),
@@ -688,14 +677,15 @@ const fn tool_kind(adapter: &BenchmarkAdapter) -> ToolKind {
 }
 
 fn correctness_observation(
-    stdout_path: &Path,
-    stderr_path: &Path,
+    captures: (&Path, &Path),
     tool: ToolKind,
     contract: OutputContractKind,
     measured: &MeasuredOutcome,
     args: &[String],
     expected: Option<&SemanticDigest>,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<CorrectnessObservation, BenchmarkRunnerError> {
+    let (stdout_path, stderr_path) = captures;
     let stderr = std::fs::read(stderr_path)?;
     let process_status = process_status(measured.status);
     let metadata = ProcessOutcome {
@@ -710,15 +700,18 @@ fn correctness_observation(
     let error_class = (measured.status == MeasuredStatus::RssLimit)
         .then_some(ErrorClass::Resource)
         .or_else(|| classify_process(tool, &metadata));
+    if cancellation.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(BenchmarkRunnerError::Measure(MeasureError::Cancelled));
+    }
     let payload = match contract {
         _ if measured.status == MeasuredStatus::RssLimit => empty_payload(contract),
         _ if error_class.is_some() => empty_payload(contract),
         OutputContractKind::SemanticSequence => CorrectnessPayload::SemanticSequence(
-            digest_semantic_sequence(stdout_path, tool, args, expected)?,
+            digest_semantic_sequence(stdout_path, tool, args, expected, cancellation)?,
         ),
-        OutputContractKind::ColoredSemanticSequence => {
-            CorrectnessPayload::SemanticSequence(digest_colored_json_sequence(stdout_path, tool)?)
-        }
+        OutputContractKind::ColoredSemanticSequence => CorrectnessPayload::SemanticSequence(
+            digest_colored_json_sequence(stdout_path, tool, cancellation)?,
+        ),
         OutputContractKind::RawBytes => CorrectnessPayload::RawBytes(std::fs::read(stdout_path)?),
         OutputContractKind::ExitOnly => CorrectnessPayload::ExitOnly,
     };
@@ -754,13 +747,18 @@ fn digest_semantic_sequence(
     tool: ToolKind,
     args: &[String],
     expected: Option<&SemanticDigest>,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<SemanticDigest, DigestError> {
     match tool {
-        ToolKind::Jq | ToolKind::Yq => digest_json_sequence(path, tool, has_sequence_flag(args)),
+        ToolKind::Jq | ToolKind::Yq => {
+            digest_json_sequence(path, tool, has_sequence_flag(args), cancellation)
+        }
         ToolKind::Tq => match tq_output_mode(args) {
-            TqOutputMode::Json { sequence } => digest_json_sequence(path, tool, sequence),
-            TqOutputMode::ToonSequence => digest_toon_sequence(path),
-            TqOutputMode::ToonValues => digest_toon_values(path, expected),
+            TqOutputMode::Json { sequence } => {
+                digest_json_sequence(path, tool, sequence, cancellation)
+            }
+            TqOutputMode::ToonSequence => digest_toon_sequence(path, cancellation),
+            TqOutputMode::ToonValues => digest_toon_values(path, expected, cancellation),
             TqOutputMode::ToonUnframed => digest_toon_unframed_document(path, expected),
             TqOutputMode::Raw => Err(DigestError::Normalize(NormalizationError::Toon(
                 "raw output cannot satisfy a semantic sequence contract".to_owned(),
@@ -772,13 +770,17 @@ fn digest_semantic_sequence(
 fn digest_colored_json_sequence(
     path: &Path,
     tool: ToolKind,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<SemanticDigest, DigestError> {
+    check_cancelled(cancellation)?;
     let bytes =
         std::fs::read(path).map_err(|error| normalization_error(tool, error.to_string()))?;
     let bytes = strip_sgr(&bytes, tool)?;
+    check_cancelled(cancellation)?;
     let mut digest = SemanticDigester::with_value_witness();
     let mut values = 0_u64;
     for value in serde_json::Deserializer::from_slice(&bytes).into_iter::<serde_json::Value>() {
+        check_cancelled(cancellation)?;
         let value = value.map_err(|error| normalization_error(tool, error.to_string()))?;
         values += 1;
         push_digest(&mut digest, &value, tool)?;
@@ -843,31 +845,32 @@ fn digest_json_sequence(
     path: &Path,
     tool: ToolKind,
     sequence: bool,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<SemanticDigest, DigestError> {
     if sequence {
-        return digest_json_text_sequence(path, tool);
+        return digest_json_text_sequence(path, tool, cancellation);
     }
     let file = File::open(path).map_err(|error| normalization_error(tool, error.to_string()))?;
-    let mut digest = matches!(tool, ToolKind::Jq | ToolKind::Yq)
-        .then(SemanticDigester::with_value_witness)
-        .unwrap_or_default();
+    let mut digest = SemanticDigester::with_value_witness();
     for value in serde_json::Deserializer::from_reader(BufReader::new(file)).into_iter() {
+        check_cancelled(cancellation)?;
         let value = value.map_err(|error| normalization_error(tool, error.to_string()))?;
         push_digest(&mut digest, &value, tool)?;
     }
     Ok(digest.finish())
 }
 
-fn digest_json_text_sequence(path: &Path, tool: ToolKind) -> Result<SemanticDigest, DigestError> {
+fn digest_json_text_sequence(
+    path: &Path,
+    tool: ToolKind,
+    cancellation: Option<&AtomicBool>,
+) -> Result<SemanticDigest, DigestError> {
     let file = File::open(path).map_err(|error| normalization_error(tool, error.to_string()))?;
     let mut reader = BufReader::new(file);
     let mut marker = [0_u8; 1];
-    let mut digest = if matches!(tool, ToolKind::Jq | ToolKind::Yq) {
-        SemanticDigester::with_value_witness()
-    } else {
-        SemanticDigester::default()
-    };
+    let mut digest = SemanticDigester::with_value_witness();
     loop {
+        check_cancelled(cancellation)?;
         let read = reader
             .read(&mut marker)
             .map_err(|error| normalization_error(tool, error.to_string()))?;
@@ -986,7 +989,11 @@ fn has_sequence_flag(args: &[String]) -> bool {
     args.iter().any(|argument| argument == "--seq")
 }
 
-fn digest_toon_sequence(path: &Path) -> Result<SemanticDigest, DigestError> {
+fn digest_toon_sequence(
+    path: &Path,
+    cancellation: Option<&AtomicBool>,
+) -> Result<SemanticDigest, DigestError> {
+    check_cancelled(cancellation)?;
     let file =
         File::open(path).map_err(|error| NormalizationError::ToonSequence(error.to_string()))?;
     let mut reader = BufReader::new(file);
@@ -1006,6 +1013,7 @@ fn digest_toon_sequence(path: &Path) -> Result<SemanticDigest, DigestError> {
     }
 
     loop {
+        check_cancelled(cancellation)?;
         let mut record = Vec::new();
         let bytes = reader
             .read_until(0x1e, &mut record)
@@ -1030,6 +1038,14 @@ fn digest_toon_sequence(path: &Path) -> Result<SemanticDigest, DigestError> {
             tq_toon::DecoderConfig::default(),
         )
         .map_err(|error| NormalizationError::ToonSequence(error.to_string()))?;
+        if documents.len() != 1 {
+            return Err(DigestError::Normalize(NormalizationError::ToonSequence(
+                format!(
+                    "record contains {} documents; expected exactly one",
+                    documents.len()
+                ),
+            )));
+        }
         let document = documents.pop().ok_or_else(|| {
             NormalizationError::ToonSequence("record contains no document".to_owned())
         })?;
@@ -1043,12 +1059,6 @@ fn digest_toon_sequence(path: &Path) -> Result<SemanticDigest, DigestError> {
         }
     }
     Ok(digest.finish())
-}
-
-fn digest_toon_document(path: &Path) -> Result<SemanticDigest, DigestError> {
-    let stdout =
-        std::fs::read(path).map_err(|error| NormalizationError::Toon(error.to_string()))?;
-    digest_toon_document_bytes(&stdout)
 }
 
 fn digest_toon_unframed_document(
@@ -1090,29 +1100,42 @@ fn digest_toon_document_bytes(stdout: &[u8]) -> Result<SemanticDigest, DigestErr
 fn digest_toon_values(
     path: &Path,
     expected: Option<&SemanticDigest>,
+    cancellation: Option<&AtomicBool>,
 ) -> Result<SemanticDigest, DigestError> {
+    check_cancelled(cancellation)?;
     let Some(expected) = expected else {
-        return digest_toon_document(path);
+        return digest_toon_document_with_witness(path);
     };
-    let Some(expected_values) = expected.value_digests.as_deref() else {
+    if expected.result_count > 1 && expected.witness.is_none() {
         return Err(DigestError::Normalize(NormalizationError::Toon(
             "default TOON values require a reference boundary witness".to_owned(),
         )));
-    };
-    if expected_values.len() <= 1 {
+    }
+    if expected.result_count <= 1 {
         if !path_is_empty(path)? && !file_ends_with_lf(path)? {
             return Err(DigestError::Normalize(NormalizationError::Toon(
                 "default TOON values require a terminal LF".to_owned(),
             )));
         }
         let actual = digest_toon_document_with_witness(path)?;
-        if actual.result_count != expected.result_count
-            || actual
-                .value_digests
-                .as_deref()
-                .and_then(|values| values.first())
-                != expected_values.first()
-        {
+        let expected_first = if expected.result_count == 1 {
+            let witness = expected.witness.as_ref().ok_or_else(|| {
+                DigestError::Normalize(NormalizationError::Toon(
+                    "default TOON values require a reference boundary witness".to_owned(),
+                ))
+            })?;
+            let mut reader = witness.reader()?;
+            Some(SemanticWitness::read_record(&mut reader)?.0)
+        } else {
+            None
+        };
+        let actual_first = if let Some(witness) = actual.witness.as_ref() {
+            let mut reader = witness.reader()?;
+            Some(SemanticWitness::read_record(&mut reader)?.0)
+        } else {
+            None
+        };
+        if actual.result_count != expected.result_count || actual_first != expected_first {
             return Err(DigestError::Normalize(NormalizationError::Toon(
                 "default TOON value does not match the reference sequence".to_owned(),
             )));
@@ -1120,26 +1143,20 @@ fn digest_toon_values(
         return Ok(actual);
     }
 
-    let line_counts = expected.toon_line_counts.as_deref().ok_or_else(|| {
-        NormalizationError::Toon(
-            "default TOON values require a reference line-count witness".to_owned(),
-        )
-    })?;
-    if line_counts.len() != expected_values.len() {
-        return Err(DigestError::Normalize(NormalizationError::Toon(
-            "default TOON reference witnesses have different lengths".to_owned(),
-        )));
-    }
+    let expected_witness = expected.witness.as_ref().expect("checked above");
+    let mut expected_reader = expected_witness.reader()?;
     let file = File::open(path).map_err(|error| NormalizationError::Toon(error.to_string()))?;
     let mut reader = BufReader::new(file);
     let mut digest = SemanticDigester::default();
-    for (expected_value, line_count) in expected_values.iter().zip(line_counts) {
+    for _ in 0..expected.result_count {
+        check_cancelled(cancellation)?;
+        let (expected_value, line_count) = SemanticWitness::read_record(&mut expected_reader)?;
         let mut record = Vec::new();
-        let hinted = read_lines(&mut reader, *line_count, &mut record)?;
+        let hinted = read_lines(&mut reader, line_count, &mut record)?;
         let hinted_value = hinted
             .then(|| decode_toon_record(&record, NormalizationError::Toon).ok())
             .flatten()
-            .filter(|value| value_digest(value).is_ok_and(|digest| digest == *expected_value));
+            .filter(|value| value_digest(value).is_ok_and(|digest| digest == expected_value));
         if let Some(value) = hinted_value {
             push_digest(&mut digest, &value, ToolKind::Tq)?;
             continue;
@@ -1153,9 +1170,10 @@ fn digest_toon_values(
         let mut scanned_len = 0;
         let mut decode_attempts = 0;
         loop {
+            check_cancelled(cancellation)?;
             if let Some((value, consumed_len)) = matching_toon_prefix(
                 &record,
-                *expected_value,
+                expected_value,
                 &mut scanned_len,
                 &mut decode_attempts,
             )? {
@@ -1294,6 +1312,12 @@ fn decode_toon_record(
         tq_toon::DecoderConfig::default(),
     )
     .map_err(|decode| error(decode.to_string()))?;
+    if documents.len() != 1 {
+        return Err(error(format!(
+            "record contains {} documents; expected exactly one",
+            documents.len()
+        )));
+    }
     let document = documents
         .pop()
         .ok_or_else(|| error("record contains no document".to_owned()))?;
@@ -1337,7 +1361,7 @@ mod tests {
         DatasetSelector, DatasetTier, ExecutionClass, InputFormat, MeasuredOutcome, MeasuredStatus,
         MeasurementProtocol, OutputContract, OutputContractKind, RssProvenance,
     };
-    use crate::compatibility::ProcessStatus;
+    use crate::compatibility::{NormalizationError, ProcessStatus};
     use crate::corpus::ArtifactIdentity;
 
     fn args(values: &[&str]) -> Vec<String> {
@@ -1416,6 +1440,13 @@ mod tests {
     }
 
     #[test]
+    fn toon_frame_rejects_multiple_documents_in_one_record() {
+        let error = super::decode_toon_record(b"1\n2\n", NormalizationError::Toon)
+            .expect_err("one frame must contain one document");
+        assert!(matches!(error, NormalizationError::Toon(_)));
+    }
+
+    #[test]
     fn rss_limited_reference_is_marked_unverified_resource() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let stdout = directory.path().join("stdout");
@@ -1450,12 +1481,12 @@ mod tests {
             process_group_rss_observed: false,
         };
         let observation = correctness_observation(
-            &stdout,
-            &stderr,
+            (&stdout, &stderr),
             crate::compatibility::ToolKind::Jq,
             crate::benchmark::OutputContractKind::SemanticSequence,
             &measured,
             &[],
+            None,
             None,
         )
         .expect("RSS-limited observation");
@@ -1569,10 +1600,9 @@ mod tests {
         fs::write(&path, b"a: 1\n2\n").expect("TOON output");
 
         let values = [json!({"a": 1}), json!(2)];
-        let mut expected = semantic_digest(values.iter()).expect("semantic digest");
-        expected.toon_line_counts = Some(vec![2, 1]);
+        let expected = semantic_digest(values.iter()).expect("semantic digest");
 
-        let actual = digest_toon_values(&path, Some(&expected)).expect("normalized values");
+        let actual = digest_toon_values(&path, Some(&expected), None).expect("normalized values");
 
         assert_eq!(actual, expected);
         assert_eq!(actual.result_count, 2);

@@ -46,3 +46,8 @@ debug = "line-tables-only"
 
 [profile.dev]
 debug = "line-tables-only"
+
+# Fresh worker provenance hashes remain inside native benchmark deadlines.
+# Optimize hashing rather than caching away executable changes.
+[profile.dev.package.sha2]
+opt-level = 3

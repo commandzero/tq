@@ -20,7 +20,9 @@ pub struct BenchmarkCampaignReport {
     pub schema_version: u32,
     /// Unique local campaign ID.
     pub campaign_id: String,
-    /// smoke, standard, or large.
+    /// Named scenario collection, independent of run extent.
+    pub suite: String,
+    /// Run extent: quick, standard, or extended.
     pub profile: String,
     /// Host/compiler identity.
     pub environment: EnvironmentManifest,
@@ -36,6 +38,32 @@ pub struct BenchmarkCampaignReport {
     pub regression_gate: RegressionGate,
     /// Overall status.
     pub final_status: BenchmarkFinalStatus,
+    /// Live execution policy and completion evidence; absent in historical reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<CampaignExecution>,
+}
+
+/// Bounded campaign policy and durable progress.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CampaignExecution {
+    /// Fast representative selection or explicit exhaustive coverage.
+    pub mode: String,
+    /// Screening, selected comparison, catalog, or explicit sample count.
+    pub sampling: String,
+    /// Whether separate RSS diagnostic repetitions were requested.
+    pub instrument_rss: bool,
+    /// Total wall-clock budget, including preparation and correctness.
+    pub campaign_budget_seconds: u64,
+    /// Wall-clock budget shared by every phase and adapter of one case.
+    pub case_budget_seconds: u64,
+    /// Number of rows in the selected plan.
+    pub planned_rows: usize,
+    /// Elapsed wall time at this checkpoint.
+    pub elapsed_seconds: f64,
+    /// True only after every planned row has been recorded without interruption.
+    pub complete: bool,
+    /// Cases or campaign phases that stopped before completing their plan.
+    pub interruptions: Vec<String>,
 }
 
 /// Exact benchmark input identity and logical shape.
@@ -306,7 +334,7 @@ impl BenchmarkCampaignReport {
     ///
     /// Returns an error when a measured sample lacks positive authoritative RSS
     /// or explicit provenance, when a timed row has no samples, or when a
-    /// native RSS-limited timed row lacks valid separate enforcement evidence.
+    /// native RSS-limited timed row lacks valid in-flight enforcement evidence.
     pub fn validate_authoritative_rss(&self) -> Result<(), String> {
         for row in &self.cases {
             for (index, sample) in row
@@ -373,6 +401,24 @@ impl BenchmarkCampaignReport {
     /// Returns an error when native samples lack calibrated timing, explicit
     /// lifetime scope, worker identity, or validated launch-isolation evidence.
     pub fn validate_for_publication(&self) -> Result<(), String> {
+        if self.profile == "quick"
+            || self
+                .execution
+                .as_ref()
+                .is_some_and(|execution| execution.sampling == "quick")
+        {
+            return Err(
+                "quick results are session diagnostics, not publication reports".to_owned(),
+            );
+        }
+        if self.final_status == BenchmarkFinalStatus::Incomplete
+            || self
+                .execution
+                .as_ref()
+                .is_some_and(|execution| !execution.complete)
+        {
+            return Err("incomplete campaign cannot be published as completed results".to_owned());
+        }
         let has_native_samples = self.cases.iter().any(|row| {
             row.samples
                 .iter()
@@ -506,6 +552,8 @@ pub enum BenchmarkFinalStatus {
     ObservedFailures,
     /// tq exceeded its own comparable baseline threshold.
     Regression,
+    /// Running, cancelled, deadline-limited, or aborted before completing the plan.
+    Incomplete,
 }
 
 impl BenchmarkCampaignReport {
@@ -514,8 +562,8 @@ impl BenchmarkCampaignReport {
     pub fn render_human(&self) -> String {
         use std::fmt::Write as _;
         let mut output = format!(
-            "benchmark {}: {:?}\nmachine: {}\n",
-            self.profile, self.final_status, self.environment.machine_identity
+            "benchmark {} / {}: {:?}\nmachine: {}\n",
+            self.suite, self.profile, self.final_status, self.environment.machine_identity
         );
         for (title, family) in [
             ("same-format", ComparisonFamily::SameFormat),
@@ -637,6 +685,29 @@ fn report_comparability(
     self_regression: bool,
 ) -> Comparability {
     let mut reasons = Vec::new();
+    if [left, right].iter().any(|report| {
+        report.final_status == BenchmarkFinalStatus::Incomplete
+            || report
+                .execution
+                .as_ref()
+                .is_some_and(|execution| !execution.complete)
+    }) {
+        reasons.push("campaign is incomplete".to_owned());
+    }
+    if self_regression
+        && [left, right].iter().any(|report| {
+            report.profile == "quick"
+                || report
+                    .execution
+                    .as_ref()
+                    .is_some_and(|execution| execution.sampling == "quick")
+        })
+    {
+        reasons.push("quick campaign evidence cannot support formal regression".to_owned());
+    }
+    if left.suite != right.suite {
+        reasons.push("evaluation suite differs".to_owned());
+    }
     if left.profile != right.profile {
         reasons.push("campaign profile differs".to_owned());
     }
@@ -973,7 +1044,9 @@ pub fn evaluate_regression(
     if !comparability.comparable {
         let (unavailable, failures): (Vec<_>, Vec<_>) =
             comparability.reasons.into_iter().partition(|reason| {
-                reason == "campaign profile differs"
+                reason == "evaluation suite differs"
+                    || reason == "quick campaign evidence cannot support formal regression"
+                    || reason == "campaign profile differs"
                     || reason == "machine identity differs"
                     || reason == "operating system differs"
                     || reason == "corpus identity differs"
@@ -1273,8 +1346,17 @@ fn validate_instrumented_samples(row: &BenchmarkRow) -> Option<String> {
         if row.outcome == BenchmarkOutcome::Timed
             && row.limits.rss_bytes.is_some()
             && native_primary
+            && row.samples.iter().any(|sample| {
+                sample
+                    .measurement_protocol
+                    .as_ref()
+                    .is_none_or(|protocol| protocol.rss_poll_interval_micros.is_none())
+            })
         {
-            return Some("lacks matching instrumented RSS-limit repetitions".to_owned());
+            return Some(
+                "lacks in-flight RSS enforcement in primary samples or separate repetitions"
+                    .to_owned(),
+            );
         }
         return None;
     }

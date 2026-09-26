@@ -57,12 +57,17 @@ One scenario page corresponds to each checked-in question fixture. The fixtures 
 
 ## Method
 
-This suite runs separately from the default tests and benchmark profiles. From
-the repository root:
+This compatibility suite runs separately from ordinary compatibility cases
+and benchmark suites. From the repository root:
 
 ```console
-./scripts/campaign-run.sh benchmark stack-overflow
+./scripts/campaign-run.sh compatibility stack-overflow extended
 ```
+
+The current extended profile takes one warmup and five measured samples per
+configuration; quick takes 0+1 and standard takes 1+3. The historical Results
+below were recorded using a different 30-sample policy and are unchanged by
+this new invocation.
 
 The 148 successful timing rows used one warmup and 30 measured samples for each
 tool, for 4,440 accepted timing samples. The two correctness-failure rows each

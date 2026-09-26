@@ -358,3 +358,89 @@ make the cases one executable example.
 
 **Compatibility verdict**: The assessed relationship between an observed case
 and its reference contract, distinct from whether the source has been audited.
+
+## Evaluation concerns
+
+**Correctness**:
+Whether tq's observed results and process behavior satisfy the expected contract for a stated scenario. Agreement with a comparison baseline alone does not establish correctness.
+_Avoid_: Reference agreement, performance
+
+**Comparison**:
+An assessment of differences between tq observations and a selected baseline, including differences in results or resource measurements. Comparison does not by itself establish which behavior is correct.
+_Avoid_: Correctness verdict, benchmark
+
+**Baseline**:
+The selected reference observations against which a tq run is compared. A baseline may come from a previous tq build or an alternative tool.
+_Avoid_: Expected result, previous tq build only
+
+**Performance**:
+The resource cost of executing a stated tq scenario, including elapsed time and memory use. Performance can be measured without a baseline and compared when suitable baseline measurements exist.
+_Avoid_: Correctness, comparison
+
+**Compatibility**:
+Whether tq satisfies a specified external usage contract for a stated scenario. Compatibility is scoped to that contract and is distinct from a declaration that a capability exists.
+_Avoid_: Syntax acceptance, capability declaration, universal jq equivalence
+
+**Benchmark**:
+A repeatable evaluation of tq's resource costs for stated scenarios, with or without comparison baselines. Correctness checks may qualify its measurements without making all correctness or compatibility checks benchmarks.
+_Avoid_: All testing, compatibility audit
+
+## Evaluation organization
+
+**Evaluation suite**:
+A named collection of related tq scenarios evaluated for a stated purpose. A suite may produce evidence for several concerns without being a benchmark.
+_Avoid_: Benchmark as an umbrella term
+
+**Evaluation scenario**:
+A named tq workload assessed against a particular data source and required behavior. Different-size subsets of that source are input-size variants of the same scenario; substituting a different dataset changes the scenario.
+_Avoid_: Sampling level, run extent
+
+**Run extent**:
+The selected scope of a tq evaluation's scenario coverage, input sizes, observations, and reporting work. Quick, standard, and extended are run extents, not names for particular input sizes or comparison baselines.
+_Avoid_: Input-size tier, format profile
+
+**Run profile**:
+A named choice of run extent: quick, standard, or extended. A run profile is selected independently of the evaluation suite and does not identify a workload or data source.
+_Avoid_: Suite name, input-size tier
+
+**Quick run**:
+A diagnostic benchmark run constrained to less than one minute of execution, excluding only compilation. Preparation, correctness checks, one measured iteration with no warmup, reporting, and cleanup all count toward that limit. It plans the standard scenario selection unless explicitly trimmed, but reports incomplete coverage if its time budget expires. Results remain temporary session artifacts presented as summary tables with light analysis.
+_Avoid_: Rapid, standard run, publication run
+
+**Standard run**:
+The default, bounded extent of a tq evaluation, chosen to answer its routine question with representative scenarios, input sizes, and observations. Its input-size selection contributes to keeping the evaluation duration practical.
+_Avoid_: Smoke, quick run, fast tier
+
+**Extended run**:
+An opt-in superset of the corresponding standard run's evaluation work, retaining its scenarios and input-size coverage while adding coverage, observations, durable documentation, or a combination of these. An extended run may execute the same checks as standard when its additional work is documentation.
+_Avoid_: Large tier, extra-large tier, exhaustive by implication
+
+**Large-input suite**:
+A collection of tq evaluation scenarios concerned with large-input processing, including parsing and selected-array sorting. Standard and extended runs select coverage within this suite, with extended retaining standard coverage and potentially adding larger inputs.
+_Avoid_: Large run extent, extra-large run extent, selected-array sorting as an extra-large tier
+
+**jq-manual suite**:
+A compatibility-focused evaluation of tq against the usage contracts documented by jq, producing correctness and comparison evidence. Standard runs its compatibility checks for current-session testing; extended runs the same checks and also generates and updates durable documentation.
+_Avoid_: Iteration-speed benchmark, reduced manual sample
+
+**Stack Overflow suite**:
+A compatibility-focused evaluation of jq usage scenarios drawn from Stack Overflow. Correctness comparisons and resource measurements are evidence produced by the suite; quick, standard, and extended describe its run extent rather than its identity.
+_Avoid_: Stack Overflow profile, benchmark-only suite
+
+**Input-size variant**:
+A reproducible scenario input drawn from the same data source at a specified size. Buildings and earthquakes are different scenario data sources, not input-size variants of each other.
+_Avoid_: Dataset substitution, different scenario
+
+## Evaluation reporting
+
+**Report disposition**:
+Whether an evaluation's reported observations remain temporary session artifacts or become durable documentation. Disposition describes the destination and persistence of evidence, not the concern being evaluated.
+_Avoid_: Run extent, correctness verdict
+
+**Session report**:
+Temporary evaluation evidence intended for inspection within the current working session rather than as a durable reference.
+_Avoid_: Published result, reference documentation
+
+**Published evaluation report**:
+Durable documentation of an evaluation's observations, comparison context, and interpretation.
+_Avoid_: Temporary artifact, passing verdict

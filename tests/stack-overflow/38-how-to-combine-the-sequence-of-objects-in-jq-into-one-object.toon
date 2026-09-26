@@ -20,6 +20,9 @@ answer:
 benchmark:
   input_format: json
   query: add
+  yq:
+    query: ".[] as $item ireduce (null; . + $item)"
+    note: "yq lacks jq's add builtin. This native reduction preserves shallow, right-hand-wins object merging and returns null for an empty array."
   input[2]:
     - a: green
       b: white

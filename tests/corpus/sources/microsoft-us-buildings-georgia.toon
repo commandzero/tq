@@ -2,7 +2,7 @@ schema_version: 1
 id: microsoft-us-buildings-georgia
 kind: geojson
 format: json
-campaigns[1]: large
+campaigns[1]: large-input
 fetch:
   url: "https://minedbuildings.z5.web.core.windows.net/legacy/usbuildings-v2/Georgia.geojson.zip"
   refresh: versioned

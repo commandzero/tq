@@ -52,6 +52,8 @@ struct BenchmarkDefinition {
     #[serde(default)]
     output_mode: Option<String>,
     query: String,
+    #[serde(default)]
+    yq: Option<Value>,
     input: Value,
 }
 
@@ -83,7 +85,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let (answer, selection) = choose_answer(question, &answers)?;
         let filename = format!("{:02}-{}.toon", rank + 1, slug(&question.title));
         let scenario_path = options.output.join(filename);
-        let scenario = json!({
+        let mut scenario = json!({
             "schema_version": 1,
             "id": format!("stack-overflow.{:02}", rank + 1),
             "rank": rank + 1,
@@ -112,6 +114,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "input": benchmark.input,
             },
         });
+        if let Some(yq) = benchmark.yq {
+            scenario["benchmark"]["yq"] = yq;
+        }
         let content = tq_test_support::fixture_data::to_toon(&scenario)?;
         patch_text.push_str(&patch_for(&scenario_path, &content));
         patch_text.push('\n');

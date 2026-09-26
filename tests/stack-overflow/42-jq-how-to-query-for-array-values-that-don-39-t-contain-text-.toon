@@ -20,6 +20,9 @@ answer:
 benchmark:
   input_format: json
   query: ".[] | select(any(.imageTags[]; contains(\"latest\")) | not) | .name"
+  yq:
+    query: ".[] | select((.imageTags | any_c(contains(\"latest\"))) | not) | .name"
+    note: "yq uses any_c(condition) over the current array instead of jq's any(generator; condition). Empty tag arrays remain a valid negative case."
   input[3]:
     - name: one
       imageTags[2]: latest,stable

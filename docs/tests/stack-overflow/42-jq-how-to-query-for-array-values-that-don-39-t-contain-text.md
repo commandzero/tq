@@ -2,7 +2,7 @@
 type: Report
 title: "jq: how to query for array values that don't contain text \"foo\"?"
 description: "Benchmark reproduction and measured results for Stack Overflow scenario 42."
-generated: { by: codex/gpt-5.6-luna, at: 2026-09-13T05:53:31Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-26T06:55:52Z }
 ---
 
 # 42: jq: how to query for array values that don't contain text "foo"?
@@ -18,6 +18,13 @@ This page records the checked-in benchmark reproduction for the question. The be
 ## Benchmark input
 
 Query: `.[] | select(any(.imageTags[]; contains("latest")) | not) | .name`
+
+yq equivalent: `.[] | select((.imageTags | any_c(contains("latest"))) | not) | .name`
+
+yq uses `any_c(condition)` over the current array instead of jq's
+`any(generator; condition)`. This preserves substring matching and keeps objects
+with empty tag arrays. All tools remain checked against the original jq query's
+output. The historical results below predate this adaptation.
 
 Output mode: structured, using `tq`'s default TOON output.
 

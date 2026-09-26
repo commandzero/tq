@@ -157,9 +157,11 @@ pub fn capture(
                 (Some(compact), Some(expanded), Some(toon), None)
             }
             OutputMode::Raw | OutputMode::Color => {
-                let captures = capture_plan(mode, query)
+                let captures = [BenchmarkTool::Jq, BenchmarkTool::Yq, BenchmarkTool::Tq]
                     .into_iter()
-                    .map(|(tool, args)| {
+                    .map(|tool| {
+                        let args =
+                            profile_args(mode, tool, record.scenario.benchmark.query_for(tool));
                         execute(tools.get(&tool), args, record, root, mode)
                             .map(|capture| (tool, capture))
                     })
@@ -345,7 +347,7 @@ pub fn validate(campaign: &OutputCampaign, scenarios: &[ScenarioRecord]) -> Resu
                             campaign,
                             tool,
                             capture,
-                            &profile_args(mode, tool, &case.query),
+                            &profile_args(mode, tool, record.scenario.benchmark.query_for(tool)),
                         ) {
                             return Err(format!(
                                 "output command/options mismatch for {}",
@@ -410,29 +412,6 @@ fn command_matches(
     let mut expected = vec![identity.path.display().to_string()];
     expected.extend(args.iter().cloned());
     capture.command == expected
-}
-
-fn capture_plan(mode: OutputMode, query: &str) -> Vec<(BenchmarkTool, Vec<String>)> {
-    match mode {
-        OutputMode::Structured => vec![(
-            BenchmarkTool::Tq,
-            profile_args(mode, BenchmarkTool::Tq, query),
-        )],
-        OutputMode::Raw | OutputMode::Color => vec![
-            (
-                BenchmarkTool::Jq,
-                profile_args(mode, BenchmarkTool::Jq, query),
-            ),
-            (
-                BenchmarkTool::Yq,
-                profile_args(mode, BenchmarkTool::Yq, query),
-            ),
-            (
-                BenchmarkTool::Tq,
-                profile_args(mode, BenchmarkTool::Tq, query),
-            ),
-        ],
-    }
 }
 
 pub(crate) fn legacy_toon_args(query: &str) -> Vec<String> {
@@ -1154,6 +1133,7 @@ mod tests {
                 benchmark: BenchmarkInput {
                     output_mode: mode,
                     query: ".name".to_owned(),
+                    yq: None,
                     input: input.clone(),
                 },
             },
