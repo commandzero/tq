@@ -15,7 +15,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use report::{BenchmarkInput, load_scenarios, render_report_with_outputs, validate_report};
+use report::{
+    BenchmarkInput, load_scenarios, render_report_with_outputs, validate_publishable_report,
+    validate_report,
+};
 use sha2::{Digest as _, Sha256};
 use tq_test_support::{
     benchmark::{
@@ -243,48 +246,7 @@ fn run(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if options.command != Command::Run {
-        let input = options.input.as_ref().expect("saved report input required");
-        let source_bytes = fs::read(path_from_root(&root, input))?;
-        let mut saved = outputs::SavedReport::from_slice(&source_bytes)?;
-        validate_report(&saved.benchmark, &scenarios)?;
-        validate_publishable_report(&saved.benchmark)?;
-        if options.command == Command::Outputs {
-            let tools = discover_tools(&root)?;
-            let captured = outputs::capture(&scenarios, &tools, &root)?;
-            outputs::validate(&captured, &scenarios)
-                .map_err(|error| format!("output comparison failed: {error}"))?;
-            saved.output_comparison = Some(captured);
-            let enriched = outputs::attach_captures(
-                &source_bytes,
-                saved.output_comparison.as_ref().expect("captured outputs"),
-            )?;
-            let output = options.output.clone().unwrap_or_else(|| {
-                env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
-                    .map_or_else(|| PathBuf::from("benchmarks"), PathBuf::from)
-                    .join(".work/stack-overflow.json")
-            });
-            write_json(&path_from_root(&root, &output), &enriched)?;
-        }
-        let report_dir = path_from_root(
-            &root,
-            options
-                .report_dir
-                .as_deref()
-                .unwrap_or(Path::new("docs/tests/stack-overflow")),
-        );
-        render_report_with_outputs(
-            &saved.benchmark,
-            &scenarios,
-            &report_dir,
-            &root,
-            saved.output_comparison.as_ref(),
-        )?;
-        println!(
-            "rendered {} Stack Overflow scenario pages to {}",
-            scenarios.len(),
-            report_dir.display()
-        );
-        return Ok(());
+        return render_saved_report(&root, options, &scenarios);
     }
     if let (Some(output), Some(deadline)) = (&quick_output, &quick_deadline) {
         return run_quick(&root, &scenarios, output, deadline, quick_start);
@@ -381,6 +343,55 @@ fn run(options: &Options) -> Result<(), Box<dyn std::error::Error>> {
     if saved.benchmark.final_status == BenchmarkFinalStatus::ObservedFailures {
         return Err("one or more Stack Overflow benchmark rows failed".into());
     }
+    Ok(())
+}
+
+fn render_saved_report(
+    root: &Path,
+    options: &Options,
+    scenarios: &[report::ScenarioRecord],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = options.input.as_ref().expect("saved report input required");
+    let source_bytes = fs::read(path_from_root(root, input))?;
+    let mut saved = outputs::SavedReport::from_slice(&source_bytes)?;
+    validate_report(&saved.benchmark, scenarios)?;
+    validate_publishable_report(&saved.benchmark)?;
+    if options.command == Command::Outputs {
+        let tools = discover_tools(root)?;
+        let captured = outputs::capture(scenarios, &tools, root)?;
+        outputs::validate(&captured, scenarios)
+            .map_err(|error| format!("output comparison failed: {error}"))?;
+        saved.output_comparison = Some(captured);
+        let enriched = outputs::attach_captures(
+            &source_bytes,
+            saved.output_comparison.as_ref().expect("captured outputs"),
+        )?;
+        let output = options.output.clone().unwrap_or_else(|| {
+            env::var_os("TQ_BENCHMARK_ARCHIVE_ROOT")
+                .map_or_else(|| PathBuf::from("benchmarks"), PathBuf::from)
+                .join(".work/stack-overflow.json")
+        });
+        write_json(&path_from_root(root, &output), &enriched)?;
+    }
+    let report_dir = path_from_root(
+        root,
+        options
+            .report_dir
+            .as_deref()
+            .unwrap_or(Path::new("docs/tests/stack-overflow")),
+    );
+    render_report_with_outputs(
+        &saved.benchmark,
+        scenarios,
+        &report_dir,
+        root,
+        saved.output_comparison.as_ref(),
+    )?;
+    println!(
+        "rendered {} Stack Overflow scenario pages to {}",
+        scenarios.len(),
+        report_dir.display()
+    );
     Ok(())
 }
 
@@ -681,15 +692,6 @@ fn collect_scenario_rows(
             report.cases.push(row);
             record_progress(report)?;
         }
-    }
-    Ok(())
-}
-
-fn validate_publishable_report(
-    report: &BenchmarkCampaignReport,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if report.profile == "quick" {
-        return Err("quick Stack Overflow reports are table-only and cannot be published".into());
     }
     Ok(())
 }

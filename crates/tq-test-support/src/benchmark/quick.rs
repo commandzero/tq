@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
 use nix::{
     errno::Errno,
-    sys::signal::{Signal, killpg},
+    sys::signal::{Signal, kill, killpg},
     unistd::Pid,
 };
 
@@ -437,30 +437,48 @@ fn signal_root_group(root: u32, signal: Signal) {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn signal_owned_groups(root: u32, known: &HashMap<u32, ProcessInfo>, signal: Signal) {
+    // The unreaped exact child anchors its own process group. A descendant's
+    // membership in another group does not make that group ours: it may have
+    // joined a group containing processes outside this supervisor's tree.
     let mut groups = HashSet::from([root]);
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     if let Ok(snapshot) = process_snapshot() {
-        // Recheck an identity and group against the current process table; a
-        // stale PID alone is never authorization to signal a process group.
         for (pid, info) in known {
-            if snapshot
+            let Some(current) = snapshot
                 .get(pid)
-                .is_some_and(|current| current.birth == info.birth && current.group == info.group)
-            {
-                groups.insert(info.group);
+                .filter(|current| current.birth == info.birth)
+            else {
+                continue;
+            };
+            // Only the verified leader can establish ownership of a separate
+            // group. Its PID and PGID must match at the time of signalling.
+            if *pid == current.group {
+                groups.insert(*pid);
             }
         }
-    }
-    // A process group is signalled only while its observed member exists.
-    // Root's group is anchored by our unreaped direct child.
-    let own_group = nix::unistd::getpgrp().as_raw();
-    for group in groups {
-        if let Some(group) = i32::try_from(group)
-            .ok()
-            .filter(|group| *group != own_group)
-        {
-            signal_group(group, signal);
+
+        let own_group = nix::unistd::getpgrp().as_raw();
+        for group in &groups {
+            if let Some(group) = i32::try_from(*group)
+                .ok()
+                .filter(|group| *group != own_group)
+            {
+                signal_group(group, signal);
+            }
         }
+        // A verified descendant in an unowned group still needs cleanup,
+        // without broadcasting to any unrelated members of that group.
+        for (pid, info) in known {
+            if snapshot.get(pid).is_some_and(|current| {
+                current.birth == info.birth && !groups.contains(&current.group)
+            }) && let Ok(pid) = i32::try_from(*pid)
+            {
+                let _ = kill(Pid::from_raw(pid), signal);
+            }
+        }
+    } else {
+        // Root's group remains safe while its exact child is unreaped, even
+        // when enumeration of the other processes fails.
+        signal_root_group(root, signal);
     }
 }
 

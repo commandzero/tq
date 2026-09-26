@@ -50,6 +50,9 @@ Historical release entries retain their original ordering.
 
 - Quick benchmark deadlines now cover executable discovery and private guard-installation cleanup without a post-build Cargo invocation; interruptions and hard cutoffs retain exact-child cleanup ownership (#60).
 - Quick benchmark reports remain incomplete when terminal reporting or cleanup cannot finish.
+- Quick cleanup preserves unrelated process groups joined by owned descendants (#60).
+- Saved Stack Overflow reports cannot publish pages or output captures when final status or execution metadata marks them incomplete (#60).
+- Optimized development-build SHA-256 so fresh worker provenance checks do not consume short benchmark deadlines (#60).
 - Benchmark wrappers honor quick sampling and its budget defaults without replacing extended archive reports.
 - Formal regression comparisons reject quick evidence and mark cross-suite baselines unavailable rather than regressed.
 - Corpus admission preserves source object-member order and rejects malformed canonical JSON while retaining exact numeric comparisons.

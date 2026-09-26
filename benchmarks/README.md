@@ -66,9 +66,11 @@ campaign budgets are allowed; quick campaign/case overrides above 50 seconds
 are rejected.
 Expiry returns status 124 and leaves results incomplete. SIGINT and SIGTERM
 retain process-group cleanup ownership and return 130 and 143 respectively.
-Cleanup targets both the process group and the exact coordinator child. An
-unreaped child at the hard cutoff remains owned by a reserved reaper; after the
-guard process exits, the OS takes over reaping.
+Cleanup signals whole groups only when their leaders are owned; descendants
+that join unrelated groups are signalled individually after identity checks.
+The exact coordinator child is also targeted. An unreaped child at the hard
+cutoff remains owned by a reserved reaper; after the guard process exits, the
+OS takes over reaping.
 Only the supervisor accepts a completed checkpoint, after terminal reporting
 and child cleanup finish; blocked output cannot leave a successful checkpoint.
 Retained checkpoints show observations available before interruption, which
@@ -417,6 +419,11 @@ cargo run --quiet -p tq-test-support --bin tq-stack-overflow -- \
   --input /path/to/benchmark-archive/.work/stack-overflow.json \
   --report-dir /path/to/benchmark-archive/.work/stack-overflow-pages
 ```
+
+Both `render` and `outputs` reject saved reports with `final_status: incomplete`
+or `execution.complete: false`, even when every planned row is present.
+Historical reports without execution metadata remain readable, subject to the
+other report validation rules.
 
 Render-only reads the saved report, including serialized output captures, and
 does not execute jq, yq, or tq. It cannot replace a failed campaign run or add

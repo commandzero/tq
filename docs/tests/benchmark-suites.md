@@ -2,7 +2,7 @@
 type: Guide
 title: "Benchmark suites"
 description: "Choose a benchmark campaign, in-process microbenchmark, or focused regression probe."
-generated: { by: codex/gpt-6-astra, at: 2026-09-26T08:18:37Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-26T09:06:53Z }
 ---
 
 # Benchmark suites
@@ -205,6 +205,9 @@ not overwrite checked-in reference pages because this runner does not enforce
 the calibrated publication gate. See the
 [Stack Overflow campaign instructions](../../benchmarks/README.md#stack-overflow-top-50)
 for capture-only and saved-report rendering modes.
+Saved reports marked incomplete, either by final status or execution metadata,
+cannot publish pages or be enriched through `outputs`, even with full row
+coverage.
 
 ### Output colors
 
