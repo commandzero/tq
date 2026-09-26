@@ -1,6 +1,17 @@
 //! Cross-format materialization and ordered semantic-equivalence tests.
 
 use serde_json::{Map, Value, json};
+#[cfg(unix)]
+use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use tq_test_support::corpus::{
+    ArtifactIdentity, GeneratedArtifacts, validate_generated_representations_cached,
+    validate_generated_representations_with_tq,
+};
 use tq_test_support::corpus::{
     ConversionError, DifferenceKind, compare_ordered, finalize_generated_representations,
     generate_representations, validate_generated_representations,
@@ -143,26 +154,30 @@ fn semantic_comparison_rejects_type_value_and_array_order_changes() {
 }
 
 #[test]
-fn semantic_comparison_rejects_object_member_order_changes() {
+fn semantic_comparison_rejects_reordered_object_members() {
     let mut expected = Map::new();
     expected.insert("first".to_owned(), json!(1));
     expected.insert("second".to_owned(), json!(2));
     let mut actual = Map::new();
     actual.insert("second".to_owned(), json!(2));
-    actual.insert("first".to_owned(), json!(1));
+    actual.insert("first".to_owned(), json!(1.0));
 
     let difference = compare_ordered(&Value::Object(expected), &Value::Object(actual))
-        .expect_err("object order change");
+        .expect_err("object member order matters");
     assert_eq!(difference.kind, DifferenceKind::ObjectOrder);
-    assert_eq!(difference.path, "");
+    assert_eq!(difference.expected, "first,second");
+    assert_eq!(difference.actual, "second,first");
 }
 
 #[test]
-fn semantic_comparison_reports_numeric_fidelity_loss() {
+fn semantic_comparison_normalizes_integral_decimal_without_rounding_precision() {
+    let integral: Value = serde_json::from_str("34").expect("integral number");
+    let decimal: Value = serde_json::from_str("34.0").expect("decimal number");
+    compare_ordered(&integral, &decimal).expect("34.0 equals 34");
+
     let exact: Value = serde_json::from_str("9007199254740993").expect("exact number");
     let rounded: Value = serde_json::from_str("9007199254740992").expect("rounded number");
-
-    let difference = compare_ordered(&exact, &rounded).expect_err("numeric loss");
+    let difference = compare_ordered(&exact, &rounded).expect_err("precision loss");
     assert_eq!(difference.kind, DifferenceKind::NumericFidelity);
     assert_eq!(difference.expected, "9007199254740993");
     assert_eq!(difference.actual, "9007199254740992");
@@ -189,4 +204,135 @@ fn corrupted_generated_representation_is_rejected() {
         validate_generated_representations(&source, &yaml, &toon),
         Err(ConversionError::Semantic { format, .. }) if format == "yaml"
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_stream_gate_rejects_reordered_members_and_malformed_output() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let source = temp.path().join("source.json");
+    let yaml = temp.path().join("source.yaml");
+    let toon = temp.path().join("source.toon");
+    let tq = temp.path().join("tq-fake.sh");
+    fs::write(&source, br#"{"outer":{"first":34.0,"second":[1,2]}}"#).expect("source");
+    fs::write(&yaml, br#"{"outer":{"first":34,"second":[1,2]}}"#).expect("yaml");
+    fs::write(&toon, br#"{"outer":{"first":34,"second":[1,2]}}"#).expect("toon");
+    fs::write(
+        &tq,
+        "#!/bin/sh\nfor arg do input=\"$arg\"; done\ncat \"$input\"\n",
+    )
+    .expect("fake tq");
+    let mut permissions = fs::metadata(&tq).expect("fake metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&tq, permissions).expect("fake executable");
+
+    validate_generated_representations_with_tq(&tq, &source, &yaml, &toon)
+        .expect("nested numeric spelling is equivalent");
+    fs::write(&yaml, br#"{"outer":{"second":[1,2],"first":34}}"#).expect("reordered yaml");
+    assert!(matches!(
+        validate_generated_representations_with_tq(&tq, &source, &yaml, &toon),
+        Err(ConversionError::TqSemantic { format, .. }) if format == "yaml"
+    ));
+
+    fs::write(&yaml, br#"{"outer":{"first":34,"second":[1,2]}}"#).expect("restore yaml");
+    fs::write(&toon, b"{\"outer\":\x0c{\"first\":34,\"second\":[1,2]}}")
+        .expect("malformed toon stream");
+    assert!(matches!(
+        validate_generated_representations_with_tq(&tq, &source, &yaml, &toon),
+        Err(ConversionError::Tq { format, .. }) if format == "toon"
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn semantic_validation_cache_hits_and_invalidates_on_identity_change() {
+    let temp = tempfile::tempdir().expect("temporary directory");
+    let source = temp.path().join("source.json");
+    let yaml = temp.path().join("source.yaml");
+    let toon = temp.path().join("source.toon");
+    let count = temp.path().join("invocations");
+    let tq = temp.path().join("tq-fake.sh");
+    let document = br#"{"a":34.0,"items":[1,2]}"#;
+    for path in [&source, &yaml, &toon] {
+        fs::write(path, document).expect("representation");
+    }
+    fs::write(
+        &tq,
+        format!(
+            "#!/bin/sh\nprintf x >> '{}'\nfor arg do input=\"$arg\"; done\ncat \"$input\"\n",
+            count.display()
+        ),
+    )
+    .expect("fake tq");
+    let mut permissions = fs::metadata(&tq).expect("fake metadata").permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&tq, permissions).expect("fake executable");
+
+    let source_identity = identity(&source, "source.json");
+    let generated = GeneratedArtifacts {
+        yaml: identity(&yaml, "source.yaml"),
+        toon: identity(&toon, "source.toon"),
+    };
+    let validate = |artifacts| {
+        validate_generated_representations_cached(
+            temp.path(),
+            &tq,
+            &source,
+            &yaml,
+            &toon,
+            &source_identity,
+            artifacts,
+        )
+        .expect("semantic validation");
+    };
+    validate(&generated);
+    assert_eq!(fs::read(&count).expect("invocation count").len(), 3);
+
+    validate(&generated);
+    assert_eq!(fs::read(&count).expect("cached invocation count").len(), 3);
+
+    let cache_path = temp.path().join("semantic-validation-cache-v1.json");
+    let stale_cache = fs::read_to_string(&cache_path)
+        .expect("semantic cache")
+        .replace("tq-semantic-equivalence-v3", "tq-semantic-equivalence-v2");
+    fs::write(&cache_path, stale_cache).expect("stale semantic policy");
+    validate(&generated);
+    assert_eq!(
+        fs::read(&count).expect("policy invalidation count").len(),
+        6
+    );
+
+    let mut changed = generated.clone();
+    changed.yaml.sha256 = "identity-changed".to_owned();
+    validate(&changed);
+    assert_eq!(
+        fs::read(&count)
+            .expect("invalidated invocation count")
+            .len(),
+        9
+    );
+
+    let mut script = fs::read(&tq).expect("fake script bytes");
+    script.extend_from_slice(b"\n# binary identity change\n");
+    fs::write(&tq, script).expect("changed fake binary");
+    validate(&generated);
+    assert_eq!(
+        fs::read(&count).expect("binary invalidation count").len(),
+        12
+    );
+}
+
+#[cfg(unix)]
+fn identity(path: &std::path::Path, manifest_path: &str) -> ArtifactIdentity {
+    use std::fmt::Write as _;
+    let bytes = fs::read(path).expect("identity bytes");
+    let mut sha256 = String::with_capacity(64);
+    for byte in Sha256::digest(&bytes) {
+        write!(&mut sha256, "{byte:02x}").expect("write digest");
+    }
+    ArtifactIdentity {
+        path: manifest_path.to_owned(),
+        bytes: bytes.len() as u64,
+        sha256,
+    }
 }

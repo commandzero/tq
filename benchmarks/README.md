@@ -1,5 +1,8 @@
 # Benchmark campaigns
 
+Start with the [benchmark suite inventory](../docs/tests/benchmark-suites.md)
+to choose between native campaigns, in-process microbenchmarks, and focused probes.
+
 The [output color test](../docs/tests/output-colors-performance.md) has a
 checked-in `tq-color-bench` command. It runs correctness-gated monochrome/color
 measurements and updates its Results block, or regenerates that block from
@@ -19,8 +22,8 @@ updates the matching `## Results` blocks in `docs/tests/stack-overflow/index.md`
 and its 50 scenario pages. Each page has authored context that regeneration
 preserves. Do not embed archive paths, local executable paths, or exhaustive
 provenance in the pages. Raw samples, logs, and corpus artifacts remain in the
-benchmark archive. Render smoke before standard; rendering standard last leaves
-the comparison index on the full standard review.
+benchmark archive. Render smoke-suite results before natural-corpus results;
+rendering natural-corpus last leaves the comparison index on its full review.
 
 Every benchmark report must include the measured host's CPU model, logical
 CPU count, RAM capacity, OS, architecture, kernel, and build profile. Use
@@ -37,8 +40,90 @@ cargo run -p tq-test-support --bin tq-bench -- \
   --render-only REPORT_PATH --markdown-dir docs/tests/comparison
 ```
 
-Rapid and large runs do not replace the standard reference pages. Smoke fills
-the three additional workload pages included in the current review.
+Quick results are session-only diagnostics and cannot replace durable reference
+pages. Standard runs also default to temporary session reports; publication is
+an explicit, calibrated CLI operation rather than a dispatcher side effect.
+
+## Suites and sampling profiles
+
+The suite selects inputs and cases: `natural-corpus` uses cached USGS feeds and
+helper workloads, `large-input` uses the Microsoft building-footprint source
+with JSON workloads, and `smoke` uses checked-in small fixtures. The independent
+profile selects measurement extent: `quick` is 0 warmups + 1 measured sample,
+`standard` (the default) is 1+3, and `extended` is 1+5. Neither changing the
+profile nor `--sampling` changes the input source. A quick run plans the same
+cases as standard unless explicitly trimmed with `--case` or `--adapter`.
+Quick retains correctness checks and native accounting preflight, but produces
+only session diagnostics, not publication or regression evidence.
+
+Quick must finish in less than one minute, excluding only compilation. Executable
+artifact discovery runs under the shared guard, and non-compilation dispatcher
+setup reduces its remaining budget. The 50-second work budget covers corpus
+acquisition/conversion, tool discovery, preflight, correctness, measurement,
+reporting, and cleanup, with a hard cutoff at 55 seconds. Direct CLI runs and
+`--sampling quick` use the same guard and effective option policy. Smaller
+campaign budgets are allowed; quick campaign/case overrides above 50 seconds
+are rejected.
+Expiry returns status 124 and leaves results incomplete. SIGINT and SIGTERM
+retain process-group cleanup ownership and return 130 and 143 respectively.
+Only the supervisor accepts a completed checkpoint, after terminal reporting
+and child cleanup finish; blocked output cannot leave a successful checkpoint.
+Retained checkpoints show observations available before interruption, which
+may occur during preparation before any measurements exist.
+
+`large-input` fast standard mode includes JSON parse/discard and
+dead-sort-length; extended adds selected-array sorting, with five measured
+samples by default even for that selected sort. Exhaustive mode selects the
+broader applicable matrix.
+For standard and extended, the fast large-input budgets default to 900 seconds
+per campaign and 300 seconds per case. Those budgets include correctness and
+measurement work, not shell corpus preparation; process cleanup may extend
+those deadlines. Quick instead uses the shared end-to-end budget above.
+
+Quick and standard default reports stay in an OS temporary session directory,
+with the path printed to stderr. This also applies to `SAMPLING=quick` with an
+extended positional profile and to the selected-sort wrapper. `--output` or an
+explicit wrapper output directory can select another session location.
+Quick rejects Markdown publication, baseline regression evaluation, and duplicate
+RSS-enforcement repetitions. Quick evidence is also rejected when supplied as a
+baseline to a non-quick run. Extended runs do not publish pages automatically:
+publication requires explicit calibration evidence and a CLI request.
+
+`--sampling quick|screen|compare|extended|catalog` overrides the default
+repetition policy when permitted. These policies are respectively 0+1, 1+1,
+1+3, 1+5, and each workload's configured repetitions. `--sampling extended`
+does not add input-size variants or publish documentation.
+
+Use the CLI for explicit selections:
+
+```console
+# A selected large-input comparison: one warmup and three measured samples.
+cargo run --release -p tq-test-support --bin tq-bench -- run \
+  --suite large-input --profile standard --case benchmark.dead-sort-length \
+  --manifest MANIFEST --cache-root CACHE_ROOT --output comparison.json
+
+# Opt into the full applicable large-input JSON workload matrix and catalog repetitions.
+SAMPLING=catalog BENCHMARK_MODE=exhaustive ./scripts/campaign-run.sh benchmark large-input extended
+
+# A provided GeoJSON input needs no generated YAML or TOON.
+cargo run --release -p tq-test-support --bin tq-bench -- run \
+  --suite large-input --profile extended --input INPUT.geojson \
+  --case benchmark.large-selected-sort --output selected.json
+```
+
+`--adapter ID` is repeatable and always retains the correctness reference.
+Catalog sampling uses each workload's configured repetitions, including in
+exhaustive mode. Non-quick exhaustive mode defaults to 3600-second campaign and
+600-second case budgets. Override these with `--campaign-budget-seconds` and
+`--case-budget-seconds`; the dispatcher accepts `CAMPAIGN_BUDGET_SECONDS`,
+`CASE_BUDGET_SECONDS`, `BENCHMARK_MODE`, and `SAMPLING`.
+
+Reports are atomically checkpointed after each completed row. Deadline or
+signal interruption leaves `final_status: "incomplete"` with execution policy,
+planned row count, elapsed time, and interruption reasons. Incomplete reports
+are diagnostic evidence only: they cannot publish comparison pages or pass a
+regression comparison. Exit status is 2 for incomplete campaigns, 1 for
+observed failures/regressions, and 0 for a completed passing campaign.
 
 ## Required execution permissions and accounting
 
@@ -65,9 +150,9 @@ memory out of the child's inherited RSS floor. Its allocation preflight runs thr
 native interface before corpus preparation. If preflight cannot collect positive
 RSS, valid units, or explicit collector provenance, abandon the campaign before
 corpus work and repair the host permissions before retrying. A later missing or
-invalid authoritative sample invalidates the campaign; do not write or review a
-partial report. A draft or unverified native backend is not accepted benchmark
-evidence.
+invalid authoritative sample invalidates the campaign. Retain its incomplete
+checkpoint for diagnosis, never as accepted benchmark evidence. A draft or
+unverified native backend is not accepted benchmark evidence.
 
 ### Timeout and cleanup ownership
 
@@ -100,17 +185,19 @@ default dependency: select it only for an explicitly requested process-group
 RSS limit or diagnostic, and record its process scope and sampling interval
 because a sampler can miss short-lived peaks. Measurements without sampled
 limits work without `ps`; catalog cases selecting an RSS limit still require
-it for enforcement repetitions. Production runs need neither `/usr/bin/time`
+it for live enforcement. Production runs need neither `/usr/bin/time`
 nor Python allocation probes.
 
-For RSS-limited rows, the sampling loop runs a separate instrumented repetition
-before each timing repetition. A failed instrumented repetition stops that
-row. The timing repetition has no recurring RSS sampler; it still checks the
-native peak against the limit at exit and enforces timeout and output limits
-while running. This is not an in-flight RSS ceiling for the timing repetition.
-Reports retain `instrumented_samples` separately and never mix them into
-primary timing or peak-RSS summaries. Primary RSS still comes from the native
-waiter for that exact timing child.
+By default an RSS-limited row samples process-group memory during each primary
+invocation instead of running duplicate enforcement repetitions. Native
+`wait4` peak RSS remains the authoritative reported peak. The sampling protocol
+is recorded and must match when comparing reports.
+
+Use `--instrument-rss` to opt into separate enforcement repetitions before
+uninstrumented timing repetitions. A failed enforcement repetition stops the
+row. The uninstrumented timing invocation checks native peak RSS at exit;
+this is not an in-flight memory ceiling. Reports retain separate repetitions
+in `instrumented_samples`, never in primary timing or peak-RSS summaries.
 
 Requested inspection fails if it returns no positive process-group RSS while
 the exact child is still alive. A child that exits before inspection can have
@@ -148,12 +235,11 @@ Repeated samples and dispersion remain necessary; a shared harness does not
 make noise cancel exactly. Runs without linked controls are diagnostic
 evidence, not a completed native publication review.
 
-For `scripts/campaign-run.sh benchmark standard`, set
-`TQ_TIMING_CALIBRATION` to that summary path. The script requires it before
-preparing the corpus because standard runs publish comparison tables. Rapid,
-smoke, and large runs also forward this variable when supplied. Use the CLI
-directly for multiple calibration files or to record a standard campaign
-without publishing tables.
+The dispatcher forwards `TQ_TIMING_CALIBRATION` when supplied but does not
+require it for diagnostic standard runs or automatically publish their results.
+Use the CLI with `--markdown-dir` and matching calibration evidence for explicit
+publication; multiple calibration files may be required for mixed instrumentation.
+Quick reports cannot be published, including through `--render-only`.
 
 For issue #30, review wall time and peak RSS independently for every comparable
 workload. Disclose each increase above 20% with baseline, candidate, sample
@@ -165,7 +251,17 @@ remain comparative evidence, never tq self-regression evidence.
 
 The catalog in `cases/workloads.jsonl` runs jq on JSON, yq on JSON and YAML, and
 tq on JSON, YAML, and TOON. It reports native-format views separately. The
-runner checks ordered values before it times a row.
+runner checks ordered values before it times a row. For semantic row-output
+comparisons, object key order and exact equivalent numeric spellings (such as
+`34` and `34.0`) do not change equivalence; array and result order do.
+High-cardinality result witnesses are disk-backed rather than limited to a
+fixed number of values. Correctness capture byte limits still apply; a single
+JSON value can still require materialization.
+
+Corpus admission is stricter: generated representations must preserve source
+object-member order as well as array and result order. Their canonical JSON
+must pass strict syntax validation without rounding exact numeric values.
+Cached admission evidence includes the ordering policy and validator identity.
 
 The `format-*` cases exercise jq-style formatting operators inside queries,
 including `@json`, `@csv`, and `@uri`. They run tq on JSON, YAML, and TOON
@@ -174,16 +270,21 @@ not tests of the CLI's output-format option. An adapter marked inapplicable
 in the catalog is excluded from measurement; the report's `unsupported`
 status does not establish a missing product capability.
 
-Profiles keep their natural source sizes. Smoke uses checked-in examples.
-Rapid uses the cached `usgs-all-month` USGS snapshot with the five high-signal
-cases and one measured sample per row. Standard uses cached USGS feeds. Large
-uses the roughly 1 GB Microsoft US building-footprint archive. The first run on
-a machine downloads missing sources, then uses the release `tq` binary to
-generate and validate a compact,
-lossless YAML 1.2 JSON-subset representation and TOON. Later runs reuse the
-admitted snapshot without network access, conversion, or full-file hashing.
-Extra-large runs the selected-array JSON scaling benchmark against that same
-Microsoft archive, comparing one, four, eight, and all available Rayon workers.
+Suites currently retain their natural source sizes: changing the profile does
+not create smaller or larger subsets of a single source. Smoke uses checked-in
+examples; natural-corpus uses cached USGS feeds and helper workloads. Large-input
+uses the roughly 1 GB Microsoft US building-footprint archive. A first run
+downloads missing sources; `tq-corpus prepare` and `refresh` generate and
+validate compact, lossless YAML 1.2 JSON-subset and TOON representations
+before admitting the manifest, including for large-input. The native
+large-input benchmarks measure JSON adapters by default; only direct
+`--input GEOJSON` runs avoid that corpus conversion. Later manifest-based runs
+reuse admitted snapshots without network access, conversion, or full-file hashing.
+`WORKERS` chooses one Rayon thread setting (default 1) for the standalone
+selected-sort wrapper; it does not run a thread-count matrix or imply parallel
+decoding. `cases/parallel-selected-json.sh` invokes the native large-input
+extended profile and requires built `tq-bench` and `tq-bench-worker` binaries
+alongside `tq` (or explicit `TQ_BENCH` and `TQ_BENCH_WORKER` paths).
 
 If a refresh stops after installing generated files but before admitting the
 manifest, resume validation without regenerating the files:
@@ -194,8 +295,10 @@ cargo run --release -p tq-test-support --bin tq-corpus -- \
 ```
 
 You can rerun `finalize` on a manifest that already passed cross-format
-validation. It validates the existing representations, then records their byte
-counts and SHA-256 identities in one atomic update.
+validation. Semantic validation evidence is reused only when artifact
+identities, the tq executable identity, and the semantic policy match.
+Changed artifacts, validator binaries, or policy invalidate that evidence.
+The manifest's byte counts and SHA-256 identities are recorded atomically.
 
 Preparation is idempotent and normally happens through the Make target. To
 prepare without running benchmarks, build `tq` and invoke the release corpus
@@ -204,36 +307,39 @@ helper directly:
 ```console
 cargo build --release -p tq-cli
 TQ_BIN="$PWD/target/release/tq" cargo run --release -p tq-test-support --bin tq-corpus -- \
-  prepare tests/corpus/sources /path/to/tq-benchmarks/.work/corpus standard
+  prepare tests/corpus/sources /path/to/tq-benchmarks/.work/corpus natural-corpus
+TQ_BIN="$PWD/target/release/tq" cargo run --release -p tq-test-support --bin tq-corpus -- \
+  prepare tests/corpus/sources /path/to/tq-benchmarks/.work/corpus large-input
 ```
 
-Use `large` for the building-footprint snapshot. `prepare` reuses the newest
-admitted source and resumes an interrupted snapshot. Use `refresh` instead of
-`prepare` only when you intend to download current upstream data. Use `verify`
-for an explicit full SHA-256 and cross-format audit. Normal benchmark runs use
-the machine-local verification cache and check file metadata before replay.
+Use `large-input` for the building-footprint snapshot. `prepare` reuses the
+newest admitted source and resumes an interrupted snapshot. Use `refresh`
+instead of `prepare` only when you intend to download current upstream data.
+Use `verify` for an explicit full SHA-256 audit; cross-format semantic
+validation reuses matching evidence. Normal benchmark runs use the
+machine-local artifact verification cache and check file metadata before
+replay. Admission through `prepare` or `verify` establishes current semantic
+validation evidence.
 
 The campaign runner prepares or replays the selected corpus and writes local
-reports:
+reports. Its canonical form is `campaign-run.sh benchmark SUITE PROFILE`, with
+an optional profile defaulting to `standard` and no suite defaulting to
+`natural-corpus`:
 
 ```console
 ./scripts/campaign-run.sh benchmark
-./scripts/campaign-run.sh benchmark rapid
+./scripts/campaign-run.sh benchmark natural-corpus quick
 ./scripts/campaign-run.sh benchmark smoke
-./scripts/campaign-run.sh benchmark standard
-./scripts/campaign-run.sh benchmark large
-./scripts/campaign-run.sh benchmark extra-large
-TQ_CORPUS_ORIGIN=refreshed ./scripts/campaign-run.sh benchmark extra-large
-./scripts/campaign-run.sh benchmark stack-overflow
+./scripts/campaign-run.sh benchmark natural-corpus standard
+./scripts/campaign-run.sh benchmark large-input standard
+./scripts/campaign-run.sh benchmark large-input extended
+TQ_CORPUS_ORIGIN=refreshed ./scripts/campaign-run.sh benchmark large-input extended
+./scripts/campaign-run.sh compatibility stack-overflow standard
 ```
 
-The standard and large profiles reuse the machine-local corpus. Set
-`TQ_CORPUS_ORIGIN=refreshed` to acquire a new upstream snapshot before running
-the rapid, standard, large, or extra-large profile.
-
-The campaign runner defaults to the rapid profile when called as
-`./scripts/campaign-run.sh benchmark`, and `tq-bench` uses the same default when
-no profile is supplied.
+Set `TQ_CORPUS_ORIGIN=refreshed` to acquire a new upstream snapshot for
+`natural-corpus` or `large-input`. Suite names are never positional profiles;
+`tq-bench` also defaults to `natural-corpus` and `standard`.
 
 ## Stack Overflow top 50
 
@@ -247,18 +353,22 @@ section. Generated metadata is limited to the campaign date, host, and tool
 versions. Exact executable paths, digests, and full samples stay in the raw
 archive.
 
-Run the suite from the repository root:
+Run the suite from the repository root, selecting quick 0+1, standard 1+3,
+or extended 1+5 independently of the `stack-overflow` suite:
 
 ```console
-./scripts/campaign-run.sh benchmark stack-overflow
+./scripts/campaign-run.sh compatibility stack-overflow standard
+./scripts/campaign-run.sh compatibility stack-overflow extended
 ```
 
-The wrapper saves measurements in the benchmark archive's
-`.work/stack-overflow.json` and diagnostic pages in
-`.work/stack-overflow-pages`. This runner does not yet enforce the calibrated
-publication gate, so a normal run does not overwrite the checked-in reference
-pages. The default rapid, standard, large, and smoke campaigns do not run
-these 50 scenarios, and the normal test suite does not invoke them.
+Quick prints diagnostic summaries and retains a session JSON report without
+captures or pages. Standard saves a temporary session report without updating
+pages. Extended saves measurements in the benchmark
+archive's `.work/stack-overflow.json` and diagnostic pages in
+`.work/stack-overflow-pages`. This runner does not enforce the calibrated
+publication gate, so normal runs do not overwrite checked-in reference pages.
+The benchmark suites, ordinary compatibility smoke/full, and the normal test
+suite do not automatically run these 50 scenarios.
 
 The normal run also captures each scenario's exact tool stdout. Captures and
 their derived output metrics are serialized in the saved report separately from
@@ -292,8 +402,9 @@ non-JSON, and error outputs remain captured but are excluded with a reason. The
 capture step does not add `--seq` or reformat stdout to hide an invalid
 comparison.
 
-The campaign uses one warmup and 30 measured samples for each small scenario.
-That sample count is part of the Stack Overflow benchmark contract.
+The saved historical Results on the scenario pages used one warmup and 30
+measured samples. New quick, standard, and extended compatibility runs use
+0+1, 1+3, and 1+5 respectively; this does not relabel earlier measurements.
 
 To regenerate diagnostic pages from saved measurements, use the binary's render mode:
 
@@ -310,9 +421,10 @@ missing measurements or captures. Passing the RSS checks alone does not establis
 publication readiness. Before selecting `--report-dir docs/tests/stack-overflow`,
 review the same-host native controls, measurement provenance, correctness and
 applicable regression disclosures described above. The runner does not automate
-that publication review. Historical reports may still be rendered, but the
-renderer labels their RSS as unverified and those pages are not accepted as
-current evidence.
+that publication review. Older reports without an explicit `suite` field need
+reviewed, explicit migration before current render tools can read them; do not
+silently relabel historical evidence. Legacy RSS remains unverified and those
+pages are not accepted as current evidence.
 
 The run performs the shared native RSS preflight before measured work begins.
 Every measured sample must retain authoritative RSS; process-group inspection
@@ -342,7 +454,7 @@ recorded corpus manifest:
 cargo build --release
 export TQ_BENCHMARK_ARCHIVE_ROOT=/path/to/tq-benchmarks
 TQ_BIN="$PWD/target/release/tq" cargo run --release -p tq-test-support --bin tq-bench -- \
-  run --profile standard \
+  run --suite natural-corpus --profile standard \
   --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/standard.json" \
   --cache-root "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/corpus" \
   --origin frozen --manifest PATH
@@ -434,23 +546,24 @@ RSS, output bytes, plan class, and every failure row. On the recorded local
 host, the large explicit-stream release gate requires peak RSS at or below 128
 MiB.
 
-The current reviewed `tq`/`yq`/`jq` comparison is the accepted Linux rapid and
+The recorded `tq`/`yq`/`jq` comparison is the accepted Linux historical `rapid` and
 standard campaigns plus the three smoke-only workloads. Its findings are
 documented in `docs/tests/comparison/`. The archive stores the corresponding
 raw reports, logs, and provenance. This review does not include a new large
-corpus campaign; the large and extra-large procedures below remain separate
-diagnostic campaigns.
+corpus campaign; current large-input procedures below are diagnostic and do
+not retroactively change the accepted reports.
 
-The extra-large parallel campaign is intentionally narrower than the full
-large matrix. It correctness-checks `[.features[].properties.release] | sort`
-against a single-process `jq` baseline, then records wall time, user/system
-CPU, peak RSS, and output digest for `jq` and `tq` with one, four, eight, and all
-available workers. It reuses the validated
-`microsoft-us-buildings-georgia` manifest and writes samples under
-`.work/parallel-selected-json/YYYY-MM-DD/`.
+Selected-array sorting is a case in the large-input suite, not a fourth
+profile. It correctness-checks `[.features[].properties.release] |
+sort` against jq, then records native wall time, user/system CPU, and peak RSS
+for jq and tq. The extended profile uses one warmup and five measured samples
+by default; override sampling explicitly when diagnosing a particular row.
+The admitted `microsoft-us-buildings-georgia` manifest is reusable with
+`--suite large-input --manifest PATH --cache-root CACHE_ROOT`. To run just the
+selected sort against a provided JSON file:
 
 ```console
-./scripts/campaign-run.sh benchmark extra-large
+benchmarks/cases/parallel-selected-json.sh INPUT.geojson target/release/tq
 ```
 
 ## Native format reference campaign
@@ -463,12 +576,12 @@ process correctness gate then compares ordered row-ID output byte-for-byte.
 The plain labels and typed scalar fields avoid the deliberate yq profile
 differences documented in the compatibility review.
 
-Build release binaries first, then run the complete command elevated outside
-the sandbox. It uses the shared `/usr/bin/time -l` measurement implementation.
+Build the release tq, tq-bench, and tq-bench-worker binaries first, then run the
+command outside restricted sandboxes. It uses the shared native waiter.
 
 ```console
 TQ_JQ=/path/to/jq-1.8.1 TQ_YQ=/path/to/yq-4.53.2 TQ_BIN="$PWD/target/release/tq" \
-  target/release/tq-bench run --profile smoke \
+  target/release/tq-bench run --suite smoke --profile standard \
   --case benchmark.native-json-seq --case benchmark.native-csv \
   --case benchmark.native-tsv --output /path/to/tq-benchmarks/.work/native-formats.json
 ```

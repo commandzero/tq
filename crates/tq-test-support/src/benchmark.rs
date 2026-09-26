@@ -8,6 +8,7 @@ mod measure;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod native_process;
 mod probe;
+pub mod quick;
 mod report;
 mod runner;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -15,11 +16,11 @@ pub mod worker;
 
 pub use probe::{AllocationProbeError, run_allocation_probe};
 
-pub(crate) use correctness::SemanticDigester;
 pub use correctness::{
     CorrectnessDecision, CorrectnessObservation, CorrectnessPayload, SemanticDigest,
     correctness_gate, semantic_digest,
 };
+pub(crate) use correctness::{SemanticDigester, canonical_number};
 pub use environment::{EnvironmentManifest, collect_environment};
 pub use manifest::{
     BenchmarkAdapter, BenchmarkCase, BenchmarkCatalog, BenchmarkCatalogError, BenchmarkLimits,
@@ -38,13 +39,12 @@ pub use measure::{
 };
 pub use report::{
     BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
-    BenchmarkRow, BenchmarkSample, Comparability, LaunchIsolationEvidence, MeasurementProtocol,
-    MetricSummary, RegressionGate, RegressionThresholds, RowSummary, SoftObjectiveStatus,
-    SoftPerformanceObjective, WorkerIdentity, compare_reports, evaluate_regression,
-    populate_reference_ratios, summarize_samples,
+    BenchmarkRow, BenchmarkSample, CampaignExecution, Comparability, LaunchIsolationEvidence,
+    MeasurementProtocol, MetricSummary, RegressionGate, RegressionThresholds, RowSummary,
+    SoftObjectiveStatus, SoftPerformanceObjective, WorkerIdentity, compare_reports,
+    evaluate_regression, populate_reference_ratios, summarize_samples,
 };
 pub use runner::{
-    BenchmarkRunnerError, correctness_witness_limit_row, is_correctness_output_limit,
-    is_correctness_resource_limit, normalize_correctness_run, run_correctness_limit_probe,
-    run_gated_row, unsupported_row,
+    BenchmarkRunnerError, is_correctness_output_limit, is_correctness_resource_limit,
+    normalize_correctness_run, run_correctness_limit_probe, run_gated_row, unsupported_row,
 };

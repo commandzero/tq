@@ -670,6 +670,7 @@ mod tests {
             DatasetTier::Startup,
             &campaign_invocation(),
             &empty_reference(),
+            true,
         )
         .expect("worker campaign row");
         let sample = row.samples.first().expect("recorded campaign sample");

@@ -13,7 +13,8 @@ use super::{
     ArchiveIdentity, ArtifactIdentity, FetchError, FetchOutcome, FetchRequest, ManifestError,
     Provenance, RequestIdentity, ReqwestTransport, SnapshotState, SourceSnapshotInput,
     build_source_snapshot, extract_zip_member, fetch, finalize_generated_representations_with_tq,
-    generate_representations_with_tq, remember_verified_snapshot, write_snapshot_manifest,
+    generate_representations_with_tq, load_frozen_snapshot, remember_generated_validation,
+    remember_verified_snapshot, validate_generated_representations_cached, write_snapshot_manifest,
 };
 
 /// Completed refreshed campaign.
@@ -65,6 +66,9 @@ pub enum RefreshError {
     /// Source validation or manifest failure.
     #[error(transparent)]
     Manifest(#[from] ManifestError),
+    /// Frozen artifact integrity or manifest verification failed.
+    #[error(transparent)]
+    Campaign(#[from] super::CampaignError),
     /// Cross-format preparation failure.
     #[error(transparent)]
     Conversion(#[from] super::ConversionError),
@@ -141,6 +145,8 @@ pub fn prepare_campaign(
                 if existing.state == SnapshotState::CrossFormatValidated
                     && existing.artifacts.generated.is_some()
                 {
+                    let frozen = load_frozen_snapshot(&path, cache_root)?;
+                    validate_snapshot_semantics(cache_root, tq, &frozen.manifest)?;
                     path
                 } else {
                     resume_snapshot(cache_root, &path, existing, tq)?
@@ -273,6 +279,7 @@ fn refresh_source(
         &relative_string(&yaml_relative)?,
         &relative_string(&toon_relative)?,
     )?;
+    remember_generated_validation(cache_root, tq, &manifest.artifacts.source_json, &generated)?;
     manifest.artifacts.generated = Some(generated);
     manifest.validation.yaml_equivalent = Some(true);
     manifest.validation.toon_equivalent = Some(true);
@@ -281,6 +288,27 @@ fn refresh_source(
     remember_verified_snapshot(cache_root, &manifest)
         .map_err(|error| io::Error::other(error.to_string()))?;
     Ok(manifest_path)
+}
+
+fn validate_snapshot_semantics(
+    cache_root: &Path,
+    tq: &Path,
+    manifest: &super::SnapshotManifest,
+) -> Result<(), RefreshError> {
+    let generated =
+        manifest.artifacts.generated.as_ref().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "missing generated artifacts")
+        })?;
+    validate_generated_representations_cached(
+        cache_root,
+        tq,
+        &cache_root.join(safe_relative(&manifest.artifacts.source_json.path)?),
+        &cache_root.join(safe_relative(&generated.yaml.path)?),
+        &cache_root.join(safe_relative(&generated.toon.path)?),
+        &manifest.artifacts.source_json,
+        generated,
+    )?;
+    Ok(())
 }
 
 fn latest_manifest(cache_root: &Path, source_id: &str) -> Result<Option<PathBuf>, RefreshError> {
@@ -352,6 +380,7 @@ fn resume_snapshot(
                 &toon_manifest_path,
             )?
         };
+    remember_generated_validation(cache_root, tq, &manifest.artifacts.source_json, &generated)?;
     manifest.artifacts.generated = Some(generated);
     manifest.validation.yaml_equivalent = Some(true);
     manifest.validation.toon_equivalent = Some(true);

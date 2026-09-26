@@ -241,6 +241,9 @@
       age: 31
       city: New York
   - query: add
+    yq:
+      query: ".[] as $item ireduce (null; . + $item)"
+      note: "yq lacks jq's add builtin. This native reduction preserves shallow, right-hand-wins object merging and returns null for an empty array."
     input[2]:
       - a: green
         b: white
@@ -265,6 +268,9 @@
       114385498,Redspybot
       29715011,American Cowboy
   - query: ".[] | select(any(.imageTags[]; contains(\"latest\")) | not) | .name"
+    yq:
+      query: ".[] | select((.imageTags | any_c(contains(\"latest\"))) | not) | .name"
+      note: "yq uses any_c(condition) over the current array instead of jq's any(generator; condition). Empty tag arrays remain a valid negative case."
     input[3]:
       - name: one
         imageTags[2]: latest,stable

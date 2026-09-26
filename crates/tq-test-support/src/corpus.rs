@@ -27,7 +27,8 @@ pub use campaign::{
 pub use conversion::{
     ConversionError, DifferenceKind, SemanticDifference, compare_ordered,
     finalize_generated_representations, finalize_generated_representations_with_tq,
-    generate_representations, generate_representations_with_tq, validate_generated_representations,
+    generate_representations, generate_representations_with_tq, remember_generated_validation,
+    validate_generated_representations, validate_generated_representations_cached,
     validate_generated_representations_with_tq,
 };
 pub(crate) use conversion::{encode_toon_exact, json_to_yaml};

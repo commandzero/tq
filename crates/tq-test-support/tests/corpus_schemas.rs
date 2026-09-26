@@ -26,7 +26,7 @@ fn valid_source() -> Value {
         "id": "usgs-all-day",
         "kind": "geojson",
         "format": "json",
-        "campaigns": ["standard"],
+        "campaigns": ["natural-corpus"],
         "fetch": {
             "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
             "refresh": "mutable",
@@ -114,6 +114,24 @@ fn valid_snapshot() -> Value {
 }
 
 #[test]
+fn corpus_prepare_and_refresh_reject_profile_selectors() {
+    for command in ["prepare", "refresh"] {
+        for selector in ["quick", "standard", "extended"] {
+            let output = std::process::Command::new(env!("CARGO_BIN_EXE_tq-corpus"))
+                .args([command, "sources", "cache", selector])
+                .output()
+                .expect("run corpus selector validation");
+            assert!(!output.status.success(), "{command} accepted {selector}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("invalid corpus suite"),
+                "{command} {selector}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
+#[test]
 fn schemas_are_valid_draft_2020_12() {
     validator(SOURCE_SCHEMA);
     validator(SNAPSHOT_SCHEMA);
@@ -122,6 +140,18 @@ fn schemas_are_valid_draft_2020_12() {
 #[test]
 fn source_schema_accepts_a_versioned_natural_source() {
     assert!(validator(SOURCE_SCHEMA).is_valid(&valid_source()));
+}
+
+#[test]
+fn source_schema_accepts_suites_but_rejects_sampling_profiles_as_selectors() {
+    let validator = validator(SOURCE_SCHEMA);
+    let mut source = valid_source();
+    source["campaigns"] = json!(["large-input"]);
+    assert!(validator.is_valid(&source));
+    for old in ["quick", "standard", "extended"] {
+        source["campaigns"] = json!([old]);
+        assert!(!validator.is_valid(&source), "{old} is not a corpus suite");
+    }
 }
 
 #[test]

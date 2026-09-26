@@ -2,7 +2,7 @@
 type: Guide
 title: "Contributing to tq"
 description: "Contributor setup, validation, and development requirements."
-generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:15:13Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-26T00:21:30Z }
 ---
 
 # Contributing to tq
@@ -31,14 +31,19 @@ Shared standards come from the repo-man bundle selected by the nearest workspace
 AGENTS.md. Resolve its pointer relative to that file. If no pointer is configured,
 use the local repo-man entry point at `~/.agents/memory/repo-man/index.md`.
 
-The campaign runner handles compatibility, benchmark, and fuzz programs:
+The campaign runner handles compatibility, benchmark, and fuzz programs.
+Benchmark suites select sources/cases, independently of quick (0+1), standard
+(1+3), or extended (1+5) sampling profiles. Its default benchmark suite and
+profile are `natural-corpus standard`:
 
 ```console
 ./scripts/campaign-run.sh compatibility smoke
 ./scripts/campaign-run.sh compatibility full
+./scripts/campaign-run.sh compatibility stack-overflow standard
 ./scripts/campaign-run.sh benchmark smoke
-./scripts/campaign-run.sh benchmark standard
-./scripts/campaign-run.sh benchmark large
+./scripts/campaign-run.sh benchmark natural-corpus quick
+./scripts/campaign-run.sh benchmark
+./scripts/campaign-run.sh benchmark large-input extended
 ./scripts/campaign-run.sh fuzz default
 ```
 

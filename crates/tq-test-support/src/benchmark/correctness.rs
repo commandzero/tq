@@ -1,12 +1,18 @@
 //! Mandatory correctness decision before timing.
 
-use serde::{Serialize, Serializer, ser::SerializeMap as _, ser::SerializeSeq as _};
-use serde_json::Value;
-use sha2::{Digest as _, Sha256};
-use thiserror::Error;
+use std::{
+    fs::File,
+    io::{self, BufReader, BufWriter, Read as _, Seek as _, SeekFrom, Write as _},
+    sync::{Arc, Mutex},
+};
 
 use super::OutputContractKind;
 use crate::compatibility::{ErrorClass, ProcessStatus};
+use serde::{Serialize, Serializer, ser::SerializeMap as _, ser::SerializeSeq as _};
+use serde_json::Value;
+use sha2::{Digest as _, Sha256};
+use tempfile::NamedTempFile;
+use thiserror::Error;
 
 /// Bounded identity of an ordered structured-result sequence.
 #[derive(Clone, Debug)]
@@ -15,10 +21,12 @@ pub struct SemanticDigest {
     pub result_count: u64,
     /// SHA-256 over canonical JSON values separated as JSON Text Sequences.
     pub sha256: [u8; 32],
-    /// Per-result hashes retained only for file-backed TOON boundary checks.
-    pub(crate) value_digests: Option<Vec<[u8; 32]>>,
-    /// Canonical LF line counts used as a linear-time TOON boundary hint.
-    pub(crate) toon_line_counts: Option<Vec<u64>>,
+    /// File-backed per-result hashes and line counts for ambiguous TOON values.
+    ///
+    /// The witness is intentionally outside the digest hash so a semantic
+    /// comparison stays cheap while TOON boundary recovery can still inspect
+    /// one expected result at a time.
+    pub(crate) witness: Option<Arc<SemanticWitness>>,
 }
 
 impl PartialEq for SemanticDigest {
@@ -147,65 +155,49 @@ pub fn semantic_digest<'a>(
 pub(crate) struct SemanticDigester {
     hasher: Sha256,
     result_count: u64,
-    value_digests: Option<Vec<[u8; 32]>>,
-    toon_line_counts: Option<Vec<u64>>,
-    witness_limit: Option<u64>,
+    witness_enabled: bool,
+    witness: Option<WitnessWriter>,
 }
-
-const WITNESS_VALUE_BYTES: usize = std::mem::size_of::<[u8; 32]>() + std::mem::size_of::<u64>();
-pub(crate) const WITNESS_BUDGET_BYTES: usize = 8 * 1024 * 1024;
-pub(crate) const DEFAULT_WITNESS_VALUE_LIMIT: u64 =
-    (WITNESS_BUDGET_BYTES / WITNESS_VALUE_BYTES) as u64;
 
 #[derive(Debug, Error)]
 pub(crate) enum SemanticDigestError {
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    #[error("semantic witness exceeded {limit} values")]
-    WitnessLimit { limit: u64 },
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 impl SemanticDigestError {
     fn into_json_error(self) -> serde_json::Error {
         match self {
             Self::Json(error) => error,
-            Self::WitnessLimit { limit } => serde_json::Error::io(std::io::Error::other(format!(
-                "semantic witness exceeded {limit} values"
-            ))),
+            Self::Io(error) => serde_json::Error::io(error),
         }
     }
 }
 
 impl SemanticDigester {
     pub(crate) fn with_value_witness() -> Self {
-        Self::with_value_witness_limit(DEFAULT_WITNESS_VALUE_LIMIT)
-    }
-
-    pub(crate) fn with_value_witness_limit(limit: u64) -> Self {
         Self {
-            value_digests: Some(Vec::new()),
-            toon_line_counts: Some(Vec::new()),
-            witness_limit: Some(limit),
+            witness_enabled: true,
             ..Self::default()
         }
     }
 
     pub(crate) fn push(&mut self, value: &Value) -> Result<(), SemanticDigestError> {
-        if let Some(limit) = self.witness_limit
-            && self.result_count >= limit
-        {
-            return Err(SemanticDigestError::WitnessLimit { limit });
-        }
         self.hasher.update([0x1e]);
         serde_json::to_writer(HashWriter(&mut self.hasher), &CanonicalValue(value))?;
         self.hasher.update(b"\n");
-        if let Some(value_digests) = &mut self.value_digests {
-            reserve_witness(value_digests, self.witness_limit);
-            value_digests.push(value_digest(value)?);
-        }
-        if let Some(line_counts) = &mut self.toon_line_counts {
-            reserve_witness(line_counts, self.witness_limit);
-            line_counts.push(toon_line_count(value)?);
+        if self.witness_enabled {
+            let value_digest = value_digest(value)?;
+            let line_count = toon_line_count(value)?;
+            let witness = if let Some(witness) = &mut self.witness {
+                witness
+            } else {
+                self.witness = Some(WitnessWriter::new()?);
+                self.witness.as_mut().expect("witness was just created")
+            };
+            witness.push(value_digest, line_count)?;
         }
         self.result_count = self.result_count.saturating_add(1);
         Ok(())
@@ -217,25 +209,71 @@ impl SemanticDigester {
         SemanticDigest {
             result_count: self.result_count,
             sha256: self.hasher.finalize().into(),
-            value_digests: self.value_digests,
-            toon_line_counts: self.toon_line_counts,
+            witness: self
+                .witness
+                .take()
+                .map(|witness| Arc::new(SemanticWitness::from_writer(witness))),
         }
     }
 }
 
-const WITNESS_RESERVE_CHUNK: u64 = 4096;
+struct WitnessWriter {
+    file: BufWriter<NamedTempFile>,
+}
 
-fn reserve_witness<T>(values: &mut Vec<T>, limit: Option<u64>) {
-    let Some(limit) = limit else {
-        return;
-    };
-    let length = values.len() as u64;
-    if length < limit && values.len() == values.capacity() {
-        let additional = (limit - length).min(WITNESS_RESERVE_CHUNK);
-        values.reserve_exact(usize::try_from(additional).unwrap_or(usize::MAX));
+impl WitnessWriter {
+    fn new() -> io::Result<Self> {
+        Ok(Self {
+            file: BufWriter::new(NamedTempFile::new()?),
+        })
+    }
+
+    fn push(&mut self, value_digest: [u8; 32], line_count: u64) -> io::Result<()> {
+        self.file.write_all(&value_digest)?;
+        self.file.write_all(&line_count.to_be_bytes())
     }
 }
 
+/// File-backed ordered witness used only when an ambiguous output format
+/// needs expected per-result boundaries. Each record is a fixed 40 bytes, so
+/// the in-memory state remains constant regardless of result count.
+#[derive(Debug)]
+pub(crate) struct SemanticWitness {
+    file: Mutex<BufWriter<NamedTempFile>>,
+}
+
+impl SemanticWitness {
+    fn from_writer(writer: WitnessWriter) -> Self {
+        Self {
+            file: Mutex::new(writer.file),
+        }
+    }
+
+    pub(crate) fn reader(&self) -> io::Result<BufReader<File>> {
+        let mut writer = self
+            .file
+            .lock()
+            .map_err(|_| io::Error::other("semantic witness lock poisoned"))?;
+        writer.flush()?;
+        let mut file = writer.get_ref().reopen()?;
+        file.seek(SeekFrom::Start(0))?;
+        Ok(BufReader::new(file))
+    }
+
+    pub(crate) fn read_record(reader: &mut BufReader<File>) -> io::Result<([u8; 32], u64)> {
+        let mut value_digest = [0_u8; 32];
+        reader.read_exact(&mut value_digest)?;
+        let mut line_count = [0_u8; std::mem::size_of::<u64>()];
+        reader.read_exact(&mut line_count)?;
+        Ok((value_digest, u64::from_be_bytes(line_count)))
+    }
+}
+
+/// Canonicalizes a finite tq number for semantic comparisons shared by
+/// benchmark and corpus validation code.
+pub(crate) fn canonical_number(input: &str) -> Result<String, String> {
+    tq_core::Number::canonicalize_literal_numeric(input).map_err(|error| error.to_string())
+}
 pub(crate) fn value_digest(value: &Value) -> Result<[u8; 32], serde_json::Error> {
     let mut hasher = Sha256::new();
     serde_json::to_writer(HashWriter(&mut hasher), &CanonicalValue(value))?;
@@ -273,9 +311,8 @@ impl Serialize for CanonicalValue<'_> {
             Value::Null => serializer.serialize_unit(),
             Value::Bool(value) => serializer.serialize_bool(*value),
             Value::Number(number) => {
-                let canonical = tq_core::Number::parse(&number.to_string())
+                let canonical = canonical_number(&number.to_string())
                     .map_err(serde::ser::Error::custom)?
-                    .to_string()
                     .parse::<serde_json::Number>()
                     .map_err(serde::ser::Error::custom)?;
                 canonical.serialize(serializer)
@@ -303,7 +340,7 @@ impl Serialize for CanonicalValue<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SemanticDigestError, SemanticDigester};
+    use super::SemanticDigester;
 
     #[test]
     fn semantic_digest_ignores_object_member_order_but_raw_bytes_do_not() {
@@ -311,7 +348,6 @@ mod tests {
             serde_json::from_str(r#"{"z":1,"a":2}"#).expect("first object");
         let second: serde_json::Value =
             serde_json::from_str(r#"{"a":2,"z":1}"#).expect("second object");
-
         assert_eq!(
             super::semantic_digest([&first]).expect("first digest"),
             super::semantic_digest([&second]).expect("second digest")
@@ -323,31 +359,35 @@ mod tests {
     }
 
     #[test]
-    fn witness_limit_rejects_without_truncating_the_digest_witness() {
-        let values = [serde_json::json!(1), serde_json::json!(2)];
-        let mut digest = SemanticDigester::with_value_witness_limit(2);
-        digest.push(&values[0]).expect("first value");
-        digest.push(&values[1]).expect("second value");
-
-        assert!(matches!(
-            digest.push(&serde_json::json!(3)),
-            Err(SemanticDigestError::WitnessLimit { limit: 2 })
-        ));
+    fn disk_witness_accepts_more_results_than_the_old_memory_ceiling() {
+        let mut digest = SemanticDigester::with_value_witness();
+        for value in 0..220_000_u64 {
+            digest
+                .push(&serde_json::json!(value))
+                .expect("disk-backed witness accepts every result");
+        }
         let digest = digest.finish();
-        assert_eq!(digest.result_count, 2);
-        assert_eq!(digest.value_digests.as_ref().map(Vec::len), Some(2));
-        assert_eq!(digest.toon_line_counts.as_ref().map(Vec::len), Some(2));
+        assert_eq!(digest.result_count, 220_000);
+        let witness = digest.witness.expect("witness file");
+        let mut reader = witness.reader().expect("witness reader");
+        let (first, first_lines) =
+            super::SemanticWitness::read_record(&mut reader).expect("first witness record");
+        assert_eq!(first_lines, 1);
+        assert_eq!(
+            first,
+            super::value_digest(&serde_json::json!(0)).expect("first digest")
+        );
     }
 
     #[test]
-    fn rejected_witness_value_does_not_mutate_the_semantic_hash() {
-        let values = [serde_json::json!(1), serde_json::json!(2)];
-        let mut limited = SemanticDigester::with_value_witness_limit(1);
-        limited.push(&values[0]).expect("accepted value");
-        assert!(limited.push(&values[1]).is_err());
-
-        let mut expected = SemanticDigester::with_value_witness_limit(1);
-        expected.push(&values[0]).expect("accepted value");
-        assert_eq!(limited.finish(), expected.finish());
+    fn numeric_spelling_is_canonicalized_alongside_object_order() {
+        let first: serde_json::Value =
+            serde_json::from_str(r#"{"z":1.0,"a":2}"#).expect("first object");
+        let second: serde_json::Value =
+            serde_json::from_str(r#"{"a":2.0,"z":1}"#).expect("second object");
+        assert_eq!(
+            super::semantic_digest([&first]).expect("first digest"),
+            super::semantic_digest([&second]).expect("second digest")
+        );
     }
 }

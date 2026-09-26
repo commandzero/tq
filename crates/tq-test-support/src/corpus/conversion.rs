@@ -1,12 +1,17 @@
-//! Untimed corpus materialization and ordered semantic comparison.
+//! Untimed corpus materialization and value-aware semantic comparison.
 
 use std::{
-    fs,
+    collections::HashSet,
+    fmt, fs,
     io::{self, Read, Write},
     path::Path,
     process::{Command, Stdio},
 };
 
+use serde::{
+    Deserialize, Deserializer,
+    de::{self, DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor},
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
@@ -14,7 +19,9 @@ use thiserror::Error;
 
 use super::{ArtifactIdentity, GeneratedArtifacts, encode_hex};
 
-/// Kind of ordered JSON-model divergence.
+const SEMANTIC_POLICY_VERSION: &str = "tq-semantic-equivalence-v3";
+
+/// Kind of semantic JSON-model divergence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DifferenceKind {
     /// JSON-model types differ.
@@ -25,11 +32,11 @@ pub enum DifferenceKind {
     NumericFidelity,
     /// Array lengths differ.
     Length,
-    /// Object member encounter order or keys differ.
+    /// Object key set differs.
     ObjectOrder,
 }
 
-/// First ordered semantic difference between two JSON-model values.
+/// First semantic difference between two JSON-model values.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SemanticDifference {
     /// RFC 6901-style path to the difference, with empty string for root.
@@ -76,14 +83,14 @@ pub enum ConversionError {
         /// Exit status and bounded stderr text.
         message: String,
     },
-    /// tq produced a representation with a different canonical JSON stream.
+    /// tq produced a representation with different value-aware semantics.
     #[error("tq-generated {format} changed corpus semantics: expected {expected}, got {actual}")]
     TqSemantic {
         /// Generated representation format.
         format: String,
-        /// Canonical JSON SHA-256 of the natural source.
+        /// Semantic digest of the natural source result stream.
         expected: String,
-        /// Canonical JSON SHA-256 after decoding the representation.
+        /// Semantic digest after decoding the representation.
         actual: String,
     },
 }
@@ -129,12 +136,13 @@ pub fn finalize_generated_representations_with_tq(
     })
 }
 
-/// Compares tq's compact JSON stream for the natural JSON, YAML, and TOON
-/// representations without materializing the complete document in memory.
+/// Compares tq's canonical JSON result streams using a value-aware digest:
+/// object members, arrays, and result sequences stay in encounter order.
+/// Numeric tokens use exact decimal normalization without binary64 rounding.
 ///
 /// # Errors
 ///
-/// Returns process, I/O, or canonical-stream mismatch errors.
+/// Returns process, I/O, or semantic-stream mismatch errors.
 pub fn validate_generated_representations_with_tq(
     tq: &Path,
     source_json: &Path,
@@ -155,6 +163,137 @@ pub fn validate_generated_representations_with_tq(
     Ok(())
 }
 
+/// Validates a prepared source and its generated representations, reusing an
+/// evidence record only when all artifact identities, candidate binary bytes,
+/// and this semantic policy version match exactly.
+///
+/// Artifact bytes are expected to have been checked by the frozen-snapshot
+/// verification cache before this function is called. The semantic cache is
+/// deliberately separate from that byte-integrity cache: a historical manifest
+/// from another tq binary or policy is never accepted as fresh evidence.
+///
+/// # Errors
+///
+/// Returns artifact I/O, validator execution, cache persistence, or semantic
+/// equivalence failures.
+pub fn validate_generated_representations_cached(
+    cache_root: &Path,
+    tq: &Path,
+    source_json: &Path,
+    yaml_input: &Path,
+    toon_input: &Path,
+    source_identity: &ArtifactIdentity,
+    generated: &GeneratedArtifacts,
+) -> Result<(), ConversionError> {
+    let expected = semantic_validation_entry(tq, source_identity, generated)?;
+    let mut cache = read_semantic_cache(cache_root);
+    if cache.entries.iter().any(|entry| entry == &expected) {
+        return Ok(());
+    }
+
+    validate_generated_representations_with_tq(tq, source_json, yaml_input, toon_input)?;
+    cache
+        .entries
+        .retain(|entry| entry.policy_version == SEMANTIC_POLICY_VERSION);
+    cache.entries.push(expected);
+    write_semantic_cache(cache_root, &cache)?;
+    Ok(())
+}
+
+/// Records evidence from a just-completed native generation or finalization.
+///
+/// Call only after `generate_representations_with_tq` or
+/// `finalize_generated_representations_with_tq` has validated these artifacts.
+///
+/// # Errors
+///
+/// Returns validator identity or cache persistence errors.
+pub fn remember_generated_validation(
+    cache_root: &Path,
+    tq: &Path,
+    source: &ArtifactIdentity,
+    generated: &GeneratedArtifacts,
+) -> Result<(), ConversionError> {
+    let expected = semantic_validation_entry(tq, source, generated)?;
+    let mut cache = read_semantic_cache(cache_root);
+    cache
+        .entries
+        .retain(|entry| entry.policy_version == SEMANTIC_POLICY_VERSION);
+    if !cache.entries.contains(&expected) {
+        cache.entries.push(expected);
+    }
+    write_semantic_cache(cache_root, &cache)
+}
+
+fn semantic_validation_entry(
+    tq: &Path,
+    source: &ArtifactIdentity,
+    generated: &GeneratedArtifacts,
+) -> Result<SemanticValidationEntry, ConversionError> {
+    Ok(SemanticValidationEntry {
+        policy_version: SEMANTIC_POLICY_VERSION.to_owned(),
+        source: source.clone(),
+        yaml: generated.yaml.clone(),
+        toon: generated.toon.clone(),
+        tq: identify_existing(tq, &tq.to_string_lossy())?,
+    })
+}
+
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+struct SemanticValidationCache {
+    schema_version: u32,
+    entries: Vec<SemanticValidationEntry>,
+}
+
+#[derive(Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+struct SemanticValidationEntry {
+    policy_version: String,
+    source: ArtifactIdentity,
+    yaml: ArtifactIdentity,
+    toon: ArtifactIdentity,
+    tq: ArtifactIdentity,
+}
+
+fn semantic_cache_path(root: &Path) -> std::path::PathBuf {
+    root.join("semantic-validation-cache-v1.json")
+}
+
+fn read_semantic_cache(root: &Path) -> SemanticValidationCache {
+    let Ok(file) = fs::File::open(semantic_cache_path(root)) else {
+        return SemanticValidationCache {
+            schema_version: 1,
+            entries: Vec::new(),
+        };
+    };
+    let Ok(cache) = serde_json::from_reader::<_, SemanticValidationCache>(file) else {
+        return SemanticValidationCache {
+            schema_version: 1,
+            entries: Vec::new(),
+        };
+    };
+    if cache.schema_version == 1 {
+        cache
+    } else {
+        SemanticValidationCache {
+            schema_version: 1,
+            entries: Vec::new(),
+        }
+    }
+}
+
+fn write_semantic_cache(
+    root: &Path,
+    cache: &SemanticValidationCache,
+) -> Result<(), ConversionError> {
+    fs::create_dir_all(root)?;
+    let mut temporary = NamedTempFile::new_in(root)?;
+    serde_json::to_writer_pretty(&mut temporary, cache)?;
+    temporary.write_all(b"\n")?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(semantic_cache_path(root))?;
+    Ok(())
+}
 fn tq_generate(
     tq: &Path,
     source_json: &Path,
@@ -166,6 +305,7 @@ fn tq_generate(
     fs::create_dir_all(parent)?;
     let mut temporary = NamedTempFile::new_in(parent)?;
     let stderr = NamedTempFile::new()?;
+
     let mut command = Command::new(tq);
     // JSON is the lossless YAML 1.2 profile for natural sources whose decimal
     // values cannot survive the YAML library's public number model exactly.
@@ -255,18 +395,13 @@ fn tq_canonical_digest(
             format: input_format.to_owned(),
             message: error.to_string(),
         })?;
-    let mut stdout = child.stdout.take().ok_or_else(|| ConversionError::Tq {
+    let stdout = child.stdout.take().ok_or_else(|| ConversionError::Tq {
         format: input_format.to_owned(),
         message: "tq stdout was not captured".to_owned(),
     })?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024].into_boxed_slice();
-    loop {
-        let read = stdout.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
+    let digest = stream_semantic_digest(stdout);
+    if digest.is_err() {
+        let _ = child.kill();
     }
     let status = child.wait()?;
     if !status.success() {
@@ -275,7 +410,194 @@ fn tq_canonical_digest(
             message: tq_failure(status.code(), stderr.path())?,
         });
     }
-    Ok(encode_hex(&hasher.finalize()))
+    let digest = digest.map_err(|error| ConversionError::Tq {
+        format: input_format.to_owned(),
+        message: format!("invalid canonical JSON stream: {error}"),
+    })?;
+    Ok(encode_hex(&digest))
+}
+
+/// Reduces each JSON value to a digest while consuming result streams in order.
+/// Memory follows nesting depth, object key sets, and individual token size,
+/// rather than the length of any array or the complete document.
+fn stream_semantic_digest<R: Read>(reader: R) -> Result<[u8; 32], io::Error> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"results\0");
+    let mut count = 0_u64;
+    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<ValueDigest>();
+    for result in stream {
+        let value = result.map_err(|error| invalid_json(error.to_string()))?;
+        hasher.update(value.0);
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| invalid_json("result count overflow"))?;
+    }
+    if count == 0 {
+        return Err(invalid_json("canonical stream is empty"));
+    }
+    hasher.update(count.to_be_bytes());
+    Ok(hasher.finalize().into())
+}
+
+const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
+struct ValueDigest([u8; 32]);
+
+impl<'de> Deserialize<'de> for ValueDigest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        ValueDigestSeed.deserialize(deserializer)
+    }
+}
+
+struct ValueDigestSeed;
+
+impl<'de> DeserializeSeed<'de> for ValueDigestSeed {
+    type Value = ValueDigest;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(ValueDigestVisitor)
+    }
+}
+
+struct ValueDigestVisitor;
+
+impl ValueDigestVisitor {
+    fn number<E: de::Error>(text: &str) -> Result<ValueDigest, E> {
+        let canonical = crate::benchmark::canonical_number(text).map_err(E::custom)?;
+        Ok(ValueDigest(hash_scalar(b"number", canonical.as_bytes())))
+    }
+}
+
+impl<'de> Visitor<'de> for ValueDigestVisitor {
+    type Value = ValueDigest;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value")
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E> {
+        Ok(ValueDigest(hash_scalar(b"null", b"")))
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(ValueDigest(hash_scalar(
+            b"bool",
+            if value {
+                b"true".as_slice()
+            } else {
+                b"false".as_slice()
+            },
+        )))
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(ValueDigest(hash_scalar(b"string", value.as_bytes())))
+    }
+
+    fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
+        self.visit_str(&value)
+    }
+
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Self::number(&value.to_string())
+    }
+
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Self::number(&value.to_string())
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut hasher = Sha256::new();
+        hasher.update(b"object\0");
+        let mut keys = HashSet::new();
+        while let Some(key) = map.next_key::<DigestKey>()? {
+            // serde_json's arbitrary_precision numbers arrive as a synthetic
+            // one-entry map. Its key is borrowed, unlike real keys read from
+            // an IO reader (which always visit_str). Never reinterpret a real
+            // object with this private key, even when its value looks numeric.
+            if key.synthetic_number {
+                let literal = map.next_value::<String>()?;
+                return Self::number(&literal);
+            }
+            let value = map.next_value_seed(ValueDigestSeed)?;
+            hasher.update((key.text.len() as u64).to_be_bytes());
+            hasher.update(key.text.as_bytes());
+            hasher.update(value.0);
+            if !keys.insert(key.text) {
+                return Err(A::Error::custom("duplicate object key"));
+            }
+        }
+        Ok(ValueDigest(hasher.finalize().into()))
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+        let mut hasher = Sha256::new();
+        hasher.update(b"array\0");
+        let mut count = 0_u64;
+        while let Some(value) = sequence.next_element_seed(ValueDigestSeed)? {
+            hasher.update(value.0);
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| A::Error::custom("array length overflow"))?;
+        }
+        hasher.update(count.to_be_bytes());
+        Ok(ValueDigest(hasher.finalize().into()))
+    }
+}
+
+struct DigestKey {
+    text: String,
+    synthetic_number: bool,
+}
+
+impl<'de> Deserialize<'de> for DigestKey {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_identifier(DigestKeyVisitor)
+    }
+}
+
+struct DigestKeyVisitor;
+
+impl<'de> Visitor<'de> for DigestKeyVisitor {
+    type Value = DigestKey;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON object key")
+    }
+
+    fn visit_borrowed_str<E>(self, text: &'de str) -> Result<Self::Value, E> {
+        Ok(DigestKey {
+            synthetic_number: text == SERDE_JSON_NUMBER_TOKEN,
+            text: text.to_owned(),
+        })
+    }
+
+    fn visit_str<E>(self, text: &str) -> Result<Self::Value, E> {
+        Ok(DigestKey {
+            text: text.to_owned(),
+            synthetic_number: false,
+        })
+    }
+
+    fn visit_string<E>(self, text: String) -> Result<Self::Value, E> {
+        Ok(DigestKey {
+            text,
+            synthetic_number: false,
+        })
+    }
+}
+
+fn hash_scalar(tag: &[u8], value: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(tag);
+    hasher.update([0]);
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+    hasher.finalize().into()
+}
+
+fn invalid_json(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
 fn tq_failure(status: Option<i32>, stderr: &Path) -> Result<String, io::Error> {
@@ -356,8 +678,8 @@ pub fn validate_generated_representations(
     let yaml_model: yaml_serde::Value = yaml_serde::from_reader(fs::File::open(yaml_input)?)
         .map_err(|error| ConversionError::Yaml(error.to_string()))?;
     // A JSON-subset YAML artifact is the exact-decimal fallback. Decode that
-    // with the arbitrary-precision ordered JSON path after proving the YAML
-    // parser accepts it; ordinary block YAML uses yaml_serde's value model.
+    // with the arbitrary-precision value path after proving the YAML parser
+    // accepts it; ordinary block YAML uses yaml_serde's value model.
     let yaml: Value = match serde_json::from_reader(fs::File::open(yaml_input)?) {
         Ok(value) => value,
         Err(_) => yaml_to_json(yaml_model)?,
@@ -368,16 +690,24 @@ pub fn validate_generated_representations(
     })?;
 
     let toon_text = fs::read_to_string(toon_input)?;
-    let expected_toon = encode_toon_exact(&source)?;
-    if toon_text != expected_toon {
+    let mut documents = tq_formats::decode_toon(
+        toon_text.as_bytes(),
+        "<corpus-validation>",
+        tq_toon::DecoderConfig::default(),
+    )
+    .map_err(|error| ConversionError::Toon(error.to_string()))?;
+    if documents.len() != 1 {
         return Err(ConversionError::Toon(
-            "generated TOON differs from its exact-decimal structural encoding".to_owned(),
+            "expected exactly one document".to_owned(),
         ));
     }
-    let toon: Value = toon_format::decode_strict(&toon_text)
+    let toon = documents
+        .pop()
+        .ok_or_else(|| ConversionError::Toon("missing document".to_owned()))?
+        .value
+        .to_json()
         .map_err(|error| ConversionError::Toon(error.to_string()))?;
-    let toon_model = binary64_number_model(&source)?;
-    compare_ordered(&toon_model, &toon).map_err(|difference| ConversionError::Semantic {
+    compare_ordered(&source, &toon).map_err(|difference| ConversionError::Semantic {
         format: "toon".to_owned(),
         difference,
     })
@@ -392,7 +722,7 @@ pub fn validate_generated_representations(
 /// # Errors
 ///
 /// Returns a parse, semantic, path, or filesystem error. Identities are only
-/// returned after both representations pass ordered semantic validation.
+/// returned after both representations pass value-aware semantic validation.
 pub fn finalize_generated_representations(
     source_json: &Path,
     yaml_input: &Path,
@@ -405,6 +735,111 @@ pub fn finalize_generated_representations(
         yaml: identify_existing(yaml_input, yaml_manifest_path)?,
         toon: identify_existing(toon_input, toon_manifest_path)?,
     })
+}
+
+/// Compares two values with ordered object members and arrays.
+///
+/// Numeric spellings are normalized through the exact `tq_core` number model;
+/// this equates `34.0` and `34` without converting through binary64.
+///
+/// # Errors
+///
+/// Returns the first semantic difference with its exact path.
+pub fn compare_ordered(expected: &Value, actual: &Value) -> Result<(), SemanticDifference> {
+    compare_at(expected, actual, "")
+}
+
+fn compare_at(expected: &Value, actual: &Value, path: &str) -> Result<(), SemanticDifference> {
+    match (expected, actual) {
+        (Value::Null, Value::Null) => Ok(()),
+        (Value::Bool(left), Value::Bool(right)) => primitive(left, right, path),
+        (Value::String(left), Value::String(right)) => primitive(left, right, path),
+        (Value::Number(left), Value::Number(right)) => {
+            let left_text = left.to_string();
+            let right_text = right.to_string();
+            let left = crate::benchmark::canonical_number(&left_text).map_err(|error| {
+                SemanticDifference {
+                    path: path.to_owned(),
+                    kind: DifferenceKind::NumericFidelity,
+                    expected: error,
+                    actual: left_text.clone(),
+                }
+            })?;
+            let right = crate::benchmark::canonical_number(&right_text).map_err(|error| {
+                SemanticDifference {
+                    path: path.to_owned(),
+                    kind: DifferenceKind::NumericFidelity,
+                    expected: right_text.clone(),
+                    actual: error,
+                }
+            })?;
+            if left == right {
+                Ok(())
+            } else {
+                Err(SemanticDifference {
+                    path: path.to_owned(),
+                    kind: DifferenceKind::NumericFidelity,
+                    expected: left,
+                    actual: right,
+                })
+            }
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            if left.len() != right.len() {
+                return Err(SemanticDifference {
+                    path: path.to_owned(),
+                    kind: DifferenceKind::Length,
+                    expected: left.len().to_string(),
+                    actual: right.len().to_string(),
+                });
+            }
+            for (index, (left, right)) in left.iter().zip(right).enumerate() {
+                compare_at(left, right, &join(path, &index.to_string()))?;
+            }
+            Ok(())
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            if left.len() != right.len() {
+                return Err(object_keys_difference(left, right, path));
+            }
+            if left.keys().ne(right.keys()) {
+                return Err(object_keys_difference(left, right, path));
+            }
+            for (key, value) in left {
+                compare_at(value, &right[key], &join(path, &escape(key)))?;
+            }
+            Ok(())
+        }
+        _ => Err(SemanticDifference {
+            path: path.to_owned(),
+            kind: DifferenceKind::Type,
+            expected: type_name(expected).to_owned(),
+            actual: type_name(actual).to_owned(),
+        }),
+    }
+}
+
+fn object_keys_difference(
+    expected: &serde_json::Map<String, Value>,
+    actual: &serde_json::Map<String, Value>,
+    path: &str,
+) -> SemanticDifference {
+    let expected_keys = expected.keys().collect::<Vec<_>>();
+    let actual_keys = actual.keys().collect::<Vec<_>>();
+    SemanticDifference {
+        path: path.to_owned(),
+        kind: DifferenceKind::ObjectOrder,
+        expected: expected_keys
+            .iter()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        actual: actual_keys
+            .iter()
+            .map(|key| key.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+    }
 }
 
 const NUMBER_MARKER_PREFIX: &str = "tqnumf4c6a91b7e2d";
@@ -481,51 +916,6 @@ fn replace_number_markers(template: &str, numbers: &[String]) -> Result<String, 
     Ok(output)
 }
 
-fn binary64_number_model(value: &Value) -> Result<Value, ConversionError> {
-    Ok(match value {
-        Value::Number(number) => {
-            if let Some(integer) = number.as_i64() {
-                Value::Number(integer.into())
-            } else if let Some(integer) = number.as_u64() {
-                Value::Number(integer.into())
-            } else {
-                let float = number.as_f64().ok_or_else(|| {
-                    ConversionError::Toon(format!("number is outside binary64: {number}"))
-                })?;
-                if float.is_finite() && float.fract() == 0.0 {
-                    if let Ok(integer) = format!("{float:.0}").parse::<i64>() {
-                        Value::Number(integer.into())
-                    } else {
-                        Value::Number(serde_json::Number::from_f64(float).ok_or_else(|| {
-                            ConversionError::Toon(format!("number is non-finite: {number}"))
-                        })?)
-                    }
-                } else {
-                    Value::Number(serde_json::Number::from_f64(float).ok_or_else(|| {
-                        ConversionError::Toon(format!("number is non-finite: {number}"))
-                    })?)
-                }
-            }
-        }
-        Value::Array(values) => Value::Array(
-            values
-                .iter()
-                .map(binary64_number_model)
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        Value::Object(values) => {
-            let mut object = serde_json::Map::with_capacity(values.len());
-            for (key, value) in values {
-                object.insert(key.clone(), binary64_number_model(value)?);
-            }
-            Value::Object(object)
-        }
-        Value::String(value) => Value::String(value.clone()),
-        Value::Null => Value::Null,
-        Value::Bool(value) => Value::Bool(*value),
-    })
-}
-
 pub(crate) fn json_to_yaml(value: &Value) -> Result<yaml_serde::Value, ConversionError> {
     use yaml_serde::Value as Yaml;
 
@@ -585,10 +975,20 @@ fn yaml_to_json(value: yaml_serde::Value) -> Result<Value, ConversionError> {
             } else if let Some(value) = value.as_u64() {
                 serde_json::Number::from(value)
             } else {
-                serde_json::Number::from_f64(value.as_f64().ok_or_else(|| {
+                let number = serde_json::Number::from_f64(value.as_f64().ok_or_else(|| {
                     ConversionError::Yaml("YAML number has no finite representation".to_owned())
                 })?)
-                .ok_or_else(|| ConversionError::Yaml("non-finite YAML number".to_owned()))?
+                .ok_or_else(|| ConversionError::Yaml("non-finite YAML number".to_owned()))?;
+                let source = crate::benchmark::canonical_number(&value.to_string())
+                    .map_err(ConversionError::Yaml)?;
+                let rendered = crate::benchmark::canonical_number(&number.to_string())
+                    .map_err(ConversionError::Yaml)?;
+                if source != rendered {
+                    return Err(ConversionError::Yaml(format!(
+                        "YAML number would lose precision: {value}"
+                    )));
+                }
+                number
             };
             Value::Number(number)
         }
@@ -616,81 +1016,6 @@ fn yaml_to_json(value: yaml_serde::Value) -> Result<Value, ConversionError> {
             ));
         }
     })
-}
-
-/// Compares two values without sorting objects, arrays, or result sequences.
-///
-/// # Errors
-///
-/// Returns the first ordered semantic difference with its exact path.
-pub fn compare_ordered(expected: &Value, actual: &Value) -> Result<(), SemanticDifference> {
-    compare_at(expected, actual, "")
-}
-
-fn compare_at(expected: &Value, actual: &Value, path: &str) -> Result<(), SemanticDifference> {
-    match (expected, actual) {
-        (Value::Null, Value::Null) => Ok(()),
-        (Value::Bool(left), Value::Bool(right)) => primitive(left, right, path),
-        (Value::String(left), Value::String(right)) => primitive(left, right, path),
-        (Value::Number(left), Value::Number(right)) => {
-            let left = left.to_string();
-            let right = right.to_string();
-            if left == right {
-                Ok(())
-            } else {
-                Err(SemanticDifference {
-                    path: path.to_owned(),
-                    kind: DifferenceKind::NumericFidelity,
-                    expected: left,
-                    actual: right,
-                })
-            }
-        }
-        (Value::Array(left), Value::Array(right)) => {
-            if left.len() != right.len() {
-                return Err(SemanticDifference {
-                    path: path.to_owned(),
-                    kind: DifferenceKind::Length,
-                    expected: left.len().to_string(),
-                    actual: right.len().to_string(),
-                });
-            }
-            for (index, (left, right)) in left.iter().zip(right).enumerate() {
-                compare_at(left, right, &join(path, &index.to_string()))?;
-            }
-            Ok(())
-        }
-        (Value::Object(left), Value::Object(right)) => {
-            let left_keys = left.keys().collect::<Vec<_>>();
-            let right_keys = right.keys().collect::<Vec<_>>();
-            if left_keys != right_keys {
-                return Err(SemanticDifference {
-                    path: path.to_owned(),
-                    kind: DifferenceKind::ObjectOrder,
-                    expected: left_keys
-                        .iter()
-                        .map(|key| key.as_str())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    actual: right_keys
-                        .iter()
-                        .map(|key| key.as_str())
-                        .collect::<Vec<_>>()
-                        .join(","),
-                });
-            }
-            for key in left_keys {
-                compare_at(&left[key], &right[key], &join(path, &escape(key)))?;
-            }
-            Ok(())
-        }
-        _ => Err(SemanticDifference {
-            path: path.to_owned(),
-            kind: DifferenceKind::Type,
-            expected: type_name(expected).to_owned(),
-            actual: type_name(actual).to_owned(),
-        }),
-    }
 }
 
 fn primitive<T: PartialEq + std::fmt::Debug>(
@@ -775,4 +1100,94 @@ fn identify_existing(
         bytes,
         sha256: encode_hex(&hasher.finalize()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::stream_semantic_digest;
+
+    fn digest(input: &str) -> [u8; 32] {
+        stream_semantic_digest(Cursor::new(input.as_bytes())).expect("semantic digest")
+    }
+
+    #[test]
+    fn stream_digest_preserves_nested_object_array_and_result_order() {
+        let original = r#"{"first":[{"a":34.0,"b":[1,{"x":true,"y":null}]}],"second":2}
+{"next":3}"#;
+        assert_eq!(
+            digest(original),
+            digest(
+                r#"{"first":[{"a":34,"b":[1,{"x":true,"y":null}]}],"second":2}
+{"next":3}"#
+            )
+        );
+        assert_ne!(
+            digest(original),
+            digest(
+                r#"{"second":2,"first":[{"a":34,"b":[1,{"x":true,"y":null}]}]}
+{"next":3}"#
+            )
+        );
+        assert_ne!(
+            digest(original),
+            digest(
+                r#"{"first":[{"a":34,"b":[1,{"y":null,"x":true}]}],"second":2}
+{"next":3}"#
+            )
+        );
+        assert_ne!(digest("1\n2"), digest("2\n1"));
+        assert_ne!(digest("[1,2]"), digest("[2,1]"));
+    }
+
+    #[test]
+    fn stream_digest_normalizes_exact_large_and_decimal_numbers() {
+        assert_eq!(
+            digest("123456789012345678901234567890.000e2"),
+            digest("12345678901234567890123456789000")
+        );
+        assert_eq!(digest("-0.00e100"), digest("0"));
+        assert_ne!(digest("9007199254740993"), digest("9007199254740992"));
+        assert_ne!(
+            digest("0.1234567890123456789012345678901"),
+            digest("0.1234567890123456789012345678902")
+        );
+    }
+
+    #[test]
+    fn stream_digest_keeps_real_private_number_keys_as_object_members() {
+        let object = r#"{"$serde_json::private::Number":"34.0"}"#;
+        assert_ne!(digest(object), digest("34.0"));
+        assert_ne!(
+            digest(r#"{"nested":[{"$serde_json::private::Number":"1"}]}"#),
+            digest(r#"{"nested":[1]}"#)
+        );
+        assert_ne!(
+            digest(object),
+            digest(r#"{"$serde_json::private::Number":"35.0"}"#)
+        );
+    }
+
+    #[test]
+    fn stream_digest_rejects_invalid_json_and_duplicate_keys() {
+        for invalid in [
+            "",
+            " \n ",
+            "[\x0c1]",
+            "true\x0cfalse",
+            r#"{"x":1,}"#,
+            "[1,]",
+            "1e",
+            "01",
+            "[1] trailing",
+            r#"{"a":1,"a":2}"#,
+            r#"{"a":1,"\u0061":2}"#,
+        ] {
+            assert!(
+                stream_semantic_digest(Cursor::new(invalid.as_bytes())).is_err(),
+                "unexpectedly accepted {invalid:?}"
+            );
+        }
+    }
 }

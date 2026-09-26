@@ -60,7 +60,25 @@ pub struct BenchmarkInput {
     #[serde(default)]
     pub output_mode: OutputMode,
     pub query: String,
+    #[serde(default)]
+    pub yq: Option<QueryOverride>,
     pub input: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QueryOverride {
+    pub query: String,
+    pub note: String,
+}
+
+impl BenchmarkInput {
+    pub fn query_for(&self, tool: BenchmarkTool) -> &str {
+        if tool == BenchmarkTool::Yq {
+            self.yq.as_ref().map_or(&self.query, |yq| &yq.query)
+        } else {
+            &self.query
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -123,9 +141,15 @@ pub fn validate_report(
     report: &BenchmarkCampaignReport,
     scenarios: &[ScenarioRecord],
 ) -> Result<(), ReportError> {
-    if report.profile != "stack-overflow" {
+    if report.suite != "stack-overflow" {
         return Err(ReportError::Invalid(format!(
-            "expected profile `stack-overflow`, found `{}`",
+            "expected suite `stack-overflow`, found `{}`",
+            report.suite
+        )));
+    }
+    if !matches!(report.profile.as_str(), "quick" | "standard" | "extended") {
+        return Err(ReportError::Invalid(format!(
+            "expected profile `quick`, `standard`, or `extended`, found `{}`",
             report.profile
         )));
     }
@@ -141,7 +165,13 @@ pub fn validate_report(
     }
     let adapters = ["jq-json", "yq-json", "tq-json"];
     let expected_rows = expected.len() * adapters.len();
-    if report.cases.len() != expected_rows {
+    let incomplete = report.profile == "quick"
+        && report.final_status == tq_test_support::benchmark::BenchmarkFinalStatus::Incomplete
+        && report
+            .execution
+            .as_ref()
+            .is_some_and(|execution| !execution.complete);
+    if report.cases.len() != expected_rows && !incomplete {
         return Err(ReportError::Invalid(format!(
             "expected {expected_rows} rows for {} scenarios, found {}",
             expected.len(),
@@ -179,18 +209,16 @@ pub fn validate_report(
             .iter()
             .find(|record| record.scenario.id == row.case_id)
             .expect("validated report case ID is present in scenarios");
-        if row.command.last() != Some(&scenario.scenario.benchmark.query) {
+        let tool = adapter_tool(&row.adapter_id).expect("validated adapter ID has a tool");
+        let query = scenario.scenario.benchmark.query_for(tool);
+        if row.command.last().map(String::as_str) != Some(query) {
             return Err(ReportError::Invalid(format!(
                 "scenario {} adapter {} has a command/query mismatch",
                 row.case_id, row.adapter_id
             )));
         }
-        let tool = adapter_tool(&row.adapter_id).expect("validated adapter ID has a tool");
-        let expected_args = super::outputs::profile_args(
-            scenario.scenario.benchmark.output_mode,
-            tool,
-            &scenario.scenario.benchmark.query,
-        );
+        let expected_args =
+            super::outputs::profile_args(scenario.scenario.benchmark.output_mode, tool, query);
         let legacy_structured_toon = scenario.scenario.benchmark.output_mode
             == OutputMode::Structured
             && tool == BenchmarkTool::Tq
@@ -219,17 +247,21 @@ pub fn validate_report(
         .iter()
         .map(|entry| entry.source_id.as_str())
         .collect::<BTreeSet<_>>();
-    if report.corpus.len() != expected.len() || corpus != expected {
+    if (!incomplete && (report.corpus.len() != expected.len() || corpus != expected))
+        || (incomplete && (!corpus.is_subset(&expected) || corpus.len() != report.corpus.len()))
+    {
         return Err(ReportError::Invalid(
             "report corpus does not match the checked-in scenario set".to_owned(),
         ));
     }
     for scenario in scenarios {
-        let entry = report
+        let Some(entry) = report
             .corpus
             .iter()
             .find(|entry| entry.source_id == scenario.scenario.id)
-            .expect("validated corpus source ID is present");
+        else {
+            continue;
+        };
         let digest = sha256_hex(&scenario.input);
         let bytes = u64::try_from(scenario.input.len()).unwrap_or(u64::MAX);
         if entry.artifact.sha256 != digest
@@ -243,6 +275,35 @@ pub fn validate_report(
         }
     }
     Ok(())
+}
+
+/// Renders a non-publishable, session-only summary of every checked scenario.
+pub fn render_quick_table(
+    report: &BenchmarkCampaignReport,
+    scenarios: &[ScenarioRecord],
+) -> String {
+    let mut output =
+        String::from("| Scenario | jq (ms) | yq (ms) | tq (ms) |\n| --- | ---: | ---: | ---: |\n");
+    for scenario in scenarios {
+        let [jq, yq, tq] = ["jq-json", "yq-json", "tq-json"].map(|adapter| {
+            report
+                .cases
+                .iter()
+                .find(|row| row.case_id == scenario.scenario.id && row.adapter_id == adapter)
+                .map_or_else(|| "not run".to_owned(), quick_cell)
+        });
+        let _ = writeln!(output, "| {} | {jq} | {yq} | {tq} |", scenario.scenario.id);
+    }
+    output
+}
+
+fn quick_cell(row: &BenchmarkRow) -> String {
+    match (&row.outcome, &row.summary) {
+        (BenchmarkOutcome::Timed, Some(summary)) => {
+            format!("{:.3}", summary.wall_time_micros.median / 1_000.0)
+        }
+        _ => outcome_name(&row.outcome).to_owned(),
+    }
 }
 
 /// Renders the index and one page per fixture.
@@ -266,6 +327,11 @@ pub fn render_report_with_outputs(
     outputs: Option<&super::outputs::OutputCampaign>,
 ) -> Result<String, ReportError> {
     validate_report(report, scenarios)?;
+    if report.profile == "quick" {
+        return Err(ReportError::Invalid(
+            "quick Stack Overflow reports are table-only and cannot be published".to_owned(),
+        ));
+    }
     if let Some(outputs) = outputs {
         super::outputs::validate(outputs, scenarios).map_err(ReportError::Invalid)?;
     }
@@ -409,6 +475,9 @@ fn scenario_preamble(record: &ScenarioRecord, repository_root: &Path) -> String 
         serde_json::to_string_pretty(&scenario.benchmark.input)
             .expect("benchmark input is serializable"),
     );
+    if let Some(yq) = &scenario.benchmark.yq {
+        let _ = write!(output, "\nyq equivalent: `{}`\n\n{}\n", yq.query, yq.note);
+    }
     if let Some(retrieved_from) = &scenario.source.retrieved_from {
         let _ = write!(
             output,
@@ -847,6 +916,7 @@ fn status_name(status: tq_test_support::benchmark::BenchmarkFinalStatus) -> &'st
         tq_test_support::benchmark::BenchmarkFinalStatus::Passed => "passed",
         tq_test_support::benchmark::BenchmarkFinalStatus::ObservedFailures => "observed-failures",
         tq_test_support::benchmark::BenchmarkFinalStatus::Regression => "regression",
+        tq_test_support::benchmark::BenchmarkFinalStatus::Incomplete => "incomplete",
     }
 }
 
@@ -1054,6 +1124,7 @@ mod tests {
                 benchmark: BenchmarkInput {
                     output_mode: OutputMode::Structured,
                     query: ".name".to_owned(),
+                    yq: None,
                     input: serde_json::json!({"name": "lambda"}),
                 },
             },
@@ -1143,9 +1214,11 @@ mod tests {
 
     fn report(legacy: bool, outcome: &BenchmarkOutcome) -> BenchmarkCampaignReport {
         BenchmarkCampaignReport {
+            execution: None,
             schema_version: 1,
             campaign_id: "2026-09-11T00:00:00Z".to_owned(),
-            profile: "stack-overflow".to_owned(),
+            suite: "stack-overflow".to_owned(),
+            profile: "standard".to_owned(),
             environment: tq_test_support::benchmark::collect_environment("test"),
             corpus: vec![BenchmarkCorpusIdentity {
                 origin: "checked-in".to_owned(),
@@ -1191,6 +1264,36 @@ mod tests {
                 BenchmarkFinalStatus::ObservedFailures
             },
         }
+    }
+
+    #[test]
+    fn validation_requires_the_current_tool_specific_query() {
+        let mut scenario = scenario_fixture();
+        let yq_query = ".name | .";
+        scenario.scenario.benchmark.yq = Some(QueryOverride {
+            query: yq_query.to_owned(),
+            note: "Equivalent native yq query.".to_owned(),
+        });
+        let scenarios = [scenario];
+        let mut report = report(false, &BenchmarkOutcome::Timed);
+
+        assert!(validate_report(&report, &scenarios).is_err());
+        let yq = report
+            .cases
+            .iter_mut()
+            .find(|row| row.adapter_id == "yq-json")
+            .unwrap();
+        *yq.command.last_mut().unwrap() = yq_query.to_owned();
+        validate_report(&report, &scenarios)
+            .expect("adapted yq query, unchanged jq and tq queries");
+
+        let jq = report
+            .cases
+            .iter_mut()
+            .find(|row| row.adapter_id == "jq-json")
+            .unwrap();
+        *jq.command.last_mut().unwrap() = yq_query.to_owned();
+        assert!(validate_report(&report, &scenarios).is_err());
     }
 
     #[test]
@@ -1326,13 +1429,78 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_a_report_for_the_wrong_campaign() {
+    fn validation_rejects_a_report_for_the_wrong_suite() {
         let mut report = report(false, &BenchmarkOutcome::Timed);
-        report.profile = "rapid".to_owned();
-        let error = validate_report(&report, &[scenario_fixture()]).expect_err("wrong profile");
-        assert!(error.to_string().contains("stack-overflow"));
+        report.suite = "natural-corpus".to_owned();
+        let error = validate_report(&report, &[scenario_fixture()]).expect_err("wrong suite");
+        assert!(
+            error
+                .to_string()
+                .contains("expected suite `stack-overflow`")
+        );
     }
 
+    #[test]
+    fn validation_accepts_all_run_profiles_and_rejects_non_profiles() {
+        let mut report = report(false, &BenchmarkOutcome::Timed);
+        for profile in ["quick", "standard", "extended"] {
+            report.profile = profile.to_owned();
+            validate_report(&report, &[scenario_fixture()]).expect("valid run profile");
+        }
+        report.profile = "stack-overflow".to_owned();
+        assert!(validate_report(&report, &[scenario_fixture()]).is_err());
+    }
+
+    #[test]
+    fn quick_reports_cannot_publish_pages() {
+        let directory = tempdir().unwrap();
+        let mut report = report(false, &BenchmarkOutcome::Timed);
+        report.profile = "quick".to_owned();
+        let destination = directory.path().join("pages");
+        let error = render_report(
+            &report,
+            &[scenario_fixture()],
+            &destination,
+            directory.path(),
+        )
+        .expect_err("quick reports cannot publish");
+        assert!(error.to_string().contains("quick"));
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn incomplete_quick_session_preserves_partial_rows_without_implying_coverage() {
+        let mut report = report(false, &BenchmarkOutcome::Timed);
+        report.profile = "quick".to_owned();
+        report.final_status = tq_test_support::benchmark::BenchmarkFinalStatus::Incomplete;
+        report.execution = Some(tq_test_support::benchmark::CampaignExecution {
+            mode: "exhaustive".to_owned(),
+            sampling: "quick".to_owned(),
+            instrument_rss: false,
+            campaign_budget_seconds: 50,
+            case_budget_seconds: 50,
+            planned_rows: 3,
+            elapsed_seconds: 1.0,
+            complete: false,
+            interruptions: vec!["campaign work budget exhausted".to_owned()],
+        });
+        report.cases.truncate(1);
+        validate_report(&report, &[scenario_fixture()]).expect("valid partial quick session");
+        let table = render_quick_table(&report, &[scenario_fixture()]);
+        assert!(table.contains("| stack-overflow.01 | 1.000 | not run | not run |"));
+        report.execution.as_mut().unwrap().complete = true;
+        assert!(validate_report(&report, &[scenario_fixture()]).is_err());
+    }
+
+    #[test]
+    fn quick_table_shows_every_tool_outcome() {
+        let mut report = report(false, &BenchmarkOutcome::Timed);
+        report.profile = "quick".to_owned();
+        report.cases[2] = row("tq-json", BenchmarkOutcome::Unsupported, false);
+        let table = render_quick_table(&report, &[scenario_fixture()]);
+        assert!(table.contains("| Scenario | jq (ms) | yq (ms) | tq (ms) |"));
+        assert!(table.contains("| stack-overflow.01 | 1.000 | 1.000 | unsupported |"));
+    }
     #[test]
     fn changed_query_or_input_is_rejected_before_writing_pages() {
         for change_query in [true, false] {

@@ -4,11 +4,12 @@
   "title": "tq benchmark campaign report",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "campaign_id", "profile", "environment", "corpus", "tools", "cases", "comparability", "regression_gate", "final_status"],
+  "required": ["schema_version", "campaign_id", "suite", "profile", "environment", "corpus", "tools", "cases", "comparability", "regression_gate", "final_status"],
   "properties": {
     "schema_version": {"const": 1},
     "campaign_id": {"type": "string", "minLength": 1},
-    "profile": {"enum": ["smoke", "rapid", "standard", "large", "stack-overflow"]},
+    "suite": {"enum": ["smoke", "natural-corpus", "large-input", "stack-overflow"]},
+    "profile": {"enum": ["quick", "standard", "extended"]},
     "environment": {
       "type": "object",
       "additionalProperties": true,
@@ -16,6 +17,22 @@
     },
     "corpus": {"type": "array"},
     "tools": {"type": "array"},
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "sampling", "instrument_rss", "campaign_budget_seconds", "case_budget_seconds", "planned_rows", "elapsed_seconds", "complete", "interruptions"],
+      "properties": {
+        "mode": {"enum": ["fast", "exhaustive"]},
+        "sampling": {"enum": ["quick", "screen", "compare", "extended", "catalog", "explicit"]},
+        "instrument_rss": {"type": "boolean"},
+        "campaign_budget_seconds": {"type": "integer", "minimum": 1},
+        "case_budget_seconds": {"type": "integer", "minimum": 1},
+        "planned_rows": {"type": "integer", "minimum": 0},
+        "elapsed_seconds": {"type": "number", "minimum": 0},
+        "complete": {"type": "boolean"},
+        "interruptions": {"type": "array", "items": {"type": "string", "maxLength": 2048}}
+      }
+    },
     "output_comparison": {
       "type": "object",
       "additionalProperties": false,
@@ -177,8 +194,15 @@
         "unavailable": {"type": "array", "items": {"type": "string"}}
       }
     },
-    "final_status": {"enum": ["passed", "observed-failures", "regression"]}
+    "final_status": {"enum": ["passed", "observed-failures", "regression", "incomplete"]}
   },
+  "allOf": [{
+    "if": {
+      "required": ["execution"],
+      "properties": {"execution": {"required": ["complete"], "properties": {"complete": {"const": false}}}}
+    },
+    "then": {"properties": {"final_status": {"const": "incomplete"}}}
+  }],
   "$defs": {
     "measurement_protocol": {
       "type": "object",

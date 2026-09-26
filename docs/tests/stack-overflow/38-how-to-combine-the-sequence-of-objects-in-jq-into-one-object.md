@@ -2,7 +2,7 @@
 type: Report
 title: "How to combine the sequence of objects in jq into one object?"
 description: "Benchmark reproduction and measured results for Stack Overflow scenario 38."
-generated: { by: codex/gpt-5.6-luna, at: 2026-09-13T05:53:31Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-26T06:55:52Z }
 ---
 
 # 38: How to combine the sequence of objects in jq into one object?
@@ -18,6 +18,13 @@ This page records the checked-in benchmark reproduction for the question. The be
 ## Benchmark input
 
 Query: `add`
+
+yq equivalent: `.[] as $item ireduce (null; . + $item)`
+
+yq lacks jq's `add` builtin. The native reduction uses shallow, right-hand-wins
+object addition, not recursive merging; an empty array produces `null`.
+All tools remain checked against the original jq query's output. The historical
+results below predate this adaptation.
 
 Output mode: structured, using `tq`'s default TOON output.
 

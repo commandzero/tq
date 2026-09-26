@@ -84,7 +84,7 @@ fn stack_overflow_campaign_uses_emitted_artifacts_and_keeps_uncalibrated_pages()
     let target = root.join("custom target");
     let output = Command::new("/bin/sh")
         .arg(root.join("scripts/campaign-run.sh"))
-        .args(["benchmark", "stack-overflow"])
+        .args(["compatibility", "stack-overflow", "extended"])
         .current_dir(root)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("CARGO", bin.join("cargo"))
@@ -96,7 +96,8 @@ fn stack_overflow_campaign_uses_emitted_artifacts_and_keeps_uncalibrated_pages()
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let arguments = fs::read_to_string(log).unwrap();
+    let arguments = fs::read_to_string(&log).unwrap();
+    assert!(arguments.contains("--profile\nextended\n"));
     assert!(arguments.contains(&format!(
         "TQ_BIN={}\n",
         target.join("aarch64-unknown-linux-gnu/release/tq").display()
@@ -130,7 +131,7 @@ fn campaign_preserves_explicit_binary_overrides() {
     let worker = root.join("provided worker");
     let output = Command::new("/bin/sh")
         .arg(root.join("scripts/campaign-run.sh"))
-        .args(["benchmark", "stack-overflow"])
+        .args(["compatibility", "stack-overflow"])
         .current_dir(root)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("CARGO", bin.join("cargo"))
@@ -147,6 +148,8 @@ fn campaign_preserves_explicit_binary_overrides() {
     let arguments = fs::read_to_string(log).unwrap();
     assert!(arguments.contains(&format!("TQ_BIN={}\n", tq.display())));
     assert!(arguments.contains(&format!("TQ_BENCH_WORKER={}\n", worker.display())));
+    assert!(arguments.contains("--profile\nstandard\n"));
+    assert!(!arguments.contains("--report-dir\n"));
     assert!(!arguments.contains("PARSER_RUN\n"));
 }
 
@@ -178,6 +181,8 @@ fn benchmark_smoke_forwards_timing_calibration() {
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     let arguments = fs::read_to_string(log).unwrap();
+    assert!(arguments.contains("--suite\nsmoke\n--profile\nstandard\n"));
+    assert!(!arguments.contains("--max-samples\n"));
     assert!(arguments.contains(&format!(
         "--timing-calibration\n{}\n",
         calibration.display()
@@ -185,25 +190,80 @@ fn benchmark_smoke_forwards_timing_calibration() {
 }
 
 #[test]
-fn benchmark_standard_requires_timing_calibration() {
+fn benchmark_suites_retain_session_reports_without_publication() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     copy_script(root, "campaign-run.sh");
     let bin = root.join("bin");
     fs::create_dir(&bin).unwrap();
     campaign_stub(&bin);
-    let output = Command::new("/bin/sh")
-        .arg(root.join("scripts/campaign-run.sh"))
-        .args(["benchmark", "standard"])
-        .current_dir(root)
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-        .env("CARGO", bin.join("cargo"))
-        .env("TQ_BENCHMARK_ARCHIVE_ROOT", root.join("archive"))
-        .env("TEST_COMMAND_LOG", root.join("commands"))
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(64));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("TQ_TIMING_CALIBRATION"));
+    let session_root = root.join("session temporary");
+    fs::create_dir(&session_root).unwrap();
+    let archive = root.join("archive");
+    for (name, invocation, suite, profile) in [
+        ("default", &["benchmark"][..], "natural-corpus", "standard"),
+        (
+            "large",
+            &["benchmark", "large-input", "standard"][..],
+            "large-input",
+            "standard",
+        ),
+    ] {
+        let log = root.join(format!("commands-{name}"));
+        let output = Command::new("/bin/sh")
+            .arg(root.join("scripts/campaign-run.sh"))
+            .args(invocation)
+            .current_dir(root)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("CARGO", bin.join("cargo"))
+            .env("TEST_TARGET_DIR", root.join("custom target"))
+            .env("TEST_TARGET_TRIPLE", "aarch64-unknown-linux-gnu")
+            .env("TQ_BENCHMARK_ARCHIVE_ROOT", &archive)
+            .env("TQ_BENCH_MANIFESTS", "/fixture/manifest.json")
+            .env("TEST_COMMAND_LOG", &log)
+            .env("TMPDIR", &session_root)
+            .env_remove("TQ_TIMING_CALIBRATION")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let arguments = fs::read_to_string(&log).unwrap();
+        assert!(arguments.contains(&format!("--suite\n{suite}\n--profile\n{profile}\n")));
+        let report = arguments
+            .split("--output\n")
+            .nth(1)
+            .and_then(|remaining| remaining.lines().next())
+            .expect("benchmark output argument");
+        let report = Path::new(report);
+        assert_eq!(report.file_name().unwrap(), "report.json");
+        assert!(report.parent().unwrap().starts_with(&session_root));
+        assert!(report.parent().unwrap().is_dir());
+        assert!(!arguments.contains("--markdown-dir\n"));
+        assert!(!archive.join(format!(".work/{profile}.json")).exists());
+    }
+    assert!(!root.join("docs/tests/comparison").exists());
+}
+
+#[test]
+fn positional_suite_names_and_profiles_are_not_interchangeable() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    copy_script(root, "campaign-run.sh");
+    for arguments in [
+        &["benchmark", "quick"][..],
+        &["benchmark", "standard"][..],
+        &["benchmark", "extra-large"][..],
+        &["benchmark", "stack-overflow"][..],
+        &["benchmark", "large-input", "extra-large"][..],
+        &["compatibility", "stack-overflow", "smoke"][..],
+    ] {
+        let output = Command::new("/bin/sh")
+            .arg(root.join("scripts/campaign-run.sh"))
+            .args(arguments)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(64), "{arguments:?}: {output:?}");
+    }
 }
 
 #[test]
@@ -221,7 +281,7 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
         let log = root.join("commands");
         let output = Command::new("/bin/sh")
             .arg(root.join("scripts/campaign-run.sh"))
-            .args(["benchmark", "stack-overflow"])
+            .args(["compatibility", "stack-overflow"])
             .current_dir(root)
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
             .env("CARGO", bin.join("cargo"))
@@ -246,15 +306,6 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
             "{bad_artifact}"
         );
     }
-}
-
-#[test]
-fn campaign_manifest_parsing_uses_host_tq_instead_of_jq() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let script = fs::read_to_string(root.join("scripts/campaign-run.sh")).unwrap();
-    assert!(!script.contains("$(jq "));
-    assert!(script.contains("host_tq"));
-    assert!(script.contains("TQ_HOST_TQ"));
 }
 
 #[test]

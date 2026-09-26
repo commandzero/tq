@@ -9,10 +9,10 @@ use std::{
 
 use tq_test_support::corpus::{
     CorpusOrigin, SnapshotManifest, SnapshotState, finalize_generated_representations_with_tq,
-    generate_representations_with_tq, inventory_snapshots, prepare_campaign, refresh_campaign,
-    validate_generated_representations_with_tq, verify_frozen_snapshot, write_snapshot_manifest,
+    generate_representations_with_tq, inventory_snapshots, load_frozen_snapshot, prepare_campaign,
+    refresh_campaign, remember_generated_validation, validate_generated_representations_cached,
+    verify_frozen_snapshot, write_snapshot_manifest,
 };
-
 fn main() {
     if let Err(error) = run() {
         eprintln!("tq-corpus: {error}");
@@ -44,7 +44,23 @@ fn finalize(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let manifest_path = Path::new(manifest_path);
     let mut manifest: SnapshotManifest = serde_json::from_reader(fs::File::open(manifest_path)?)?;
     if manifest.state == SnapshotState::CrossFormatValidated {
-        println!("{}", serde_json::to_string_pretty(&manifest)?);
+        let frozen = load_frozen_snapshot(manifest_path, cache)?;
+        let generated = frozen
+            .manifest
+            .artifacts
+            .generated
+            .as_ref()
+            .ok_or("validated snapshot has no generated representations")?;
+        validate_generated_representations_cached(
+            cache,
+            &tq_binary()?,
+            &cache.join(&frozen.manifest.artifacts.source_json.path),
+            &cache.join(&generated.yaml.path),
+            &cache.join(&generated.toon.path),
+            &frozen.manifest.artifacts.source_json,
+            generated,
+        )?;
+        println!("{}", serde_json::to_string_pretty(&frozen.manifest)?);
         return Ok(());
     }
     if manifest.artifacts.generated.is_some() {
@@ -68,6 +84,12 @@ fn finalize(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         &toon_manifest_path,
     )?;
 
+    remember_generated_validation(
+        cache,
+        &tq_binary()?,
+        &manifest.artifacts.source_json,
+        &generated,
+    )?;
     manifest.artifacts.generated = Some(generated);
     manifest.validation.yaml_equivalent = Some(true);
     manifest.validation.toon_equivalent = Some(true);
@@ -84,7 +106,7 @@ fn refresh(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let refreshed = refresh_campaign(
         Path::new(sources),
         Path::new(cache),
-        campaign,
+        corpus_suite(campaign)?,
         &tq_binary()?,
     )?;
     print_campaign(&refreshed)
@@ -97,10 +119,18 @@ fn prepare(arguments: &[String]) -> Result<(), Box<dyn Error>> {
     let prepared = prepare_campaign(
         Path::new(sources),
         Path::new(cache),
-        campaign,
+        corpus_suite(campaign)?,
         &tq_binary()?,
     )?;
     print_campaign(&prepared)
+}
+
+fn corpus_suite(value: &str) -> Result<&str, Box<dyn Error>> {
+    if matches!(value, "natural-corpus" | "large-input") {
+        Ok(value)
+    } else {
+        Err(format!("invalid corpus suite: {value}; expected natural-corpus or large-input").into())
+    }
 }
 
 fn print_campaign(
@@ -146,11 +176,14 @@ fn verify(arguments: &[String]) -> Result<(), Box<dyn Error>> {
         .generated
         .as_ref()
         .ok_or("snapshot has no generated representations")?;
-    validate_generated_representations_with_tq(
+    validate_generated_representations_cached(
+        cache,
         &tq_binary()?,
         &cache.join(&frozen.manifest.artifacts.source_json.path),
         &cache.join(&generated.yaml.path),
         &cache.join(&generated.toon.path),
+        &frozen.manifest.artifacts.source_json,
+        generated,
     )?;
     println!("{}", serde_json::to_string_pretty(&frozen.manifest)?);
     Ok(())
@@ -176,7 +209,7 @@ fn inventory(arguments: &[String]) -> Result<(), Box<dyn Error>> {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  tq-corpus prepare SOURCES_DIR CACHE_ROOT rapid|standard|large\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT rapid|standard|large\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus finalize CACHE_ROOT MANIFEST.json\n  tq-corpus verify CACHE_ROOT MANIFEST.json\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
+    "usage:\n  tq-corpus prepare SOURCES_DIR CACHE_ROOT natural-corpus|large-input\n  tq-corpus refresh SOURCES_DIR CACHE_ROOT natural-corpus|large-input\n  tq-corpus generate SOURCE.json OUTPUT.yaml OUTPUT.toon\n  tq-corpus finalize CACHE_ROOT MANIFEST.json\n  tq-corpus verify CACHE_ROOT MANIFEST.json\n  tq-corpus inventory smoke|refreshed|frozen MANIFEST.json..."
 }
 
 fn tq_binary() -> Result<PathBuf, Box<dyn Error>> {

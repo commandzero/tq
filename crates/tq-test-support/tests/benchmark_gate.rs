@@ -35,6 +35,7 @@ fn incorrect_candidate_never_receives_timing_samples() {
         DatasetTier::Startup,
         &invocation(executable),
         &reference(),
+        false,
     )
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
@@ -72,6 +73,7 @@ fn colored_json_gate_requires_sgr_and_matching_json_before_timing() {
         DatasetTier::Startup,
         &invocation(candidate_script),
         &reference,
+        false,
     )
     .expect("colored gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::Timed);
@@ -88,6 +90,7 @@ fn colored_json_gate_requires_sgr_and_matching_json_before_timing() {
         DatasetTier::Startup,
         &invocation(wrong_json),
         &reference,
+        false,
     )
     .expect("wrong colored row");
     assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
@@ -101,6 +104,7 @@ fn colored_json_gate_requires_sgr_and_matching_json_before_timing() {
         DatasetTier::Startup,
         &invocation(no_color),
         &reference,
+        false,
     )
     .expect("missing colored row");
     assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
@@ -118,6 +122,7 @@ fn colored_json_gate_requires_sgr_and_matching_json_before_timing() {
         DatasetTier::Startup,
         &invocation(malformed),
         &reference,
+        false,
     )
     .expect("malformed colored row");
     assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
@@ -135,6 +140,7 @@ fn correct_candidate_runs_warmup_and_requested_samples() {
         DatasetTier::Startup,
         &invocation(executable),
         &reference(),
+        false,
     )
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::Timed);
@@ -163,6 +169,7 @@ fn rss_limited_rows_keep_timing_and_enforcement_repetitions_separate() {
         DatasetTier::Startup,
         &invocation,
         &reference(),
+        true,
     )
     .expect("limited gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::Timed);
@@ -192,6 +199,36 @@ fn rss_limited_rows_keep_timing_and_enforcement_repetitions_separate() {
 }
 
 #[test]
+fn rss_limited_rows_do_not_repeat_work_without_opt_in() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let executable = script(directory.path(), "primary-rss", "printf '1\\n'");
+    let mut invocation = invocation(executable);
+    invocation.rss_limit = Some(128 * 1024 * 1024);
+    let mut case = case();
+    case.limits.rss_bytes = invocation.rss_limit;
+    let row = run_gated_row(
+        &case,
+        &adapter(),
+        &corpus(),
+        DatasetTier::Startup,
+        &invocation,
+        &reference(),
+        false,
+    )
+    .expect("primary RSS row");
+
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+    assert_eq!(row.samples.len(), 3);
+    assert!(row.instrumented_samples.is_empty());
+    assert!(row.samples.iter().all(|sample| {
+        sample
+            .measurement_protocol
+            .as_ref()
+            .is_some_and(|protocol| protocol.rss_poll_interval_micros == Some(25_000))
+    }));
+}
+
+#[test]
 fn failed_sampled_enforcement_is_not_reported_as_a_timing_repetition() {
     let directory = tempfile::tempdir().unwrap();
     let executable = script(directory.path(), "over-limit", "printf '1\\n'");
@@ -206,6 +243,7 @@ fn failed_sampled_enforcement_is_not_reported_as_a_timing_repetition() {
         DatasetTier::Startup,
         &invocation,
         &reference(),
+        true,
     )
     .unwrap();
     assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
@@ -225,6 +263,7 @@ fn signaled_correctness_candidate_is_not_misclassified_as_incorrect() {
         DatasetTier::Startup,
         &invocation(executable),
         &reference(),
+        false,
     )
     .expect("gated row");
     assert_eq!(row.outcome, BenchmarkOutcome::OomOrSignal);
@@ -336,7 +375,8 @@ fn semantic_digest_matches_json_and_toon_without_retaining_result_sequences() {
 }
 
 #[test]
-fn semantic_witness_limit_becomes_a_resource_row_before_sampling() {
+fn high_cardinality_correctness_does_not_hit_a_witness_ceiling() {
+    let values = vec![json!(1); 220_000];
     let directory = tempfile::tempdir().expect("temporary directory");
     let executable = script(
         directory.path(),
@@ -351,17 +391,13 @@ fn semantic_witness_limit_becomes_a_resource_row_before_sampling() {
         &corpus(),
         DatasetTier::Startup,
         &invocation,
-        &reference(),
+        &reference_values(&values),
+        false,
     )
-    .expect("bounded witness row");
+    .expect("disk-backed witness row");
 
-    assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
-    assert!(row.samples.is_empty());
-    assert!(
-        row.diagnostic
-            .as_deref()
-            .is_some_and(|diagnostic| diagnostic.contains("semantic witness"))
-    );
+    assert_eq!(row.outcome, BenchmarkOutcome::Timed);
+    assert_eq!(row.samples.len(), 3);
 }
 
 #[test]
@@ -375,6 +411,7 @@ fn default_toon_values_are_normalized_without_sequence_framing() {
         DatasetTier::Startup,
         &invocation(toon),
         &reference_values(&[json!({"a": 1}), json!(2)]),
+        false,
     )
     .expect("gated row");
 
@@ -396,6 +433,7 @@ fn default_toon_values_preserve_adjacent_same_shaped_objects() {
         DatasetTier::Startup,
         &invocation(toon),
         &reference_values(&[json!({"a": 1}), json!({"a": 2})]),
+        false,
     )
     .expect("adjacent object row");
 
@@ -413,6 +451,7 @@ fn default_toon_value_without_terminal_lf_is_reported_as_unnormalized() {
         DatasetTier::Startup,
         &invocation(toon),
         &reference_values(&[json!({"a": 1})]),
+        false,
     )
     .expect("missing terminal LF row");
 
@@ -435,6 +474,7 @@ fn default_toon_value_with_trailing_extra_bytes_is_rejected() {
         DatasetTier::Startup,
         &invocation(toon),
         &reference_values(&[json!({"a": 1})]),
+        false,
     )
     .expect("trailing bytes row");
 
@@ -457,6 +497,7 @@ fn malformed_default_toon_multi_result_stream_is_rejected_with_bounded_fallback(
         DatasetTier::Startup,
         &invocation(toon),
         &reference_values(&[json!(1), json!(2)]),
+        false,
     )
     .expect("malformed multi-result row");
 
@@ -494,6 +535,7 @@ fn large_first_toon_composite_and_following_scalar_use_linear_boundary_hint() {
         DatasetTier::Startup,
         &large_invocation,
         &reference_values(&[first, json!(2)]),
+        false,
     )
     .expect("large composite row");
 
@@ -517,6 +559,7 @@ fn explicit_toon_sequence_and_json_output_are_normalized_from_arguments() {
         DatasetTier::Startup,
         &sequence_invocation,
         &reference_values(&[json!({"a": 1}), json!(2)]),
+        false,
     )
     .expect("sequence gated row");
     assert_eq!(sequence_row.outcome, BenchmarkOutcome::Timed);
@@ -540,6 +583,7 @@ fn explicit_toon_sequence_and_json_output_are_normalized_from_arguments() {
         DatasetTier::Startup,
         &json_invocation,
         &reference_values(&[json!({"a": 1}), json!(2)]),
+        false,
     )
     .expect("JSON gated row");
     assert_eq!(json_row.outcome, BenchmarkOutcome::Timed);
@@ -560,6 +604,7 @@ fn resource_failure_is_not_misclassified_as_incorrect() {
         DatasetTier::Startup,
         &invocation(executable),
         &reference(),
+        false,
     )
     .expect("resource row");
 
@@ -584,6 +629,7 @@ fn successful_empty_selection_is_timed_without_first_output_latency() {
         DatasetTier::Startup,
         &invocation(executable),
         &reference_values(&[]),
+        false,
     )
     .expect("empty selection row");
 
@@ -615,6 +661,7 @@ fn nonzero_exit_after_correctness_never_becomes_a_valid_timing() {
             DatasetTier::Startup,
             &invocation,
             &reference(),
+            false,
         )
         .expect("gated row");
         assert_eq!(row.outcome, BenchmarkOutcome::Incorrect);
@@ -633,6 +680,7 @@ fn capture_limit_on_candidate_is_a_resource_failure() {
         DatasetTier::Startup,
         &invocation(executable),
         &reference(),
+        false,
     )
     .expect("gated capture limit");
     assert_eq!(row.outcome, BenchmarkOutcome::ResourceLimit);
@@ -673,6 +721,7 @@ fn candidate_measurement_infrastructure_failure_aborts_before_gate_decision() {
         DatasetTier::Startup,
         &measured,
         &reference(),
+        false,
     );
     let Err(BenchmarkRunnerError::Measure(MeasureError::Collection {
         source,

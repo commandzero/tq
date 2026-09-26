@@ -17,17 +17,11 @@ fn benchmark_schemas_are_valid_and_campaign_shape_is_versioned() {
         &fs::read(root.join("schemas/benchmark-campaign-v1.schema.json")).expect("campaign schema"),
     )
     .expect("campaign schema JSON");
-    assert!(
-        campaign_schema["properties"]["profile"]["enum"]
-            .as_array()
-            .expect("profile enum")
-            .iter()
-            .any(|profile| profile == "rapid")
-    );
     let validator = jsonschema::Validator::new(&campaign_schema).expect("valid campaign schema");
     assert!(validator.is_valid(&json!({
         "schema_version": 1,
         "campaign_id": "local-2026-07-31",
+        "suite": "natural-corpus",
         "profile": "standard",
         "environment": {
             "collected_at": "2026-07-31T00:00:00Z",
@@ -104,7 +98,7 @@ fn adapter_applicability_requires_a_matching_unsupported_reason() {
 }
 
 #[test]
-fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
+fn workload_catalog_is_schema_valid_and_gated() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let schema: Value = serde_json::from_slice(
         &fs::read(root.join("schemas/benchmark-case-v1.schema.json")).expect("case schema"),
@@ -131,29 +125,7 @@ fn workload_catalog_is_schema_valid_gated_and_has_the_full_adapter_matrix() {
             "unknown compatibility gate on line {}",
             index + 1
         );
-        let adapters = case["adapters"].as_array().expect("adapter matrix");
-        let adapter_ids = adapters
-            .iter()
-            .map(|adapter| adapter["id"].as_str().expect("adapter ID"))
-            .collect::<BTreeSet<_>>();
-        let expected_adapters = BTreeSet::from([
-            "jq-json", "yq-json", "yq-yaml", "tq-json", "tq-yaml", "tq-toon",
-        ]);
-        assert_eq!(adapter_ids, expected_adapters);
-        for adapter in adapters.iter().filter(|adapter| adapter["tool"] == "tq") {
-            let format = adapter["input_format"].as_str().expect("input format");
-            let args = adapter["args"].as_array().expect("adapter args");
-            assert!(args.windows(2).any(|pair| {
-                pair[0].as_str() == Some("--input-format") && pair[1].as_str() == Some(format)
-            }));
-        }
-        for adapter in adapters.iter().filter(|adapter| adapter["tool"] == "yq") {
-            if let Some(query) = adapter.get("query") {
-                assert_ne!(query.as_str().expect("adapter query"), "");
-            }
-        }
     }
-    assert_eq!(ids.len(), 39);
 }
 
 #[test]

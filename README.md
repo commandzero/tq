@@ -161,14 +161,18 @@ output support in each tool.
 target/release/tq compatibility
 ```
 
-Benchmark campaigns generate and validate their input representations before
-timing jq, yq, and tq. Reports and large corpora belong in the separate
-`commandzero/tq-benchmarks` repository.
+Benchmark suites choose inputs and cases; quick (0+1), standard (1+3), and
+extended (1+5) choose sampling extent. The default suite is `natural-corpus`
+with profile `standard`; `smoke` uses tiny fixtures, while `large-input` uses
+the admitted building-footprint source. Reports and large corpora belong in
+the separate `commandzero/tq-benchmarks` repository.
 
 ```console
+./scripts/campaign-run.sh benchmark
 ./scripts/campaign-run.sh benchmark smoke
-./scripts/campaign-run.sh benchmark standard
-./scripts/campaign-run.sh benchmark large
+./scripts/campaign-run.sh benchmark natural-corpus quick
+./scripts/campaign-run.sh benchmark large-input extended
+./scripts/campaign-run.sh compatibility stack-overflow standard
 ```
 
 See the [benchmark guide](benchmarks/README.md) for campaign details and the

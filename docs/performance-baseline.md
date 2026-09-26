@@ -2,7 +2,7 @@
 type: Report
 title: Performance review policy
 description: Benchmark evidence, regression limits, and archive requirements.
-generated: { by: codex/gpt-5.6-luna, at: 2026-09-13T18:56:11Z }
+generated: { by: codex/gpt-6-astra, at: 2026-09-26T05:34:45Z }
 ---
 
 # Performance review policy
@@ -69,7 +69,7 @@ Run self-regression checks against JSON reports in the archive checkout's
 ```console
 export TQ_BENCHMARK_ARCHIVE_ROOT=/path/to/benchmark-archive
 TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --release -- \
-  run --profile standard --origin frozen --manifest PATH \
+  run --suite natural-corpus --profile extended --origin frozen --manifest PATH \
   --output "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/candidate.json" \
   --baseline "$TQ_BENCHMARK_ARCHIVE_ROOT/.work/accepted.json" \
   --timing-calibration PATH_TO_VERIFIED_NATIVE_SUMMARY \
@@ -77,10 +77,17 @@ TQ_BIN="$PWD/target/release/tq" cargo run -p tq-test-support --bin tq-bench --re
   --minimum-regression-samples 5
 ```
 
-The gate skips comparisons when the profile, machine, corpus artifact, or tool
-identity differs. A reference-tool change is metadata, not a regression. Old
-wrapper-based or sampled-memory reports keep their original method and are not
-comparable baselines for native-accounting claims.
+The gate marks comparisons unavailable, not regressed, when suite, profile,
+machine, corpus artifact, or tool identity differs. Quick-profile or
+quick-sampled evidence is ineligible on either side, even when the other
+contracts match and a one-sample minimum is requested. Use a like-for-like
+extended baseline with at least five samples. A reference-tool change is
+metadata, not a regression. Old wrapper-based or sampled-memory reports keep
+their original method and are not comparable baselines for native-accounting
+claims.
+Reports predating the explicit suite field require a reviewed migration before
+the current comparator can read them; never infer or silently relabel their
+historical suite or sampling profile.
 
 For issue #30 acceptance, review wall time and peak RSS independently for every
 comparable workload. Disclose each increase above 20% with baseline, candidate,
