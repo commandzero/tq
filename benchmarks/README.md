@@ -66,6 +66,11 @@ campaign budgets are allowed; quick campaign/case overrides above 50 seconds
 are rejected.
 Expiry returns status 124 and leaves results incomplete. SIGINT and SIGTERM
 retain process-group cleanup ownership and return 130 and 143 respectively.
+Cleanup signals whole groups only when their leaders are owned; descendants
+that join unrelated groups are signalled individually after identity checks.
+The exact coordinator child is also targeted. An unreaped child at the hard
+cutoff remains owned by a reserved reaper; after the guard process exits, the
+OS takes over reaping.
 Only the supervisor accepts a completed checkpoint, after terminal reporting
 and child cleanup finish; blocked output cannot leave a successful checkpoint.
 Retained checkpoints show observations available before interruption, which
@@ -415,6 +420,11 @@ cargo run --quiet -p tq-test-support --bin tq-stack-overflow -- \
   --report-dir /path/to/benchmark-archive/.work/stack-overflow-pages
 ```
 
+Both `render` and `outputs` reject saved reports with `final_status: incomplete`
+or `execution.complete: false`, even when every planned row is present.
+Historical reports without execution metadata remain readable, subject to the
+other report validation rules.
+
 Render-only reads the saved report, including serialized output captures, and
 does not execute jq, yq, or tq. It cannot replace a failed campaign run or add
 missing measurements or captures. Passing the RSS checks alone does not establish
@@ -473,6 +483,12 @@ that parser explicitly; it is separate from the measured `TQ_BIN`. Install a
 host-native parser before running the script, especially when Cargo is configured
 for cross-compilation. Explicit `TQ_BIN` and `TQ_BENCH_WORKER` selections remain
 unchanged.
+
+Quick compilation stages `tq-quick` with `cargo install --path` in a private
+installation root, retaining Cargo's workspace build cache and target
+configuration. The script executes that binary directly, without a post-build
+Cargo invocation. A supervised reentry removes the private installation before
+artifact discovery; installation cleanup shares the quick deadline.
 
 Before a full review, verify that jq, yq, and tq are all discoverable and that
 their recorded paths, versions, and build identities match that campaign's

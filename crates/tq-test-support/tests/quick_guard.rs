@@ -1,9 +1,11 @@
+#![cfg(any(target_os = "macos", target_os = "linux"))]
+
 //! End-to-end quick guard behavior with real sleeping processes.
 
 use std::{
     env, fs,
     os::unix::process::CommandExt as _,
-    process::Command,
+    process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +29,39 @@ fn blocked_preparation_expires_without_waiting_for_the_child() {
     let (output, elapsed) = run_quick("1", "/bin/sh", &["-c", "sleep 10"]);
     assert_eq!(output.status.code(), Some(124));
     assert!(elapsed < Duration::from_secs(3), "elapsed: {elapsed:?}");
+}
+
+#[test]
+fn coordinator_in_supervisor_group_is_killed_before_guard_returns() {
+    let temp = tempfile::tempdir().unwrap();
+    let pid_file = temp.path().join("coordinator.pid");
+    let started = Instant::now();
+    let output = Command::new(quick())
+        .args(["--budget-seconds", "1", "--"])
+        .arg(env::current_exe().unwrap())
+        .args(["--exact", "joined_supervisor_group_helper", "--nocapture"])
+        .env("TQ_QUICK_TEST_JOINED_GROUP_PID", &pid_file)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(124));
+    assert!(started.elapsed() < Duration::from_secs(3));
+    let pid = fs::read_to_string(pid_file).unwrap().parse().unwrap();
+    assert!(
+        !process_is_running(pid),
+        "coordinator {pid} survived the guard"
+    );
+}
+
+#[test]
+fn joined_supervisor_group_helper() {
+    use nix::unistd::{Pid, getpgid, getppid, setpgid};
+    let Ok(pid_file) = env::var("TQ_QUICK_TEST_JOINED_GROUP_PID") else {
+        return;
+    };
+    let supervisor_group = getpgid(Some(getppid())).unwrap();
+    setpgid(Pid::from_raw(0), supervisor_group).unwrap();
+    fs::write(pid_file, std::process::id().to_string()).unwrap();
+    thread::sleep(Duration::from_secs(10));
 }
 
 #[test]
@@ -222,6 +257,94 @@ fn descendant_in_a_separate_process_group_is_cleaned_up() {
         !process_is_running(pid),
         "dedicated-group descendant {pid} survived cleanup"
     );
+}
+
+#[test]
+fn joining_an_unrelated_group_does_not_kill_its_members() {
+    use nix::unistd::{Pid, getpgid, getpgrp};
+
+    let temp = tempfile::tempdir().unwrap();
+    let pid_file = temp.path().join("joining-descendant.pid");
+    // This group belongs only to test-owned sleep processes. Never make the
+    // test runner (or its invoking shell) the target of the regression.
+    let mut sentinel = Command::new("sleep")
+        .arg("10")
+        .process_group(0)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let group = i32::try_from(sentinel.id()).unwrap();
+    assert_ne!(getpgrp().as_raw(), group);
+    assert_eq!(getpgid(Some(Pid::from_raw(group))).unwrap().as_raw(), group);
+    let mut member = Command::new("sleep")
+        .arg("10")
+        .process_group(group)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    assert_eq!(
+        getpgid(Some(Pid::from_raw(i32::try_from(member.id()).unwrap())))
+            .unwrap()
+            .as_raw(),
+        group
+    );
+    let started = Instant::now();
+    let output = Command::new(quick())
+        .args(["--budget-seconds", "1", "--"])
+        .arg(env::current_exe().unwrap())
+        .args(["--exact", "join_unrelated_group_helper", "--nocapture"])
+        .env("TQ_QUICK_TEST_UNRELATED_GROUP", group.to_string())
+        .env("TQ_QUICK_TEST_JOINING_PID", &pid_file)
+        .output()
+        .unwrap();
+    let joining_pid: u32 = fs::read_to_string(pid_file)
+        .expect("coordinator spawned joining descendant")
+        .parse()
+        .unwrap();
+    let sentinel_running = process_is_running(sentinel.id());
+    let member_running = process_is_running(member.id());
+    let joining_running = process_is_running(joining_pid);
+    // Reap only the two exact children we created, regardless of verdict.
+    let _ = sentinel.kill();
+    let _ = member.kill();
+    sentinel.wait().unwrap();
+    member.wait().unwrap();
+    assert_eq!(output.status.code(), Some(124));
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(sentinel_running, "unrelated group leader was killed");
+    assert!(member_running, "unrelated group member was killed");
+    assert!(!joining_running, "owned joining descendant survived");
+}
+
+#[test]
+fn join_unrelated_group_helper() {
+    use nix::unistd::{Pid, getpgid, getpgrp};
+
+    let (Ok(group), Ok(pid_file)) = (
+        env::var("TQ_QUICK_TEST_UNRELATED_GROUP"),
+        env::var("TQ_QUICK_TEST_JOINING_PID"),
+    ) else {
+        return;
+    };
+    let group: i32 = group.parse().unwrap();
+    assert_ne!(getpgrp().as_raw(), group);
+    let mut child = Command::new("sleep")
+        .arg("10")
+        .process_group(group)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("join unrelated test-owned process group");
+    assert_eq!(
+        getpgid(Some(Pid::from_raw(i32::try_from(child.id()).unwrap())))
+            .unwrap()
+            .as_raw(),
+        group
+    );
+    fs::write(pid_file, child.id().to_string()).unwrap();
+    child.wait().unwrap();
 }
 
 #[test]

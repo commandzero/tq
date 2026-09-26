@@ -5,21 +5,24 @@
 //! sharing one absolute deadline with nested workers.
 
 use std::{
-    collections::{HashMap, HashSet},
     env, io,
     path::{Path, PathBuf},
     process::{Child, Command},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, Sender},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::collections::{HashMap, HashSet};
+
 #[cfg(unix)]
 use nix::{
     errno::Errno,
-    sys::signal::{Signal, killpg},
+    sys::signal::{Signal, kill, killpg},
     unistd::Pid,
 };
 
@@ -106,6 +109,12 @@ pub fn supervise_command_with_report(
     budget: Duration,
     report: Option<&Path>,
 ) -> io::Result<i32> {
+    if !cfg!(any(target_os = "macos", target_os = "linux")) {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "quick process supervisor supports macOS and Linux",
+        ));
+    }
     let started = Instant::now();
     let inherited = remaining_work_budget();
     let work = inherited
@@ -143,14 +152,18 @@ pub fn supervise_command_with_report(
         use std::os::unix::process::CommandExt as _;
         command.process_group(0);
     }
-    let mut child = command.spawn()?;
+    // Reserve the eventual exact-child reaper before launch. Thread creation
+    // failure cannot leave a spawned child without a bounded cleanup owner.
+    let reaper = reserve_reaper()?;
+    let child = command.spawn()?;
     let result = supervise_child(
-        &mut child,
+        child,
         work_deadline,
         hard_deadline,
         absolute,
         &interrupt,
         &terminate,
+        &reaper,
     );
     let accepted = !interrupt.load(Ordering::Relaxed)
         && !terminate.load(Ordering::Relaxed)
@@ -179,6 +192,51 @@ pub fn supervise_command_with_report(
 }
 
 fn supervise_child(
+    mut child: Child,
+    work_deadline: Instant,
+    hard_deadline: Instant,
+    absolute: u128,
+    interrupt: &AtomicBool,
+    terminate: &AtomicBool,
+    reaper: &Sender<Child>,
+) -> io::Result<i32> {
+    let root = child.id();
+    let result = supervise_child_until_deadline(
+        &mut child,
+        work_deadline,
+        hard_deadline,
+        absolute,
+        interrupt,
+        terminate,
+    );
+    if result.is_err() && child_exited(root).is_ok() {
+        // Signal only while the unreaped exact child still anchors its PGID.
+        #[cfg(unix)]
+        signal_root_group(root, Signal::SIGKILL);
+        let _ = child.kill();
+    }
+    match child.try_wait() {
+        Ok(Some(_)) => result,
+        Ok(None) => {
+            let _ = child.kill();
+            defer_reap(child, reaper)?;
+            result.map(|_| 124)
+        }
+        Err(error) => {
+            #[cfg(unix)]
+            let lost_owner = error.raw_os_error() == Some(nix::libc::ECHILD);
+            #[cfg(not(unix))]
+            let lost_owner = false;
+            if !lost_owner {
+                let _ = child.kill();
+                defer_reap(child, reaper)?;
+            }
+            Err(error)
+        }
+    }
+}
+
+fn supervise_child_until_deadline(
     child: &mut Child,
     work_deadline: Instant,
     hard_deadline: Instant,
@@ -187,6 +245,7 @@ fn supervise_child(
     terminate: &AtomicBool,
 ) -> io::Result<i32> {
     let root = child.id();
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     let mut known = HashMap::new();
     let interruption = loop {
         let now = Instant::now();
@@ -239,14 +298,19 @@ fn supervise_child(
     // Clean up *before* reaping the direct child: while it is still our child,
     // its PID and process-group identifier cannot be recycled. This also
     // handles workers which started separate process groups.
-    #[cfg(unix)]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     signal_owned_groups(root, &known, Signal::SIGTERM);
     let grace = (Instant::now() + TERM_GRACE).min(hard_deadline);
     while Instant::now() < grace {
         std::thread::sleep(POLL.min(grace.saturating_duration_since(Instant::now())));
     }
-    #[cfg(unix)]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     signal_owned_groups(root, &known, Signal::SIGKILL);
+    // Force the exact child as well as the observed groups. An exited
+    // coordinator retains its PID until we reap it below.
+    if !child_exited(root)? {
+        let _ = child.kill();
+    }
     loop {
         if child_exited(root)? {
             // A later group signal must never follow this reap.
@@ -274,10 +338,46 @@ fn supervise_child(
             }));
         }
         if Instant::now() >= hard_deadline {
+            // The outer owner still holds the Child and handles deferred reap
+            // if the exact child remains alive despite direct SIGKILL.
+            let _ = child.kill();
             return Ok(124);
         }
         std::thread::sleep(POLL.min(hard_deadline.saturating_duration_since(Instant::now())));
     }
+}
+
+fn reserve_reaper() -> io::Result<Sender<Child>> {
+    let (sender, receiver) = mpsc::channel::<Child>();
+    std::thread::Builder::new()
+        .name("quick-child-reaper".to_owned())
+        .spawn(move || {
+            if let Ok(mut child) = receiver.recv() {
+                let _ = child.kill();
+                // Exceptional waits stay off the bounded caller. Keep the
+                // exact owner alive until reaped or another waiter owns it.
+                loop {
+                    match child.wait() {
+                        Ok(_) => break,
+                        #[cfg(unix)]
+                        Err(error) if error.raw_os_error() == Some(nix::libc::ECHILD) => break,
+                        Err(_) => {
+                            let _ = child.kill();
+                            std::thread::sleep(POLL);
+                        }
+                    }
+                }
+            }
+        })?;
+    Ok(sender)
+}
+
+fn defer_reap(child: Child, reaper: &Sender<Child>) -> io::Result<()> {
+    reaper.send(child).map_err(|error| {
+        let mut child = error.0;
+        let _ = child.kill();
+        io::Error::other("quick child reaper exited before taking ownership")
+    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -335,32 +435,50 @@ fn signal_root_group(root: u32, signal: Signal) {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn signal_owned_groups(root: u32, known: &HashMap<u32, ProcessInfo>, signal: Signal) {
+    // The unreaped exact child anchors its own process group. A descendant's
+    // membership in another group does not make that group ours: it may have
+    // joined a group containing processes outside this supervisor's tree.
     let mut groups = HashSet::from([root]);
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
     if let Ok(snapshot) = process_snapshot() {
-        // Recheck an identity and group against the current process table; a
-        // stale PID alone is never authorization to signal a process group.
         for (pid, info) in known {
-            if snapshot
+            let Some(current) = snapshot
                 .get(pid)
-                .is_some_and(|current| current.birth == info.birth && current.group == info.group)
-            {
-                groups.insert(info.group);
+                .filter(|current| current.birth == info.birth)
+            else {
+                continue;
+            };
+            // Only the verified leader can establish ownership of a separate
+            // group. Its PID and PGID must match at the time of signalling.
+            if *pid == current.group {
+                groups.insert(*pid);
             }
         }
-    }
-    // A process group is signalled only while its observed member exists.
-    // Root's group is anchored by our unreaped direct child.
-    let own_group = nix::unistd::getpgrp().as_raw();
-    for group in groups {
-        if let Some(group) = i32::try_from(group)
-            .ok()
-            .filter(|group| *group != own_group)
-        {
-            signal_group(group, signal);
+
+        let own_group = nix::unistd::getpgrp().as_raw();
+        for group in &groups {
+            if let Some(group) = i32::try_from(*group)
+                .ok()
+                .filter(|group| *group != own_group)
+            {
+                signal_group(group, signal);
+            }
         }
+        // A verified descendant in an unowned group still needs cleanup,
+        // without broadcasting to any unrelated members of that group.
+        for (pid, info) in known {
+            if snapshot.get(pid).is_some_and(|current| {
+                current.birth == info.birth && !groups.contains(&current.group)
+            }) && let Ok(pid) = i32::try_from(*pid)
+            {
+                let _ = kill(Pid::from_raw(pid), signal);
+            }
+        }
+    } else {
+        // Root's group remains safe while its exact child is unreaped, even
+        // when enumeration of the other processes fails.
+        signal_root_group(root, signal);
     }
 }
 
@@ -460,17 +578,17 @@ fn process_snapshot() -> io::Result<HashMap<u32, ProcessInfo>> {
         let parent = fields.next().and_then(|field| field.parse::<u32>().ok());
         let group = fields.next().and_then(|field| field.parse::<u32>().ok());
         let birth = fields.nth(16).and_then(|field| field.parse::<u64>().ok());
-        if let (Some(parent), Some(group), Some(birth)) = (parent, group, birth) {
-            if state != Some("Z") {
-                snapshot.insert(
-                    pid,
-                    ProcessInfo {
-                        parent,
-                        group,
-                        birth,
-                    },
-                );
-            }
+        if let (Some(parent), Some(group), Some(birth)) = (parent, group, birth)
+            && state != Some("Z")
+        {
+            snapshot.insert(
+                pid,
+                ProcessInfo {
+                    parent,
+                    group,
+                    birth,
+                },
+            );
         }
     }
     Ok(snapshot)

@@ -49,9 +49,13 @@ work_root="$benchmark_archive_root/.work"
 
 cargo_bin=${CARGO:-cargo}
 host_tq=${TQ_HOST_TQ:-}
+quick_install_root=
 
 cleanup_cargo_output() {
     rm -f "${cargo_output:-}"
+    if [ -n "${quick_install_root:-}" ]; then
+        rm -rf "$quick_install_root"
+    fi
 }
 
 cleanup_cargo_output_and_exit() {
@@ -182,7 +186,8 @@ build_benchmark_worker() {
 }
 
 # Compile every executable before starting quick's shared wall-clock budget.
-# The supervised re-entry below must never invoke Cargo.
+# Install the guard into an owned staging root using Cargo's workspace cache,
+# then transfer cleanup of that root to the guard on exec.
 build_quick_support() {
     cargo_output=$(mktemp "${TMPDIR:-/tmp}/tq-cargo-quick-build.XXXXXX")
     trap cleanup_cargo_output EXIT
@@ -199,7 +204,6 @@ build_quick_support() {
     quick_compile_seconds=$((quick_compile_seconds + $(date +%s) - cargo_started))
     TQ_SUPPORT_CARGO_OUTPUT=$cargo_output
     export TQ_SUPPORT_CARGO_OUTPUT
-    trap - EXIT HUP INT TERM
 }
 
 discover_quick_support() {
@@ -245,6 +249,16 @@ if [ "${TQ_CAMPAIGN_COMPILED:-}" != 1 ]; then
                 TQ_CAMPAIGN_QUICK_BUILD=1
                 export TQ_CAMPAIGN_QUICK_BUILD
                 build_tq_cli
+                quick_install_root=$(mktemp -d "${TMPDIR:-/tmp}/tq-quick-install.XXXXXX")
+                trap cleanup_cargo_output EXIT
+                trap 'cleanup_cargo_output_and_exit 129' HUP
+                trap 'cleanup_cargo_output_and_exit 130' INT
+                trap 'cleanup_cargo_output_and_exit 143' TERM
+                : > "$quick_install_root/.tq-quick-install"
+                cargo_started=$(date +%s)
+                "$cargo_bin" install --path crates/tq-test-support --locked --bin tq-quick \
+                    --root "$quick_install_root" --no-track
+                quick_compile_seconds=$((quick_compile_seconds + $(date +%s) - cargo_started))
                 build_quick_support
                 TQ_CAMPAIGN_COMPILED=1
                 export TQ_CAMPAIGN_COMPILED
@@ -268,7 +282,7 @@ if [ "${TQ_CAMPAIGN_COMPILED:-}" != 1 ]; then
                 if [ "$quick_remaining" -lt 1 ]; then
                     exit 124
                 fi
-                exec "$cargo_bin" run --quiet --release --locked -p tq-test-support --bin tq-quick -- \
+                exec "$quick_install_root/bin/tq-quick" --cleanup-install-root "$quick_install_root" \
                     --budget-seconds "$quick_remaining" -- "$0" "$campaign" "$suite" "$profile"
             fi
             ;;
