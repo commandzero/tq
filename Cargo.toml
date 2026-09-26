@@ -35,13 +35,9 @@ multiple_crate_versions = "allow"
 cargo_common_metadata = "allow"
 
 [profile.release]
-codegen-units = 1
-lto = "thin"
 strip = "symbols"
 
 [profile.bench]
-codegen-units = 1
-lto = "thin"
 debug = "line-tables-only"
 
 [profile.dev]

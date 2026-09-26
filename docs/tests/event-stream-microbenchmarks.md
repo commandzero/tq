@@ -109,8 +109,8 @@ below tq's 1.95 minimum. Only `cargo_bench_support` is enabled; Criterion's defa
 Rayon and Plotters features are disabled. Statistical/reporting dependencies remain
 development-only. The production dependency graph does not include Criterion.
 
-Explicit targets use `harness = false`. Bench builds use thin LTO and 1 codegen unit,
-matching release optimization settings, with line-table debug information retained.
+Explicit targets use `harness = false`. Release and bench builds use Cargo's default
+codegen-unit and LTO settings. Bench builds retain line-table debug information.
 The existing test-support crate has no new benchmark group or production dependency.
 Fixture modules live under `benchmarks/micro` and are compiled only by benchmark
 targets; they do not create a new workspace crate or release API.
