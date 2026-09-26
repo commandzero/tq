@@ -2,7 +2,7 @@
 type: Report
 title: "mimalloc versus the system allocator"
 description: "Extended diagnostic comparison of default mimalloc tq, system-allocator tq, and jq, with speed, memory, and publication limitations."
-generated: { by: openai-codex/gpt-6-astra, at: 2026-09-26T20:13:34Z }
+generated: { by: openai-codex/gpt-6-astra, at: 2026-09-26T20:44:24Z }
 ---
 
 # mimalloc versus the system allocator
@@ -34,7 +34,8 @@ gate. A publication-ready campaign needs matching native controls under the
   mimalloc feature patch. The archived patch also contains the README explanation
   subsequently removed; that documentation change does not affect these binaries.
 - Host platform: Linux x86-64, AMD Ryzen 7 7700, 16 logical CPUs, 61.9 GiB RAM;
-  kernel `7.2.4-ogc3.1.fc44.x86_64`; Rust 1.98.1, release profile.
+  kernel `7.2.4-ogc3.1.fc44.x86_64`; Rust 1.98.1, release profile with
+  `codegen-units = 1`, `lto = "thin"`, and `strip = "symbols"` at the tested revision.
 - Candidate: `mimalloc` 0.1.52 with default crate features, `libmimalloc-sys`
   0.1.49; no secure-mode opt-in. Baseline tq: identical source with
   `--no-default-features`. The benchmark harness was built once and unchanged.
@@ -51,6 +52,10 @@ gate. A publication-ready campaign needs matching native controls under the
   address reservation. First-result timing and raw protocol fields remain in the
   reports. RSS-limited rows may also sample process-group RSS for live enforcement;
   these campaigns did not request separate instrumented repetitions.
+
+Main commit `80eccc0` subsequently removed the explicit codegen-unit and LTO
+overrides. These measurements predate that change and do not establish performance
+under the current Cargo-default optimization settings.
 
 ```console
 # System allocator baseline
