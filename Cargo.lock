@@ -548,9 +548,9 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
-version = "0.19.1"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52e0387578e845beb7a1acff126228499f26cb18edf12919cc513bb863266464"
+checksum = "d301f5bf187b3c295fce6468d3875037a0bccc5f6b151c63cac2f85babf21912"
 dependencies = [
  "bit-set",
  "regex-automata",
@@ -1129,7 +1129,7 @@ dependencies = [
  "bytecount",
  "data-encoding",
  "email_address",
- "fancy-regex 0.19.1",
+ "fancy-regex 0.19.2",
  "fraction",
  "getrandom 0.3.4",
  "itoa",
@@ -2372,7 +2372,7 @@ version = "0.4.0"
 dependencies = [
  "base64 0.23.1",
  "criterion",
- "fancy-regex 0.19.1",
+ "fancy-regex 0.19.2",
  "indexmap",
  "itoa",
  "jiff",
