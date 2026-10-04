@@ -92,7 +92,8 @@ fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
     for section in delta.lines().filter_map(|line| line.strip_prefix("## ")) {
         if !matches!(
             section,
-            "ADDED Requirements"
+            "Purpose"
+                | "ADDED Requirements"
                 | "MODIFIED Requirements"
                 | "REMOVED Requirements"
                 | "RENAMED Requirements"
@@ -515,6 +516,28 @@ mod tests {
         ] {
             assert!(synchronized(&format!("{DELTA}{extra}"), MAIN, "").is_err());
         }
+    }
+    #[test]
+    fn purpose_metadata_is_allowed_without_replacing_delta_operations() {
+        let purpose = "## Purpose\nDefine a new capability with its observable behavior.\n\n";
+        assert!(
+            synchronized(
+                &format!("{purpose}{DELTA}"),
+                &format!("{purpose}{MAIN}"),
+                ""
+            )
+            .is_ok()
+        );
+        assert!(synchronized(purpose, &format!("{purpose}{MAIN}"), "").is_err());
+        assert!(
+            synchronized(
+                &format!("{purpose}{DELTA}## OTHER Requirements\n"),
+                MAIN,
+                ""
+            )
+            .is_err()
+        );
+        assert!(synchronized(&format!("{purpose}{DELTA}"), "", "").is_err());
     }
     #[test]
     fn detects_missing_or_changed_scenarios() {
