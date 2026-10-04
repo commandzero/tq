@@ -1296,8 +1296,9 @@ the six remaining witnesses and the 92-input native CLI probe before creating
 the narrow Linux registry. Linux probe results are 81 exact and 11 differing
 samples, with no process issues and all five reference runtime hashes checked
 before and after. The same macOS probe records 77 exact and 15 differing
-samples. Sample-specific ULP maxima and practical restrictions are documented
-in `docs/jq-compatibility-disparities.md`.
+samples. The target-scoped witness records remain in
+`tests/compatibility/reviews/disparities-x86_64-linux.toon`; the current public
+difference summary is `docs/tests/jq-manual/coverage.md`.
 
 Final review then found a separate language implementation gap:
 `def f: {tool}; f` succeeds in pinned jq but fails with exit 3 and
@@ -1985,7 +1986,8 @@ properties, not exact equality to jq's platform math. Other targets are unverifi
 
 These probes did not establish that unsafe or FFI code was necessary. The
 revised design excludes new native engines and unsafe bridges. Safe Rust math
-and regex implementation is proceeding, with measured limitations recorded in
-`docs/jq-compatibility-disparities.md` and kept distinct from exact matches.
+and regex implementation is proceeding, with measured limitations summarized in
+`docs/tests/jq-manual/coverage.md` and supported by metadata in
+`tests/compatibility/reviews/`, distinct from exact matches.
 Missing functionality and uninvestigated failures remain incomplete. The
 implementation remains uncommitted until the required work and checks are complete.

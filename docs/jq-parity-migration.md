@@ -100,7 +100,7 @@ bounded at 8,192 bytes. Input token limits can impose a tighter bound. Embedded
 numeric callers can supply explicit `NumberLimits`.
 
 Mathematical functions use safe Rust libraries. Measured last-bit and target
-differences are recorded in the [disparity register](jq-compatibility-disparities.md),
+differences are recorded in the [jq manual coverage](tests/jq-manual/coverage.md#differences-by-test),
 not silently rounded into exact matches. The compatibility harness compares
 decimal results losslessly, separately from runtime JSON projection.
 

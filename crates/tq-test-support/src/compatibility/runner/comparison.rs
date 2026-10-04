@@ -201,6 +201,7 @@ fn compare_case(
     let successful = successful_observation(&reference) && successful_observation(&actual);
     let json_equivalent = (structured && successful).then_some(reference.results == actual.results);
     let (verdict, reason) = case_verdict(case, &reference, &actual, &differences);
+    let presentation_note = presentation_note(case, &reference, &actual);
     let toon_equivalent = toon
         .as_ref()
         .filter(|_| successful_observation(&actual))
@@ -243,7 +244,71 @@ fn compare_case(
     if let Some(tokens) = tokens {
         row["tokens"] = tokens;
     }
+    if let Some(note) = presentation_note {
+        row["presentation_note"] = json!(note);
+    }
     Ok(row)
+}
+
+// Reporting only: catalog intent is insufficient without matching execution evidence.
+fn presentation_note(
+    case: &CompatibilityCase,
+    reference: &ToolObservation,
+    actual: &ToolObservation,
+) -> Option<String> {
+    if case.expected.contract != ContractKind::RawBytes
+        || !case
+            .capabilities
+            .iter()
+            .any(|capability| capability == "presentation-difference")
+        || !successful_observation(reference)
+        || !successful_observation(actual)
+        || reference.stderr_hex != actual.stderr_hex
+        || reference.error_class != actual.error_class
+    {
+        return None;
+    }
+    let rationale = case
+        .adapters
+        .tq
+        .note
+        .as_deref()
+        .filter(|note| !note.trim().is_empty())?;
+    let reference = decode_hex(reference.raw_stdout_hex.as_deref()?)?;
+    let actual = decode_hex(actual.raw_stdout_hex.as_deref()?)?;
+    if reference == actual || strip_sgr(&reference)? != strip_sgr(&actual)? {
+        return None;
+    }
+    Some(format!(
+        "Expected presentation difference: {rationale} JSON data and process behavior agree; ANSI styling differs"
+    ))
+}
+
+fn strip_sgr(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut stripped = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != 0x1b {
+            stripped.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        if bytes.get(index + 1) != Some(&b'[') {
+            return None;
+        }
+        let mut end = index + 2;
+        while bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
+        {
+            end += 1;
+        }
+        if bytes.get(end) != Some(&b'm') {
+            return None;
+        }
+        index = end + 1;
+    }
+    Some(stripped)
 }
 
 // The JSON execution provides ordered value boundaries without changing input

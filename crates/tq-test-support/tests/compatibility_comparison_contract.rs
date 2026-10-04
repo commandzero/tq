@@ -64,6 +64,151 @@ exit "${TQ_CODE:-0}"
     )
 }
 
+fn presentation_report(reference_body: &str, actual_body: &str) -> serde_json::Value {
+    let directory = tempfile::tempdir().unwrap();
+    fs::create_dir_all(
+        directory
+            .path()
+            .join("tests/compatibility/reviews/jq-manual"),
+    )
+    .unwrap();
+    let version = "if [ \"$1\" = --version ]; then printf 'fake-1\\n'; exit 0; fi";
+    let jq = fake(
+        directory.path(),
+        "jq",
+        &format!("{version}\n{reference_body}"),
+    );
+    let tq = fake(directory.path(), "tq", &format!("{version}\n{actual_body}"));
+    let case = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "id": "manual.test-color", "title": "Color styling",
+        "classification": "jq-target", "capabilities": ["presentation-difference"],
+        "status": "mvp", "fixture": {"format": "json", "inline": "1"},
+        "query": ".", "adapters": {
+            "jq": {"supported": true},
+            "tq": {"supported": true, "note": "Structural quote ownership and ANSI reset segmentation differ."}
+        }, "invocation_mode": "stdin",
+        "expected": {"contract": "raw-bytes", "baseline": "required"}
+    })).unwrap();
+    compare_manual(
+        &CompatibilityCatalog {
+            cases: vec![case],
+            identity: ArtifactIdentity {
+                path: "fake".into(),
+                bytes: 0,
+                sha256: String::new(),
+            },
+        },
+        &ExecutableConfig {
+            jq: Some(jq),
+            tq: Some(tq),
+            yq: None,
+        },
+        directory.path(),
+        Duration::from_millis(200),
+    )
+    .unwrap()
+}
+
+#[test]
+fn all_six_manual_color_cases_declare_presentation_intent() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog =
+        tq_test_support::compatibility::load_catalog(&root.join("tests/compatibility/cases"))
+            .unwrap();
+    for id in [
+        "manual.colors.ansi-values",
+        "manual.colors.custom-1-31",
+        "manual.colors.default-palette",
+        "manual.invoking.color-output",
+        "manual.invoking.jq-colors",
+        "manual.invoking.no-color-forced",
+    ] {
+        let case = catalog.cases.iter().find(|case| case.id == id).unwrap();
+        assert!(
+            case.capabilities
+                .iter()
+                .any(|capability| capability == "presentation-difference"),
+            "{id}"
+        );
+        assert!(
+            case.adapters
+                .tq
+                .note
+                .as_deref()
+                .is_some_and(|note| note.contains("presentation difference")),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn expected_color_annotation_preserves_raw_failure_and_counts() {
+    let report = presentation_report(
+        "printf '\\033[31m{\"key\":\"value\"}\\033[0m\\n'",
+        "printf '{\\033[32m\"\\033[0mkey\\033[32m\"\\033[0m:\"value\"}\\n'",
+    );
+    let row = &report["cases"][0];
+    assert_eq!(
+        row["presentation_note"],
+        "Expected presentation difference: Structural quote ownership and ANSI reset segmentation differ. JSON data and process behavior agree; ANSI styling differs"
+    );
+    assert_eq!(row["verdict"], "failure");
+    assert!(
+        row["reason"]
+            .as_str()
+            .unwrap()
+            .contains("not been accepted")
+    );
+    assert_ne!(
+        row["differences"].as_array().unwrap().as_slice(),
+        &[] as &[serde_json::Value]
+    );
+    assert_eq!(report["summary"]["failures"], 1);
+    assert_eq!(report["summary"]["exact_matches"], 0);
+    assert_eq!(report["summary"]["reviewed_disparities"], 0);
+}
+
+#[test]
+fn presentation_metadata_cannot_hide_data_status_stderr_or_escape_mismatches() {
+    let reference = "printf '\\033[31m1\\033[0m\\n'";
+    for (label, actual) in [
+        ("data", "printf '\\033[32m2\\033[0m\\n'"),
+        ("framing", "printf '\\033[32m1\\033[0m'"),
+        ("exit", "printf '\\033[32m1\\033[0m\\n'; exit 1"),
+        (
+            "stderr",
+            "printf '\\033[32m1\\033[0m\\n'; printf warning >&2",
+        ),
+        ("timeout", "printf '\\033[32m1\\033[0m\\n'; sleep 2"),
+        ("non-SGR", "printf '\\033[2J1\\n'"),
+        ("incomplete-SGR", "printf '\\033[321\\n'"),
+    ] {
+        let report = presentation_report(reference, actual);
+        assert!(
+            report["cases"][0].get("presentation_note").is_none(),
+            "{label}"
+        );
+        assert_eq!(report["cases"][0]["verdict"], "failure", "{label}");
+    }
+    let both_failed = presentation_report(
+        "printf '\\033[31m1\\033[0m\\n'; exit 1",
+        "printf '\\033[32m1\\033[0m\\n'; exit 1",
+    );
+    assert!(both_failed["cases"][0].get("presentation_note").is_none());
+    let failed_reference = presentation_report(
+        "printf '\\033[31m1\\033[0m\\n'; exit 1",
+        "printf '\\033[32m1\\033[0m\\n'",
+    );
+    assert!(
+        failed_reference["cases"][0]
+            .get("presentation_note")
+            .is_none()
+    );
+    let exact = presentation_report(reference, reference);
+    assert!(exact["cases"][0].get("presentation_note").is_none());
+    assert_eq!(exact["cases"][0]["verdict"], "match");
+}
+
 #[test]
 fn manual_comparison_forces_authored_tq_output_flags_to_each_contract() {
     let directory = tempfile::tempdir().expect("temporary directory");

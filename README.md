@@ -108,10 +108,11 @@ their compact JSON fallback and use the shared palette.
 
 The default uses cyan keys, green strings, magenta numbers, light-blue booleans,
 normal nulls, and light-black delimiters, separators, and enclosing quotes.
-JSON uses the same palette. Customize any output format with `JQ_COLORS`:
+JSON uses the same palette. Customize any output format with `TQ_COLORS`.
+It takes priority over the compatible `JQ_COLORS` fallback:
 
 ```sh
-export JQ_COLORS='0;39:0;94:0;94:0;35:0;32:0;90:0;90:0;36'
+export TQ_COLORS='0;39:0;94:0;94:0;35:0;32:0;90:0;90:0;36'
 ```
 
 Slots are null, false, true, numbers, strings, arrays, objects, and keys.

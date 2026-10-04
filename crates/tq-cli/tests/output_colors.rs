@@ -16,7 +16,8 @@ fn run(args: &[&str], input: &[u8], colors: Option<&str>) -> Output {
         .args(args)
         .env("NO_COLOR", "")
         .env_remove("HOME")
-        .env_remove("JQ_LIBRARY_PATH");
+        .env_remove("JQ_LIBRARY_PATH")
+        .env_remove("TQ_COLORS");
     if let Some(colors) = colors {
         command.env("JQ_COLORS", colors);
     } else {
@@ -543,7 +544,7 @@ fn automatic_pipe_output_is_plain_for_all_formats() {
 }
 
 #[test]
-fn environment_denial_ignores_jq_colors_for_embedded_runs() {
+fn environment_denial_ignores_color_palettes_for_embedded_runs() {
     if std::env::var_os(ENVIRONMENT_DENIED_HELPER).is_some() {
         let denied = CapabilityPolicy {
             environment: false,
@@ -565,11 +566,12 @@ fn environment_denial_ignores_jq_colors_for_embedded_runs() {
     let output = Command::new(std::env::current_exe().expect("locate color test binary"))
         .args([
             "--exact",
-            "environment_denial_ignores_jq_colors_for_embedded_runs",
+            "environment_denial_ignores_color_palettes_for_embedded_runs",
             "--nocapture",
         ])
         .env(ENVIRONMENT_DENIED_HELPER, "1")
         .env("JQ_COLORS", CUSTOM_EIGHT)
+        .env("TQ_COLORS", CUSTOM_SEVEN)
         .env("NO_COLOR", "1")
         .output()
         .expect("spawn environment-denied color helper");

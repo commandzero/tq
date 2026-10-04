@@ -51,37 +51,35 @@ The inventory records source coverage, not compatibility. The generated Results 
 
 | Verdict | Cases |
 | --- | ---: |
-| failure | 1 |
-| match | 27 |
+| Exact match | 28 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
-| compact_json | 27 | 28 |
+| compact_json | 28 | 28 |
 | toon | 28 | 28 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
 ### Output size
 
-27 eligible examples. Counts use the `o200k_base` and `cl100k_base` tokenizers over complete stdout, including trailing newlines. The totals compare default `-o json` output with default LF-terminated `-o toon` results; TOON sequence captures, when available, are shown in the cases but excluded from size totals. Diff is TOON tokens minus JSON tokens. % is the signed percent difference `(TOON - JSON) / JSON`, so savings are negative and growth is positive.
+28 eligible examples. Counts use the `o200k_base` and `cl100k_base` tokenizers over complete stdout, including trailing newlines. The totals compare default `-o json` output with default LF-terminated `-o toon` results; TOON sequence captures, when available, are shown in the cases but excluded from size totals. Diff is TOON tokens minus JSON tokens. % is the signed percent difference `(TOON - JSON) / JSON`, so savings are negative and growth is positive.
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 542 | 335 | -207 | -38.19% |
-| `cl100k_base` | 540 | 335 | -205 | -37.96% |
+| `o200k_base` | 570 | 353 | -217 | -38.07% |
+| `cl100k_base` | 568 | 353 | -215 | -37.85% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+No differences.
 
 ### Cases
 
@@ -279,22 +277,24 @@ jq 'match("a|ab"; "l")'
 }
 
 # tq -o json
-
-
-[stderr]
-tq: bytecode operation is not executable in this language wave: regex flag 'l' (longest-match mode)
+{
+  "offset": 0,
+  "length": 2,
+  "string": "ab",
+  "captures": []
+}
 
 # tq
-
-
-[stderr]
-tq: bytecode operation is not executable in this language wave: regex flag 'l' (longest-match mode)
+offset: 0
+length: 2
+string: ab
+captures[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 28 | 0 | 0 | 0 | n/a |
+| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
 
 #### manual.regex.flag-m
 

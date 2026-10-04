@@ -41,18 +41,18 @@ The jq-target cases deliberately keep tq enabled. Tilde, `$ORIGIN`, HOME auto-so
 
 | Verdict | Cases |
 | --- | ---: |
-| match | 21 |
+| Exact match | 21 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
 | compact_json | 21 | 21 |
 | toon | 21 | 21 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
@@ -67,10 +67,9 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+No differences.
 
 ### Cases
 
@@ -327,8 +326,8 @@ tq: query compilation failed: TQ-MODULE-METADATA-001: module metadata must be a 
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.modules.modulemeta
 
@@ -567,8 +566,8 @@ tq: query compilation failed: TQ-MODULE-PATH-001: module path "foo/foo" repeats 
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.modules.search-terminator
 
@@ -599,7 +598,7 @@ tq: query compilation failed: TQ-MODULE-NOT-FOUND-001: module "foo" was not foun
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 <!-- tq-manual-compare:end -->

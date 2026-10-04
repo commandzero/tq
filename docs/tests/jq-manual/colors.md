@@ -21,18 +21,18 @@ The eight slot records (lines 18–25) all reuse the aggregate object fixture, w
 
 | Verdict | Cases |
 | --- | ---: |
-| match | 3 |
+| Differences | 3 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
 | compact_json | 0 | 0 |
 | toon | 0 | 0 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
@@ -47,10 +47,11 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+1. `manual.colors.ansi-values`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+2. `manual.colors.custom-1-31`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+3. `manual.colors.default-palette`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
 
 ### Cases
 
@@ -66,7 +67,7 @@ jq -C -c .
 \x1b[1;36m{\x1b[0m\x1b[2;37m"null"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;30mnull\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"false"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[2;31mfalse\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"true"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[4;32mtrue\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"number"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[5;33m1\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"string"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[7;34m"x"\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"array"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[8;35m[]\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"object"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;36m{}\x1b[0m\x1b[1;36m}\x1b[0m
 
 # tq -o json
-\x1b[1;36m{\x1b[0m\x1b[2;37m"null"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;30mnull\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"false"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[2;31mfalse\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"true"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[4;32mtrue\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"number"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[5;33m1\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"string"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[7;34m"x"\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"array"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[8;35m[]\x1b[0m\x1b[1;36m,\x1b[0m\x1b[2;37m"object"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;36m{}\x1b[0m\x1b[1;36m}\x1b[0m
+\x1b[1;36m{\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37mnull\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;30mnull\x1b[0m\x1b[1;36m,\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37mfalse\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[2;31mfalse\x1b[0m\x1b[1;36m,\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37mtrue\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[4;32mtrue\x1b[0m\x1b[1;36m,\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37mnumber\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[5;33m1\x1b[0m\x1b[1;36m,\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37mstring\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;36m"\x1b[0m\x1b[7;34mx\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m,\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37marray\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[8;35m[\x1b[0m\x1b[8;35m]\x1b[0m\x1b[1;36m,\x1b[0m\x1b[1;36m"\x1b[0m\x1b[2;37mobject\x1b[0m\x1b[1;36m"\x1b[0m\x1b[1;36m:\x1b[0m\x1b[1;36m{\x1b[0m\x1b[1;36m}\x1b[0m\x1b[1;36m}\x1b[0m
 
 # tq
 <not run>
@@ -74,8 +75,8 @@ jq -C -c .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 335 | 335 | n/a | n/a | n/a |
-| `cl100k_base` | 277 | 277 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.colors.custom-1-31
 
@@ -87,7 +88,7 @@ jq -C -c .
 \x1b[1;31m{\x1b[0m\x1b[1;31m"null"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mnull\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"false"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mfalse\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"true"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mtrue\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"number"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m1\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"string"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m"x"\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"array"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m[]\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"object"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m{}\x1b[0m\x1b[1;31m}\x1b[0m
 
 # tq -o json
-\x1b[1;31m{\x1b[0m\x1b[1;31m"null"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mnull\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"false"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mfalse\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"true"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mtrue\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"number"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m1\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"string"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m"x"\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"array"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m[]\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"object"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m{}\x1b[0m\x1b[1;31m}\x1b[0m
+\x1b[1;31m{\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mnull\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mnull\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mfalse\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mfalse\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mtrue\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31mtrue\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mnumber\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m1\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mstring\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mx\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31marray\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m[\x1b[0m\x1b[1;31m]\x1b[0m\x1b[1;31m,\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31mobject\x1b[0m\x1b[1;31m"\x1b[0m\x1b[1;31m:\x1b[0m\x1b[1;31m{\x1b[0m\x1b[1;31m}\x1b[0m\x1b[1;31m}\x1b[0m
 
 # tq
 <not run>
@@ -95,8 +96,8 @@ jq -C -c .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 335 | 335 | n/a | n/a | n/a |
-| `cl100k_base` | 277 | 277 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.colors.default-palette
 
@@ -108,7 +109,7 @@ jq -C -c .
 \x1b[1;39m{\x1b[0m\x1b[1;34m"null"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;90mnull\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"false"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39mfalse\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"true"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39mtrue\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"number"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"string"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;32m"x"\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"array"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m[]\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"object"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m{}\x1b[0m\x1b[1;39m}\x1b[0m
 
 # tq -o json
-\x1b[1;39m{\x1b[0m\x1b[1;34m"null"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;90mnull\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"false"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39mfalse\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"true"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39mtrue\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"number"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"string"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;32m"x"\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"array"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m[]\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;34m"object"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m{}\x1b[0m\x1b[1;39m}\x1b[0m
+\x1b[1;39m{\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34mnull\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;90mnull\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34mfalse\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39mfalse\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34mtrue\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39mtrue\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34mnumber\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34mstring\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m"\x1b[0m\x1b[0;32mx\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34marray\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m[\x1b[0m\x1b[1;39m]\x1b[0m\x1b[1;39m,\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;34mobject\x1b[0m\x1b[1;39m"\x1b[0m\x1b[1;39m:\x1b[0m\x1b[1;39m{\x1b[0m\x1b[1;39m}\x1b[0m\x1b[1;39m}\x1b[0m
 
 # tq
 <not run>
@@ -116,7 +117,7 @@ jq -C -c .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 335 | 335 | n/a | n/a | n/a |
-| `cl100k_base` | 277 | 277 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 <!-- tq-manual-compare:end -->

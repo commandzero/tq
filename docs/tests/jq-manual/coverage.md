@@ -8,51 +8,92 @@ description: "Current jq manual test coverage, comparison results, and known dif
 
 The suite covers all **251 published input/output examples** in the jq manual,
 accounts for **68 fenced snippets**, and adds tests for documented behavior,
-composition, and edge cases. It runs **952 unique cases** against pinned jq 1.8.1.
+composition, and edge cases. It runs **952 unique cases** against pinned jq 1.8.2.
 A mapped example is covered, but coverage alone does not mean it passes.
 
 ## Results
 
 The latest recorded macOS comparison reports:
 
-| Check | Matches | Cases |
-| --- | ---: | ---: |
-| Values and process behavior, including CLI contracts | 944 | 952 |
-| Exact compact JSON output | 919 | 921 |
-| TOON values and process behavior | 921 | 921 |
+| Check | Exact matches | Differences | Cases |
+| --- | ---: | ---: | ---: |
+| Values and process behavior, including CLI contracts | 943 | 9 | 952 |
+| Compact JSON output | 919 | 2 | 921 |
+| TOON values and process behavior | 921 | 0 | 921 |
 
 JSON value comparison ignores whitespace and object key order, but preserves
 array and result order. Compact JSON and CLI contracts compare exact bytes.
 Raw CLI cases are not included in the JSON/TOON output checks.
 
-**Eight cases remain strict failures:** two accepted math rounding differences
-and six color-output differences. The all-cases exact gate therefore does not
-pass. These results describe the measured build, not every platform or release.
+**9 differences remain:** 2 expected math rounding differences,
+6 expected presentation differences, and 1 test-runner message difference.
+The all-cases exact gate does not pass.
+These results describe the measured build, not every platform or release.
 
-## Known differences
+## Differences by test
 
-### Math rounding
+1. **Expected rounding difference — low significance.**
+   [`manual.audit.math.erfc-ulp`](math-boundaries.md#manualauditmatherfc-ulp)
 
-Two cases are accepted as **low-significance rounding differences**:
+   `erfc` on `2`: jq returns `0.0046777349810472645`; tq returns
+   `0.004677734981047266`. tq is 2 floating-point steps (ULP) higher.
 
-| Query and input | jq result | tq result | Difference |
-| --- | --- | --- | --- |
-| `erfc` on `2` | `0.0046777349810472645` | `0.004677734981047266` | tq is 2 ULP higher |
-| `tgamma` on `0.5` | `1.772453850905516` | `1.7724538509055159` | tq is 1 ULP lower |
+2. **Expected rounding difference — low significance.**
+   [`manual.audit.math.tgamma-ulp`](math-boundaries.md#manualauditmathtgamma-ulp)
 
-ULP measures spacing between adjacent floating-point values. tq's safe-Rust
-`libm` implementation rounds differently from the reference's system math
-functions. Both tools exit successfully with empty stderr.
+   `tgamma` on `0.5`: jq returns `1.772453850905516`; tq returns
+   `1.7724538509055159`. tq is 1 ULP lower.
 
-Acceptance applies only to these measured inputs. The tests retain the exact
-mismatches; there is no blanket tolerance or guarantee for other inputs.
+3. **ANSI styles — expected presentation difference.**
+   [`manual.colors.ansi-values`](colors.md#manualcolorsansi-values)
 
-### Color output
+   The test checks custom colors and text styles across JSON types.
+   tq styles enclosing quotes differently; the JSON data is unchanged.
 
-Six cases in [colors](colors.md) and [invoking jq](invoking-jq.md) differ in ANSI
-styling. tq uses its own palette and enclosing-quote styling rather than jq's
-exact presentation. These byte-contract failures are separate from the accepted
-math differences.
+4. **Bright-red palette — expected presentation difference.**
+   [`manual.colors.custom-1-31`](colors.md#manualcolorscustom-1-31)
+
+   Both tools use the requested bright-red color.
+   ANSI escape/reset placement differs, not the JSON data.
+
+5. **jq-style palette — expected presentation difference.**
+   [`manual.colors.default-palette`](colors.md#manualcolorsdefault-palette)
+
+   The test supplies jq's palette through `JQ_COLORS`.
+   tq gives enclosing quotes the structure's style, not the key/string style.
+
+6. **Forced color — expected presentation difference.**
+   [`manual.invoking.color-output`](invoking-jq.md#manualinvokingcolor-output)
+
+   Both tools emit colored JSON with `-C`.
+   Quote styling differs, not the JSON data.
+
+7. **Custom `JQ_COLORS` — expected presentation difference.**
+   [`manual.invoking.jq-colors`](invoking-jq.md#manualinvokingjq-colors)
+
+   Both tools apply the custom palette.
+   tq styles quotes as structure rather than key content.
+
+8. **Forced color with `NO_COLOR` — expected presentation difference.**
+   [`manual.invoking.no-color-forced`](invoking-jq.md#manualinvokingno-color-forced)
+
+   Both tools let `-C` override `NO_COLOR` and emit colored JSON.
+   Quote styling differs; option precedence and JSON data agree.
+
+9. **Test-runner messages — no effect on the supplied test's result.**
+   [`manual.invoking.run-tests`](invoking-jq.md#manualinvokingrun-tests)
+
+   jq 1.8.2 prints extra internal self-test messages that tq does not emit.
+   Both tools pass the supplied test and exit 0.
+
+All 6 color cases are expected differences from tq's presentation styling.
+They produce identical output after removing ANSI styling, even with the same palette.
+
+The reports mark a color difference as expected only when the observed data and
+process behavior agree. Exact colored-byte checks remain strict.
+
+The math acceptance applies only to the 2 measured inputs.
+The suite retains every exact observation without blanket numerical tolerances.
 
 ## Longest-match regex support
 
@@ -60,7 +101,8 @@ The manual's `match("a|ab"; "l")` example passes. The implementation uses the
 existing safe-Rust `fancy-regex` library, with no added dependency or FFI.
 Conservative match-length bounds avoid unnecessary endpoint searches.
 
-Local release-build measurements include startup, execution, and output:
+Local release-build measurements against jq 1.8.1 include startup, execution,
+and output. These timings are separate from the jq 1.8.2 correctness run:
 
 | Workload | jq median | tq median | tq / jq |
 | --- | ---: | ---: | ---: |
@@ -75,7 +117,7 @@ These measurements are not general performance guarantees.
 
 ## Details and verification
 
-- [Comparison details](../../jq-compatibility-disparities.md): exact math observations, regex limits, benchmark method, and executable identities.
+- [Comparison results](index.md): test-by-test outputs and token measurements.
 - [Source inventory](../../../tests/compatibility/reviews/jq-manual/source-examples.toon): manual examples and source-to-test mappings.
 - [Test setup](../../../tests/compatibility/readme.md#jq-manual-coverage): reference setup and coverage checks.
 
@@ -91,6 +133,9 @@ cargo run -p tq-test-support --bin tq-manual-compare -- \
   --markdown-dir target/jq-manual-review target/manual-comparison.toon
 ```
 
-The latest local evidence is in `target/manual-comparison-optimized.toon`, with
-rendered pages in `target/jq-manual-review-optimized`. These generated files are
-ignored by Git.
+The jq 1.8.2 comparison regenerates the [index](index.md) and all 21 section
+Results blocks. The 251 published-example reference check and 55 reference-pin,
+workflow, coverage, and strict-gate tests pass.
+
+Full local evidence is in `target/manual-comparison-jq-1.8.2.toon`, ignored by
+Git. The strict comparison exits 1 because the 9 exact-contract differences remain.

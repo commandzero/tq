@@ -9,6 +9,7 @@ Historical release entries retain their original ordering.
 
 ### Changed
 
+- `TQ_COLORS` now takes priority over `JQ_COLORS` for terminal palette customization.
 - **Breaking:** Upgrade the tq Rust crates together to 0.4.0 for incompatible API changes, including the required `tq_formats::Document.line_number` field; see the [migration notes](docs/jq-parity-migration.md#rust-library-migration-to-040) (#35).
 - **Breaking:** `-c` and `--compact-output` now select compact JSON. Remove `-c` when expecting TOON; combining it with explicit TOON output is rejected (#42).
 - **Breaking:** Default TOON output now emits zero or more LF-terminated values, preserving earlier results on later errors. Use `-o toon-seq` for RS framing or `--unframed` to require exactly one document (#41, #42).
@@ -35,7 +36,7 @@ Historical release entries retain their original ordering.
 
 ### Added
 
-- Expanded jq mathematical function support, including trigonometric, logarithmic, gamma, and Bessel functions; platform differences remain documented in the [disparity review](docs/jq-compatibility-disparities.md) (#39, #40).
+- Expanded jq mathematical function support, including trigonometric, logarithmic, gamma, and Bessel functions; platform differences remain documented in the [jq manual coverage](docs/tests/jq-manual/coverage.md#differences-by-test) (#39, #40).
 - Runtime NaN and infinity values, plus jq-style non-finite JSON input and `fromjson`. Native TOON and YAML input still reject non-finite values (#39, #40, #41).
 - Nested array/object destructuring and alternative patterns with `?//` (#39, #44).
 - SQL-style indexing and joins with `IN`, `INDEX`, and `JOIN` (#39, #40, #44).

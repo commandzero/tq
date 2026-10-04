@@ -65,7 +65,7 @@ fn reference_identity_is_path_independent_but_not_version_or_binary_independent(
     validate_manual_reference(&pin, &identity, &reference.target).unwrap();
     for changed in [
         ToolIdentity {
-            version: "jq-1.8.2".into(),
+            version: "jq-1.8.1".into(),
             ..identity.clone()
         },
         ToolIdentity {
@@ -101,11 +101,11 @@ fn linux_reference_uses_the_reviewed_static_official_release() {
         .iter()
         .find(|reference| reference.target == "x86_64-linux")
         .expect("reviewed Linux reference");
-    assert_eq!(reference.version, "jq-1.8.1");
-    assert_eq!(reference.bytes, 2_255_816);
+    assert_eq!(reference.version, "jq-1.8.2");
+    assert_eq!(reference.bytes, 2_267_912);
     assert_eq!(
         reference.sha256,
-        "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d"
+        "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f"
     );
     assert_eq!(
         reference.build_configuration,
@@ -114,6 +114,22 @@ fn linux_reference_uses_the_reviewed_static_official_release() {
     assert_eq!(
         reference.runtime_libraries,
         [] as [tq_test_support::corpus::ArtifactIdentity; 0]
+    );
+}
+
+#[test]
+fn macos_reference_uses_the_reviewed_official_release() {
+    let pin = pin();
+    let reference = pin
+        .references
+        .iter()
+        .find(|reference| reference.target == "aarch64-macos")
+        .expect("reviewed macOS reference");
+    assert_eq!(reference.version, "jq-1.8.2");
+    assert_eq!(reference.bytes, 841_504);
+    assert_eq!(
+        reference.sha256,
+        "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e"
     );
 }
 

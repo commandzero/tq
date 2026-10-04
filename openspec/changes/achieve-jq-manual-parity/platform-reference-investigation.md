@@ -23,7 +23,7 @@ contracts. The six review entries are `exp(1)`, `tgamma(0.5)`, `y0(1)`,
 `yn(0;1)`, the extreme integer-exponent conversion witness, and regex flag `l`.
 The native 92-input CLI math probe has 81 exact and 11 differing samples, no
 process issues, and unchanged executable/runtime hashes before and after.
-See `docs/jq-compatibility-disparities.md` for exact observations and restrictions.
+See `tests/compatibility/reviews/disparities-x86_64-linux.toon` for the target-scoped witness records and `docs/tests/jq-manual/coverage.md` for the current difference summary.
 
 ## Linux x86_64 candidate
 

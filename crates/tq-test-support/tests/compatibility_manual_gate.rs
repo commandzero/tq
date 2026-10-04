@@ -74,6 +74,27 @@ fn encoding_campaigns_cannot_be_omitted_or_forged_by_a_semantic_match() {
 }
 
 #[test]
+fn reporting_only_presentation_note_cannot_pass_strict_or_completion_gates() {
+    let (catalog, inventory, review_ids, _) = baseline_inputs();
+    let mut report = passing_report();
+    let row = report["cases"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["id"] == "manual.colors.default-palette")
+        .unwrap();
+    row["verdict"] = "failure".into();
+    row["presentation_note"] = "Expected presentation difference: JSON data and process behavior agree; ANSI styling differs".into();
+    let counts = manual_verdict_counts(&report).unwrap();
+    assert_eq!(counts.failures, 1);
+    assert_eq!(counts.reviewed_disparities, 0);
+    assert!(validate_strict_manual_report(&report, &catalog, &inventory, &review_ids).is_err());
+    assert!(
+        validate_completion_manual_report(&report, &catalog, &inventory, &review_ids, &[]).is_err()
+    );
+}
+
+#[test]
 fn strict_gate_rejects_a_report_contract_relabeling() {
     let (catalog, inventory, review_ids, _) = baseline_inputs();
     let mut report = passing_report();

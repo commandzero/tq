@@ -414,7 +414,7 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: Some('C'),
         syntax: "-C, --color-output",
         value: false,
-        description: "force ANSI color for any output format (JQ_COLORS supported)",
+        description: "force ANSI color for any output format (TQ_COLORS/JQ_COLORS supported)",
     },
     OptionSpec {
         short: Some('M'),
@@ -615,7 +615,8 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
     );
     help.push_str("\nColor: automatic on terminals, plain in pipes/files; NO_COLOR disables automatic color.\n\
          -C forces color, -M requests plain bytes; the last flag wins.\n\
-         JQ_COLORS accepts seven/eight SGR slots. Raw strings and proxy bytes stay verbatim.\n");
+         TQ_COLORS overrides JQ_COLORS; both accept seven/eight SGR slots.\n\
+                  Raw strings and proxy bytes stay verbatim.\n");
     help
 }
 

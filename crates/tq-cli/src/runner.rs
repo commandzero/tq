@@ -5592,10 +5592,12 @@ struct ResultOutput<'a, W> {
 
 fn color_palette(options: &RunOptions) -> JsonColorPalette {
     if options.capability_policy.environment {
-        std::env::var("JQ_COLORS").map_or_else(
-            |_| JsonColorPalette::default(),
-            |value| JsonColorPalette::from_jq_colors(&value),
-        )
+        std::env::var_os("TQ_COLORS")
+            .or_else(|| std::env::var_os("JQ_COLORS"))
+            .and_then(|value| value.into_string().ok())
+            .map_or_else(JsonColorPalette::default, |value| {
+                JsonColorPalette::from_jq_colors(&value)
+            })
     } else {
         JsonColorPalette::default()
     }

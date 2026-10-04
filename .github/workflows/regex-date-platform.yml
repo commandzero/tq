@@ -45,12 +45,12 @@ jobs:
           # inputs and repository variables remain explicit reviewed overrides.
           - os: ubuntu-latest
             reference_target: x86_64-linux
-            reference_jq_url: https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64
-            reference_jq_sha256: 020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d
+            reference_jq_url: https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64
+            reference_jq_sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
           - os: macos-latest
             reference_target: aarch64-macos
-            reference_jq_url: https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-macos-arm64
-            reference_jq_sha256: a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603
+            reference_jq_url: https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-arm64
+            reference_jq_sha256: 2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e
           # Windows execution is deferred pending an authorized native
           # runner. Keep its shell contracts in platform_shell.rs for later
           # execution; do not represent an unverified host as complete here.

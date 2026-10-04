@@ -42,7 +42,7 @@ cargo test -p tq-test-support --test compatibility_manual
 ```
 
 The separate reference check compares jq with the published manual outputs.
-It requires a jq 1.8 reference executable. Two imported output strings lose a
+It requires the pinned jq 1.8.2 reference executable. Two imported output strings lose a
 space; the inventory preserves the published text and records the verified
 reference output separately. The check sets `PAGER=less` for environment examples.
 
@@ -70,9 +70,9 @@ results, such as `debug` and `stderr`.
 
 ### JSON equivalence and output size
 
-The [jq manual report](../../docs/tests/jq-manual/index.md) preserves a historical
-capture of compatibility verdicts, per-example outputs, and tokenizer counts.
-It is not a current-head completion report. Generate fresh full
+The [jq manual report](../../docs/tests/jq-manual/index.md) records the latest
+macOS comparison against pinned jq 1.8.2, including compatibility verdicts,
+per-example outputs, and tokenizer counts. It is not an all-platform completion report. Generate fresh full
 TOON evidence under ignored `target/` storage to retain executable identities,
 actual stdout, process outcomes, and reasons without committing campaign dumps.
 
@@ -125,7 +125,7 @@ rejects changed or unverified reference builds before executing cases. Reference
 installation paths are not pinned. Passing this gate alone
 does not establish complete manual compatibility.
 
-Release jobs use the official jq 1.8.1 `jq-linux-amd64` and
+Release jobs use the official jq 1.8.2 `jq-linux-amd64` and
 `jq-macos-arm64` artifacts with checked-in SHA-256 pins. The Linux artifact
 is statically linked, so it does not require the former Red Hat runtime
 libraries on the hosted Ubuntu runner. Explicit artifact overrides must still
@@ -174,20 +174,16 @@ Each approval must match the case fingerprint, executable identities, contract,
 and observed outputs. Unknown, stale, duplicate, and unlisted approvals fail.
 Approvals cannot excuse regressions outside the frozen gap inventory. Exact
 matches and disparities are counted separately; the default exact gate still
-rejects every disparity. See the [disparity policy](../../docs/jq-compatibility-disparities.md)
-for evidence and reconsideration requirements.
+rejects every disparity. See the [numbered difference list](../../docs/tests/jq-manual/coverage.md#differences-by-test)
+for current observations and their practical impact.
 
-The [macOS registry](reviews/disparities-aarch64-macos.toon) contains five
-reviewed observations renewed against the final macOS completion executable.
-It is tied to that recorded executable build, not a standing waiver for future
-builds or other targets. Revalidate observations before replacing their
-identities; never copy an old approval onto an unexamined mismatch. The [Linux
-completion report](../../docs/tests/comparison-x86-64-linux.md) records 896 exact
-results and nine reviewed observations across the same 905-case inventory, with
-compact JSON 867/876 and TOON 876/876. This is a completion-campaign
-checkpoint, not a claim that every remaining parity or release gate is complete.
-Its nine target-scoped approvals are bound to the recorded x86_64 executable;
-they do not waive another build or platform.
+The [macOS registry](reviews/disparities-aarch64-macos.toon) and
+[Linux registry](reviews/disparities-x86_64-linux.toon) retain target-scoped
+approval records. Each record is tied to its recorded executable build, not a
+standing waiver for future builds or other targets.
+
+Revalidate observations before replacing their identities.
+Never copy an old approval onto an unexamined mismatch.
 
 Token counts use the `o200k_base` and `cl100k_base` encodings over complete stdout,
 including trailing newlines. The token report's `Diff` value is TOON tokens minus
