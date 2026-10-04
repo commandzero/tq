@@ -21,6 +21,8 @@ brew install commandzero/tools/tq
 
 ### Cargo
 
+Requires Rust 1.95 or newer.
+
 ```console
 cargo install tq-cli
 ```
