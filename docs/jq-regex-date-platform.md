@@ -2,7 +2,7 @@
 type: Report
 title: jq regex, date, and platform compatibility
 description: Safe-library behavior, resource limits, and ambient capability controls.
-generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:46:06Z }
+
 ---
 
 # jq regex, date, and platform compatibility
@@ -17,8 +17,8 @@ the generated campaign report.
 
 ## Selected dependencies and limits
 
-`tq` uses `fancy-regex` 0.19.1 for the jq-compatible regex surface and Jiff
-0.2.35 for UTC-first date/time conversion. `fancy-regex` is a safe Rust
+`tq` uses `fancy-regex` 0.19.2 for the jq-compatible regex surface and Jiff
+0.2.37 for UTC-first date/time conversion. `fancy-regex` is a safe Rust
 backtracking engine, so every compiled pattern receives an explicit
 backtracking limit plus compiled/delegated-size limits. The VM also checks
 input/pattern bytes, match and replacement counts, retained output, and
@@ -27,19 +27,22 @@ cancellation between bounded engine calls. The CLI maps
 searched-input limit; these are resource envelopes, not wall-clock
 guarantees.
 
-Supported regex built-ins are `test`, `match`, `capture`, `scan`, `split`,
-`splits`, `sub`, and `gsub`. Supported flags are `g`, `i`, `m`, `s`, `p`, `x`,
-and `n`; array pattern/flag forms are accepted only by the jq operations that
-document them. The `l` longest-match flag returns a stable unsupported
-diagnostic. Other patterns are parsed by the selected Rust engine; rejected
-syntax produces a pattern error. `m` matches jq's dot-newline behavior; `s` retains single-line
-anchors; `p` combines those modes. Offsets and lengths count Unicode scalar
-values, matching jq's reviewed UTF-8 behavior. The `l` mode remains an
-explicit safe-engine limitation and is not silently approximated.
+- Supported built-ins: `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`, and `gsub`.
+- Supported flags: `g`, `i`, `m`, `s`, `p`, `x`, `n`, and `l`.
+- Array pattern/flag forms are accepted only by operations that document them.
+- `l` selects the longest match using bounded endpoint searches.
+- Finite pattern-consumption bounds reduce the search; unknown or unbounded patterns retain the bounded fallback.
+- Whole-pattern recursion with `l` remains unsupported.
+- Other syntax is parsed by the Rust engine; rejected syntax produces a pattern error.
+- `m` matches jq's dot-newline behavior; `s` retains single-line anchors; `p` combines both.
+- Offsets and lengths count Unicode scalar values.
 
-Compatibility reports classify the rejected longest-match flag as
-`unsupported-capability`, configured regex envelopes as `resource`, portable
-date bounds as `runtime-range`, and denied ambient effects as `runtime-policy`.
+Compatibility reports distinguish these error classes:
+
+- `unsupported-capability`: whole-pattern recursion with longest-match mode.
+- `resource`: configured regex limits, including longest-match search work.
+- `runtime-range`: portable date bounds.
+- `runtime-policy`: denied ambient effects.
 
 ## Date and time policy
 

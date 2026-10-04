@@ -1,16 +1,15 @@
 # tq
 
-The TOON format helps [reduce token counts](https://toonformat.dev/guide/getting-started#what-is-toon)  and [ipmrove LLM accuracy](https://toonformat.dev/guide/benchmarks.html#retrieval-accuracy) thanks to a less verbose sytax with correctness hints, like array lengths.
+The TOON format helps [reduce token counts](https://toonformat.dev/guide/getting-started#what-is-toon)  and [improve LLM accuracy](https://toonformat.dev/guide/benchmarks.html#retrieval-accuracy) thanks to a less verbose syntax with correctness hints, like array lengths.
 
 Thanks to JSON's decades-long adoption, powerful tools like [`jq`](https://jqlang.org/) exist to quickly filter and query JSON documents. To use `jq` with TOON-formatted input, you would have had to convert it to JSON first.
 
-This is exactly the goal of `tq`: a TOON-native `jq` drop-in replacement. With some additional beneifts:
+This is exactly the goal of `tq`: a TOON-native query tool with jq-compatible supported behavior. With some additional benefits:
 
-1. Full compatibility with the `jq` [https://jqlang.org/manual/]
+1. Supported `jq` behavior scoped by the [compatibility guide](docs/compatibility.md)
 2. Expanded input and output format support including JSON, YAML, and TOON
-3. Performance and memory usage within 50% of `jq`
-4. Multithreading for large workloads
-5. Rust's memory safety
+3. Multithreading for large workloads
+4. Rust's memory safety
 
 ## Installation
 
@@ -28,11 +27,9 @@ cargo install tq-cli
 
 ## Usage
 
-###
-
 ### Shell pipes
 
-To maintain compatibility `tq` defaults to treating stdin as JSON and outputs as TOON.
+`tq` autodetects the input format on stdin and outputs TOON by default.
 
 ```sh
 echo '{"foo":"bar"}' | tq
@@ -49,12 +46,12 @@ Use `-i | --input-format` to specify the input format and `-o | --output-format`
 
 ```sh
 echo 'input_formats[3]: json,yaml,toon' | tq -i toon -c
-# => {"input_formats": ["json","yaml","toon"]}
+# => {"input_formats":["json","yaml","toon"]}
 ```
 
 ### Silent passthrough
 
-The `-x | --proxy-on-error` argument allows graceful handling of untrustworty
+The `-x | --proxy-on-error` argument allows graceful handling of untrustworthy
 sources. With `tq -x` any unparsable input will be passed through unmodified
 without errors.
 
@@ -71,10 +68,10 @@ echo '[invalid:json]' | tq -x
 Add a single directive to your `AGENTS.md` file to use `tq` with your agents:
 
 ```markdown
-Tool calls: use `tq` instead of `jq` for querying and filtering data in JSON-compatible formats, including .json, .ndjson, .jsonl, .yml, .yaml, and .toon. Always pipe expected JSON outputs through `tq -x` with an optional filter or `jq` expression.
+Tool calls: use `tq` instead of `jq` for querying and filtering data in JSON-compatible formats, including .json, .ndjson, .jsonl, .yml, .yaml, and .toon. Always pipe expected JSON outputs through `tq -x -c` with an optional filter or `jq` expression.
 ```
 
-###
+### Examples
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'

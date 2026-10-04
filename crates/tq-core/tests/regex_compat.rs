@@ -386,9 +386,15 @@ fn regex_longest_match_bounds_preserve_unicode_flags_and_context() {
         (r"\x61{1,2}|abc", "l", "abc", r#"[0,"abc"]"#),
         ("a{1,3}?", "l", "aaaa", r#"[0,"aaa"]"#),
         ("(?:a|ab){1,2}", "l", "abab", r#"[0,"abab"]"#),
-        ("(?i:k)|aa", "l", "aaK", r#"[2,"K"]"#),
-        ("K|aa", "li", "aaK", r#"[2,"K"]"#),
-        ("(?i:k)(?-i:a)|aaa", "l", "aaaKa", r#"[3,"Ka"]"#),
+        // Keep the Kelvin sign distinct from its NFC-normalized ASCII K.
+        ("(?i:k)|aa", "l", "aa\u{212a}", "[2,\"\u{212a}\"]"),
+        ("K|aa", "li", "aa\u{212a}", "[2,\"\u{212a}\"]"),
+        (
+            "(?i:k)(?-i:a)|aaa",
+            "l",
+            "aaa\u{212a}a",
+            "[3,\"\u{212a}a\"]",
+        ),
         ("a|é|aa", "l", "aéaa", r#"[1,"é"]"#),
         (".|ab", "l", "ab😀", r#"[2,"😀"]"#),
         ("[a😀]|ab", "l", "ab😀", r#"[2,"😀"]"#),

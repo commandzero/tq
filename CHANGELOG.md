@@ -10,7 +10,7 @@ Historical release entries retain their original ordering.
 ### Changed
 
 - `TQ_COLORS` now takes priority over `JQ_COLORS` for terminal palette customization.
-- **Breaking:** Upgrade the tq Rust crates together to 0.4.0 for incompatible API changes, including the required `tq_formats::Document.line_number` field; see the [migration notes](docs/jq-parity-migration.md#rust-library-migration-to-040) (#35).
+- **Breaking:** Upgrade the tq Rust crates together to 0.4.1 for incompatible API changes, including the required `tq_formats::Document.line_number` field; see the [migration notes](docs/jq-parity-migration.md#rust-library-migration-to-040) (#35).
 - **Breaking:** `-c` and `--compact-output` now select compact JSON. Remove `-c` when expecting TOON; combining it with explicit TOON output is rejected (#42).
 - **Breaking:** Default TOON output now emits zero or more LF-terminated values, preserving earlier results on later errors. Use `-o toon-seq` for RS framing or `--unframed` to require exactly one document (#41, #42).
 - **Breaking:** `--seq` now reads JSON sequences and emits TOON sequences by default. Use `--seq -o json` or `--seq -c` to retain JSON sequence output (#42).
