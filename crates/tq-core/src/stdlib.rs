@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use fancy_regex::{Captures, Error as RegexError, Match, Regex, RegexBuilder, RegexInput};
+use fancy_regex::{Captures, Error as RegexError, Expr, Match, Regex, RegexBuilder, RegexInput};
 use indexmap::IndexMap;
 use jiff::{
     Timestamp,
@@ -18,7 +18,97 @@ pub(crate) struct RegexProgram {
     regex: Regex,
     global: bool,
     ignore_empty: bool,
+    longest: Option<LongestRegex>,
 }
+
+struct LongestRegex {
+    flags: String,
+    pattern: String,
+    has_search_anchor: bool,
+    max_consumed: Option<ConsumedLength>,
+}
+
+#[derive(Clone, Copy)]
+struct ConsumedLength {
+    bytes: usize,
+    scalars: usize,
+}
+
+impl ConsumedLength {
+    // Bound consumption, not the reported span after \K. The parsed AST has
+    // already applied inline/external flags and decoded escapes. UTF-8 scalars
+    // occupy at most four bytes; Unicode case folding can change byte width.
+    fn maximum(expr: &Expr) -> Option<Self> {
+        let zero = Self {
+            bytes: 0,
+            scalars: 0,
+        };
+        match expr {
+            Expr::Empty
+            | Expr::Assertion(_)
+            | Expr::KeepOut
+            | Expr::ContinueFromPreviousMatchEnd => Some(zero),
+            Expr::Literal { val, casei } => {
+                let scalars = val.chars().count();
+                Some(Self {
+                    bytes: if *casei {
+                        scalars.checked_mul(4)?
+                    } else {
+                        val.len()
+                    },
+                    scalars,
+                })
+            }
+            // fancy-regex guarantees Delegate consumes exactly one character.
+            Expr::Any { .. } | Expr::Delegate { .. } => Some(Self {
+                bytes: 4,
+                scalars: 1,
+            }),
+            Expr::GeneralNewline { unicode } => Some(Self {
+                bytes: if *unicode { 3 } else { 2 },
+                scalars: 2,
+            }),
+            Expr::Group(child) => Self::maximum(child),
+            Expr::AtomicGroup(child) => Self::maximum(child),
+            Expr::LookAround(child, _) => {
+                // Keep unknown constructs on the original path, even inside
+                // assertions. Known assertions inspect context but consume none.
+                Self::maximum(child)?;
+                Some(zero)
+            }
+            Expr::Concat(children) => children.iter().try_fold(zero, |sum, child| {
+                let child = Self::maximum(child)?;
+                Some(Self {
+                    bytes: sum.bytes.checked_add(child.bytes)?,
+                    scalars: sum.scalars.checked_add(child.scalars)?,
+                })
+            }),
+            Expr::Alt(children) => children.iter().try_fold(zero, |max, child| {
+                let child = Self::maximum(child)?;
+                Some(Self {
+                    bytes: max.bytes.max(child.bytes),
+                    scalars: max.scalars.max(child.scalars),
+                })
+            }),
+            Expr::Repeat { child, hi, .. } if *hi != usize::MAX => {
+                let child = Self::maximum(child)?;
+                Some(Self {
+                    bytes: child.bytes.checked_mul(*hi)?,
+                    scalars: child.scalars.checked_mul(*hi)?,
+                })
+            }
+            // Backreferences, subroutines, conditionals, unbounded repeats and
+            // other control constructs need separate proofs. Overflow also
+            // returns None, preserving the existing exhaustive search.
+            _ => None,
+        }
+    }
+}
+
+// Reserve this bounded engine allowance for every longest-mode search, even
+// when delegation or an early success uses less. The rest of the work budget
+// accounts for haystack scans and generated repeat sizes before compilation.
+const LONGEST_BACKTRACK_ALLOWANCE: usize = 256;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum RegexPullKind {
@@ -55,8 +145,8 @@ pub(crate) enum RegexPull {
 ///
 /// The compiled program and haystack are owned by `Arc`s so this cursor can be
 /// stored in a suspended generator without a self-referential iterator. Each
-/// search iteration performs one public fancy-regex engine search, with a
-/// checkpoint before and after that bounded call, and converts temporary
+/// search iteration performs bounded public fancy-regex engine searches, with
+/// checkpoints around calls and longest-mode candidate compilation, and converts temporary
 /// captures into an owned `Value` before returning. A pull may skip duplicate
 /// or ignored empty matches. Checkpoints do not interrupt execution inside a
 /// single engine call; the configured engine limits bound that work.
@@ -65,6 +155,7 @@ pub(crate) struct RegexCursor {
     input: Arc<str>,
     kind: RegexPullKind,
     limits: VmLimits,
+    longest_work_remaining: usize,
     next_start: usize,
     last_match_end: Option<usize>,
     last_skipped_empty: bool,
@@ -91,6 +182,7 @@ pub(crate) fn regex_cursor(
         input,
         kind,
         limits,
+        longest_work_remaining: limits.regex_backtrack_limit,
         next_start: 0,
         last_match_end: None,
         last_skipped_empty: false,
@@ -121,11 +213,12 @@ impl RegexCursor {
                 // OPTION_NOT_CONTINUED_FROM_PREVIOUS_MATCH flag.
                 search_input = search_input.continue_from_previous_match_end(false);
             }
-            let captures = self
-                .program
-                .regex
-                .captures_input(search_input)
-                .map_err(regex_runtime_error);
+            let captures = self.program.captures(
+                search_input,
+                self.limits,
+                &mut self.longest_work_remaining,
+                checkpoint,
+            );
             let captures = match captures {
                 Ok(captures) => {
                     checkpoint()?;
@@ -147,7 +240,9 @@ impl RegexCursor {
             if start == end {
                 self.next_start = advance_regex_position(self.input.as_ref(), end);
                 self.last_skipped_empty = end == search_start;
-                if self.last_match_end == Some(end) {
+                // Longest mode searches afresh after a nonempty result; jq
+                // retains an empty result at that same endpoint.
+                if self.program.longest.is_none() && self.last_match_end == Some(end) {
                     continue;
                 }
             } else {
@@ -161,7 +256,7 @@ impl RegexCursor {
                 self.done = true;
                 return Err(resource("regex-match-count"));
             }
-            if self.program.ignore_empty && start == end {
+            if self.program.longest.is_none() && self.program.ignore_empty && start == end {
                 continue;
             }
             if self.stop_after_one {
@@ -751,45 +846,277 @@ fn compile_regex(
     if pattern.len() > limits.regex_pattern_bytes {
         return Err(resource("regex-pattern-bytes"));
     }
-    let mut builder = RegexBuilder::new(pattern);
     let mut global = false;
     let mut ignore_empty = false;
+    let mut longest = false;
     for flag in flags.chars() {
         match flag {
             'g' => global = true,
-            'i' => {
-                builder.case_insensitive(true);
-            }
-            // jq's `m` and `p` make dot match line terminators. jq keeps
-            // ^/$ anchored to the complete input for these flags.
-            'm' | 'p' => {
-                builder.dot_matches_new_line(true);
-            }
-            // jq's `s` selects single-line anchors. The Rust engine's default
-            // anchor behavior already matches this mode.
-            's' => {}
-            'x' => {
-                builder.ignore_whitespace(true);
-            }
+            'i' | 'm' | 'p' | 's' | 'x' => {}
             'n' => ignore_empty = true,
-            'l' => {
-                return Err(unsupported("regex flag 'l' (longest-match mode)"));
-            }
+            'l' => longest = true,
             other => return Err(runtime(format!("regex flag '{other}' is invalid"))),
         }
     }
-    builder
-        .backtrack_limit(limits.regex_backtrack_limit)
-        .delegate_size_limit(limits.regex_compiled_bytes)
-        .delegate_dfa_size_limit(limits.regex_compiled_bytes.saturating_mul(4));
+    let engine_limits = if longest {
+        longest_engine_limits(limits)
+    } else {
+        limits
+    };
+    let mut builder = regex_builder(pattern, flags, engine_limits);
     let regex = builder
         .build()
         .map_err(|error| regex_compile_error(&error))?;
+    let longest = if longest {
+        let parsing_pattern = format!(
+            "{}{}{}{pattern}",
+            if flags.contains('i') { "(?i)" } else { "" },
+            if flags.contains('m') || flags.contains('p') {
+                "(?s)"
+            } else {
+                ""
+            },
+            if flags.contains('x') { "(?x)" } else { "" },
+        );
+        let tree =
+            Expr::parse_tree(&parsing_pattern).map_err(|error| regex_compile_error(&error))?;
+        if tree
+            .expr
+            .has_descendant(|expr| matches!(expr, Expr::SubroutineCall(0)))
+        {
+            return Err(VmError::Unsupported {
+                operation: Arc::from("regex longest-match mode with whole-pattern recursion"),
+            });
+        }
+        let has_search_anchor = tree
+            .expr
+            .has_descendant(|expr| matches!(expr, Expr::ContinueFromPreviousMatchEnd));
+        // Validate the original first. Wrapping must not repair invalid syntax.
+        // A trailing extended-mode comment needs a newline before our closing
+        // delimiter, including when extended mode was enabled inline.
+        builder.pattern(format!("(?:{pattern})"));
+        let wrapped = if let Ok(regex) = builder.build() {
+            regex
+        } else {
+            builder.pattern(format!("(?:{pattern}\n)"));
+            builder
+                .build()
+                .map_err(|error| regex_compile_error(&error))?
+        };
+        Some(LongestRegex {
+            flags: flags.to_owned(),
+            pattern: wrapped.as_str().to_owned(),
+            has_search_anchor,
+            max_consumed: ConsumedLength::maximum(&tree.expr),
+        })
+    } else {
+        None
+    };
     Ok(RegexProgram {
         regex,
         global,
         ignore_empty,
+        longest,
     })
+}
+
+fn regex_builder(pattern: &str, flags: &str, limits: VmLimits) -> RegexBuilder {
+    let mut builder = RegexBuilder::new(pattern);
+    // jq's m/p enable dot-newline, while s selects the engine's default
+    // whole-input anchors. Keep these settings identical for endpoint probes.
+    builder
+        .case_insensitive(flags.contains('i'))
+        .dot_matches_new_line(flags.contains('m') || flags.contains('p'))
+        .ignore_whitespace(flags.contains('x'))
+        .backtrack_limit(limits.regex_backtrack_limit)
+        .delegate_size_limit(limits.regex_compiled_bytes)
+        .delegate_dfa_size_limit(limits.regex_compiled_bytes.saturating_mul(4));
+    builder
+}
+
+fn longest_engine_limits(limits: VmLimits) -> VmLimits {
+    VmLimits {
+        regex_backtrack_limit: limits
+            .regex_backtrack_limit
+            .min(LONGEST_BACKTRACK_ALLOWANCE),
+        ..limits
+    }
+}
+
+fn charge_regex_work(remaining: &mut usize, cost: usize) -> Result<(), VmError> {
+    *remaining = remaining
+        .checked_sub(cost)
+        .ok_or_else(|| resource("regex-backtrack"))?;
+    Ok(())
+}
+
+impl LongestRegex {
+    fn search_cost(&self, text: &str, limits: VmLimits) -> usize {
+        text.len()
+            .saturating_add(self.pattern.len())
+            .saturating_add(limits.regex_backtrack_limit)
+    }
+
+    fn endpoints<'t>(
+        &self,
+        text: &'t str,
+        start: usize,
+    ) -> impl Iterator<Item = (usize, usize)> + 't {
+        let max_end = self.max_consumed.map_or(text.len(), |max| {
+            let scalar_end = text[start..]
+                .char_indices()
+                .nth(max.scalars)
+                .map_or(text.len(), |(offset, _)| start + offset);
+            scalar_end.min(start.saturating_add(max.bytes))
+        });
+        std::iter::once(text.len())
+            .chain(text.char_indices().rev().map(|(i, _)| i))
+            .enumerate()
+            .skip_while(move |(_, end)| *end > max_end)
+    }
+
+    fn start_is_eligible(
+        &self,
+        original: &Regex,
+        input: RegexInput<'_, str>,
+        start: usize,
+        limits: VmLimits,
+        checkpoint: &dyn Fn() -> Result<(), VmError>,
+    ) -> Result<bool, VmError> {
+        if !self.has_search_anchor {
+            return original
+                .is_match_input(input.from_pos(start).anchored(true))
+                .map_err(regex_runtime_error);
+        }
+        // Moving from_pos would also move \G. Keep its original search
+        // origin and constrain the attempt with an assertion instead.
+        let start_chars = char_offset(input.haystack(), start);
+        let pattern = format!("(?<=\\A(?s:.{{{start_chars}}})){}", self.pattern);
+        let regex = regex_builder(&pattern, &self.flags, limits)
+            .build()
+            .map_err(|error| regex_compile_error(&error))?;
+        checkpoint()?;
+        regex.is_match_input(input).map_err(regex_runtime_error)
+    }
+}
+
+impl RegexProgram {
+    fn captures<'t>(
+        &self,
+        input: RegexInput<'t, str>,
+        limits: VmLimits,
+        work_remaining: &mut usize,
+        checkpoint: &dyn Fn() -> Result<(), VmError>,
+    ) -> Result<Option<Captures<'t, str>>, VmError> {
+        let Some(longest) = &self.longest else {
+            return self
+                .regex
+                .captures_input(input)
+                .map_err(regex_runtime_error);
+        };
+        let LongestRegex {
+            flags,
+            pattern,
+            has_search_anchor,
+            max_consumed,
+        } = longest;
+        let engine_limits = longest_engine_limits(limits);
+        let search_cost = longest.search_cost(input.haystack(), engine_limits);
+        // Reject absent patterns with one bounded engine search rather than
+        // compiling every endpoint of a haystack that cannot match at all.
+        checkpoint()?;
+        charge_regex_work(work_remaining, search_cost)?;
+        let present = self
+            .regex
+            .captures_input(input.clone())
+            .map_err(regex_runtime_error);
+        checkpoint()?;
+        if present?.is_none() {
+            return Ok(None);
+        }
+        let text = input.haystack();
+
+        let mut best = None;
+        let mut best_length = 0;
+
+        // Oniguruma ranks consumed bytes (before any \K reset), across all
+        // starting positions. Strict improvement preserves engine-order ties.
+        // Endpoint assertions retain the complete haystack for anchors and
+        // lookarounds; slicing prefixes would change the language being matched.
+        // Check start eligibility before enumerating endpoints. Charge both
+        // engine allowances and input/compilation size to one cursor-wide budget.
+        for (start_chars, start) in text
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain(std::iter::once(text.len()))
+            .enumerate()
+        {
+            if start < input.start() {
+                continue;
+            }
+            if best.is_some()
+                && (text.len() - start <= best_length
+                    || max_consumed.is_some_and(|max| best_length >= max.bytes))
+            {
+                break;
+            }
+            checkpoint()?;
+            charge_regex_work(
+                work_remaining,
+                search_cost.saturating_add(if *has_search_anchor { start_chars } else { 0 }),
+            )?;
+            let at_start = longest.start_is_eligible(
+                &self.regex,
+                input.clone(),
+                start,
+                engine_limits,
+                checkpoint,
+            );
+            checkpoint()?;
+            if !at_start? {
+                continue;
+            }
+            for (remaining_chars, end) in longest.endpoints(text, start) {
+                if end < start || (best.is_some() && end - start <= best_length) {
+                    break;
+                }
+                if self.ignore_empty && end == start {
+                    break;
+                }
+                checkpoint()?;
+                charge_regex_work(
+                    work_remaining,
+                    search_cost
+                        .saturating_add(if *has_search_anchor { start_chars } else { 0 })
+                        .saturating_add(remaining_chars),
+                )?;
+                let endpoint = format!("{pattern}(?=(?s:.{{{remaining_chars}}})\\z)");
+                let (pattern, candidate_input) = if *has_search_anchor {
+                    (
+                        format!("(?<=\\A(?s:.{{{start_chars}}})){endpoint}"),
+                        input.clone(),
+                    )
+                } else {
+                    (endpoint, input.clone().from_pos(start).anchored(true))
+                };
+                let candidate = regex_builder(&pattern, flags, engine_limits);
+                let regex = candidate
+                    .build()
+                    .map_err(|error| regex_compile_error(&error))?;
+                checkpoint()?;
+                let captures = regex
+                    .captures_input(candidate_input)
+                    .map_err(regex_runtime_error);
+                checkpoint()?;
+                if let Some(captures) = captures? {
+                    best_length = end - start;
+                    best = Some(captures);
+                    break;
+                }
+            }
+        }
+        Ok(best)
+    }
 }
 
 fn regex_compile_error(error: &RegexError) -> VmError {
@@ -837,6 +1164,10 @@ fn match_object(
             )?,
         );
         if let Some(matched) = capture {
+            // jq emits string before length for both empty and null captures.
+            if matched.as_str().is_empty() {
+                value.insert(Arc::from("string"), Value::string(""));
+            }
             value.insert(
                 Arc::from("length"),
                 number_usize(matched.as_str().chars().count())?,
@@ -1130,12 +1461,6 @@ fn resource(resource: &'static str) -> VmError {
 fn numeric_range(message: impl Into<Arc<str>>) -> VmError {
     VmError::NumericRange {
         message: message.into(),
-    }
-}
-
-fn unsupported(operation: impl Into<Arc<str>>) -> VmError {
-    VmError::Unsupported {
-        operation: operation.into(),
     }
 }
 

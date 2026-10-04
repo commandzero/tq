@@ -1,39 +1,80 @@
 # tq
 
-`tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, JSON5, JSON Lines, JSON
-Text Sequences, CSV, and TSV. It writes LF-terminated TOON values by default
-and can stream structured input without loading the complete input.
+The TOON format helps [reduce token counts](https://toonformat.dev/guide/getting-started#what-is-toon)  and [ipmrove LLM accuracy](https://toonformat.dev/guide/benchmarks.html#retrieval-accuracy) thanks to a less verbose sytax with correctness hints, like array lengths.
 
-`tq` supports common jq filters, including navigation, pipes, generators,
-conditionals, operators, variables, path updates, user filters, modules, and
-the common built-ins. Arrays and ordered objects retain their jq semantics.
-The language also includes `empty`, `error`, optional access, `try/catch`,
-`reduce`, and `foreach`. See [jq compatibility](docs/compatibility.md) for
-supported syntax and known differences.
+Thanks to JSON's decades-long adoption, powerful tools like [`jq`](https://jqlang.org/) exist to quickly filter and query JSON documents. To use `jq` with TOON-formatted input, you would have had to convert it to JSON first.
 
-## Install and use
+This is exactly the goal of `tq`: a TOON-native `jq` drop-in replacement. With some additional beneifts:
 
-Rust 1.95 or newer is required.
+1. Full compatibility with the `jq` [https://jqlang.org/manual/]
+2. Expanded input and output format support including JSON, YAML, and TOON
+3. Performance and memory usage within 50% of `jq`
+4. Multithreading for large workloads
+5. Rust's memory safety
+
+## Installation
+
+### Homebrew
+
+```console
+brew install commandzero/tools/tq
+```
+
+### Cargo
 
 ```console
 cargo install tq-cli
-tq -i json -o toon-seq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
-To build from a checkout instead, run `cargo build --release` and use
-`target/release/tq`.
+## Usage
 
-With no file argument, `tq` reads stdin. It processes files and `-` in argument
-order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.json5`, `.jsonl`,
-`.ndjson`, `.json-seq`, `.jsonseq`, `.csv`, and `.tsv` extensions select the
-parser. Other sources use bounded content
-detection. For ambiguous input, select a parser with
-`--input-format toon|yaml|json|json5|jsonl|json-seq|toon-seq|csv|tsv`.
-`ndjson` is an alias for `jsonl`, and `jsonseq` is an alias for `json-seq`.
-JSON5 is document-at-a-time input and accepts the literal triple-double-quoted
-multiline strings used by kibana-sync. Files ending in `.json` remain strict
-JSON, so select `-i json5` when a JSON5 producer uses that extension. CSV and
-TSV use their explicit selectors or matching file extensions.
+###
+
+### Shell pipes
+
+To maintain compatibility `tq` defaults to treating stdin as JSON and outputs as TOON.
+
+```sh
+echo '{"foo":"bar"}' | tq
+# => foo: bar
+
+echo '{"fruits":["apple","banana","orange"],"vegetables":["carrot","broccoli","spinach"]}' | tq '.fruits'
+# => [3]: apple,banana,orange
+
+echo '{"fruits":["apple","banana","orange"],"vegetables":["carrot","broccoli","spinach"]}' | tq '.vegetables[2]'
+# => spinach
+```
+
+Use `-i | --input-format` to specify the input format and `-o | --output-format` to specify the output format, or `-c | --compact-output` for compact JSON output.
+
+```sh
+echo 'input_formats[3]: json,yaml,toon' | tq -i toon -c
+# => {"input_formats": ["json","yaml","toon"]}
+```
+
+### Silent passthrough
+
+The `-x | --proxy-on-error` argument allows graceful handling of untrustworty
+sources. With `tq -x` any unparsable input will be passed through unmodified
+without errors.
+
+```sh
+echo '[invalid:json]' | tq
+# => tq: Json input rejected: invalid JSON at byte 8, line 1, column 9: invalid numeric literal
+
+echo '[invalid:json]' | tq -x
+# => [invalid:json]
+```
+
+### AGENTS.md
+
+Add a single directive to your `AGENTS.md` file to use `tq` with your agents:
+
+```markdown
+Tool calls: use `tq` instead of `jq` for querying and filtering data in JSON-compatible formats, including .json, .ndjson, .jsonl, .yml, .yaml, and .toon. Always pipe expected JSON outputs through `tq -x` with an optional filter or `jq` expression.
+```
+
+###
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
@@ -44,10 +85,6 @@ tq -i jsonl -o jsonl '.event' events.ndjson
 unpredictable-command | tq -x -i json
 ```
 
-`-x` or `--proxy-on-error` handles sources whose format is uncertain. `tq`
-keeps the bounded source before parsing it. If parsing rejects the source,
-`tq` writes the original bytes unchanged and treats that source as successful.
-Resource, I/O, query, runtime, and output errors still fail.
 
 For multiple sources, the fallback applies to each source separately. With
 `--slurp`, a rejected source proxies the complete ordered source set because

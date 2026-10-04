@@ -68,6 +68,56 @@ separate from execution verdicts. These results provide no reason to introduce a
 for the manual's tested math inputs; they do not establish bit-for-bit agreement
 for every input or platform.
 
+### Current reproduction of the two math failures
+
+The current macOS worktree reproduces both remaining mathematical failures with
+pinned jq 1.8.1 and release tq 0.4.0. Run each query with `-c`, supplying the
+listed JSON input on stdin:
+
+| Manual case | Query | Input | jq stdout number | tq stdout number | tq relative to jq |
+| --- | --- | --- | --- | --- | --- |
+| `manual.audit.math.erfc-ulp` | `erfc` | `2` | `0.0046777349810472645` | `0.004677734981047266` | 2 binary64 ULP higher |
+| `manual.audit.math.tgamma-ulp` | `tgamma` | `0.5` | `1.772453850905516` | `1.7724538509055159` | 1 binary64 ULP lower |
+
+Both tools exit 0, emit one compact JSON number followed by LF, and emit no
+stderr. These are numerical computation differences, not merely different
+formatting of the same binary64 value:
+
+| Query | jq binary64 value | tq binary64 value | Binary64 subtraction `tq - jq` |
+| --- | --- | --- | --- |
+| `erfc` | `0x1.328f5ec350e65p-8` | `0x1.328f5ec350e67p-8` | approximately `+1.7347234759768071e-18` |
+| `tgamma` | `0x1.c5bf891b4ef6bp+0` | `0x1.c5bf891b4ef6ap+0` | approximately `-2.2204460492503131e-16` |
+
+Direct diagnostic calls to macOS's system `erfc` and `tgamma` reproduced jq's
+values. tq dispatches to the existing pure-Rust `libm` 0.2.16 implementations in
+[math.rs](../crates/tq-core/src/math.rs), which round differently at these inputs.
+The diagnostic system-library calls were external Python probes, not an FFI
+addition to tq. Neither result's proximity nor its agreement with jq establishes
+which implementation is more mathematically accurate.
+
+`erfc` computes a complementary error-function value used in tail probabilities;
+`tgamma` computes the Gamma function. The last-bit differences can affect exact
+number comparisons, serialized bytes, snapshots, or downstream calculations.
+The observed 2-ULP and 1-ULP distances apply **only to these witnesses**, not to
+all inputs, targets, or a global numerical error guarantee.
+
+The user accepted these two measured witnesses as **low-significance rounding
+differences**, rather than blockers requiring further numerical implementation
+work. That judgment is scoped to `erfc(2)` and `tgamma(0.5)` and the observations
+above; it is not a blanket numerical tolerance or an accuracy guarantee.
+
+Both cases remain **failures** in the current strict campaign. No tolerance,
+input-specific correction, output rounding, or machine-readable identity-bound
+disparity approval was introduced by this acceptance. A principled exact fix would require a supported safe backend whose
+results are verified against the selected reference; direct native FFI conflicts
+with the implementation policy above.
+
+This reproduction used `macOS-26.7-arm64-arm-64bit-Mach-O`, jq executable SHA-256
+`a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603`,
+and release tq executable SHA-256
+`cf7549683a1ee004fe98ab4f7a0dc0dc133569d9e05a4296387ae4ca66e628b6`.
+These observations are distinct from the historical approvals below.
+
 ### Reviewed math boundary observations
 
 The current implementation uses the standard library's platform operations for
@@ -239,10 +289,23 @@ fallback and now matches on both verified targets.
 
 ### Longest regex matching
 
-The replacement implementation using `fancy-regex` 0.19.1 rejects jq's `l` flag.
-It does not silently return the first alternative, which would give the wrong
-match for patterns such as `a|ab`. Primary review accepts this explicit
-safe-library restriction for the exact witness in each target's approval registry.
+The current implementation supports jq's `l` flag through bounded endpoint
+searches using `fancy-regex` 0.19.1. The manual witness `match("a|ab"; "l")`
+on `"ab"` now matches the pinned macOS jq 1.8.1 compact stdout and process contract.
+It selects the longest consumed byte length across starting positions, retains
+engine-order ties, and reports offsets and lengths in Unicode scalars. Endpoint
+assertions preserve the complete input for anchors and lookarounds.
+
+This is bounded support, not universal Oniguruma equivalence. A cursor-wide,
+size-weighted work budget and per-search backtracking allowance can reject large
+or complex searches with `regex-backtrack`. Whole-pattern recursion under `l`
+is explicitly unsupported because endpoint wrapping would change its recursion
+target; ordinary-mode recursion is unchanged. Known engine differences remain
+for `\\K` resets in abandoned alternatives and global empty matches around
+multibyte characters. These are not approved disparities or blanket waivers.
+
+The observations below are **historical**, from the implementation that rejected
+`l`. Its identity-bound approvals do not apply to the changed executable.
 
 Witness: input `"ab"`, query `match("a|ab"; "l")`, compact JSON output.
 
@@ -263,13 +326,89 @@ SHA-256 executable identities for this observation:
 The Linux executables identified above produce the same stdout/stderr and exit
 statuses for this witness. Its approval additionally binds Linux runtime libraries.
 
-Scripts requiring longest matching cannot currently substitute tq for jq.
-Other regex behavior is not exempted. The regression witness is
-`longest_match_remains_an_explicit_safe_engine_limitation` in
-[regex_compat.rs](../crates/tq-core/tests/regex_compat.rs).
-After implementation, reconsider this restriction if a safe Rust library offers
-longest matching with captures and bounded work. Revalidate the witness and
-refresh its identity-bound approval against the final executable before release.
+The current regression witness is `regex_longest_match_selects_longer_alternative`
+in [regex_compat.rs](../crates/tq-core/tests/regex_compat.rs), with additional
+capture, flag, recursion-rejection, and resource-limit tests. The CLI regression
+also checks exact compact output. Revalidate broader engine behavior and target
+contracts before release; do not renew the historical unsupported-flag approval
+for a witness that now matches.
+
+#### Longest-match dependency and performance comparison
+
+The longest-match fix adds **no new library, foreign-function call, or unsafe
+bridge**. It uses the existing safe Rust `fancy-regex` 0.19.1 dependency; neither
+`Cargo.lock` nor the core dependency manifest changed. jq's pinned reference
+uses its native Oniguruma engine. tq instead constrains candidate endpoints and
+runs repeated bounded Rust-engine searches, sometimes compiling endpoint probes.
+This extra work is a compatibility tradeoff, not a performance optimization.
+
+The **pre-optimization** local comparison used the release tq and pinned jq 1.8.1
+executables identified in the current math reproduction above. Both received piped JSON stdin and `-c`;
+stdout was captured and required to match exactly, with status 0 and empty stderr
+on every run. Each scenario had three warmups and nine measured rounds, alternating
+tool order. The table shows median end-to-end wall time, **including process
+startup, parsing, query execution, and output**, not isolated regex-engine time.
+
+| Scenario | Query | jq median | tq median | tq / jq |
+| --- | --- | ---: | ---: | ---: |
+| Startup control, one `"ab"` input | `.` | 5.00 ms | 6.00 ms | 1.20× |
+| Manual witness, one `"ab"` input | `match("a\|ab"; "l")` | 5.10 ms | 6.37 ms | 1.25× |
+| Manual witness, 1,000 `"ab"` inputs in one process | `match("a\|ab"; "l")` | 9.73 ms | 58.85 ms | 6.05× |
+| 501-character input: `"a"` followed by 500 `"b"` characters | `match("a"; "l")` | 7.19 ms | 196.21 ms | 27.29× |
+| Same 501-character input, ordinary-mode control | `match("a")` | 5.82 ms | 7.28 ms | 1.25× |
+
+The startup control shows why the single-example ratio hides much of the extra
+regex work. Batched inputs amortize startup, while the longer literal-search
+probe exposed the cost of endpoint enumeration and compilation. Ordinary
+matching does not use this endpoint-search path.
+
+The subsequent optimization derives conservative maximum **consumed byte and
+Unicode-scalar lengths** from the parsed pattern. It skips endpoints beyond
+those bounds and stops checking later starts once the byte maximum is reached.
+This preserves byte-based longest ranking, earlier-match ties, captures, and
+full-input context. Case-insensitive bounds account for changing UTF-8 widths;
+`\\K` bounds count consumption before the reported-span reset. Unknown constructs,
+unbounded repeats, and bound arithmetic overflow retain the original fallback.
+No new dependency, FFI, cache, or relaxed work limit was introduced.
+
+The same five scenarios were measured again with the same method and pinned jq,
+using optimized release tq executable SHA-256
+`e5fc798027c0a3d52a59728a455229ba0b811dedb0edeb7ae7da68d14b7c547f`.
+All captured outputs and process contracts matched exactly.
+
+| Scenario | Earlier tq median | Optimized tq median | Fresh jq median | Optimized tq / jq |
+| --- | ---: | ---: | ---: | ---: |
+| Startup control | 6.00 ms | 5.13 ms | 4.59 ms | 1.12× |
+| One manual longest-match input | 6.37 ms | 5.31 ms | 4.69 ms | 1.13× |
+| 1,000 manual inputs in one process | 58.85 ms | 54.93 ms | 9.37 ms | 5.87× |
+| 501-character literal longest search | 196.21 ms | 6.66 ms | 4.67 ms | 1.43× |
+| 501-character ordinary-mode control | 7.28 ms | 6.15 ms | 4.76 ms | 1.29× |
+
+The user accepted the optimized longest-match fix at the measured performance
+above, closing the original unsupported-flag witness. This scoped acceptance
+includes the disclosed batched-input overhead; it is not a general performance
+waiver for other workloads or future regressions.
+
+The long literal probe improved approximately **29.45×** between captures.
+Startup and ordinary-mode controls also vary between runs, so their small timing
+changes are not evidence of optimization gains. The repeated manual witness
+still spends time compiling regexes and endpoint probes per input: **5.87× jq**
+in this capture. This change primarily removes impossible long-input probes;
+it does not solve repeated compilation or improve unknown/unbounded patterns.
+
+A deterministic regression makes `a` and `a|ab` succeed on the 501-character input
+under a 4,000-unit work budget, where the earlier implementation exhausted it.
+Additional tests cover Unicode byte ties, case folding, bounded repetition,
+lookaround, newline matching, and search/reset anchors. Larger or more complex
+fallback searches may still exhaust tq's conservative work budget rather than
+produce a successful result. Resource-limit failures must not be counted as
+fast successful matches.
+
+These are local diagnostic measurements, not cross-platform or representative
+workload claims. No isolated engine-time, CPU, or peak-memory measurement was
+made. Samples, queries, input byte counts, method, and executable identities are
+retained locally in ignored `target/regex-longest-performance.json` (before)
+and `target/regex-longest-performance-optimized.json` (after).
 
 ### Cancellation and resource bounds
 

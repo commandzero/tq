@@ -22,6 +22,28 @@ fn execute(query: &str, input: &str) -> (Result<ExitStatus, RunError>, Vec<u8>, 
 }
 
 #[test]
+fn longest_match_cli_matches_jq_compact_output() {
+    let (status, stdout, stderr) = execute(r#"match("a|ab"; "l")"#, r#""ab""#);
+    assert_eq!(status.unwrap(), ExitStatus::Success);
+    assert_eq!(
+        stdout,
+        b"{\"offset\":0,\"length\":2,\"string\":\"ab\",\"captures\":[]}\n"
+    );
+    assert!(stderr.is_empty());
+}
+
+#[test]
+fn longest_match_cli_preserves_unicode_byte_ties_across_global_pulls() {
+    let (status, stdout, stderr) = execute(
+        r#"[match("a|é|aa"; "lg") | [.offset, .string]]"#,
+        r#""aéaa""#,
+    );
+    assert_eq!(status.unwrap(), ExitStatus::Success);
+    assert_eq!(stdout, "[[1,\"é\"],[2,\"aa\"]]\n".as_bytes());
+    assert!(stderr.is_empty());
+}
+
+#[test]
 fn scan_cli_keeps_single_capture_arrays() {
     let (status, stdout, stderr) = execute(r#"[scan("(.)")]"#, r#""ab""#);
     assert_eq!(status.unwrap(), ExitStatus::Success);
