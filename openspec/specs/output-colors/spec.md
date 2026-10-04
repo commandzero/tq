@@ -1,8 +1,10 @@
+# Output colors Specification
+
 ## Purpose
 
 Define consistent semantic terminal colors for every supported tq output format while preserving the underlying serialized data and bounded streaming behavior.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Default semantic palette
 Colored output SHALL use the following eight-slot palette by default, without requiring an environment variable or configuration file. This assignment also provides a jq testing example:
@@ -37,12 +39,12 @@ The leading `0` resets emphasis and background before selecting the foreground. 
 - **THEN** JSON uses tq's default palette, just like the other output formats
 
 ### Requirement: Compatible JQ_COLORS overrides
-The CLI SHALL retain its supported `JQ_COLORS` environment-variable interface and apply overrides across every supported output format. Eight colon-separated SGR entries SHALL map to null, false, true, numbers, strings, arrays, objects, and object keys, in that order. The existing seven-entry form SHALL remain accepted and use the number entry for object keys. Each entry SHALL be nonempty and contain only ASCII digits and semicolons, preserving the existing parser's acceptance rules. Unset or invalid values SHALL fall back to tq's complete default palette. Invalid values SHALL NOT be echoed in diagnostics.
+The CLI SHALL accept `TQ_COLORS` with priority over the supported `JQ_COLORS` environment-variable interface and apply the selected override across every supported output format. When `TQ_COLORS` is set, including an empty or invalid value, it SHALL be selected instead of `JQ_COLORS`; otherwise `JQ_COLORS` SHALL be selected. Eight colon-separated SGR entries SHALL map to null, false, true, numbers, strings, arrays, objects, and object keys, in that order. The existing seven-entry form SHALL remain accepted and use the number entry for object keys. Each entry SHALL be nonempty and contain only ASCII digits and semicolons, preserving the existing parser's acceptance rules. Unset or invalid values SHALL fall back to tq's complete default palette. Invalid values SHALL NOT be echoed in diagnostics.
 
-The CLI SHALL resolve the palette once per invocation when environment access is permitted. When environment access is denied, it SHALL use the built-in palette without reading `JQ_COLORS`. Setting a palette SHALL NOT itself enable color or override `NO_COLOR`, monochrome selection, or terminal capability policy. No new theme file or theme-selection flag is introduced.
+The CLI SHALL resolve the palette once per invocation when environment access is permitted. When environment access is denied, it SHALL use the built-in palette without reading `TQ_COLORS` or `JQ_COLORS`. Setting a palette SHALL NOT itself enable color or override `NO_COLOR`, monochrome selection, or terminal capability policy. No new theme file or theme-selection flag is introduced.
 
 #### Scenario: Custom eight-slot palette
-- **WHEN** environment access is permitted and a valid eight-entry `JQ_COLORS` is supplied with color enabled
+- **WHEN** environment access is permitted, `TQ_COLORS` is unset, and a valid eight-entry `JQ_COLORS` is supplied with color enabled
 - **THEN** every output writer uses those entries for the corresponding scalar, key, and structural tokens
 - **AND** false and true may have different styles
 
@@ -50,6 +52,11 @@ The CLI SHALL resolve the palette once per invocation when environment access is
 - **WHEN** a valid seven-entry palette is supplied
 - **THEN** object-key content uses the number entry
 - **AND** an invalid palette instead selects the complete tq default, not a partially applied palette or jq's default
+
+#### Scenario: tq palette takes priority
+- **WHEN** environment access is permitted and both `TQ_COLORS` and `JQ_COLORS` are set with color enabled
+- **THEN** the CLI uses `TQ_COLORS` and ignores `JQ_COLORS`
+- **AND** an empty or invalid `TQ_COLORS` selects the complete tq default palette rather than falling back to `JQ_COLORS`
 
 ### Requirement: Quotation marks share structural styles
 Opening and closing syntactic quotation marks SHALL use the same palette entry as the enclosing structure's delimiters and separators, rather than the string or object-key entry. Array brackets and their separators SHALL use the array entry; object braces, colons, and separators SHALL use the object entry. Key quotes SHALL use the object entry. Value quotes SHALL use their immediate enclosing container's entry, with the object entry as the fallback for a standalone quoted scalar. Nested containers SHALL select their own structural entry; separators between them retain their parent's entry.

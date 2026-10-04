@@ -30,7 +30,7 @@ TOON colon separators are unstyled in every writer route, including array and ta
 
 ### Policy once per invocation
 
-Resolve Auto/Always/Never and the palette once at the CLI process boundary using the existing capability policy. Read `JQ_COLORS` only when environment access is permitted; otherwise use the built-in default. Apply the resolved choice to every supported writer. A custom palette does not enable color. Retain last-explicit-flag precedence, allow `-C` to override `NO_COLOR`, and allow `-M` for every format. Do not couple color to input extensions, formatter builtins, or output indentation families.
+Resolve Auto/Always/Never and the palette once at the CLI process boundary using the existing capability policy. Read palette variables only when environment access is permitted; otherwise use the built-in default. Select `TQ_COLORS` when set, otherwise `JQ_COLORS`. An empty or invalid selected value uses the complete default without falling back to the other variable. Apply the resolved choice to every supported writer. A custom palette does not enable color. Retain last-explicit-flag precedence, allow `-C` to override `NO_COLOR`, and allow `-M` for every format. Do not couple color to input extensions, formatter builtins, or output indentation families.
 
 This preserves plain redirected output while allowing deliberate terminal presentation through a pipe with `-C`. Such a stream needs SGR removal before direct format parsing. No writer probes environment variables or terminal state on its own.
 
@@ -62,7 +62,7 @@ For all native formats and writer routes, verify that removing only generated st
 
 - ANSI changes bytes in explicitly colored streams. Automatic redirection stays plain, and docs explain `-M` and forced terminal presentation.
 - A missed writer route would leave inconsistent colors. Enumerate native writers, raw/non-string fallback, JSON event output, TOON tabular/folded output, and direct transcode in acceptance coverage.
-- Per-span resets add SGR bytes and runtime while keeping style boundaries and limit handling explicit. Retain the plain fast path; colors do not grant extra resource allowance. The [measured overhead](../../../docs/tests/output-colors-performance.md) is accepted for this change. The all-month corpus is larger than a typical terminal-color workload, so its higher time ratios do not require further optimization before acceptance.
+- Per-span resets add SGR bytes and runtime while keeping style boundaries and limit handling explicit. Retain the plain fast path; colors do not grant extra resource allowance. The [measured overhead](../../../../docs/tests/output-colors-performance.md) is accepted for this change. The all-month corpus is larger than a typical terminal-color workload, so its higher time ratios do not require further optimization before acceptance.
 - Bright-black contrast varies by terminal theme. Preserve the supplied default and document terminal-palette dependence; do not invent adaptive RGB behavior.
 - Custom array/object styles make quote context visible. Specify and test immediate-container ownership and the root fallback; preserve the seven-slot key fallback even when its number style differs from the default key color.
 

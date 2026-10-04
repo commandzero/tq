@@ -11,7 +11,7 @@ tq currently treats color as a JSON-only option. PR #33 supplies jq-compatible J
 - Keep raw strings and proxy bytes verbatim. Do not invent array indices, focus state, delimiters, or trailing commas merely to exercise theme roles.
 - Treat the JSON palette difference from jq as a non-breaking presentation change. Document and test tq's colors separately from jq's data compatibility.
 - Initially provide one built-in default theme. User theme files, theme-selection flags, and interactive focus are deferred.
-- Preserve seven/eight-slot `JQ_COLORS` overrides and apply them across all output formats; keep `NO_COLOR` and explicit color/monochrome selection.
+- Support seven/eight-slot `TQ_COLORS` overrides with priority over compatible `JQ_COLORS` overrides across all output formats; keep `NO_COLOR` and explicit color/monochrome selection.
 - Color syntactic quotation marks with their enclosing structure's delimiter/separator style, including custom palettes, instead of jq's string/key style. Use the object entry for root scalar quotes; introduce no extra palette slot.
 
 ## Capabilities
