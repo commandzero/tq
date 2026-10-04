@@ -258,7 +258,7 @@ fn every_documented_signature_points_at_a_catalog_behavior_witness() {
         .map(|clause| clause["id"].as_str().unwrap())
         .collect::<BTreeSet<_>>();
     let evidence = ledger["clause_evidence"].as_array().unwrap();
-    assert_eq!(evidence.len(), 71);
+    assert_eq!(evidence.len(), 73);
     let allowed_evidence_kinds = ["catalog-case", "focused-public-test"]
         .into_iter()
         .collect::<BTreeSet<_>>();
