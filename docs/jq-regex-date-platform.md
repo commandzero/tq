@@ -32,6 +32,8 @@ guarantees.
 - Array pattern/flag forms are accepted only by operations that document them.
 - `l` selects the longest match using bounded endpoint searches.
 - Finite pattern-consumption bounds reduce the search; unknown or unbounded patterns retain the bounded fallback.
+- The initial presence scan is bounded by input size and engine limits.
+- Repeated candidate searches also spend a cumulative work budget; large inputs can exhaust it even within the input-byte limit.
 - Whole-pattern recursion with `l` remains unsupported.
 - Other syntax is parsed by the Rust engine; rejected syntax produces a pattern error.
 - `m` matches jq's dot-newline behavior; `s` retains single-line anchors; `p` combines both.

@@ -7,6 +7,12 @@ Historical release entries retain their original ordering.
 
 ## [Unreleased]
 
+### Security
+
+- Enforced configured TOON sequence frame limits in byte-slice decoding before document materialization (#35).
+- Prevented runtime-root staging from spilling to disk when an embedded caller denies filesystem access (#42).
+- Kept signed jq artifact URLs out of downloader arguments and sanitized download failure diagnostics (#47).
+
 ### Changed
 
 - `TQ_COLORS` now takes priority over `JQ_COLORS` for terminal palette customization.
@@ -25,7 +31,6 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
-- Enforced configured TOON sequence frame limits in byte-slice decoding before document materialization (#35).
 - Enforced configured nesting-depth and token-size limits when decoding JSON byte slices, whether explicitly selected or auto-detected (#41, #46).
 - `-R -s` now concatenates multiple sources into one bounded string, including remaining-input access with `-n` (#46).
 - Input filename and line metadata now follow the shared input cursor and physical source position (#41, #42, #46).
@@ -36,6 +41,7 @@ Historical release entries retain their original ordering.
 
 ### Added
 
+- Bounded longest-match regex support with the `l` flag; whole-pattern recursion remains unsupported.
 - Expanded jq mathematical function support, including trigonometric, logarithmic, gamma, and Bessel functions; platform differences remain documented in the [jq manual coverage](docs/tests/jq-manual/coverage.md#differences-by-test) (#39, #40).
 - Runtime NaN and infinity values, plus jq-style non-finite JSON input and `fromjson`. Native TOON and YAML input still reject non-finite values (#39, #40, #41).
 - Nested array/object destructuring and alternative patterns with `?//` (#39, #44).

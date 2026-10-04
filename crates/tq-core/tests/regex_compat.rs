@@ -420,6 +420,79 @@ fn regex_longest_match_bounds_preserve_unicode_flags_and_context() {
 }
 
 #[test]
+fn regex_longest_match_absent_literal_accepts_large_input() {
+    for size in [1_000_000, 1_048_576] {
+        let input = serde_json::to_string(&"b".repeat(size)).unwrap();
+        assert_eq!(evaluate(r#"test("a")"#, &input), [Value::Bool(false)]);
+        assert_eq!(evaluate(r#"test("a"; "l")"#, &input), [Value::Bool(false)]);
+        assert_eq!(evaluate(r#"match("a")"#, &input), [] as [Value; 0]);
+        assert_eq!(evaluate(r#"match("a"; "l")"#, &input), [] as [Value; 0]);
+    }
+}
+
+#[test]
+fn regex_longest_match_presence_scan_keeps_work_limits() {
+    let input = serde_json::to_string(&"b".repeat(1_048_576)).unwrap();
+    assert_eq!(
+        evaluate_with_limits(
+            r#"match("a"; "l")"#,
+            &input,
+            VmLimits {
+                regex_backtrack_limit: 512,
+                ..VmLimits::default()
+            }
+        ),
+        Ok(Vec::new())
+    );
+    for limit in [1, 256] {
+        assert_eq!(
+            evaluate_with_limits(
+                r#"match("a"; "l")"#,
+                &input,
+                VmLimits {
+                    regex_backtrack_limit: limit,
+                    ..VmLimits::default()
+                }
+            ),
+            Err(VmError::Resource {
+                resource: "regex-backtrack"
+            })
+        );
+    }
+    let input = serde_json::to_string(&format!("a{}", "b".repeat(1_048_575))).unwrap();
+    assert_eq!(
+        evaluate_with_limits(
+            r#"match("a"; "l")"#,
+            &input,
+            VmLimits {
+                regex_backtrack_limit: 512,
+                ..VmLimits::default()
+            }
+        ),
+        Err(VmError::Resource {
+            resource: "regex-backtrack"
+        })
+    );
+}
+
+#[test]
+fn regex_longest_match_hostile_presence_scan_keeps_engine_limit() {
+    assert_eq!(
+        evaluate_with_limits(
+            r#"match("^(?:(a|aa)+)\\1$"; "l")"#,
+            r#""aaaaaaaaaaaaaaaaaaaab""#,
+            VmLimits {
+                regex_backtrack_limit: 1_000,
+                ..VmLimits::default()
+            }
+        ),
+        Err(VmError::Resource {
+            resource: "regex-backtrack"
+        })
+    );
+}
+
+#[test]
 fn regex_longest_match_moderate_input_skips_nonmatching_starts() {
     let input = serde_json::to_string(&format!("a{}", "b".repeat(500))).unwrap();
     let started = std::time::Instant::now();

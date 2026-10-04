@@ -13,6 +13,7 @@ description: Supported jq behavior, intentional differences, and compatibility e
 - Default output is TOON, not JSON.
 - Default colors and quote styling differ from jq.
 - Some math results differ by 1–2 binary64 ULP (steps between representable numbers).
+- Bessel functions `jn` and `yn` require a finite order with absolute value at most 1,024.
 - Regex and platform behavior have documented limits.
 - Compatibility is tested, not a claim of complete jq parity.
 

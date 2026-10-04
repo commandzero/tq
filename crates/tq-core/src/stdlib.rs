@@ -107,7 +107,8 @@ impl ConsumedLength {
 
 // Reserve this bounded engine allowance for every longest-mode search, even
 // when delegation or an early success uses less. The rest of the work budget
-// accounts for haystack scans and generated repeat sizes before compilation.
+// accounts for repeated haystack scans and generated repeat sizes before
+// compilation.
 const LONGEST_BACKTRACK_ALLOWANCE: usize = 256;
 
 #[derive(Clone, Copy, Debug)]
@@ -951,8 +952,8 @@ fn charge_regex_work(remaining: &mut usize, cost: usize) -> Result<(), VmError> 
 }
 
 impl LongestRegex {
-    fn search_cost(&self, text: &str, limits: VmLimits) -> usize {
-        text.len()
+    fn search_cost(&self, scanned_bytes: usize, limits: VmLimits) -> usize {
+        scanned_bytes
             .saturating_add(self.pattern.len())
             .saturating_add(limits.regex_backtrack_limit)
     }
@@ -1021,11 +1022,13 @@ impl RegexProgram {
             max_consumed,
         } = longest;
         let engine_limits = longest_engine_limits(limits);
-        let search_cost = longest.search_cost(input.haystack(), engine_limits);
+        let search_cost = longest.search_cost(input.haystack().len(), engine_limits);
         // Reject absent patterns with one bounded engine search rather than
         // compiling every endpoint of a haystack that cannot match at all.
         checkpoint()?;
-        charge_regex_work(work_remaining, search_cost)?;
+        // Input bytes bound this unavoidable scan; only repeated candidate scans
+        // spend haystack bytes from the cumulative longest-search work budget.
+        charge_regex_work(work_remaining, longest.search_cost(0, engine_limits))?;
         let present = self
             .regex
             .captures_input(input.clone())
