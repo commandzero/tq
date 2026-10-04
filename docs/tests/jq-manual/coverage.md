@@ -121,8 +121,8 @@ These measurements are not general performance guarantees.
 - [Source inventory](../../../tests/compatibility/reviews/jq-manual/source-examples.toon): manual examples and source-to-test mappings.
 - [Test setup](../../../tests/compatibility/readme.md#jq-manual-coverage): reference setup and coverage checks.
 
-The core suite passed, including focused runs of 36 core regex tests and 3 CLI
-regex tests. Core Clippy and formatting checks passed. Full-workspace testing
+The core suite passed, including focused runs of 39 core regex tests and 3 CLI
+regex tests. Scoped regex Clippy and formatting checks passed. Full-workspace testing
 has not been verified to completion.
 
 Run a new comparison from the repository root after configuring the reference
