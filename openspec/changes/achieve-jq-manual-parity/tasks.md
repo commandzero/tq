@@ -97,4 +97,8 @@ Matching tasks in this plan target jq behavior subject to the reviewed safe-libr
 - [ ] 10.4 Run workspace formatting, clippy, tests, native-format/resource regressions, and affected benchmark comparisons; preserve all 303 baseline matches and document any performance change before acceptance.
 - [ ] 10.5 Regenerate compatibility reports and update help, formats documentation, numeric/security migration notes, and changelog; verify TOON remains the documented default, `-c` selects compact JSON, and token savings remain separate from verdicts.
 - [ ] 10.6 Validate OpenSpec and affected documentation, verify implementation against all eight delta specs, then synchronize and archive only after completion; retain campaign results and the resolved gap inventory as review evidence.
-- [x] 10.7 Complete `docs/tests/jq-manual/coverage.md` and supporting metadata in `tests/compatibility/reviews/` with observed jq/tq witnesses, target/dependency identity, practical impact, accepted bounds or restrictions, and regression evidence; retain explicit reconsideration criteria for after the spec is fully implemented.
+- [ ] 10.7 Complete `docs/tests/jq-manual/coverage.md` and supporting metadata in `tests/compatibility/reviews/` with observed jq/tq witnesses, target/dependency identity, practical impact, accepted bounds or restrictions, and regression evidence; retain explicit reconsideration criteria for after the spec is fully implemented.
+
+Task 10.7 remains open: the jq 1.8.2 summaries do not renew executable-bound
+approvals. Current source-controlled target identities, observations, and
+reconsideration/regression evidence are still required in the review metadata.
