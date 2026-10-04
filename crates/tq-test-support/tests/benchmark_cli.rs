@@ -383,11 +383,12 @@ fn quick_uses_standard_sources_and_one_measured_invocation_per_row() {
         assert_eq!(row["warmups"], 0);
         assert_eq!(row["requested_samples"], 1);
         assert_eq!(row["samples"].as_array().expect("samples").len(), 1);
-        assert!(
+        assert_eq!(
             row["instrumented_samples"]
                 .as_array()
                 .expect("instrumented")
-                .is_empty()
+                .as_slice(),
+            [] as [serde_json::Value; 0]
         );
     }
     for row in standard["cases"].as_array().expect("standard rows") {

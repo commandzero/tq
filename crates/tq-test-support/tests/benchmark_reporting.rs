@@ -1320,10 +1320,9 @@ fn suite_identity_prevents_cross_suite_comparison_and_regression() {
     let baseline = campaign("machine-a", "digest-a", 100, 1024);
     assert!(compare_reports(&baseline, &baseline).comparable);
     let mut candidate = campaign("machine-a", "digest-a", 200, 2048);
-    assert!(
-        !evaluate_regression(&baseline, &candidate, regression_thresholds())
-            .failures
-            .is_empty()
+    assert_ne!(
+        evaluate_regression(&baseline, &candidate, regression_thresholds()).failures,
+        [] as [String; 0]
     );
     candidate.suite = "large-input".to_owned();
     assert!(!compare_reports(&baseline, &candidate).comparable);
@@ -1338,7 +1337,7 @@ fn suite_identity_prevents_cross_suite_comparison_and_regression() {
     );
     assert!(!gate.evaluated);
     assert!(gate.failures.is_empty(), "failures: {:?}", gate.failures);
-    assert!(!gate.unavailable.is_empty());
+    assert_ne!(gate.unavailable, [] as [String; 0]);
 }
 
 fn one_sample_campaign(wall: u128, rss: u64) -> BenchmarkCampaignReport {
@@ -1370,10 +1369,9 @@ fn quick_profile_evidence_cannot_form_a_regression_baseline_or_candidate() {
         minimum_samples: 1,
         ..regression_thresholds()
     };
-    assert!(
-        !evaluate_regression(&baseline, &candidate, thresholds.clone())
-            .failures
-            .is_empty()
+    assert_ne!(
+        evaluate_regression(&baseline, &candidate, thresholds.clone()).failures,
+        [] as [String; 0]
     );
 
     baseline.profile = "quick".to_owned();
@@ -1381,7 +1379,7 @@ fn quick_profile_evidence_cannot_form_a_regression_baseline_or_candidate() {
     let gate = evaluate_regression(&baseline, &candidate, thresholds);
     assert!(!gate.evaluated);
     assert!(gate.failures.is_empty(), "failures: {:?}", gate.failures);
-    assert!(!gate.unavailable.is_empty());
+    assert_ne!(gate.unavailable, [] as [String; 0]);
 }
 
 #[test]
@@ -1394,7 +1392,7 @@ fn quick_sampling_evidence_is_unavailable_on_either_side_of_regression() {
     };
     let comparable_gate = evaluate_regression(&baseline, &candidate, thresholds.clone());
     assert!(comparable_gate.evaluated);
-    assert!(!comparable_gate.failures.is_empty());
+    assert_ne!(comparable_gate.failures, [] as [String; 0]);
 
     for quick_baseline in [true, false] {
         let mut quick_baseline_report = baseline.clone();

@@ -359,8 +359,8 @@ fn unframed_multi_result_failure_publishes_no_colored_bytes() {
     let plain = run_mode(&args, b"", false, None);
     assert!(!colored.status.success());
     assert_eq!(colored.status, plain.status);
-    assert!(colored.stdout.is_empty());
-    assert!(plain.stdout.is_empty());
+    assert_eq!(colored.stdout, [] as [u8; 0]);
+    assert_eq!(plain.stdout, [] as [u8; 0]);
 }
 
 #[test]
@@ -371,7 +371,7 @@ fn empty_result_has_no_presentation_bytes() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
 }
 
 #[test]

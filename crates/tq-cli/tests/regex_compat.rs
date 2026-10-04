@@ -29,7 +29,7 @@ fn longest_match_cli_matches_jq_compact_output() {
         stdout,
         b"{\"offset\":0,\"length\":2,\"string\":\"ab\",\"captures\":[]}\n"
     );
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -40,7 +40,7 @@ fn longest_match_cli_preserves_unicode_byte_ties_across_global_pulls() {
     );
     assert_eq!(status.unwrap(), ExitStatus::Success);
     assert_eq!(stdout, "[[1,\"é\"],[2,\"aa\"]]\n".as_bytes());
-    assert!(stderr.is_empty());
+    assert_eq!(stderr, [] as [u8; 0]);
 }
 
 #[test]
