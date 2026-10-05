@@ -9,6 +9,20 @@ use winsafe::{HPROCESS, co, guard::CloseHandleGuard};
 pub(super) const EXIT_POLL: Duration = Duration::from_micros(100);
 pub(super) const RSS_SAMPLE_INTERVAL: Duration = Duration::from_millis(25);
 
+#[cfg(test)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum JobFault {
+    Query,
+    Terminate,
+    ExitObservation,
+    ExitObservationWithoutAccounting,
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(super) static JOB_FAULT: std::cell::Cell<Option<JobFault>> = const { std::cell::Cell::new(None) };
+}
+
 #[derive(Debug)]
 struct InspectionJob(Arc<Job>);
 
@@ -42,11 +56,27 @@ impl PreparedChild {
             .ok_or_else(|| io::Error::other("spawned child has no process identity"))?;
         // Acquire before try_wait can release Tokio's original PID anchor.
         let accounting = open_process(pid);
+        #[cfg(test)]
+        let accounting = if JOB_FAULT.with(std::cell::Cell::get)
+            == Some(JobFault::ExitObservationWithoutAccounting)
+        {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "injected accounting access failure",
+            ))
+        } else {
+            accounting
+        };
+        // Release the wrapper's InspectionJob clone explicitly: NativeChild
+        // must own the last inspection handle for the close fallback to work.
+        drop(self.command);
         Ok(NativeChild {
             child,
             accounting,
-            job: self.job,
+            job: Some(self.job),
             status: None,
+            #[cfg(test)]
+            fault: JOB_FAULT.with(std::cell::Cell::get),
         })
     }
 }
@@ -54,8 +84,10 @@ impl PreparedChild {
 pub(super) struct NativeChild {
     child: Box<dyn ChildWrapper>,
     accounting: io::Result<CloseHandleGuard<HPROCESS>>,
-    job: Arc<Job>,
+    job: Option<Arc<Job>>,
     status: Option<ExitStatus>,
+    #[cfg(test)]
+    fault: Option<JobFault>,
 }
 
 pub(super) struct Resources {
@@ -79,20 +111,71 @@ impl NativeChild {
 
     pub(super) fn observe_exit(&mut self) -> io::Result<Option<ExitStatus>> {
         if self.status.is_none() {
-            self.status = self.child.try_wait()?;
+            if self.job.is_none()
+                && let Ok(process) = &self.accounting
+            {
+                // The fallback must not depend on the failed job API. Wait on
+                // the pinned root before reading its code (259 is a valid exit).
+                use std::os::windows::process::ExitStatusExt as _;
+                if process_has_exited(process)? {
+                    self.status = Some(ExitStatus::from_raw(
+                        process.GetExitCodeProcess().map_err(io_error)?,
+                    ));
+                }
+            } else if self.job.is_none() {
+                // Even if the independent accounting handle was unavailable,
+                // the retained Tokio child still owns the exact root handle.
+                // NativeChild::prepare's outer JobObject wrapper adds a failing
+                // completion-port query to try_wait; bypass only that query,
+                // without consuming the wrapper or closing its job guard before
+                // the root has been reaped and resource collection attempted.
+                self.status = self.child.inner_mut().try_wait()?;
+            } else {
+                #[cfg(test)]
+                if matches!(
+                    self.fault,
+                    Some(JobFault::ExitObservation | JobFault::ExitObservationWithoutAccounting)
+                ) {
+                    return Err(io::Error::other(
+                        "injected persistent job exit observation error",
+                    ));
+                }
+                self.status = self.child.try_wait()?;
+            }
         }
         Ok(self.status)
+    }
+
+    pub(super) fn close_inspection_job(&mut self) {
+        // PreparedChild::spawn has dropped CommandWrap and its InspectionJob
+        // clone before returning this owner. This is the final inspection job
+        // handle; closing it kills the assigned tree, independently of the
+        // process-wrap termination/query APIs. Keep child and exact accounting
+        // handle alive until root exit and resource collection.
+        drop(self.job.take());
     }
 
     pub(super) fn terminate(&mut self) -> io::Result<()> {
         // This is a retained job handle, never a recycled PID. The wrapper's
         // start_kill is nonblocking and terminates the entire nested job tree.
+        #[cfg(test)]
+        if self.fault == Some(JobFault::Terminate) {
+            return Err(io::Error::other(
+                "injected persistent job termination error",
+            ));
+        }
         self.child.start_kill()
     }
 
     pub(super) fn tree_is_empty(&self) -> io::Result<bool> {
+        #[cfg(test)]
+        if self.fault == Some(JobFault::Query) {
+            return Err(io::Error::other("injected persistent job query error"));
+        }
         Ok(self
             .job
+            .as_ref()
+            .ok_or_else(|| io::Error::other("inspection job closed for fail-safe cleanup"))?
             .query_process_id_list()
             .map_err(io_error)?
             .is_empty())
@@ -125,14 +208,17 @@ impl NativeChild {
     }
 
     pub(super) fn sampled_tree_working_set(&self) -> io::Result<u64> {
+        let job = self
+            .job
+            .as_ref()
+            .ok_or_else(|| io::Error::other("inspection job closed"))?;
         let mut total = 0_u64;
-        for pid in self.job.query_process_id_list().map_err(io_error)? {
+        for pid in job.query_process_id_list().map_err(io_error)? {
             let pid32 = u32::try_from(pid).map_err(io_error)?;
             let process = match open_process(pid32) {
                 Ok(process) => process,
                 Err(error) => {
-                    if self
-                        .job
+                    if job
                         .query_process_id_list()
                         .map_err(io_error)?
                         .contains(&pid)
@@ -145,8 +231,7 @@ impl NativeChild {
             // Enumeration/open races cannot authorize an unrelated process:
             // reacquire membership after opening the handle. The newly held
             // handle pins this identity while we query its working set.
-            if !self
-                .job
+            if !job
                 .query_process_id_list()
                 .map_err(io_error)?
                 .contains(&pid)
@@ -174,7 +259,7 @@ impl Drop for NativeChild {
         // Normal paths explicitly verify tree cleanup before releasing the
         // owner. This is the panic/error backstop; KillOnDrop additionally
         // sets JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE in the dependency.
-        let _ = self.child.start_kill();
+        let _ = self.terminate();
     }
 }
 
@@ -256,6 +341,41 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_accounting_and_failed_job_observation_still_reap_exact_root() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut command = tokio::process::Command::new("cmd.exe");
+            command.args(["/D", "/C", "ping -n 30 127.0.0.1 > nul"]);
+            let mut owner = NativeChild::prepare(command).unwrap().spawn().unwrap();
+            let independent = open_process(owner.child.id().unwrap()).unwrap();
+            owner.accounting = Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "injected accounting access failure",
+            ));
+            owner.fault = Some(JobFault::ExitObservation);
+            assert!(owner.observe_exit().is_err());
+            owner.close_inspection_job();
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while owner.observe_exit().unwrap().is_none() {
+                assert!(std::time::Instant::now() < deadline);
+                tokio::time::sleep(EXIT_POLL).await;
+            }
+            assert!(process_has_exited(&independent).unwrap());
+            assert!(owner.status.is_some());
+            let error = owner.resources().err().expect("missing counters must fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("injected accounting access failure")
+            );
+            drop(owner);
+        });
+    }
+
+    #[test]
     fn exact_child_resources_match_independent_handle_counters_without_tolerance() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -294,6 +414,80 @@ mod tests {
                 );
             }
         });
+    }
+
+    #[test]
+    fn close_fallback_kills_descendants_and_preserves_exact_root_accounting() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            for fault in [
+                JobFault::Query,
+                JobFault::Terminate,
+                JobFault::ExitObservation,
+            ] {
+                close_fallback_case(fault).await;
+            }
+        });
+    }
+
+    async fn close_fallback_case(fault: JobFault) {
+        let directory = tempfile::tempdir().unwrap();
+        let descendant_path = directory.path().join("descendant-pid");
+        let escaped = descendant_path.display().to_string().replace('\'', "''");
+        let mut command = tokio::process::Command::new("powershell.exe");
+        command.args(["-NoProfile", "-Command", &format!(
+            "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -LiteralPath '{escaped}' -Value $child.Id; Start-Sleep -Seconds 30"
+        )]);
+        let mut owner = NativeChild::prepare(command).unwrap().spawn().unwrap();
+        owner.fault = Some(fault);
+        let root = open_process(owner.child.id().unwrap()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let descendant = loop {
+            if let Ok(pid) = std::fs::read_to_string(&descendant_path)
+                && let Ok(pid) = pid.trim().trim_start_matches('\u{feff}').parse()
+            {
+                break open_process(pid).unwrap();
+            }
+            assert!(std::time::Instant::now() < deadline);
+            tokio::time::sleep(EXIT_POLL).await;
+        };
+        match fault {
+            JobFault::Query => assert!(owner.tree_is_empty().is_err()),
+            JobFault::Terminate => assert!(owner.terminate().is_err()),
+            JobFault::ExitObservation | JobFault::ExitObservationWithoutAccounting => {
+                assert!(owner.observe_exit().is_err());
+            }
+        }
+        assert!(!process_has_exited(&root).unwrap());
+        assert!(!process_has_exited(&descendant).unwrap());
+        owner.close_inspection_job();
+        assert!(owner.job.is_none());
+        while owner.observe_exit().unwrap().is_none() {
+            assert!(std::time::Instant::now() < deadline);
+            tokio::time::sleep(EXIT_POLL).await;
+        }
+        // Collection occurs while the remaining child/job guard is still
+        // retained, and remains exactly comparable with an independent handle.
+        let resources = owner.resources().unwrap();
+        let (_, _, kernel, user) = root.GetProcessTimes().unwrap();
+        assert_eq!(resources.user.as_nanos(), u128::from(u64::from(user)) * 100);
+        assert_eq!(
+            resources.system.as_nanos(),
+            u128::from(u64::from(kernel)) * 100
+        );
+        assert_eq!(
+            resources.peak_working_set,
+            u64::try_from(root.GetProcessMemoryInfo().unwrap().PeakWorkingSetSize).unwrap()
+        );
+        drop(owner);
+        while !process_has_exited(&descendant).unwrap() {
+            assert!(std::time::Instant::now() < deadline);
+            tokio::time::sleep(EXIT_POLL).await;
+        }
+        assert!(process_has_exited(&root).unwrap());
     }
 
     #[test]

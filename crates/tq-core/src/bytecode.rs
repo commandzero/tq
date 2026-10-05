@@ -620,7 +620,7 @@ impl Compiler {
                 left: self.expression(left)?,
                 right: self.expression(right)?,
             },
-            ExprKind::Comma(_, _) => return self.comma_spine(expr),
+            ExprKind::Comma(_, _) => return self.comma_tree(expr),
             ExprKind::Array(child) => Operation::Array(self.expression(child)?),
             ExprKind::Object(entries) => {
                 let mut operands = Vec::with_capacity(entries.len());
@@ -821,20 +821,36 @@ impl Compiler {
         self.instruction(operation, expr.span)
     }
 
-    fn comma_spine(&mut self, mut expr: &Expr) -> Result<u32, Box<Diagnostic>> {
-        // Literal arrays form left-associated comma spines. Preserve their exact
-        // postorder and spans without one large lowering frame per element.
-        let mut pending = Vec::new();
-        while let ExprKind::Comma(left, right) = &expr.kind {
-            pending.push((right.as_ref(), expr.span));
-            expr = left;
+    fn comma_tree(&mut self, expr: &Expr) -> Result<u32, Box<Diagnostic>> {
+        enum Work<'a> {
+            Expression(&'a Expr),
+            Comma(Span),
         }
-        let mut left = self.expression(expr)?;
-        for (right, span) in pending.into_iter().rev() {
-            let right = self.expression(right)?;
-            left = self.instruction(Operation::Comma { left, right }, span)?;
+
+        // Visit both branches in postorder, retaining parenthesized grouping and
+        // spans without a lowering call frame for each comma on either spine.
+        let mut work = vec![Work::Expression(expr)];
+        let mut values = Vec::new();
+        while let Some(task) = work.pop() {
+            match task {
+                Work::Expression(expr) => match &expr.kind {
+                    ExprKind::Comma(left, right) => {
+                        work.push(Work::Comma(expr.span));
+                        work.push(Work::Expression(right));
+                        work.push(Work::Expression(left));
+                    }
+                    _ => values.push(self.expression(expr)?),
+                },
+                Work::Comma(span) => {
+                    let right = values.pop().expect("comma right child was lowered");
+                    let left = values.pop().expect("comma left child was lowered");
+                    values.push(self.instruction(Operation::Comma { left, right }, span)?);
+                }
+            }
         }
-        Ok(left)
+        let root = values.pop().expect("comma tree root was lowered");
+        debug_assert_eq!(values, [] as [u32; 0]);
+        Ok(root)
     }
 
     fn instruction(&mut self, operation: Operation, span: Span) -> Result<u32, Box<Diagnostic>> {
@@ -1425,7 +1441,12 @@ mod tests {
         for (query, expected_commas) in [
             ("1,2,3", vec![(2, 0, 1), (4, 2, 3)]),
             ("1,(2,3)", vec![(3, 1, 2), (4, 0, 3)]),
+            ("1,(2,(3,4))", vec![(4, 2, 3), (5, 1, 4), (6, 0, 5)]),
             ("(1,2),(3,4)", vec![(2, 0, 1), (5, 3, 4), (6, 2, 5)]),
+            (
+                "1,((2,3),(4,5))",
+                vec![(3, 1, 2), (6, 4, 5), (7, 3, 6), (8, 0, 7)],
+            ),
         ] {
             let parsed = parse(query).unwrap();
             let mut expected_spans = Vec::new();
@@ -1451,6 +1472,80 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             assert_eq!(commas, expected_commas, "{query}");
+        }
+    }
+
+    #[test]
+    fn right_nested_commas_compile_on_one_mebibyte_stack() {
+        use std::{
+            process::{Command, Stdio},
+            thread,
+            time::{Duration, Instant},
+        };
+
+        const CHILD_ENV: &str = "TQ_RIGHT_COMMA_STACK_CHILD";
+        const LENGTH: usize = 256;
+        if std::env::var_os(CHILD_ENV).is_some() {
+            let mut query = LENGTH.to_string();
+            for value in (1..LENGTH).rev() {
+                query = format!("{value},({query})");
+            }
+            // Isolate lowering from the recursive parser's own stack usage.
+            // Parsing on the harness thread does not change grammar/resource limits.
+            let parsed = parse(&query).expect("right-nested comma query parses");
+            thread::Builder::new()
+                .stack_size(1024 * 1024)
+                .spawn(move || {
+                    let bytecode = Bytecode::compile(parsed.ast(), &[], &ResolveOptions::default())
+                        .expect("right-nested commas compile");
+
+                    assert_eq!(bytecode.instructions.len(), LENGTH * 2 - 1);
+                    for (offset, instruction) in bytecode.instructions[LENGTH..].iter().enumerate()
+                    {
+                        let expected_left = u32::try_from(LENGTH - 2 - offset).unwrap();
+                        let expected_right = u32::try_from(LENGTH + offset - 1).unwrap();
+                        assert!(matches!(
+                            instruction.operation,
+                            Operation::Comma { left, right }
+                                if left == expected_left && right == expected_right
+                        ));
+                    }
+                    bytecode
+                        .validate()
+                        .expect("right-nested bytecode validates");
+                })
+                .expect("1 MiB compiler thread starts")
+                .join()
+                .expect("1 MiB compiler thread succeeds");
+            return;
+        }
+
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "bytecode::tests::right_nested_commas_compile_on_one_mebibyte_stack",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(CHILD_ENV, "1")
+            .env("RUST_MIN_STACK", "8388608")
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("compiler regression child starts");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().expect("compiler child status") {
+                assert!(status.success(), "compiler child failed: {status}");
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("right-nested compiler regression exceeded 5-second deadline");
+            }
+            thread::sleep(Duration::from_millis(10));
         }
     }
 

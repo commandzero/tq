@@ -31,7 +31,8 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
-- Large comma-expression queries no longer overflow the Windows CLI's default stack (#68).
+- Large comma-expression queries, including right-nested expressions, no longer overflow the Windows CLI's default stack (#68).
+- Deeply nested malformed queries now return parser diagnostics without overflowing during error cleanup (#68).
 - Enforced configured nesting-depth and token-size limits when decoding JSON byte slices, whether explicitly selected or auto-detected (#41, #46).
 - `-R -s` now concatenates multiple sources into one bounded string, including remaining-input access with `-n` (#46).
 - Input filename and line metadata now follow the shared input cursor and physical source position (#41, #42, #46).

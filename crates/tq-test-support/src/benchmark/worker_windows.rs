@@ -1,6 +1,8 @@
 //! Windows isolated worker protocol and retained deferred lifecycle executor.
 
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
 use std::{
     env,
     ffi::OsString,
@@ -11,7 +13,7 @@ use std::{
     process::Stdio,
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicU8, Ordering},
+        atomic::{AtomicU8, Ordering},
         mpsc,
     },
     thread::{self, JoinHandle},
@@ -168,10 +170,18 @@ enum Reply {
     },
 }
 
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum TargetCleanup {
+    Pending,
+    Verified,
+    Fallback,
+}
+
 pub(super) struct WorkerControl {
     coordinator: CloseHandleGuard<HPROCESS>,
     abort: PathBuf,
-    target_cleanup_complete: AtomicBool,
+    target_cleanup: AtomicU8,
 }
 impl WorkerControl {
     #[cfg(test)]
@@ -179,7 +189,7 @@ impl WorkerControl {
         Ok(Self {
             coordinator: open_process(std::process::id())?,
             abort: marker(reply, "abort"),
-            target_cleanup_complete: AtomicBool::new(false),
+            target_cleanup: AtomicU8::new(TargetCleanup::Pending as u8),
         })
     }
 
@@ -194,11 +204,17 @@ impl WorkerControl {
         Ok(Self {
             coordinator,
             abort: marker(reply, "abort"),
-            target_cleanup_complete: AtomicBool::new(false),
+            target_cleanup: AtomicU8::new(TargetCleanup::Pending as u8),
         })
     }
     pub(super) fn mark_target_collected(&self) {
-        self.target_cleanup_complete.store(true, Ordering::Release);
+        self.target_cleanup
+            .store(TargetCleanup::Verified as u8, Ordering::Release);
+    }
+
+    pub(super) fn mark_fallback_collected(&self) {
+        self.target_cleanup
+            .store(TargetCleanup::Fallback as u8, Ordering::Release);
     }
 
     pub(super) fn cancelled(&self) -> io::Result<bool> {
@@ -536,6 +552,23 @@ async fn coordinate(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     #[cfg(test)]
+    {
+        if let Some((executable, fault, gate)) = &*FAULT_WORKER.lock().unwrap()
+            && executable == &invocation.executable
+        {
+            command = tokio::process::Command::new(env::current_exe()?);
+            command.args([
+                "--exact",
+                "benchmark::worker::tests::persistent_job_error_worker",
+                "--nocapture",
+            ]);
+            command.env("TQ_BENCH_TEST_JOB_FAULT", fault);
+            command.env("TQ_BENCH_TEST_JOB_FAULT_GATE", gate);
+            command.stdin(Stdio::from(File::open(request_file.path())?));
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+    }
+    #[cfg(test)]
     let spawned = pause_before_worker_spawn(&invocation.executable)?;
     let mut owner = {
         let _admission = lock_worker_admission();
@@ -560,6 +593,7 @@ async fn coordinate(
         .ok_or_else(|| io::Error::other("worker deadline exceeds monotonic clock"))?;
     let ready = marker(&paths.reply, "ready");
     let abort = marker(&paths.reply, "abort");
+    let fallback = marker(&paths.reply, "failed");
     let mut failure = owner.process.as_ref().err().map(|error| {
         MeasureError::Io(io::Error::other(format!(
             "acquire exact worker handle: {error}"
@@ -576,7 +610,7 @@ async fn coordinate(
         match owner.observe_exit() {
             Ok(Some(status)) => {
                 // Ready publication may race the first metadata observation.
-                if ready.is_file() {
+                if ready.is_file() || fallback.is_file() {
                     break;
                 }
                 failure.get_or_insert(MeasureError::Io(io::Error::other(format!(
@@ -608,8 +642,10 @@ async fn coordinate(
         }
         tokio::time::sleep(EXIT_POLL).await;
     }
-    // Ready means target accounting AND target tree cleanup have completed.
-    // Worker-only termination is now safe; it never addresses the target Job.
+    // Ready means target accounting AND verified target tree cleanup. A
+    // fallback reply reaches here only after exact failed-worker exit; it
+    // never authorizes terminating the sole collector before accounting.
+    // Worker-only termination is safe on the normal ready path.
     loop {
         match owner.observe_exit() {
             Ok(Some(_)) => break,
@@ -623,8 +659,15 @@ async fn coordinate(
         }
         tokio::time::sleep(EXIT_POLL).await;
     }
+    let fallback_reply = fallback.is_file();
+    if fallback_reply && owner.status.is_some_and(|status| status.success()) {
+        failure.get_or_insert(MeasureError::Io(io::Error::other(
+            "kill-on-close fallback worker did not exit as failed",
+        )));
+    }
     let _ = fs::remove_file(&abort);
     let _ = fs::remove_file(&ready);
+    let _ = fs::remove_file(&fallback);
     if let Some(error) = failure {
         return Err(error);
     }
@@ -633,7 +676,7 @@ async fn coordinate(
         Reply::Outcome {
             protocol,
             mut outcome,
-        } if protocol == PROTOCOL => {
+        } if protocol == PROTOCOL && !fallback_reply => {
             outcome.measurement_protocol.worker = Some(identity);
             Ok(*outcome)
         }
@@ -694,6 +737,7 @@ pub fn run() -> Result<(), String> {
         &control,
         measure_target(&invocation, &paths, &control, request.sample_tree),
     ));
+    let fallback = control.target_cleanup.load(Ordering::Acquire) == TargetCleanup::Fallback as u8;
     let reply = match result {
         Ok(outcome) => Reply::Outcome {
             protocol: PROTOCOL.to_owned(),
@@ -722,6 +766,13 @@ pub fn run() -> Result<(), String> {
         return Err("worker reply exceeds protocol cap".to_owned());
     }
     fs::write(&paths.reply, encoded).map_err(|e| e.to_string())?;
+    if fallback {
+        // Never publish the verified-empty marker. The coordinator reads this
+        // error reply only AFTER exact worker exit, retaining its admission slot
+        // through the OS final-close backstop for both target jobs.
+        fs::write(marker(&paths.reply, "failed"), []).map_err(|e| e.to_string())?;
+        return Err("target cleanup required kill-on-close fallback".to_owned());
+    }
     fs::write(marker(&paths.reply, "ready"), []).map_err(|e| e.to_string())?;
     // The independent coordinator handle watches death during measurement.
     // Collection, tree cleanup and reply publication are complete: exit even
@@ -739,17 +790,19 @@ async fn run_owned_measurement(
         tokio::select! {
             result = &mut measurement => return result,
             () = tokio::time::sleep(Duration::from_millis(25)) => {
-                if control.target_cleanup_complete.load(Ordering::Acquire)
-                    && matches!(process_has_exited(&control.coordinator), Ok(true))
+                let cleanup = control.target_cleanup.load(Ordering::Acquire);
+                if cleanup == TargetCleanup::Fallback as u8
+                    || (cleanup == TargetCleanup::Verified as u8
+                        && matches!(process_has_exited(&control.coordinator), Ok(true)))
                 {
                     let deadline = orphan_deadline.get_or_insert_with(|| Instant::now() + Duration::from_secs(1));
                     if Instant::now() >= *deadline {
-                        // Worker-only final backstop for a permanently blocked
-                        // capture-file write after its coordinator has died.
-                        // The exact target has already exited, accounting was
-                        // attempted, and its Job was verified empty. Terminating
-                        // this process stops its still-owned writer threads;
-                        // it never interrupts the sole target collector.
+                        // Exact-root exit/accounting precedes either verified
+                        // tree cleanup or explicit closure of BOTH kill-on-close
+                        // job guards. Failure fallback also bounds blocked file
+                        // writers while the coordinator is alive. Worker exit
+                        // releases OS handles; coordinator admission stays owned
+                        // until that exit, never interrupting root collection.
                         std::process::exit(1);
                     }
                 }
@@ -841,6 +894,9 @@ pub fn worker_executable_path() -> io::Result<PathBuf> {
         "native tq-bench-worker.exe not found",
     ))
 }
+
+#[cfg(test)]
+static FAULT_WORKER: Mutex<Option<(PathBuf, String, PathBuf)>> = Mutex::new(None);
 
 #[cfg(test)]
 mod tests {
@@ -958,6 +1014,151 @@ mod tests {
         assert!(wall_time_micros.is_none());
     }
 
+    #[test]
+    fn persistent_job_error_worker() {
+        use super::super::native_process_windows::{JOB_FAULT, JobFault};
+        let Ok(fault) = env::var("TQ_BENCH_TEST_JOB_FAULT") else {
+            return;
+        };
+        JOB_FAULT.with(|slot| {
+            slot.set(Some(match fault.as_str() {
+                "query" => JobFault::Query,
+                "terminate" => JobFault::Terminate,
+                "observe" => JobFault::ExitObservation,
+                "observe-no-accounting" => JobFault::ExitObservationWithoutAccounting,
+                _ => panic!("unknown job fault"),
+            }));
+        });
+        let result = run();
+        assert!(result.is_err(), "fallback worker must exit as failed");
+        let gate = PathBuf::from(env::var_os("TQ_BENCH_TEST_JOB_FAULT_GATE").unwrap());
+        fs::write(gate.join("waiting"), std::process::id().to_string()).unwrap();
+        while !gate.join("release").is_file() {
+            thread::sleep(Duration::from_millis(5));
+        }
+        std::process::exit(1);
+    }
+
+    #[test]
+    fn persistent_job_errors_fail_boundedly_and_release_admission_after_worker_exit() {
+        let _test_guard = registry_test_lock();
+        for fault in ["query", "terminate", "observe", "observe-no-accounting"] {
+            persistent_job_error_case(fault);
+        }
+    }
+
+    fn persistent_job_error_case(fault: &str) {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("target.exe");
+        fs::copy(env::var_os("COMSPEC").unwrap(), &executable).unwrap();
+        let invocation = BenchmarkInvocation {
+            cancellation: None,
+            executable: executable.clone(),
+            args: vec![
+                "/D".into(),
+                "/C".into(),
+                if fault == "query" {
+                    "exit 17".into()
+                } else {
+                    "ping -n 30 127.0.0.1 > nul".into()
+                },
+            ],
+            stdin: Vec::new(),
+            current_dir: None,
+            timeout: Duration::from_millis(200),
+            output_limit: 1024,
+            rss_limit: None,
+            retain_output: false,
+        };
+        *FAULT_WORKER.lock().unwrap() =
+            Some((executable, fault.to_owned(), directory.path().to_owned()));
+        let healthy = BenchmarkInvocation {
+            executable: env::var_os("COMSPEC").unwrap().into(),
+            args: vec!["/D".into(), "/C".into(), "exit 0".into()],
+            timeout: Duration::from_secs(1),
+            cancellation: None,
+            stdin: Vec::new(),
+            current_dir: None,
+            output_limit: 1024,
+            rss_limit: None,
+            retain_output: false,
+        };
+        let started = Instant::now();
+        let result = assert_fallback_keeps_admission(&invocation, &healthy, directory.path());
+        *FAULT_WORKER.lock().unwrap() = None;
+        let Err(MeasureError::Collection {
+            source,
+            exit_code,
+            wall_time_micros,
+            stdout_path,
+            stderr_path,
+            ..
+        }) = result
+        else {
+            panic!("persistent job error returned success");
+        };
+        let message = source.to_string();
+        let _ = fs::remove_file(stdout_path);
+        let _ = fs::remove_file(stderr_path);
+        let expected = if fault == "observe-no-accounting" {
+            "injected accounting access failure"
+        } else {
+            "injected persistent job"
+        };
+        assert!(message.contains(expected), "{message}");
+        assert!(exit_code.is_some(), "lost exact-root exit: {message}");
+        assert!(wall_time_micros.is_some());
+        assert!(started.elapsed() < Duration::from_secs(4));
+        assert_eq!(measure_process(&healthy, false).unwrap().exit_code, Some(0));
+    }
+
+    struct ReleaseFallback(PathBuf);
+    impl Drop for ReleaseFallback {
+        fn drop(&mut self) {
+            let _ = fs::write(self.0.join("release"), []);
+        }
+    }
+
+    fn assert_fallback_keeps_admission(
+        invocation: &BenchmarkInvocation,
+        healthy: &BenchmarkInvocation,
+        gate: &Path,
+    ) -> Result<MeasuredOutcome, MeasureError> {
+        thread::scope(|scope| {
+            let release = ReleaseFallback(gate.to_owned());
+            let (send, receive) = mpsc::channel();
+            scope.spawn(move || send.send(measure_process(invocation, false)).unwrap());
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !gate.join("waiting").is_file() {
+                assert!(Instant::now() < deadline, "fallback worker did not collect");
+                thread::sleep(Duration::from_millis(5));
+            }
+            let pid = fs::read_to_string(gate.join("waiting"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let worker = open_process(pid).unwrap();
+            assert!(!process_has_exited(&worker).unwrap());
+            assert!(matches!(receive.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            let phase = {
+                let registry = EXECUTOR.get().unwrap().lock().unwrap();
+                assert_eq!(registry.len(), 1, "fallback lost its owned slot");
+                Arc::clone(&registry[0].phase)
+            };
+            // Exercise the actual deadline handoff while the failed collector
+            // is deliberately kept alive after accounting and job guard close.
+            defer_executor(&phase);
+            assert!(
+                measure_process(healthy, false).is_err(),
+                "admitted before failed worker exit"
+            );
+            drop(release);
+            let result = receive.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(process_has_exited(&worker).unwrap());
+            result
+        })
+    }
+
     struct TestChild(std::process::Child);
     impl std::ops::Deref for TestChild {
         type Target = std::process::Child;
@@ -987,13 +1188,23 @@ mod tests {
         let control = WorkerControl {
             coordinator: open_process(parent_pid).unwrap(),
             abort: directory.join("abort"),
-            target_cleanup_complete: AtomicBool::new(false),
+            target_cleanup: AtomicU8::new(TargetCleanup::Pending as u8),
         };
         let (created, _, _, _) = control.coordinator.GetProcessTimes().unwrap();
         assert_eq!(
             u64::from(created).to_string(),
             env::var("TQ_BENCH_TEST_ORPHAN_CREATED").unwrap()
         );
+        if let Ok(fault) = env::var("TQ_BENCH_TEST_BLOCKED_JOB_FAULT") {
+            use super::super::native_process_windows::{JOB_FAULT, JobFault};
+            JOB_FAULT.with(|slot| {
+                slot.set(Some(match fault.as_str() {
+                    "query" => JobFault::Query,
+                    "terminate" => JobFault::Terminate,
+                    _ => panic!("unknown job fault"),
+                }));
+            });
+        }
         let paths = PreparedPaths {
             stdin: directory.join("stdin"),
             stdout: directory.join("stdout"),
@@ -1051,6 +1262,17 @@ mod tests {
 
     #[test]
     fn coordinator_death_with_blocked_writer_exits_only_after_target_cleanup() {
+        blocked_writer_watchdog_case(None);
+    }
+
+    #[test]
+    fn persistent_job_errors_with_blocked_writer_fail_closed_with_live_coordinator() {
+        for fault in ["query", "terminate"] {
+            blocked_writer_watchdog_case(Some(fault));
+        }
+    }
+
+    fn blocked_writer_watchdog_case(fault: Option<&str>) {
         let directory = tempfile::tempdir().unwrap();
         let mut coordinator = TestChild(
             std::process::Command::new("powershell.exe")
@@ -1075,6 +1297,7 @@ mod tests {
                     u64::from(created).to_string(),
                 )
                 .env("TQ_BENCH_TEST_ORPHAN_DIRECTORY", directory.path())
+                .envs(fault.map(|fault| ("TQ_BENCH_TEST_BLOCKED_JOB_FAULT", fault)))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
@@ -1099,8 +1322,12 @@ mod tests {
             .parse()
             .unwrap();
         let target = open_process(target_pid).unwrap();
-        coordinator.kill().unwrap();
-        coordinator.wait().unwrap();
+        if fault.is_some() {
+            fs::write(directory.path().join("abort"), []).unwrap();
+        } else {
+            coordinator.kill().unwrap();
+            coordinator.wait().unwrap();
+        }
         while !process_has_exited(&target).unwrap() {
             assert!(
                 Instant::now() < deadline,
@@ -1127,6 +1354,9 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         };
         assert_eq!(status.code(), Some(1), "watchdog did not fail closed");
+        if fault.is_some() {
+            assert!(!process_has_exited(&parent).unwrap());
+        }
         assert!(
             !directory.path().join("reply.ready").is_file(),
             "blocked capture published success"

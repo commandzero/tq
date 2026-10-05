@@ -99,6 +99,7 @@ pub(super) async fn measure_target_with_sinks(
     let mut forced = None;
     let mut failure = None;
     let mut cancelled = false;
+    let mut fallback = false;
     let sampling_requested = sample_tree && invocation.rss_limit.is_some();
     let mut sampled_peak: Option<u64> = None;
     let mut next_sample = Instant::now();
@@ -108,6 +109,10 @@ pub(super) async fn measure_target_with_sinks(
             Ok(None) => {}
             Err(error) => {
                 failure.get_or_insert(MeasureError::Io(error));
+                // process-wrap's try_wait also queries its job completion
+                // port. Do not keep retrying that API after it has failed.
+                owner.close_inspection_job();
+                fallback = true;
             }
         }
         match control.cancelled() {
@@ -157,6 +162,8 @@ pub(super) async fn measure_target_with_sinks(
             && let Err(error) = owner.terminate()
         {
             failure.get_or_insert(MeasureError::Io(error));
+            owner.close_inspection_job();
+            fallback = true;
         }
         tokio::time::sleep(EXIT_POLL).await;
     };
@@ -164,20 +171,43 @@ pub(super) async fn measure_target_with_sinks(
     let resources = owner.resources();
     // Collect before releasing the accounting handle, then kill remaining
     // descendants. Neither tree cleanup nor pipe draining extends wall time.
-    loop {
+    let cleanup_deadline = Instant::now() + std::time::Duration::from_secs(1);
+    while !fallback {
         if let Err(error) = owner.terminate() {
             failure.get_or_insert(MeasureError::Io(error));
+            fallback = true;
+            break;
         }
         match owner.tree_is_empty() {
             Ok(true) => break,
-            Ok(false) => {}
+            Ok(false) if Instant::now() < cleanup_deadline => {}
+            Ok(false) => {
+                failure.get_or_insert(MeasureError::Io(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "target job did not empty after termination; kill-on-close fallback required",
+                )));
+                fallback = true;
+            }
             Err(error) => {
                 failure.get_or_insert(MeasureError::Io(error));
+                fallback = true;
             }
         }
-        tokio::time::sleep(EXIT_POLL).await;
+        if !fallback {
+            tokio::time::sleep(EXIT_POLL).await;
+        }
     }
-    control.mark_target_collected();
+    if fallback {
+        owner.close_inspection_job();
+        // Exact-root resources were attempted above. Drop the process-wrap
+        // child normally (never into_inner, which leaks its job handle), closing
+        // the second kill-on-close job. This is failure containment, NOT an
+        // empty-tree observation. Coordinator admission waits for worker exit.
+        drop(owner);
+        control.mark_fallback_collected();
+    } else {
+        control.mark_target_collected();
+    }
     let drain = forced.is_none() && !cancelled && failure.is_none();
     let (stdout_result, stderr_result) =
         tokio::join!(stdout_task.finish(drain), stderr_task.finish(drain));
