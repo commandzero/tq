@@ -54,6 +54,7 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
             sha256: "a".repeat(64),
         },
         tools: Vec::new(),
+        reference_execution: None,
         cases: vec![tq_test_support::compatibility::CaseReport {
             id: "common.identity".to_owned(),
             capabilities: vec!["value.identity".to_owned()],
@@ -92,6 +93,27 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
         },
         final_status: FinalStatus::Passed,
     }
+}
+
+#[test]
+fn reference_stream_configuration_is_explicit_without_rewriting_historical_reports() {
+    let mut report = report(1, 10);
+    let historical = serde_json::to_value(&report).unwrap();
+    assert!(historical.get("reference_execution").is_none());
+    let restored: CompatibilityReport = serde_json::from_value(historical).unwrap();
+    assert!(restored.reference_execution.is_none());
+    report.reference_execution = Some(tq_test_support::compatibility::ReferenceExecution {
+        target: "x86_64-windows".to_owned(),
+        jq_structured_program_prefix_args: vec!["--binary".to_owned()],
+    });
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        json["reference_execution"]["jq_structured_program_prefix_args"],
+        json!(["--binary"])
+    );
+    let human = report.render_human();
+    assert!(human.contains("--binary"));
+    assert!(human.contains("raw input and raw CLI arguments unchanged; captured bytes verbatim"));
 }
 
 #[test]

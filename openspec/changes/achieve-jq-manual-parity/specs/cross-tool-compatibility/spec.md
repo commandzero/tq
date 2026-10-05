@@ -14,7 +14,7 @@ The suite SHALL publish exact matches, reviewed disparities, and unresolved fail
 - **THEN** the limitation has an executable witness and documented impact for reconsideration after full implementation, without introducing unsafe or FFI code
 
 ### Requirement: Complete pinned manual parity inventory
-The suite SHALL version the jq manual source fingerprint, section inventory, source-to-case relationships, reference executable identity and build configuration, and a closure inventory for every baseline failure and policy difference. The initial inventory SHALL include all 518 referenced cases at commit `dcabecc`, all 251 published input/output examples, all 13 manual sections plus introduction, and all 68 fenced snippets. These numbers SHALL be lower bounds for coverage, not caps. Every documented runnable behavior SHALL have an executable case; prose-only explanations and incomplete syntax SHALL retain reviewed source notes with reasons rather than fabricated successful executions.
+The suite SHALL pin jq 1.8.2 as the execution reference on each required native target, preserving earlier jq 1.8.1 observations as historical evidence rather than renewed acceptance or approvals. It SHALL version the jq 1.8 manual source fingerprint, section inventory, source-to-case relationships, reference executable identity and build configuration, and a closure inventory for every baseline failure and policy difference. The initial inventory SHALL include all 518 referenced cases at commit `dcabecc`, all 251 published input/output examples, all 13 manual sections plus introduction, and all 68 fenced snippets. These numbers SHALL be lower bounds for coverage, not caps. Every documented runnable behavior SHALL have an executable case; prose-only explanations and incomplete syntax SHALL retain reviewed source notes with reasons rather than fabricated successful executions.
 
 #### Scenario: A source example has no test
 - **WHEN** a runnable source passage lacks an executable case or its case is disabled, deferred, or removed
@@ -44,7 +44,7 @@ A strict manual campaign SHALL execute every admitted case and exit unsuccessful
 - **THEN** the release gate fails even if the net number of passing cases increases
 
 ### Requirement: Explicit output-mode and identity contracts
-Structured manual programs SHALL compare jq with `tq -o json` for ordered JSON results and process behavior, and SHALL additionally compare compact JSON bytes using `jq -c` and `tq -c` where the contract is deterministic. The suite MUST NOT coerce values, drop results, apply blanket numeric tolerances, sort arrays, ignore required stderr, or change filters to conceal a mismatch. Whitespace and object member order SHALL be ignored only for semantic JSON comparisons. Query-level `tojson`, raw output, debug/stderr text, compact output, color, and framing contracts SHALL retain their observable bytes. Native TOON output SHALL be verified separately for representable results and MUST NOT contribute to a jq pass when JSON parity fails.
+Structured manual programs SHALL compare jq with `tq -o json` for ordered JSON results and process behavior, and SHALL additionally compare compact JSON bytes using `jq -c` and `tq -c` where the contract is deterministic. The suite MUST NOT coerce values, drop results, apply blanket numeric tolerances, sort arrays, ignore required stderr, or change filters to conceal a mismatch. Whitespace and object member order SHALL be ignored only for semantic JSON comparisons. Query-level `tojson`, raw output, debug/stderr text, compact output, color, and framing contracts SHALL retain their observable bytes. Color presentation SHALL follow the archived `output-colors` main spec, not jq's default palette or quote styling. The suite SHALL assert tq's palette/override/fallback and all-format contracts, including JSON Lines, and verify that removing only tq-generated SGR yields exactly the corresponding plain tq bytes. Explicit tq presentation differences SHALL remain separately identified rather than counted as exact jq ANSI matches or newly approved safe-library disparities; program-generated escapes and data/process observations SHALL NOT be normalized away. Native TOON output SHALL be verified separately for representable results and MUST NOT contribute to a jq pass when JSON parity fails.
 
 Only documented output-format selection, explicit strict JSON selection for input-parser conformance, controlled fixture locations, and matched environment/platform setup SHALL adapt an invocation. Normal valid JSON input cases SHALL also test automatic detection, so the strict override cannot conceal a detection regression. tq-specific allow flags or rewritten queries SHALL NOT be required to pass ordinary process-CLI cases. Program identity and help/build content SHALL use explicit tq contracts for actual product identity, documented option semantics, success status, and stream placement, not forged jq version strings or unconditional identity exemptions.
 
@@ -72,22 +72,21 @@ Reference-text errors SHALL be recorded as provenance separately from a case's e
 - **THEN** tq must match that invalid-arity contract and separately execute the valid `/0` witness, with the source correction recorded independently
 
 ### Requirement: Reproducible platform and resource scope
-The parity campaign SHALL run on every advertised supported
-operating-system/architecture combination with an available runner, subject to
-the explicit native-Windows deferral below, with a pinned jq build, matched C
-math environment, locale, timezone, environment variables, filesystem
-fixtures, and recorded resource limits. It SHALL cover POSIX shell, PowerShell
-and cmd invocation forms where applicable, Windows binary/newline behavior,
-terminal color detection, and observable unbuffered writes. An unavailable
-required platform check SHALL be unverified and SHALL block an unqualified
-cross-platform compatibility claim. Defined platform-conditional errors SHALL
-be tested against the reference rather than skipped.
+The parity campaign SHALL run on every advertised supported operating-system/architecture combination. Completion SHALL require fresh native jq 1.8.2 evidence on local macOS, ironhide Linux x86_64, and smokescreen Windows 11 Pro `x86_64-pc-windows-msvc`, with pinned reference executable/build and runtime identities, matched C math environment, locale, timezone, environment variables, filesystem fixtures, and recorded resource limits. Windows acceptance SHALL execute native Windows jq/tq binaries in native PowerShell; SSH into WSL, cross-compilation, and non-Windows PowerShell SHALL NOT qualify. The suite SHALL cover POSIX shell, applicable cmd forms, Windows binary/newline behavior, terminal color detection, and observable unbuffered writes. Missing required native execution or reference evidence SHALL remain unverified and SHALL block completion as well as a compatibility claim. Defined platform-conditional errors SHALL be tested against the reference rather than skipped. This requirement supersedes the earlier Windows deferral, including stale task and historical checkpoint wording.
 
-Native Windows verification is explicitly deferred for this change until a runner is available. Windows test definitions SHALL remain intact, and Windows SHALL remain unverified without contributing passing executions or accepted disparities. macOS and Linux verification remain completion requirements. This scoped deferral SHALL NOT permit a Windows or unqualified cross-platform compatibility claim, and SHALL NOT waive failed cases on verified targets.
+Native Windows compatibility capture SHALL preserve exact stdout/stderr bytes, status, bounded timeout cleanup/reaping, and wall time with executable/target identity. Capture is implemented with overlapped named pipes and JobObjects and SHALL NOT itself count as acceptance evidence. Native Windows CPU/RSS accounting is implemented through a retained exact-child process handle using `GetProcessTimes` and `PeakWorkingSetSize`, with a surviving isolated worker. Validation remains incomplete: separate control executions vary in 15.625 ms CPU quanta, with observed differences up to 62.5 ms exceeding the unchanged 20 ms check. The suite SHALL NOT loosen that check or infer performance acceptance or issue #31 closure from backend implementation. Strict-report differences SHALL remain differences, not exact matches. The user disabled Smart App Control on development-only smokescreen and reported native launch verified with state `0`; no further security changes are needed, and launch success SHALL NOT establish acceptance. Compatibility captures, wall-time-only measurements, WSL results, or placeholder zeros SHALL NOT satisfy native CPU/RSS or final resource/performance evidence. Target-scoped disparities SHALL require fresh identity-bound review against jq 1.8.2; this revision SHALL NOT renew historical approvals or approve new math differences.
 
-#### Scenario: Native Windows runner is unavailable
-- **WHEN** this change completes without native Windows execution
-- **THEN** the release evidence records Windows verification as deferred and unverified, retains the pending shell and binary/newline tests, and limits compatibility claims to verified targets
+#### Scenario: Required native Windows evidence is missing
+- **WHEN** native smokescreen PowerShell execution or its pinned jq 1.8.2 reference evidence is missing
+- **THEN** Windows remains unverified and the change remains incomplete, with no passing execution or accepted disparity manufactured from the missing evidence
+
+#### Scenario: SSH reaches WSL on the Windows host
+- **WHEN** a campaign executes Linux binaries through SSH into WSL on smokescreen
+- **THEN** it cannot satisfy native Windows acceptance regardless of the host's Windows installation
+
+#### Scenario: Native CPU/RSS backend validation is incomplete
+- **WHEN** the implemented native Windows backend records exact-child CPU/RSS but separate control executions differ by up to 62.5 ms in 15.625 ms CPU quanta, exceeding the unchanged 20 ms check
+- **THEN** observations retain their own verdicts, validation and performance acceptance remain incomplete, and issue #31 remains open without a relaxed check
 
 #### Scenario: Math symbol is unavailable on a platform
 - **WHEN** jq defines a documented function but raises a runtime availability error on the current platform

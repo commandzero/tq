@@ -1,5 +1,13 @@
 //! Correctness-first warmup and sampling loop.
 
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::result_large_err,
+        reason = "Windows error layout exceeds the lint threshold; preserve typed diagnostics and the public error variant used by campaign cancellation matching"
+    )
+)]
+
 use std::{
     collections::BTreeMap,
     fs::File,

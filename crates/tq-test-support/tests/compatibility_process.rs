@@ -77,6 +77,65 @@ fn early_exit_treats_closed_stdin_as_completed() {
 }
 
 #[test]
+fn concurrent_children_do_not_inherit_other_invocations_capture_pipes() {
+    const CALLERS: usize = 12;
+    const ROUNDS: usize = 32;
+    let ready = std::sync::Barrier::new(CALLERS);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..CALLERS)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut outcomes = Vec::with_capacity(ROUNDS);
+                    for round in 0..ROUNDS {
+                        ready.wait();
+                        let invocation = Invocation {
+                            executable: PathBuf::from("/usr/bin/perl"),
+                            args: vec![
+                                "-MFcntl=:mode".to_owned(),
+                                "-e".to_owned(),
+                                "for my $fd (3..255) { if (open(my $fh, '<&=' . $fd)) { my @s = stat($fh); print qq($fd\\n) if S_ISFIFO($s[2]); } }".to_owned(),
+                            ],
+                            stdin: Vec::new(),
+                            timeout: Duration::from_secs(2),
+                            current_dir: None,
+                            environment: BTreeMap::new(),
+                        };
+                        let outcome = if round % 2 == 0 {
+                            run_process(&invocation)
+                        } else {
+                            run_process_with_environment_bounded(&invocation, &BTreeMap::new(), 4096)
+                                .map(|result| result.outcome)
+                        };
+                        // Assert only after all rounds so a failure cannot strand
+                        // the remaining callers at the next barrier.
+                        outcomes.push(outcome);
+                    }
+                    outcomes
+                })
+            })
+            .collect();
+        for worker in workers {
+            for (round, outcome) in worker
+                .join()
+                .expect("concurrent caller")
+                .into_iter()
+                .enumerate()
+            {
+                let outcome = outcome.expect("concurrent process observation");
+                assert_eq!(outcome.status, ProcessStatus::Exited);
+                assert_eq!(outcome.exit_code, Some(0));
+                assert_eq!(outcome.stderr, [] as [u8; 0]);
+                assert!(
+                    outcome.stdout.is_empty(),
+                    "round {round}: inherited capture pipe descriptors: {}",
+                    String::from_utf8_lossy(&outcome.stdout)
+                );
+            }
+        }
+    });
+}
+
+#[test]
 fn runaway_process_is_killed_and_classified_timeout() {
     let outcome = run_process(&Invocation {
         executable: PathBuf::from("/bin/sh"),

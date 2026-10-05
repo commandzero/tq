@@ -28,10 +28,13 @@ pub enum ToolKind {
 
 impl ToolKind {
     fn executable_name(self) -> &'static str {
-        match self {
-            Self::Jq => "jq",
-            Self::Yq => "yq",
-            Self::Tq => "tq",
+        match (self, cfg!(windows)) {
+            (Self::Jq, false) => "jq",
+            (Self::Yq, false) => "yq",
+            (Self::Tq, false) => "tq",
+            (Self::Jq, true) => "jq.exe",
+            (Self::Yq, true) => "yq.exe",
+            (Self::Tq, true) => "tq.exe",
         }
     }
 }
@@ -199,40 +202,40 @@ fn capture_runtime_libraries(
     path: &Path,
     repository_root: &Path,
 ) -> Vec<ArtifactIdentity> {
-    if kind != ToolKind::Jq {
-        return Vec::new();
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (kind, path, repository_root);
+        Vec::new()
     }
-    #[cfg(target_os = "linux")]
-    let probe = ("ldd", vec![path.display().to_string()]);
-    #[cfg(target_os = "macos")]
-    let probe = ("otool", vec!["-L".to_owned(), path.display().to_string()]);
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    let _ = (path, repository_root);
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    return Vec::new();
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        if kind != ToolKind::Jq {
+            return Vec::new();
+        }
+        #[cfg(target_os = "linux")]
+        let probe = ("ldd", vec![path.display().to_string()]);
+        #[cfg(target_os = "macos")]
+        let probe = ("otool", vec!["-L".to_owned(), path.display().to_string()]);
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let Ok(outcome) = run_process(&Invocation {
-        executable: PathBuf::from(probe.0),
-        args: probe.1,
-        stdin: Vec::new(),
-        timeout: Duration::from_secs(5),
-        current_dir: Some(repository_root.to_owned()),
-        environment: BTreeMap::new(),
-    }) else {
-        return Vec::new();
-    };
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    if outcome.status != ProcessStatus::Exited || outcome.exit_code != Some(0) {
-        return Vec::new();
+        let Ok(outcome) = run_process(&Invocation {
+            executable: PathBuf::from(probe.0),
+            args: probe.1,
+            stdin: Vec::new(),
+            timeout: Duration::from_secs(5),
+            current_dir: Some(repository_root.to_owned()),
+            environment: BTreeMap::new(),
+        }) else {
+            return Vec::new();
+        };
+        if outcome.status != ProcessStatus::Exited || outcome.exit_code != Some(0) {
+            return Vec::new();
+        }
+        let paths = runtime_paths(&outcome.stdout);
+        paths
+            .into_iter()
+            .filter_map(|path| artifact_identity(&path))
+            .collect()
     }
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let paths = runtime_paths(&outcome.stdout);
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    paths
-        .into_iter()
-        .filter_map(|path| artifact_identity(&path))
-        .collect()
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -317,14 +320,19 @@ fn candidates(kind: ToolKind, root: &Path) -> Vec<PathBuf> {
     let sibling = root.parent().unwrap_or(root);
     match kind {
         ToolKind::Jq => vec![
-            sibling.join("jq/jq"),
-            root.join("target/reference-build/jq/jq"),
+            sibling.join("jq").join(kind.executable_name()),
+            root.join("target/reference-build/jq")
+                .join(kind.executable_name()),
         ],
         ToolKind::Yq => vec![
-            sibling.join("yq/yq"),
-            root.join("target/reference-build/yq/yq"),
+            sibling.join("yq").join(kind.executable_name()),
+            root.join("target/reference-build/yq")
+                .join(kind.executable_name()),
         ],
-        ToolKind::Tq => vec![root.join("target/release/tq"), root.join("target/debug/tq")],
+        ToolKind::Tq => vec![
+            root.join("target/release").join(kind.executable_name()),
+            root.join("target/debug").join(kind.executable_name()),
+        ],
     }
 }
 
@@ -352,4 +360,35 @@ fn executable_permissions(metadata: &fs::Metadata) -> bool {
 #[cfg(not(unix))]
 fn executable_permissions(_metadata: &fs::Metadata) -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ToolKind, candidates};
+    use std::path::Path;
+
+    #[test]
+    fn local_candidates_use_native_executable_names() {
+        let root = Path::new("workspace/repository");
+        for (kind, directory, name) in [(ToolKind::Jq, "jq", "jq"), (ToolKind::Yq, "yq", "yq")] {
+            let executable = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+            assert_eq!(
+                candidates(kind, root),
+                vec![
+                    Path::new("workspace").join(directory).join(&executable),
+                    root.join("target/reference-build")
+                        .join(directory)
+                        .join(&executable),
+                ]
+            );
+        }
+        let executable = format!("tq{}", std::env::consts::EXE_SUFFIX);
+        assert_eq!(
+            candidates(ToolKind::Tq, root),
+            vec![
+                root.join("target/release").join(&executable),
+                root.join("target/debug").join(&executable),
+            ]
+        );
+    }
 }

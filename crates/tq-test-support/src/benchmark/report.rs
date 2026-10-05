@@ -235,7 +235,33 @@ impl MeasurementProtocol {
 
     fn has_explicit_lifetime_scope(&self) -> bool {
         let scope = self.rss_scope.to_ascii_lowercase().replace(['-', '_'], " ");
-        scope.contains("pre exec") && scope.contains("waited") && scope.contains("descendant")
+        (scope.contains("pre exec") && scope.contains("waited") && scope.contains("descendant"))
+            || (scope.contains("windows exact target process lifetime")
+                && scope.contains("peak working set")
+                && scope.contains("excluding descendants"))
+    }
+}
+
+#[cfg(test)]
+mod lifetime_scope_tests {
+    use super::MeasurementProtocol;
+
+    #[test]
+    fn windows_lifetime_scope_does_not_waive_calibration_or_isolation_evidence() {
+        let mut protocol = MeasurementProtocol {
+            timing_method: "retained-handle Windows accounting".to_owned(),
+            input_delivery: "prepared-seekable-stdin-file".to_owned(),
+            rss_scope: "windows-exact-target-process-lifetime peak working set including threads, excluding descendants".to_owned(),
+            exit_poll_interval_micros: 100,
+            rss_poll_interval_micros: None,
+            validated_accuracy_micros: None,
+            worker: None,
+            isolation_evidence: None,
+        };
+        assert!(protocol.has_explicit_lifetime_scope());
+        assert!(!protocol.is_valid_for_comparison());
+        protocol.rss_scope = "sampled job committed memory".to_owned();
+        assert!(!protocol.has_explicit_lifetime_scope());
     }
 }
 

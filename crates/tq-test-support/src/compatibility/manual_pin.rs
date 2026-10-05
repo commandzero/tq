@@ -59,6 +59,9 @@ pub struct ManualBuildPin {
     pub sha256: String,
     /// Exact nonempty lines from jq's build-configuration output.
     pub build_configuration: String,
+    /// Official release artifact provenance, when recorded for this pin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_asset_url: Option<String>,
     /// Hashes of dynamically linked runtime libraries, when applicable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runtime_libraries: Vec<crate::corpus::ArtifactIdentity>,

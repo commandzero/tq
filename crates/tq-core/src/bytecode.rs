@@ -620,10 +620,7 @@ impl Compiler {
                 left: self.expression(left)?,
                 right: self.expression(right)?,
             },
-            ExprKind::Comma(left, right) => Operation::Comma {
-                left: self.expression(left)?,
-                right: self.expression(right)?,
-            },
+            ExprKind::Comma(_, _) => return self.comma_spine(expr),
             ExprKind::Array(child) => Operation::Array(self.expression(child)?),
             ExprKind::Object(entries) => {
                 let mut operands = Vec::with_capacity(entries.len());
@@ -821,6 +818,26 @@ impl Compiler {
                 value: self.expression(value)?,
             },
         };
+        self.instruction(operation, expr.span)
+    }
+
+    fn comma_spine(&mut self, mut expr: &Expr) -> Result<u32, Box<Diagnostic>> {
+        // Literal arrays form left-associated comma spines. Preserve their exact
+        // postorder and spans without one large lowering frame per element.
+        let mut pending = Vec::new();
+        while let ExprKind::Comma(left, right) = &expr.kind {
+            pending.push((right.as_ref(), expr.span));
+            expr = left;
+        }
+        let mut left = self.expression(expr)?;
+        for (right, span) in pending.into_iter().rev() {
+            let right = self.expression(right)?;
+            left = self.instruction(Operation::Comma { left, right }, span)?;
+        }
+        Ok(left)
+    }
+
+    fn instruction(&mut self, operation: Operation, span: Span) -> Result<u32, Box<Diagnostic>> {
         let index = u32::try_from(self.instructions.len()).map_err(|_| {
             Box::new(
                 Diagnostic::new(
@@ -828,13 +845,10 @@ impl Compiler {
                     DiagnosticClass::Resource,
                     "query contains too many bytecode instructions",
                 )
-                .at(expr.span, "instruction limit exceeded"),
+                .at(span, "instruction limit exceeded"),
             )
         })?;
-        self.instructions.push(Instruction {
-            operation,
-            span: expr.span,
-        });
+        self.instructions.push(Instruction { operation, span });
         Ok(index)
     }
 
@@ -1396,6 +1410,48 @@ mod tests {
         .disassemble();
         assert!(labels.contains("Label"));
         assert!(labels.contains("Break"));
+    }
+
+    #[test]
+    fn comma_lowering_preserves_postorder_spans_and_parenthesized_shape() {
+        fn postorder_spans(expr: &crate::ast::Expr, spans: &mut Vec<Span>) {
+            if let crate::ast::ExprKind::Comma(left, right) = &expr.kind {
+                postorder_spans(left, spans);
+                postorder_spans(right, spans);
+            }
+            spans.push(expr.span);
+        }
+
+        for (query, expected_commas) in [
+            ("1,2,3", vec![(2, 0, 1), (4, 2, 3)]),
+            ("1,(2,3)", vec![(3, 1, 2), (4, 0, 3)]),
+            ("(1,2),(3,4)", vec![(2, 0, 1), (5, 3, 4), (6, 2, 5)]),
+        ] {
+            let parsed = parse(query).unwrap();
+            let mut expected_spans = Vec::new();
+            postorder_spans(parsed.ast(), &mut expected_spans);
+            let bytecode =
+                Bytecode::compile(parsed.ast(), &[], &ResolveOptions::default()).unwrap();
+            assert_eq!(
+                bytecode
+                    .instructions
+                    .iter()
+                    .map(|instruction| instruction.span)
+                    .collect::<Vec<_>>(),
+                expected_spans,
+                "{query}",
+            );
+            let commas = bytecode
+                .instructions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, instruction)| match instruction.operation {
+                    Operation::Comma { left, right } => Some((index, left, right)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(commas, expected_commas, "{query}");
+        }
     }
 
     #[test]

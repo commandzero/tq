@@ -23,6 +23,9 @@ pub struct CompatibilityReport {
     pub corpus: ArtifactIdentity,
     /// Discovered executable identities.
     pub tools: Vec<ToolIdentity>,
+    /// Reference stream configuration; absent in historical reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_execution: Option<ReferenceExecution>,
     /// Per-case observations.
     pub cases: Vec<CaseReport>,
     /// Aggregate capability coverage.
@@ -35,6 +38,30 @@ pub struct CompatibilityReport {
     pub capability_counts: CapabilityCounts,
     /// Final campaign result.
     pub final_status: FinalStatus,
+}
+
+/// Platform-specific jq invocation configuration, separate from binary identity.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReferenceExecution {
+    /// Host architecture and OS.
+    pub target: String,
+    /// Options prepended only to structured-input semantic/error and compact
+    /// program invocations. Raw-input programs and raw/exit-status CLI contracts
+    /// retain authored arguments; all captured bytes remain verbatim.
+    pub jq_structured_program_prefix_args: Vec<String>,
+}
+
+impl ReferenceExecution {
+    pub(crate) fn for_host() -> Self {
+        Self {
+            target: super::manual_host_target(),
+            jq_structured_program_prefix_args: if cfg!(windows) {
+                vec!["--binary".to_owned()]
+            } else {
+                Vec::new()
+            },
+        }
+    }
 }
 
 /// tq implementation disposition for a capability tag.
@@ -207,6 +234,10 @@ impl CompatibilityReport {
             executed,
             differences
         );
+        if let Some(reference) = &self.reference_execution {
+            writeln!(output, "jq reference ({}): structured-program prefix args {:?}; raw input and raw CLI arguments unchanged; captured bytes verbatim", reference.target, reference.jq_structured_program_prefix_args)
+                .expect("write reference execution configuration");
+        }
         for case in self.cases.iter().filter(|case| {
             !case.semantic_diffs.is_empty()
                 || case

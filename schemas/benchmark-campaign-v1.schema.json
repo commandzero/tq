@@ -100,7 +100,7 @@
                 "process_group_peak_rss_bytes": {"type": ["integer", "null"], "minimum": 0},
                 "rss_provenance": {
                   "anyOf": [
-                    {"enum": ["gnu-time-v", "bsd-time-l", "darwin-wait4", "linux-wait4"]},
+                    {"enum": ["gnu-time-v", "bsd-time-l", "darwin-wait4", "linux-wait4", "windows-peak-working-set"]},
                     {"type": "null"}
                   ]
                 },
@@ -116,7 +116,7 @@
               "allOf": [{
                 "if": {
                   "required": ["rss_provenance"],
-                  "properties": {"rss_provenance": {"enum": ["darwin-wait4", "linux-wait4"]}}
+                  "properties": {"rss_provenance": {"enum": ["darwin-wait4", "linux-wait4", "windows-peak-working-set"]}}
                 },
                 "then": {
                   "required": ["measurement_protocol", "peak_rss_bytes", "user_cpu_micros", "system_cpu_micros"],

@@ -106,6 +106,7 @@ pub fn run_campaign(
         profile: profile.name().to_owned(),
         corpus: catalog.identity.clone(),
         tools,
+        reference_execution: Some(super::ReferenceExecution::for_host()),
         cases: reports,
         coverage,
         capability_matrix,
@@ -309,7 +310,13 @@ fn execute_with_resources(
         bytes,
         pin_format: pin_input_format,
     } = fixture;
-    let mut args = adapter.args.clone();
+    let mut args = reference_program_args(
+        identity.tool,
+        case.expected.contract,
+        input_format,
+        &adapter.args,
+        cfg!(windows),
+    );
     rewrite_json_module_args(resources.module_directory.as_ref(), &mut args);
     if pin_input_format {
         match identity.tool {
@@ -569,6 +576,44 @@ fn fixture_environment(
         );
     }
     Ok(environment)
+}
+
+fn reference_program_args(
+    tool: ToolKind,
+    contract: ContractKind,
+    input_format: FixtureFormat,
+    authored: &[String],
+    windows: bool,
+) -> Vec<String> {
+    let mut args = authored.to_vec();
+    if windows
+        && tool == ToolKind::Jq
+        && matches!(contract, ContractKind::ResultSequence | ContractKind::Error)
+        && input_format != FixtureFormat::Raw
+        && !raw_input_for_args(authored)
+    {
+        // Select jq's native byte-stream mode before any authored `--` boundary.
+        // Raw-input and CLI byte contracts must keep jq's original text mode.
+        args.insert(0, "--binary".to_owned());
+    }
+    args
+}
+
+fn raw_input_for_args(args: &[String]) -> bool {
+    let expanded = comparison::expand_short_comparison_options(args);
+    let mut arguments = expanded.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--" || !argument.starts_with('-') {
+            break;
+        }
+        if matches!(argument.as_str(), "-R" | "--raw-input") {
+            return true;
+        }
+        for _ in 0..option_value_count(argument) {
+            arguments.next();
+        }
+    }
+    false
 }
 
 struct ExecutionResources {
@@ -1093,6 +1138,97 @@ mod tests {
 
     #[cfg(unix)]
     use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, time::Duration};
+
+    #[test]
+    fn windows_binary_reference_selection_preserves_raw_contracts_and_option_values() {
+        use super::reference_program_args;
+        use crate::compatibility::ContractKind;
+        let authored = vec![
+            "--arg".to_owned(),
+            "value".to_owned(),
+            "-R".to_owned(),
+            "--".to_owned(),
+        ];
+        let selected = reference_program_args(
+            ToolKind::Jq,
+            ContractKind::ResultSequence,
+            FixtureFormat::Json,
+            &authored,
+            true,
+        );
+        assert_eq!(
+            selected,
+            [vec!["--binary".to_owned()], authored.clone()].concat()
+        );
+        for (tool, contract, format, windows) in [
+            (
+                ToolKind::Jq,
+                ContractKind::RawBytes,
+                FixtureFormat::Json,
+                true,
+            ),
+            (
+                ToolKind::Jq,
+                ContractKind::ExitStatus,
+                FixtureFormat::Json,
+                true,
+            ),
+            (
+                ToolKind::Jq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Raw,
+                true,
+            ),
+            (ToolKind::Jq, ContractKind::Error, FixtureFormat::Raw, true),
+            (
+                ToolKind::Jq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Json,
+                false,
+            ),
+            (
+                ToolKind::Tq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Json,
+                true,
+            ),
+            (
+                ToolKind::Yq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Json,
+                true,
+            ),
+        ] {
+            assert_eq!(
+                reference_program_args(tool, contract, format, &authored, windows),
+                authored
+            );
+        }
+        for raw_flag in ["-R", "--raw-input", "-Rs", "-nRc"] {
+            let args = vec![raw_flag.to_owned()];
+            assert_eq!(
+                reference_program_args(
+                    ToolKind::Jq,
+                    ContractKind::ResultSequence,
+                    FixtureFormat::Json,
+                    &args,
+                    true
+                ),
+                args
+            );
+        }
+        let from_file = vec!["-f".to_owned(), "program.jq".to_owned()];
+        assert_eq!(
+            reference_program_args(
+                ToolKind::Jq,
+                ContractKind::Error,
+                FixtureFormat::None,
+                &from_file,
+                true
+            ),
+            [vec!["--binary".to_owned()], from_file].concat()
+        );
+    }
 
     #[test]
     fn logical_json_case_expands_to_the_complete_native_input_matrix() {

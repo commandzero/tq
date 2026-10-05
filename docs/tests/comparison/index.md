@@ -16,6 +16,15 @@ native accounting path separately. They are helper controls, not jq/yq/tq
 workload measurements. Every workload table below comes from the full native
 rerun; no wrapper-based measurements are included.
 
+## Native jq compatibility acceptance
+
+The [jq manual platform results](../jq-manual/coverage.md#native-platform-results)
+cover release comparisons on macOS, Linux (`ironhide`), and native Windows
+(`smokescreen`). Builds, Clippy, and workspace tests pass on all three hosts.
+The strict manual campaigns retain platform-specific differences; Windows
+benchmark calibration is still incomplete. These correctness runs do not
+replace the workload timing tables below.
+
 ## Current allocator diagnostic
 
 The [mimalloc versus system allocator summary](mimalloc-vs-default.md) records

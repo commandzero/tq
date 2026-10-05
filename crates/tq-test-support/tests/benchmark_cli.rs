@@ -7,9 +7,10 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use tq_test_support::{
-    benchmark::load_benchmark_catalog,
-    corpus::{GeneratedArtifacts, SnapshotState, build_source_snapshot, write_snapshot_manifest},
+use tq_test_support::benchmark::load_benchmark_catalog;
+#[cfg(unix)]
+use tq_test_support::corpus::{
+    GeneratedArtifacts, SnapshotState, build_source_snapshot, write_snapshot_manifest,
 };
 
 fn write_report(path: &Path, final_status: &str) {
@@ -907,6 +908,7 @@ fn native_delimited_raw_contract_unwraps_reference_scalars() {
     }
 }
 
+#[cfg(unix)]
 fn test_snapshot_input(source_json_file: PathBuf) -> tq_test_support::corpus::SourceSnapshotInput {
     tq_test_support::corpus::SourceSnapshotInput {
         campaign_id: "2026-09-13T00:00:00Z".to_owned(),
@@ -940,6 +942,7 @@ fn test_snapshot_input(source_json_file: PathBuf) -> tq_test_support::corpus::So
     }
 }
 
+#[cfg(unix)]
 fn artifact_identity(path: &str, file: &Path) -> tq_test_support::corpus::ArtifactIdentity {
     use sha2::{Digest as _, Sha256};
     use std::fmt::Write as _;

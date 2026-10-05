@@ -98,6 +98,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         "source_inventory_sha256": pin.source_inventory_sha256,
         "target": manual_host_target(),
         "source_checkout_verified": source_root.is_some(),
+        "execution": report["reference_execution"],
     });
     write_reports(&destination, &report)?;
     write_markdown_sections(&markdown_destination, &report, &reviews)?;
@@ -1289,12 +1290,12 @@ mod tests {
         let reviews = root.path().join("reviews # space");
         std::fs::create_dir_all(&output).unwrap();
         std::fs::create_dir_all(&reviews).unwrap();
-        let target = reviews.join("sample # ?.toon");
+        let target = reviews.join("sample # %.toon");
         std::fs::write(&target, "fixture").unwrap();
 
         assert_eq!(
             super::relative_markdown_link(&output, &target).unwrap(),
-            "../reviews%20%23%20space/sample%20%23%20%3F.toon"
+            "../reviews%20%23%20space/sample%20%23%20%25.toon"
         );
     }
 

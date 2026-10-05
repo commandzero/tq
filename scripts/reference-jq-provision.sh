@@ -15,6 +15,11 @@ sha256_file() {
     fi
 }
 
+case "$(uname -s)" in
+MINGW* | MSYS* | CYGWIN*) executable_suffix=.exe ;;
+*) executable_suffix= ;;
+esac
+
 if [ -n "${TQ_JQ:-}" ]; then
     reference_jq=$TQ_JQ
 elif [ -n "${TQ_REFERENCE_JQ:-}" ]; then
@@ -29,13 +34,13 @@ elif [ -n "${TQ_REFERENCE_JQ_URL:-}" ]; then
     newline=${newline%_}
     carriage_return=$(printf '\015')
     case "$TQ_REFERENCE_JQ_URL" in
-        *"$newline"*|*"$carriage_return"*)
-            echo "a jq artifact URL may not contain newline characters" >&2
-            exit 69
-            ;;
+    *"$newline"* | *"$carriage_return"*)
+        echo "a jq artifact URL may not contain newline characters" >&2
+        exit 69
+        ;;
     esac
     escaped_url=$(printf '%s' "$TQ_REFERENCE_JQ_URL" | sed 's/[\\\"]/\\&/g')
-    reference_jq="${TQ_REFERENCE_JQ_OUTPUT:-${PWD}/target/reference-build/jq/jq}"
+    reference_jq="${TQ_REFERENCE_JQ_OUTPUT:-${PWD}/target/reference-build/jq/jq${executable_suffix}}"
     if [ ! -e "$reference_jq" ]; then
         reference_dir=$(dirname "$reference_jq")
         mkdir -p "$reference_dir"
@@ -52,8 +57,7 @@ elif [ -n "${TQ_REFERENCE_JQ_URL:-}" ]; then
         trap cleanup EXIT HUP INT TERM
         if ! printf 'url = "%s"\n' "$escaped_url" |
             env -u TQ_REFERENCE_JQ_URL curl --fail --silent --show-error --location --retry 2 \
-                --config - -o "$temporary_jq" 2>/dev/null
-        then
+                --config - -o "$temporary_jq" 2>/dev/null; then
             echo "cannot download pinned jq artifact: curl failed" >&2
             exit 69
         fi
@@ -68,9 +72,9 @@ elif [ -n "${TQ_REFERENCE_JQ_URL:-}" ]; then
         trap - EXIT HUP INT TERM
     fi
 else
-    reference_jq="${PWD}/target/reference-build/jq/jq"
+    reference_jq="${PWD}/target/reference-build/jq/jq${executable_suffix}"
     if [ ! -f "$reference_jq" ]; then
-        reference_jq="${PWD}/../jq/jq"
+        reference_jq="${PWD}/../jq/jq${executable_suffix}"
     fi
 fi
 

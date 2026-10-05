@@ -1,19 +1,24 @@
 //! Per-process wall, latency, CPU, memory, and byte measurement.
 
 use std::{
-    fs::{File, OpenOptions},
-    io::{self, Read, Write},
+    io,
     path::PathBuf,
+    sync::{Arc, atomic::AtomicBool},
+    time::Duration,
+};
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::{
+    fs::{File, OpenOptions},
+    io::{Read, Write},
     process::{Command, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use serde::{Deserialize, Serialize};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
@@ -37,6 +42,11 @@ pub fn collector_source_sha256() -> String {
         include_bytes!("native_process.rs").as_slice(),
         include_bytes!("probe.rs").as_slice(),
         include_bytes!("worker.rs").as_slice(),
+        include_bytes!("native_process_windows.rs").as_slice(),
+        include_bytes!("pipe_windows.rs").as_slice(),
+        include_bytes!("capture_windows.rs").as_slice(),
+        include_bytes!("measure_windows.rs").as_slice(),
+        include_bytes!("worker_windows.rs").as_slice(),
         include_bytes!("../bin/tq-bench-probe.rs").as_slice(),
         include_bytes!("../bin/tq-bench-worker.rs").as_slice(),
         include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).as_slice(),
@@ -55,13 +65,21 @@ pub fn collector_source_sha256() -> String {
         .collect()
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const RSS_SAMPLE_INTERVAL: Duration = Duration::from_millis(25);
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const CAPTURE_POLL: Duration = Duration::from_millis(1);
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const CAPTURE_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const CAPTURE_READ_CHUNK: usize = 16 * 1024;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 const UNSET_FIRST_RESULT: u64 = u64::MAX;
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 const PREFLIGHT_ALLOCATION_BYTES: u64 = 64 * 1024 * 1024;
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 const MIN_PREFLIGHT_DELTA_BYTES: u64 = PREFLIGHT_ALLOCATION_BYTES / 2;
 
 /// Source of an authoritative peak RSS value.
@@ -72,6 +90,8 @@ pub enum RssProvenance {
     DarwinWait4,
     /// Native Linux `wait4` resource collection.
     LinuxWait4,
+    /// Windows exact-process OS peak working set, not committed memory.
+    WindowsPeakWorkingSet,
     /// Historical GNU `/usr/bin/time -v` collection.
     GnuTimeV,
     /// Historical BSD `/usr/bin/time -l` collection.
@@ -85,6 +105,7 @@ impl RssProvenance {
         match self {
             Self::DarwinWait4 => "darwin-wait4",
             Self::LinuxWait4 => "linux-wait4",
+            Self::WindowsPeakWorkingSet => "windows-peak-working-set",
             Self::GnuTimeV => "gnu-time-v",
             Self::BsdTimeL => "bsd-time-l",
         }
@@ -121,6 +142,7 @@ pub struct BenchmarkInvocation {
     pub retain_output: bool,
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) struct PreparedCaptureFiles {
     stdin: NamedTempFile,
     stdout: NamedTempFile,
@@ -457,6 +479,7 @@ pub(crate) struct PreparedCapturePaths {
     pub(crate) reply: PathBuf,
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 impl PreparedCaptureFiles {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn paths(&self) -> PreparedCapturePaths {
@@ -587,7 +610,7 @@ pub enum MeasureError {
 /// Returns an infrastructure error when native accounting is unavailable, the
 /// probe cannot run, or its measured high-water mark is implausibly small.
 pub fn preflight_rss(cancellation: Option<Arc<AtomicBool>>) -> Result<RssPreflight, MeasureError> {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     {
         let executable = std::env::current_exe()?;
         let mut invocation = BenchmarkInvocation {
@@ -641,12 +664,10 @@ pub fn preflight_rss(cancellation: Option<Arc<AtomicBool>>) -> Result<RssPreflig
             provenance: expected,
         })
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
-        let _ = cancellation;
-        Err(MeasureError::Unsupported(
-            "native wait4 accounting is implemented only on macOS and Linux".to_owned(),
-        ))
+        drop(cancellation);
+        Err(unsupported_native_measurement())
     }
 }
 
@@ -721,20 +742,25 @@ fn measure_process_worker_with_sampling(
     invocation: &BenchmarkInvocation,
     sample_process_group: bool,
 ) -> Result<MeasuredOutcome, MeasureError> {
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     {
         super::worker::measure_process(invocation, sample_process_group)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         let _ = invocation;
         let _ = sample_process_group;
-        Err(MeasureError::Unsupported(
-            "isolated native worker is implemented only on macOS and Linux".to_owned(),
-        ))
+        Err(unsupported_native_measurement())
     }
 }
 
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+fn unsupported_native_measurement() -> MeasureError {
+    let reason = "isolated native accounting is implemented only on macOS, Linux, and Windows";
+    MeasureError::Unsupported(reason.to_owned())
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub(crate) fn prepare_capture_files(
     invocation: &BenchmarkInvocation,
 ) -> io::Result<PreparedCaptureFiles> {
@@ -1316,8 +1342,12 @@ fn measurement_protocol(has_rss_sampler: bool, worker_process_group: bool) -> Me
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn native_rss_provenance() -> RssProvenance {
+    #[cfg(windows)]
+    {
+        RssProvenance::WindowsPeakWorkingSet
+    }
     #[cfg(target_os = "macos")]
     {
         RssProvenance::DarwinWait4
@@ -1328,6 +1358,7 @@ fn native_rss_provenance() -> RssProvenance {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn validate_resources(
     rss: u64,
     user: Duration,
@@ -1351,24 +1382,16 @@ fn validate_resources(
     Ok(rss)
 }
 
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn configure_process_group(command: &mut Command, shared_group: Option<Pid>) {
     use std::os::unix::process::CommandExt as _;
     command.process_group(shared_group.map_or(0, Pid::as_raw));
 }
 
-#[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command, _shared_group: Option<()>) {}
-
-#[cfg(unix)]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn exit_signal(status: std::process::ExitStatus) -> Option<i32> {
     use std::os::unix::process::ExitStatusExt as _;
     status.signal()
-}
-
-#[cfg(not(unix))]
-fn exit_signal(_status: std::process::ExitStatus) -> Option<i32> {
-    None
 }
 
 #[cfg(test)]

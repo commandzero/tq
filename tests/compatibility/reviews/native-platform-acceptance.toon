@@ -1,0 +1,277 @@
+date: 2026-10-04
+snapshot: implementation-v6
+base_commit: 3605d2d
+base_commit_full: 3605d2de42a9099d67b5f6dc758bf5e030ad7c75
+evidence_root: target/cross-platform-2026-10-04-3605d2d
+identity_policy: Embedded artifact-from-reports identities; not the current working tree. Evidence timestamps extend into 2026-10-05 UTC.
+overlay:
+  files: 59
+  base_files: 815
+  verified_source_files: 874
+  tar: implementation-v6.tar.gz
+  tar_sha256: 2b20cd29995cbcc4f6c2def7a2de69ed5336d54f3c6b93701a69d83c5985a432
+  manifest: implementation-v6-sha256.json
+  manifest_sha256: 4c7413eece591c70a9415527b940d6d9ff4cc82c300c2d23c8326e0e19b48a60
+strict_acceptance: FAIL
+strict_manual_exit_code: 1
+comparison_policy: Exact declared contracts; math stdout is strings; no numeric tolerance or CRLF/ANSI normalization.
+platforms:
+  macos:
+    host: macOS arm64
+    target: aarch64-apple-darwin
+    reference_target: aarch64-macos
+    profile: bench (optimized)
+    tools[2]{tool,version,path,bytes,sha256,identity_from}:
+      jq,jq-1.8.2,target/reference-build/jq/jq,841504,2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e,final-bound manual report
+      tq,tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown),target/release/tq,31700144,f19a1748184ea431b5b2efdc64831739192b597992094667318d8f39b89f9145,final-bound manual report
+    evidence[11]{path,sha256}:
+      macos-v6/acceptance-summary.json,cd807d3dd1ff9b69316534592b353fcb57749e8ec691426a6ba93c6d308ce54b
+      macos-v6/final-integrity.json,b55b60b4194c8ae4a087127886f336f5c8389803130fa9d188b07edb5a0b94b5
+      macos-v6/report/manual-comparison.toon,8f35af3e220353c6c553df5aea21926bd48578ea544801e0d2fa5ee43427ea7f
+      macos-v6/report/manual-final-bound.toon,c8695eabeeab714f216a70f28287ae285ec7f2cd1ae1ea999f7b35d89b6bc30a
+      macos-v6/report/manual-final-bound.json,85f1f7ece4ec1ce6e88ab2f41c00d798ca520fd9dfd618dd1a01912cd3e6ec00
+      macos-v6/final-bound/manual-final-bound-summary.json,c480a7e6b6203d2cc259a79be09acc9a2a69c78c4986b79c9ab10139b33cec2e
+      macos-v6/final-bound/identity-before.json,882563b38ff75c885afb1596faf9de431440ec824f853b4160d91908807ac18a
+      macos-v6/final-bound/identity-after.json,882563b38ff75c885afb1596faf9de431440ec824f853b4160d91908807ac18a
+      macos-v6/final-bound/strict-manual-final-bound.json,714027ac4e0dea269289a7c620b0ddd857aca62f148702ba8a5980a899fd2eb7
+      macos-v6/final-source-sha256.json,c03d9a224baa1aa45219618c859e21e7237dae1e84a7e299f413d5d775e61a5d
+      macos-v6/final-bound/evidence-sha256-final.json,c94c6daca59f1f89163d330f58449ec6b8f3c12d630e0f9cab4f0119caedd69b
+    source_verified_base_plus_overlay: true
+    strict_unique_difference_ids: 9
+    difference_ids_unchanged_from_v5: true
+    identity_note: Final-bound report tq/jq identities equal final integrity and identity-before/after; no rebuild.
+    source_tree_sha256: b97e115aa11e9afb458693580a3f8be9705aec5b0976c6e924e91d22e8b42cb1
+    release_manual_runner_sha256: 9507281358a7de5f97b2be47c7946e095c6deff2c6ecd00eb0c7224bbaeef5fa
+    workspace:
+      passed: 1838
+      failed: 0
+      ignored: 10
+    composition:
+      cases: 297
+      matches: 297
+    preflight: "Final v6 passed; Clippy, workspace, microbench smoke, 21 strict OpenSpec validations."
+    manual_report: macos-v6/report/manual-final-bound.toon
+    final_tq_sha256: f19a1748184ea431b5b2efdc64831739192b597992094667318d8f39b89f9145
+    manual_tq_identity_matches_final: true
+    source_file_count: 874
+    source_unchanged_before_after: true
+    before_after_identity_equal: true
+    original_release_provenance:
+      profile: release
+      report: macos-v6/report/manual-comparison.toon
+      report_sha256: 8f35af3e220353c6c553df5aea21926bd48578ea544801e0d2fa5ee43427ea7f
+      tools[2]{tool,version,path,bytes,sha256,identity_from}:
+        jq,jq-1.8.2,target/reference-build/jq/jq,841504,2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e,manual report
+        tq,tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown),target/release/tq,31699984,0e1d58961c8d3de228f9167ed0d447005823ae67c92102ca14874b69660a6512,manual report
+      preserved: true
+    build_provenance:
+      replacement: "Preflight cargo bench replaced target/release/tq in the shared release output path; profile change, not feature drift."
+      features[2]: default,mimalloc
+      original_release_profile:
+        strip: symbols
+      final_bench_profile:
+        debug: line-tables-only
+      fingerprints[2]{path,profile}:
+        target/release/.fingerprint/tq-cli-7ffed6e77268a8f8/bin-tq.json,"9224925014336183120"
+        target/release/.fingerprint/tq-cli-54a84c8c0f147678/bin-tq.json,"9921770604049210784"
+      no_product_rebuild_for_binding: true
+  linux:
+    host: Linux ironhide 7.2.4-ogc3.1.fc44.x86_64
+    target: x86_64-unknown-linux-gnu
+    reference_target: x86_64-linux
+    profile: release
+    tools[2]{tool,version,path,bytes,sha256,identity_from}:
+      jq,jq-1.8.2,target/reference-build/jq/jq,2267912,b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f,manual report
+      tq,tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown),target/release/tq,40641512,db4de19bfa37c2132036e770466fd8945b41cd5309c38ec916c290be90e4c336,manual report
+    evidence[3]{path,sha256}:
+      linux-v6/summary.json,af73d069b8c4e30ad3eb1e5f011ebed9035db3ec9d59c810526f67ed149516de
+      linux-v6/reports/manual-strict.json,1f67de2212b21cc565e9aba4f8c8aa80dbc7762466765615fc11c72bc0d5fc7e
+      linux-v6/reports/strict-differences-exact.json,e14dab632eeb7fcba58fa536f43704038da50bb7b0c2cc37d11cc3532b72a73c
+    source_verified_base_plus_overlay: true
+    strict_unique_difference_ids: 15
+    difference_ids_unchanged_from_v5: true
+    source_file_hash_manifest_sha256: c03d9a224baa1aa45219618c859e21e7237dae1e84a7e299f413d5d775e61a5d
+    release_manual_runner_sha256: 289a3f1f8528ce386c74e8a8b7b58f025a3f997105feb33e0233793bc3b7687b
+    workspace:
+      passed: 1836
+      failed: 0
+      ignored: 10
+    preflight: Not rerun; historical v2 missing okf and openspec; availability not rechecked; no full-preflight pass.
+  windows:
+    host: Windows 11 Pro 10.0.26300 AMD64
+    target: x86_64-pc-windows-msvc
+    reference_target: x86_64-windows
+    profile: release
+    tools[2]{tool,version,path,bytes,sha256,identity_from}:
+      jq,jq-1.8.2,target/reference-build/jq/jq.exe,1035264,a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627,manual report
+      tq,tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown),target/release/tq.exe,53722624,6fb382603ec87de31fd7dffcc34567319b2bee1064ee356ab42b38ffd1008fab,manual report
+    evidence[4]{path,sha256}:
+      windows-v6/summary.json,784331e570ebaf6671401a08e145acb9f1f7242da885a93fb792cf08196fcbaa
+      windows-v6/manual-mismatches-decoded.json,48a354de39d4602e378722a10f949415fbfb63a21e41f0370abd52f5350c7ae6
+      windows-v6/manual-difference-ids.json,8f94268b9beeb33aced6a2916a6010fc18aef25f511c72d4628afb37d78fa387
+      windows-v6/gate-results.json,2504b1a9de8f96962ee75d0447fe8aa7436afddbed44f2b34009a1ccbfec9fea
+    source_verified_base_plus_overlay: true
+    strict_unique_difference_ids: 60
+    difference_ids_unchanged_from_v5: true
+    release_manual_runner_sha256: 556db878f2153aae73295cc137dd07b99c072cbeb1b7022e45febafe052585d1
+    workspace:
+      passed: 1650
+      failed: 0
+      ignored: 9
+    snapshot_timestamp_utc: "2026-10-05T02:47:15.4890437Z"
+    execution: Native AMD64 Windows; WSL only SSH transport.
+    preflight: "Check/Clippy/workspace renewed; v5 standalone reference/relocation/guards/accounting retained, not v6 reruns."
+campaigns[9]{platform,campaign,cases,exact,differences}:
+  macos,primary,952,943,9
+  macos,compact_json,921,919,2
+  macos,toon,921,921,0
+  linux,primary,952,937,15
+  linux,compact_json,921,913,8
+  linux,toon,921,921,0
+  windows,primary,952,912,40
+  windows,compact_json,921,879,42
+  windows,toon,921,921,0
+gates[35]{platform,gate,exit_code}:
+  macos,build,0
+  macos,compatibility-process,0
+  macos,portability,0
+  macos,preflight-final,0
+  macos,published-reference,0
+  macos,report-decode,0
+  macos,strict-manual,1
+  macos,workspace-tests,0
+  linux,decode-manual-evidence,0
+  linux,final-source-status,0
+  linux,formatting,0
+  linux,identities,0
+  linux,manual-reference-tests,0
+  linux,manual-relocation,0
+  linux,manual-strict,1
+  linux,release-manual,0
+  linux,release-tq,0
+  linux,workspace-all-feature-tests,0
+  linux,workspace-clippy,0
+  windows,native-check,0
+  windows,native-clippy,0
+  windows,native-release-manual-build,0
+  windows,native-release-manual-strict,1
+  windows,native-release-tq-build,0
+  windows,native-workspace-tests,0
+  windows,release-composed-arities-jq,0
+  windows,release-composed-arities-tq,0
+  windows,release-documented-arities-jq,0
+  windows,release-documented-arities-tq,0
+  windows,release-tq-version,0
+  windows,runner-exit-seven,7
+  windows,runner-exit-zero,0
+  windows,runner-quoting,0
+  windows,runner-timeout,124
+  macos,strict-manual-final-bound,1
+difference_groups:
+  macos:
+    "math-numeric-boundary-or-ULP"[2]: manual.audit.math.erfc-ulp,manual.audit.math.tgamma-ulp
+    "ANSI-layout-palette"[6]: manual.colors.ansi-values,manual.colors.custom-1-31,manual.colors.default-palette,manual.invoking.color-output,manual.invoking.jq-colors,manual.invoking.no-color-forced
+    "jq-internal-run-tests-output"[1]: manual.invoking.run-tests
+  linux:
+    "math-numeric-boundary-or-ULP"[8]: manual.audit.math.erfc-ulp,manual.audit.math.integer-scale-boundary,manual.audit.math.tgamma-ulp,manual.composition.arity.scalbln.2,manual.composition.arity.y0.0,manual.composition.arity.yn.2,manual.math.y0,manual.math.yn
+    "ANSI-layout-palette"[6]: manual.colors.ansi-values,manual.colors.custom-1-31,manual.colors.default-palette,manual.invoking.color-output,manual.invoking.jq-colors,manual.invoking.no-color-forced
+    "jq-internal-run-tests-output"[1]: manual.invoking.run-tests
+  windows:
+    "math-numeric-boundary-or-ULP"[8]: manual.audit.math.erfc-ulp,manual.audit.math.integer-scale-boundary,manual.audit.math.tgamma-ulp,manual.composition.arity.scalbln.2,manual.composition.arity.y0.0,manual.composition.arity.yn.2,manual.math.y0,manual.math.yn
+    "jq-math-unavailable"[11]: manual.audit.math.scalb-infinite-boundary,manual.composition.arity.drem.2,manual.composition.arity.exp10.0,manual.composition.arity.gamma.0,manual.composition.arity.scalb.2,manual.composition.arity.significand.0,manual.math.drem,manual.math.exp10,manual.math.gamma,manual.math.scalb,manual.math.significand
+    "raw-input-or-CLI-CRLF-contract"[32]: manual.audit.streaming.json-root-boundary-auto,manual.audit.streaming.json-root-boundary-explicit,manual.audit.streaming.json-root-boundary-hybrid,manual.audit.streaming.json-root-boundary-nested-empty,manual.audit.streaming.json-root-boundary-object-order,manual.audit.streaming.json-root-boundary-prefix-reset,manual.audit.streaming.json-root-boundary-prior-valid,manual.audit.streaming.malformed-eof-array-stream-error,manual.audit.streaming.malformed-eof-object-stream-error,manual.audit.streaming.malformed-eof-string-stream-error,manual.audit.streaming.malformed-missing-separator-stream-error,manual.audit.streaming.malformed-plain-partial-output,manual.audit.streaming.malformed-trailing-comma-stream-error,manual.composition.arity.input.0,manual.composition.arity.inputs.0,manual.invoking.ascii-escape,manual.invoking.compact-output,manual.invoking.exit-false,manual.invoking.exit-null,manual.invoking.exit-true,manual.invoking.indent-output,manual.invoking.monochrome-output,manual.invoking.raw-input,manual.invoking.raw-output,manual.invoking.seq,manual.invoking.sort-keys,manual.invoking.tab-output,manual.io.input,manual.io.input-null-input,manual.io.inputs,manual.runtime.continuation.raw-lines,manual.streaming.stream-errors-form
+    "ANSI-layout-palette-and-CRLF"[6]: manual.colors.ansi-values,manual.colors.custom-1-31,manual.colors.default-palette,manual.invoking.color-output,manual.invoking.jq-colors,manual.invoking.no-color-forced
+    "jq-internal-run-tests-output-and-CRLF"[1]: manual.invoking.run-tests
+    "jq-native-module-resolution"[2]: manual.modules.path-origin,manual.modules.path-tilde
+math_witnesses[29]{platform,id,jq_exit,tq_exit,jq_stdout,tq_stdout}:
+  macos,manual.audit.math.erfc-ulp,0,0,"0.0046777349810472645\n","0.004677734981047266\n"
+  macos,manual.audit.math.tgamma-ulp,0,0,"1.772453850905516\n","1.7724538509055159\n"
+  linux,manual.audit.math.erfc-ulp,0,0,"0.004677734981047265\n","0.004677734981047266\n"
+  linux,manual.audit.math.integer-scale-boundary,0,0,"[\n  0,\n  1.7976931348623157e+308,\n  0,\n  0,\n  0\n]\n","[\n  1.7976931348623157e+308,\n  1.7976931348623157e+308,\n  0,\n  2,\n  2\n]\n"
+  linux,manual.audit.math.tgamma-ulp,0,0,"1.772453850905516\n","1.7724538509055159\n"
+  linux,manual.composition.arity.scalbln.2,0,0,"[\n  0,\n  1.7976931348623157e+308,\n  0,\n  0,\n  0\n]\n","[\n  1.7976931348623157e+308,\n  1.7976931348623157e+308,\n  0,\n  2,\n  2\n]\n"
+  linux,manual.composition.arity.y0.0,0,0,"0.08825696421567698\n","0.08825696421567697\n"
+  linux,manual.composition.arity.yn.2,0,0,"0.08825696421567698\n","0.08825696421567697\n"
+  linux,manual.math.y0,0,0,"0.08825696421567698\n","0.08825696421567697\n"
+  linux,manual.math.yn,0,0,"0.08825696421567698\n","0.08825696421567697\n"
+  windows,manual.audit.math.erfc-ulp,0,0,"0.004677734981047265\n","0.004677734981047266\n"
+  windows,manual.audit.math.integer-scale-boundary,0,0,"[\n  0,\n  1.7976931348623157e+308,\n  0,\n  0,\n  0\n]\n","[\n  1.7976931348623157e+308,\n  1.7976931348623157e+308,\n  0,\n  2,\n  2\n]\n"
+  windows,manual.audit.math.scalb-infinite-boundary,5,0,"","[\n  0,\n  0,\n  1.7976931348623157e+308,\n  2\n]\n"
+  windows,manual.audit.math.tgamma-ulp,0,0,"1.772453850905516\n","1.7724538509055159\n"
+  windows,manual.composition.arity.drem.2,5,0,"","1\n"
+  windows,manual.composition.arity.exp10.0,5,0,"","1\n"
+  windows,manual.composition.arity.gamma.0,5,0,"","1\n"
+  windows,manual.composition.arity.scalb.2,5,0,"","[\n  0,\n  0,\n  1.7976931348623157e+308,\n  2\n]\n"
+  windows,manual.composition.arity.scalbln.2,0,0,"[\n  0,\n  1.7976931348623157e+308,\n  0,\n  0,\n  0\n]\n","[\n  1.7976931348623157e+308,\n  1.7976931348623157e+308,\n  0,\n  2,\n  2\n]\n"
+  windows,manual.composition.arity.significand.0,5,0,"","1\n"
+  windows,manual.composition.arity.y0.0,0,0,"0.08825696421567694\n","0.08825696421567697\n"
+  windows,manual.composition.arity.yn.2,0,0,"0.08825696421567694\n","0.08825696421567697\n"
+  windows,manual.math.drem,5,0,"","1\n"
+  windows,manual.math.exp10,5,0,"","1\n"
+  windows,manual.math.gamma,5,0,"","1\n"
+  windows,manual.math.scalb,5,0,"","16\n"
+  windows,manual.math.significand,5,0,"","1\n"
+  windows,manual.math.y0,0,0,"0.08825696421567694\n","0.08825696421567697\n"
+  windows,manual.math.yn,0,0,"0.08825696421567694\n","0.08825696421567697\n"
+gate_notes: Runner exit 7 and timeout 124 are expected harness probes; ignored and zero-test targets are not coverage passes.
+windows_reference:
+  structured_program_prefix_args[1]: "--binary"
+  guard: "Only structured jq program execution; raw-input, CLI and exit contracts retain authored arguments and native CRLF."
+  raw_args_unchanged: true
+  crlf_differences_remain_failures: true
+windows_default_stack:
+  reserve_bytes: 1048576
+  commit_bytes: 4096
+  stack_raised: false
+  profile: release
+  signatures: 220
+  documented_plain:
+    jq_exit: 0
+    tq_exit: 0
+    stdout: "[]\n"
+  composed:
+    jq_exit: 0
+    tq_exit: 0
+    stdout: "[]\n"
+  source: windows-v6/REPORT.md and gate-results.json
+calibration:
+  status: blocked/incomplete; no fresh v6 calibration on any platform
+  v6_controls_rerun: false
+  performance_gate: not established
+  collector_source_identity: 03c6d866d26b05a323429f878b234c106e21d8107b87a932f44f7f2d279c122c
+  collector_identity_unchanged_from_v5: true
+  collector_identity_scope: Excludes compatibility/process.rs; not whole-source identity or calibration evidence.
+  compatibility_process_sha256: 3b22546a60eaafa55d42be2242fda95b062aa4948532b151f645aa3cff760e1d
+  windows_v4:
+    exit_code: 101
+    records: 180
+    cpu_control_failures: 10
+    quantization_us: 15625
+    unchanged_control_tolerance_us: 20000
+    control_comparison: Distinct executions; same-child exact counter tests do not establish calibration.
+    controls: windows-v4/acceptance-v4/native-validation/windows-native-controls-x5MjeT/controls.json
+    controls_sha256: fbdf43b783a814315b2ccfc603002d5bda076e955478508beb1c56195de9599e
+    status_sha256: 9020d978d3a30c0997049ca21b43218be06d1a3505b2a818f02d73678ec348ea
+full_campaign:
+  v6_rerun: false
+  status: Historical full campaign pending; not v6 validation.
+  stale_denial_fixture_ids[2]: environment.denied,platform.denied
+  harness_errors[3]{id,tool,input_format,error_class}:
+    platform.denied,tq,json,malformed-output
+    platform.denied,tq,yaml,malformed-output
+    platform.denied,tq,toon,malformed-output
+  historical_reference: linux/reports/compatibility-full.json
+  historical_reference_sha256: 7997bbfa2d6599884d701d91969a9a6c14cc357034e201abac098c6af29c83b9
+  note: Stale default-denial assumptions; environment safe/redacted by default and platform clock varies across companion executions. No raw process/environment dumps included.
+validation:
+  raw_campaign_counts_checked: true
+  all_grouped_ids_checked: true
+  math_strings_checked_against_raw_observations: true
+  overlay_artifact_hashes_checked: true
+  overlay_member_hashes_checked: 59
+  tq_json_toon_roundtrip: passed
+  toon_format_0_5_0_roundtrip: passed
+  tq_fixture_data_roundtrip: passed
+  scope: Evidence summary only; native gates and full campaign not rerun for this document.
+  macos_final_bound_source_files_checked: 874
+  macos_final_bound_before_after_identities_checked: true

@@ -534,12 +534,18 @@ baseline_cases[518]{id,exact_match}:
   manual.types.table-003,true
   manual.types.table-004,true
   manual.types.table-005,true
-references[2]:
+references[3]:
   - target: aarch64-macos
     version: jq-1.8.2
     bytes: 841504
     sha256: 2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e
     build_configuration: "--host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip"
+  - target: x86_64-windows
+    version: jq-1.8.2
+    bytes: 1035264
+    sha256: a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
+    build_configuration: "--disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all -Wl,--stack,8388608' LDFLAGS=-s"
+    release_asset_url: https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe
   - target: x86_64-linux
     version: jq-1.8.2
     bytes: 2267912

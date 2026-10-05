@@ -45,52 +45,67 @@ fn source_inventory_is_frozen_by_bytes_and_section_identity() {
 #[test]
 fn reference_identity_is_path_independent_but_not_version_or_binary_independent() {
     let pin = pin();
-    let reference = &pin.references[0];
-    let identity = ToolIdentity {
-        tool: ToolKind::Jq,
-        path: "relocated/jq".into(),
-        version: reference.version.clone(),
-        executable: tq_test_support::corpus::ArtifactIdentity {
+    for reference in &pin.references {
+        let identity = ToolIdentity {
+            tool: ToolKind::Jq,
             path: "relocated/jq".into(),
-            bytes: reference.bytes,
-            sha256: reference.sha256.clone(),
-        },
-        build_features: reference
-            .build_configuration
-            .lines()
-            .map(str::to_owned)
-            .collect(),
-        runtime_libraries: reference.runtime_libraries.clone(),
-    };
-    validate_manual_reference(&pin, &identity, &reference.target).unwrap();
-    for changed in [
-        ToolIdentity {
-            version: "jq-1.8.1".into(),
-            ..identity.clone()
-        },
-        ToolIdentity {
-            build_features: vec!["different configuration".into()],
-            ..identity.clone()
-        },
-        ToolIdentity {
+            version: reference.version.clone(),
             executable: tq_test_support::corpus::ArtifactIdentity {
-                sha256: "00".repeat(32),
-                ..identity.executable.clone()
+                path: "relocated/jq".into(),
+                bytes: reference.bytes,
+                sha256: reference.sha256.clone(),
             },
-            ..identity.clone()
-        },
-        ToolIdentity {
-            runtime_libraries: vec![tq_test_support::corpus::ArtifactIdentity {
-                path: "/usr/lib/libjq.so.1".into(),
-                bytes: 1,
-                sha256: "11".repeat(32),
-            }],
-            ..identity.clone()
-        },
-    ] {
-        assert!(validate_manual_reference(&pin, &changed, &reference.target).is_err());
+            build_features: reference
+                .build_configuration
+                .lines()
+                .map(str::to_owned)
+                .collect(),
+            runtime_libraries: reference.runtime_libraries.clone(),
+        };
+        validate_manual_reference(&pin, &identity, &reference.target).unwrap();
+        for changed in [
+            ToolIdentity {
+                version: "jq-1.8.1".into(),
+                ..identity.clone()
+            },
+            ToolIdentity {
+                build_features: vec!["different configuration".into()],
+                ..identity.clone()
+            },
+            ToolIdentity {
+                executable: tq_test_support::corpus::ArtifactIdentity {
+                    sha256: "00".repeat(32),
+                    ..identity.executable.clone()
+                },
+                ..identity.clone()
+            },
+            ToolIdentity {
+                executable: tq_test_support::corpus::ArtifactIdentity {
+                    bytes: reference.bytes + 1,
+                    ..identity.executable.clone()
+                },
+                ..identity.clone()
+            },
+            ToolIdentity {
+                tool: ToolKind::Tq,
+                ..identity.clone()
+            },
+            ToolIdentity {
+                runtime_libraries: vec![tq_test_support::corpus::ArtifactIdentity {
+                    path: "/usr/lib/libjq.so.1".into(),
+                    bytes: 1,
+                    sha256: "11".repeat(32),
+                }],
+                ..identity.clone()
+            },
+        ] {
+            assert!(validate_manual_reference(&pin, &changed, &reference.target).is_err());
+        }
+        assert!(validate_manual_reference(&pin, &identity, "unverified-target").is_err());
+        let mut ambiguous = pin.clone();
+        ambiguous.references.push(reference.clone());
+        assert!(validate_manual_reference(&ambiguous, &identity, &reference.target).is_err());
     }
-    assert!(validate_manual_reference(&pin, &identity, "unverified-target").is_err());
 }
 
 #[test]
@@ -115,6 +130,54 @@ fn linux_reference_uses_the_reviewed_static_official_release() {
         reference.runtime_libraries,
         [] as [tq_test_support::corpus::ArtifactIdentity; 0]
     );
+}
+
+#[test]
+fn windows_reference_uses_the_reviewed_static_official_release() {
+    let pin = pin();
+    let reference = pin
+        .references
+        .iter()
+        .find(|reference| reference.target == "x86_64-windows")
+        .expect("reviewed Windows reference");
+    assert_eq!(reference.version, "jq-1.8.2");
+    assert_eq!(reference.bytes, 1_035_264);
+    assert_eq!(
+        reference.sha256,
+        "a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627"
+    );
+    assert_eq!(
+        reference.build_configuration,
+        "--disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all -Wl,--stack,8388608' LDFLAGS=-s"
+    );
+    assert_eq!(
+        reference.release_asset_url.as_deref(),
+        Some("https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-windows-amd64.exe")
+    );
+    assert_eq!(
+        reference.runtime_libraries,
+        [] as [tq_test_support::corpus::ArtifactIdentity; 0]
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn native_windows_reference_matches_the_reviewed_pin_when_provisioned() {
+    let identity = tq_test_support::compatibility::discover_tool(
+        ToolKind::Jq,
+        &tq_test_support::compatibility::ExecutableConfig::from_env(),
+        root(),
+    )
+    .expect("native jq discovery");
+    let Some(identity) = identity else {
+        return;
+    };
+    validate_manual_reference(
+        &pin(),
+        &identity,
+        &tq_test_support::compatibility::manual_host_target(),
+    )
+    .expect("native jq must match the authentic reviewed Windows artifact");
 }
 
 #[test]

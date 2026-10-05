@@ -468,8 +468,16 @@ fn remaining_files_share_order_and_source_metadata() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let expected = format!("[\"{}\",3,2,\"{}\",1]\n", first.display(), second.display());
-    assert_eq!(output.stdout, expected.as_bytes());
+    let mut expected = serde_json::to_vec(&serde_json::json!([
+        first.to_str().expect("first path"),
+        3,
+        2,
+        second.to_str().expect("second path"),
+        1,
+    ]))
+    .expect("source metadata serializes");
+    expected.push(b'\n');
+    assert_eq!(output.stdout, expected);
 }
 
 #[test]

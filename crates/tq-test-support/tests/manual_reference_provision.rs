@@ -327,6 +327,43 @@ mod unix {
     }
 
     #[test]
+    fn windows_shell_default_resolves_exe_and_verifies_cached_bytes() {
+        let directory = tempfile::tempdir().expect("reference fixture directory");
+        let reference = directory.path().join("target/reference-build/jq/jq.exe");
+        fs::create_dir_all(reference.parent().unwrap()).unwrap();
+        let bytes = b"#!/bin/sh\nexit 0\n";
+        fs::write(&reference, bytes).unwrap();
+        fs::set_permissions(&reference, fs::Permissions::from_mode(0o755)).unwrap();
+        let uname = directory.path().join("uname");
+        fs::write(&uname, b"#!/bin/sh\nprintf 'MINGW64_NT-10.0\\n'\n").unwrap();
+        fs::set_permissions(&uname, fs::Permissions::from_mode(0o755)).unwrap();
+        for (expected, succeeds) in [(digest(bytes), true), ("00".repeat(32), false)] {
+            let output = Command::new("sh")
+                .arg(root().join("scripts/reference-jq-provision.sh"))
+                .current_dir(directory.path())
+                .env(
+                    "PATH",
+                    format!("{}:/usr/bin:/bin", directory.path().display()),
+                )
+                .env("TQ_REFERENCE_JQ_SHA256", expected)
+                .env_remove("TQ_JQ")
+                .env_remove("TQ_REFERENCE_JQ")
+                .env_remove("TQ_REFERENCE_JQ_URL")
+                .output()
+                .unwrap();
+            assert_eq!(output.status.success(), succeeds, "{output:?}");
+            if succeeds {
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout).trim(),
+                    reference.to_str().unwrap()
+                );
+            } else {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("SHA-256 mismatch"));
+            }
+        }
+    }
+
+    #[test]
     fn missing_explicit_reference_is_a_release_gate_failure() {
         let directory = tempfile::tempdir().expect("reference fixture directory");
         let output = run(

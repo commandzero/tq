@@ -26,7 +26,7 @@ The system SHALL provide bounded jq-compatible `test`, `match`, `capture`, `scan
 - **THEN** jq's complete output sequence is preserved, including empty branches and errors
 
 ### Requirement: Date and platform built-ins
-The system SHALL provide the pinned manual's date/time behavior and policy-governed environment/platform I/O with explicit platform identities. The CLI SHALL permit the documented ambient operations by default; library callers SHALL retain denial controls. `input_filename` and `input_line_number` SHALL report the current consumed input's metadata, including values consumed by `input` and `inputs`, rather than retaining the first input's location. Clock and local-time tests SHALL use a controlled platform contract rather than literal wall-clock equality between separate processes.
+The system SHALL provide the pinned manual's date/time behavior and policy-governed environment/platform I/O with explicit platform identities. The CLI SHALL permit the documented ambient operations by default; library callers SHALL retain denial controls. `input_filename` and `input_line_number` SHALL report the current consumed input's metadata, including values consumed by `input` and `inputs`, rather than retaining the first input's location. Clock and local-time tests SHALL use a controlled platform contract rather than literal wall-clock equality between separate processes. Acceptance SHALL require fresh matched jq 1.8.2 evidence on local macOS, ironhide Linux x86_64, and smokescreen Windows 11 Pro `x86_64-pc-windows-msvc` through native PowerShell, as required by `cross-tool-compatibility`. The earlier native-Windows deferral is superseded; SSH into WSL and non-Windows execution SHALL NOT qualify. Missing native evidence SHALL remain incomplete, not an accepted platform disparity.
 
 #### Scenario: UTC round trip
 - **WHEN** an admitted timestamp is parsed, converted, and formatted in UTC
@@ -51,3 +51,7 @@ The system SHALL provide the pinned manual's date/time behavior and policy-gover
 #### Scenario: Platform-specific date behavior
 - **WHEN** a manual date format depends on the C library or timezone
 - **THEN** the gate compares matched platform settings and preserves any reference error as an executable contract
+
+#### Scenario: Native Windows date and metadata acceptance
+- **WHEN** date/time, environment-policy, filename, and physical-line cases execute on smokescreen
+- **THEN** native Windows jq 1.8.2 and tq observations from PowerShell retain reference/target identity and binary/newline behavior, without using WSL evidence or treating the implemented capture backend as completed acceptance; strict-report differences remain differences, not exact matches

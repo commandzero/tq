@@ -109,19 +109,27 @@ fn powershell_preserves_quoted_filter_variables_and_paths_when_available() {
 #[cfg(windows)]
 #[test]
 fn cmd_preserves_quoted_filter_variables_and_paths() {
+    use std::os::windows::process::CommandExt as _;
+
     let directory = tempfile::tempdir().expect("cmd fixture directory");
     let filter = directory.path().join("filter with spaces.jq");
     fs::write(&filter, ".[ $name ]").expect("cmd filter writes");
-    let output = Command::new("cmd.exe")
-        .args([
-            "/C",
-            "echo {\"foo\":\"bar\"}|\"%TQ_BIN%\" --arg name foo -ijson -ojson -c -f \"%FILTER%\"",
-        ])
-        .env("TQ_BIN", tq_binary())
-        .env("FILTER", &filter)
-        .output()
-        .expect("run cmd filter");
-    assert_success(&output);
+    for command in [
+        r#""echo {"foo":"bar"}|"%TQ_BIN%" --arg name foo -ijson -ojson -c ".[ $name ]"""#,
+        r#""echo {"foo":"bar"}|"%TQ_BIN%" --arg name foo -ijson -ojson -c -f "%FILTER%"""#,
+    ] {
+        // cmd uses shell quoting, not CRT argv escaping; /S strips the outer quotes.
+        let output = Command::new("cmd.exe")
+            .args(["/D", "/S", "/C"])
+            .raw_arg(command)
+            .env("TQ_BIN", tq_binary())
+            .env("FILTER", &filter)
+            .env_remove("HOME")
+            .env_remove("JQ_LIBRARY_PATH")
+            .output()
+            .expect("run cmd filter");
+        assert_success(&output);
+    }
 }
 
 #[cfg(windows)]
@@ -133,5 +141,5 @@ fn windows_binary_mode_keeps_raw_output_lf_terminated() {
         .expect("run Windows binary output");
     assert!(output.status.success());
     assert_eq!(output.stdout, b"line\nnext\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }

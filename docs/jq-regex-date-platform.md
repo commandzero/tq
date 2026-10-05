@@ -12,8 +12,10 @@ description: Safe-library behavior, resource limits, and ambient capability cont
 The cases cover syntax, Unicode scalar offsets, optional captures, match order,
 flags, splitting and substitution, UTC arrays, epoch ranges, environment shape,
 and input metadata. The exploratory run used jq 1.7.1. The full campaign uses
-the repository's pinned jq 1.8.x binary and records its exact identity in
-the generated campaign report.
+pinned jq 1.8.2 reference binaries and records each executable, build, runtime,
+and target identity in the generated campaign report. Earlier jq 1.8.1
+checkpoints remain historical; they do not renew current acceptance or
+identity-bound disparity approvals.
 
 ## Selected dependencies and limits
 
@@ -74,11 +76,30 @@ cargo test -p tq-core regex_date_platform_release_host_contract
 cargo test -p tq-cli ambient
 ```
 
-The same checks run on Linux and macOS before release publication through the
-reusable `.github/workflows/regex-date-platform.yml` workflow. It also supports
-manual runs. Native Windows execution is deferred
-until a runner is available. Windows test definitions remain in the repository;
-their presence does not establish Windows compatibility.
+The reusable `.github/workflows/regex-date-platform.yml` workflow runs the
+Linux/macOS checks and supports manual runs. Workflow coverage alone does not
+establish final acceptance. The user superseded the earlier Windows deferral:
+the active change requires fresh native jq 1.8.2 evidence on local macOS,
+ironhide Linux x86_64, and smokescreen Windows 11 Pro
+`x86_64-pc-windows-msvc`. Windows acceptance must execute native Windows jq/tq
+binaries in native PowerShell, including applicable shell, binary/newline,
+date/environment, and metadata witnesses. SSH into WSL, cross-compilation,
+and non-Windows PowerShell do not count. Missing evidence blocks completion;
+Windows test definitions alone do not establish compatibility.
+
+Native Windows compatibility capture is implemented with overlapped named
+pipes and JobObjects. Native CPU/RSS accounting uses a retained exact-child
+handle for `GetProcessTimes` and `PeakWorkingSetSize`, with a surviving
+isolated worker. Validation remains incomplete: separate control executions
+vary in 15.625 ms CPU quanta, with differences up to 62.5 ms exceeding the
+unchanged 20 ms check. Issue #31 remains open and no performance acceptance is
+claimed. WSL results, wall time, or placeholder zeros cannot replace native
+resource validation. Strict-report differences remain differences, not exact
+matches; no new math disparity or renewed approval is authorized.
+
+The user disabled Smart App Control on development-only smokescreen and
+reported native launch verified with state `0`. No further security changes
+are needed; this launch prerequisite does not establish acceptance.
 
 ## Environment and input metadata
 

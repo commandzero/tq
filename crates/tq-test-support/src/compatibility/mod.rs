@@ -45,8 +45,8 @@ pub use process::{
 };
 pub use report::{
     CapabilityCounts, CapabilityDisposition, CaseReport, CompatibilityReport, CoverageCount,
-    FinalStatus, ObservationState, REPORT_SCHEMA_VERSION, SemanticDiff, ToolObservation,
-    encode_hex, tq_contract_matches,
+    FinalStatus, ObservationState, REPORT_SCHEMA_VERSION, ReferenceExecution, SemanticDiff,
+    ToolObservation, encode_hex, tq_contract_matches,
 };
 pub use runner::{
     CampaignProfile, RunnerError, compare_manual, compare_manual_with_disparities, run_campaign,

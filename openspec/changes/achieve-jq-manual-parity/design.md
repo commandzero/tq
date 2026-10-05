@@ -22,11 +22,11 @@ Maintain `docs/tests/jq-manual/coverage.md` as the public difference summary, wi
 
 ### One strict campaign, separate source provenance
 
-Extend the existing compatibility runner rather than building a second test framework. Pin the imported source fingerprint and jq 1.8.1 executable/build configuration. Resolve source entries through the normalized TOON review model to executable cases. The original 518 cases are a minimum; enumerate missing documented overloads, flags, shell forms, and process behavior before calling the inventory complete.
+Extend the existing compatibility runner rather than building a second test framework. Pin the imported jq 1.8 source fingerprint and each target's jq 1.8.2 executable/build configuration and runtime dependencies. Preserve earlier jq 1.8.1 reports as historical evidence, not current reference validation or renewed approvals. Resolve source entries through the normalized TOON review model to executable cases. The original 518 cases are a minimum; enumerate missing documented overloads, flags, shell forms, and process behavior before calling the inventory complete.
 
 Keep corrected manual text separate from execution verdicts. Invalid `frexp/2` and `modf/2` probes still execute as negative contracts, while valid `/0` witnesses execute as positive contracts. The two whitespace corrections retain their original source evidence. Removing a case, accepting an expected difference, or marking a probe unavailable cannot improve the passing percentage.
 
-Use semantic ordered JSON comparison for ordinary programs, and exact observations for compact output, raw output, framing, colors, explicit stderr payloads, and `tojson`. Ordinary compiler diagnostic wording may differ when its error class, status, source context, and stream placement satisfy the contract. Do not normalize program-emitted stderr, error values, or numeric values. Identity commands get real tq assertions, never automatic success or jq impersonation. Test strict JSON parser behavior with `-i json`, and test automatic detection independently with valid JSON streams.
+Use semantic ordered JSON comparison for ordinary programs, and exact observations for undecorated compact output, raw output, framing, explicit stderr payloads, and `tojson`. Retain exact observed color bytes, but judge tq presentation against the archived `output-colors` main spec rather than requiring jq's default ANSI bytes. Its shared tq palette, structural quote styles, `TQ_COLORS` precedence, seven/eight-slot `JQ_COLORS` parsing and tq fallback, and all-format coloring supersede this change's earlier exact-default-color policy. Check terminal decisions against jq where the contracts align, and verify that removing only tq-generated SGR reproduces the corresponding plain tq bytes. Explicit presentation differences stay separately identified; they are neither exact jq color matches nor newly approved safe-library disparities. Do not strip program-generated escapes or weaken data, framing, stderr, or numeric comparisons. Ordinary compiler diagnostic wording may differ when its error class, status, source context, and stream placement satisfy the contract. Do not normalize program-emitted stderr, error values, or numeric values. Identity commands get real tq assertions, never automatic success or jq impersonation. Test strict JSON parser behavior with `-i json`, and test automatic detection independently with valid JSON streams.
 
 Keep fixture execution self-contained. A companion-repository source audit may require the pinned manual checkout, but running committed cases must not depend on a developer-specific sibling path. Reports record reference identity, target, environment, denominator, and every failure, and the strict campaign exits nonzero on missing evidence.
 
@@ -100,7 +100,7 @@ Add source-linked composition witnesses without modifying the original manual
 snapshot or its protected case IDs. Test each affected operation both inside a
 definition and around a call, plus filter/value parameters, nested captures,
 recursion, empty/multiple results, errors, cancellation, and tight limits.
-Regenerate both native campaigns and executable-bound approvals after the
+Regenerate all three required native campaigns and review executable-bound approvals after the
 implementation stabilizes. Earlier matching reports remain checkpoint evidence.
 
 ### Separate numeric provenance from computed values
@@ -145,16 +145,46 @@ The process CLI admits the manual's environment, clock, file metadata, module lo
 
 This is a deliberate change to earlier CLI confinement. Document the security consequence of executing startup/module code from jq-compatible locations. Tests use controlled home directories, environment variables, clocks, paths, and terminal state rather than a developer's ambient configuration. Never add tq-specific allow flags merely to make a reference case pass.
 
-## Native Windows verification deferral
+## Required native platform acceptance
 
-Native Windows execution is deferred because no runner is available. Retain the
-PowerShell/cmd and binary/newline tests, but do not count non-Windows PowerShell
-execution or compilation as Windows evidence. macOS and Linux campaigns remain
-required for this change. Record Windows as unverified in release evidence and
-documentation; do not approve Windows disparities or advertise verified Windows
-manual compatibility without a native pinned-jq campaign. Reopen verification
-when a native runner is available. This explicit deferral does not waive missing
-cases, failed tests on verified hosts, or any other release target.
+The user superseded the Windows deferral. Final acceptance requires fresh,
+source/executable-bound jq 1.8.2 campaigns on local macOS, ironhide Linux x86_64,
+and smokescreen Windows 11 Pro `x86_64-pc-windows-msvc`. Windows commands must
+execute native Windows jq/tq binaries in native PowerShell. An SSH session into
+WSL proves only Linux behavior, not Windows acceptance; cross-compilation and
+PowerShell on macOS/Linux also do not count. Retain applicable cmd invocation,
+binary/newline, terminal, date/environment, module/path, and live unbuffered
+witnesses. Missing execution or reference identity blocks acceptance, not merely
+an unqualified compatibility claim.
+
+Native Windows compatibility capture is implemented with overlapped named
+pipes and JobObjects for bounded child execution, concurrent stdin/stdout/stderr
+handling, exact bytes/status, and timeout cleanup/reaping. Capture observations
+retain wall time and native executable/reference identities. Implementation
+alone does not establish acceptance. Preserve failed, timed-out, and incomplete
+captures as such; strict-report differences remain differences, not matches.
+
+Native CPU/RSS accounting is also implemented: retain the exact child's process
+handle for `GetProcessTimes` and `PeakWorkingSetSize` observations, with a
+surviving isolated worker. Accounting implementation is distinct from its
+validation. Separate control executions vary in 15.625 ms CPU quanta, with
+observed differences up to 62.5 ms exceeding the unchanged 20 ms check.
+Validation remains incomplete; no tolerance change or performance acceptance
+is authorized, and issue #31 remains open. Wall time, WSL measurements,
+placeholder zeros, or successful compatibility capture cannot replace native
+resource validation. Renew target-scoped disparity evidence against jq 1.8.2
+only after review; existing approvals are not portable to Windows or a new
+reference identity, and this revision approves no new math differences.
+
+The user disabled Smart App Control on development-only smokescreen and
+reported native launch verified with state `0`. No further security changes
+are needed. This launch prerequisite does not establish campaign, resource,
+or performance acceptance.
+
+The earlier deferral in `tasks.md`, `platform-reference-investigation.md`, and
+`implementation-review.md` is superseded acceptance guidance, not a waiver.
+Those task/history files are outside this planning edit's ownership; their
+checkpoints remain historical and task reconciliation is still required.
 
 ## Risks / Trade-offs
 

@@ -325,7 +325,7 @@ fn supervise_child_until_deadline(
                     143
                 });
             }
-            return Ok(status.code().unwrap_or_else(|| {
+            return Ok(status.code().unwrap_or({
                 #[cfg(unix)]
                 {
                     use std::os::unix::process::ExitStatusExt as _;

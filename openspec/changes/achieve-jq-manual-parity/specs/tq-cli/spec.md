@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Output formatting controls
-TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. When no output-format selector is supplied and none of `-c`/`--compact-output`, `--seq`, or `--unframed` is supplied, structured output SHALL emit zero or more canonical TOON values, each followed by LF without RS. `--seq` SHALL select JSON Text Sequence input. With default TOON output or explicit TOON output (`-o toon`/`--output-format toon`), it SHALL select RS-framed TOON Text Sequence output; with JSON output (`-o json`/`--output-format json` or `-c`), it SHALL select RS-framed JSON Text Sequence output. Other explicit native structured outputs SHALL retain their native framing. `-o toon-seq`/`--output-format toon-seq` SHALL select TOON sequence output without changing input selection. `-o json` SHALL select JSON, pretty by default. `-c` and `--compact-output`, including bundled short options, SHALL select compact JSON without requiring `-o json`. An explicit TOON output selection combined with compact JSON SHALL fail before input consumption regardless of argument order. Explicit JSON selection with `-c` SHALL be valid in either order. JSON Lines output SHALL remain compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, forced color, and raw or joined output modes. Compact output, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible options MUST fail before input is consumed. An output-format selector MUST NOT silently select an input parser; `--seq` explicitly selects JSON sequence input and framing only for TOON or JSON output.
+TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. When no output-format selector is supplied and none of `-c`/`--compact-output`, `--seq`, or `--unframed` is supplied, structured output SHALL emit zero or more canonical TOON values, each followed by LF without RS. `--seq` SHALL select JSON Text Sequence input. With default TOON output or explicit TOON output (`-o toon`/`--output-format toon`), it SHALL select RS-framed TOON Text Sequence output; with JSON output (`-o json`/`--output-format json` or `-c`), it SHALL select RS-framed JSON Text Sequence output. Other explicit native structured outputs SHALL retain their native framing. `-o toon-seq`/`--output-format toon-seq` SHALL select TOON sequence output without changing input selection. `-o json` SHALL select JSON, pretty by default. `-c` and `--compact-output`, including bundled short options, SHALL select compact JSON without requiring `-o json`. An explicit TOON output selection combined with compact JSON SHALL fail before input consumption regardless of argument order. Explicit JSON selection with `-c` SHALL be valid in either order. JSON Lines output SHALL remain compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, and raw or joined output modes. JSON Lines and its NDJSON alias SHALL accept color under the archived `output-colors` main spec, including automatic terminal color and forced `-C`; removing tq-generated SGR SHALL preserve the plain compact LF-terminated bytes. Consumers requiring directly parseable JSON Lines SHALL use redirected automatic output or `-M`. Compact output, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible options MUST fail before input is consumed. An output-format selector MUST NOT silently select an input parser; `--seq` explicitly selects JSON sequence input and framing only for TOON or JSON output.
 
 #### Scenario: Default TOON
 - **WHEN** `tq '.'` runs without output options
@@ -36,8 +36,13 @@ TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and s
 - **THEN** the CLI reports an incompatible-option usage error before reading input
 
 #### Scenario: Raw JSON Lines conflict
-- **WHEN** JSON Lines output is combined with raw, joined, or forced-color output
+- **WHEN** JSON Lines output is combined with raw or joined output
 - **THEN** the CLI reports an incompatible-option usage error before reading input
+
+#### Scenario: Colored JSON Lines
+- **WHEN** JSON Lines output is combined with forced color
+- **THEN** tq accepts the option and styles compact JSON tokens while preserving the underlying LF-terminated serialization
+- **AND** with terminal capability permitted, JSON Lines and its NDJSON alias use the shared tq palette, and removing generated SGR yields exactly the corresponding plain compact records and LF framing
 
 ### Requirement: Remaining input consumption
 `input` and `inputs` SHALL share the top-level evaluator's ordered input cursor, including stdin and file arguments. `input` SHALL pull one value and report jq's end-of-input error when exhausted; `inputs` SHALL pull all remaining values and emit nothing at exhaustion. Consumed documents MUST NOT later become top-level evaluation inputs. `--null-input` SHALL suppress only the implicit initial read, not reads requested by these built-ins. Decoding, proxy, byte, depth, cancellation, and source-order behavior MUST remain the same as top-level CLI processing. Source filename and line metadata SHALL reflect the active consumed input.
@@ -63,7 +68,7 @@ TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and s
 - **THEN** it reads those values into one array despite suppressing the implicit top-level read
 
 ### Requirement: Deferred jq CLI options are rejected clearly
-Every option documented in the pinned jq manual SHALL implement its documented contract, subject to the explicit TOON default-output and product-identity contracts. Such options MUST NOT be reported as deferred. Unknown options and historical options absent from the reference SHALL fail with the reference usage contract and MUST NOT be silently ignored.
+Every option documented in the pinned jq manual SHALL implement its documented contract, subject to the explicit TOON default-output, product-identity, and archived `output-colors` presentation contracts. Such options MUST NOT be reported as deferred. Unknown options and historical options absent from the reference SHALL fail with the reference usage contract and MUST NOT be silently ignored.
 
 #### Scenario: Deferred module path
 - **WHEN** a user supplies the documented jq library-path syntax

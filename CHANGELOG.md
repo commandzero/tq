@@ -31,6 +31,7 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
+- Large comma-expression queries no longer overflow the Windows CLI's default stack (#68).
 - Enforced configured nesting-depth and token-size limits when decoding JSON byte slices, whether explicitly selected or auto-detected (#41, #46).
 - `-R -s` now concatenates multiple sources into one bounded string, including remaining-input access with `-n` (#46).
 - Input filename and line metadata now follow the shared input cursor and physical source position (#41, #42, #46).

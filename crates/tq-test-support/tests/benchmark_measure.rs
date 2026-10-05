@@ -4,8 +4,21 @@ use std::{path::PathBuf, time::Duration};
 
 use tq_test_support::benchmark::{
     BenchmarkInvocation, BenchmarkSample, MeasuredStatus, RssProvenance, measure_process,
-    measure_process_uninstrumented, summarize_samples,
+    summarize_samples,
 };
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use tq_test_support::benchmark::measure_process_uninstrumented;
+
+#[cfg(windows)]
+fn measurement_test_slot() -> std::sync::MutexGuard<'static, ()> {
+    // Serialize test cases, not their children: the allocation case still runs
+    // two simultaneous measurements. Unrelated harness tests must not consume
+    // the production registry's four slots and turn success tests into busy tests.
+    static SLOT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    SLOT.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn invocation(args: &[&str], output_limit: u64, timeout: Duration) -> BenchmarkInvocation {
     BenchmarkInvocation {
@@ -23,6 +36,8 @@ fn invocation(args: &[&str], output_limit: u64, timeout: Duration) -> BenchmarkI
 
 #[test]
 fn sleeper_timeout_is_preserved_as_a_row_outcome() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let outcome = measure_process(&invocation(
         &["sleep", "500"],
         1024,
@@ -34,12 +49,16 @@ fn sleeper_timeout_is_preserved_as_a_row_outcome() {
     assert!(outcome.peak_rss_bytes.expect("timeout RSS") > 0);
     assert!(matches!(
         outcome.rss_provenance,
-        RssProvenance::LinuxWait4 | RssProvenance::DarwinWait4
+        RssProvenance::LinuxWait4
+            | RssProvenance::DarwinWait4
+            | RssProvenance::WindowsPeakWorkingSet
     ));
 }
 
 #[test]
 fn output_limit_and_first_result_are_measured_without_reframing() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let limited = measure_process(&invocation(
         &["output", "1048576"],
         1024,
@@ -77,6 +96,8 @@ fn output_limit_and_first_result_are_measured_without_reframing() {
 
 #[test]
 fn stdout_and_stderr_captures_are_independently_bounded() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let limited = measure_process(&invocation(
         &["streams", "1025", "2048"],
         1024,
@@ -157,6 +178,8 @@ fn stdout_and_stderr_captures_are_independently_bounded() {
 
 #[test]
 fn cpu_and_memory_metrics_include_authoritative_rss_provenance() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let outcome = measure_process(&invocation(
         &["memory", "8388608"],
         1024,
@@ -169,12 +192,16 @@ fn cpu_and_memory_metrics_include_authoritative_rss_provenance() {
     assert!(outcome.peak_rss_bytes.expect("authoritative RSS") > 0);
     assert!(matches!(
         outcome.rss_provenance,
-        RssProvenance::LinuxWait4 | RssProvenance::DarwinWait4
+        RssProvenance::LinuxWait4
+            | RssProvenance::DarwinWait4
+            | RssProvenance::WindowsPeakWorkingSet
     ));
 }
 
 #[test]
 fn rss_limit_stops_the_process_when_host_sampling_is_available() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let mut request = invocation(&["memory", "8388608"], 1024, Duration::from_secs(2));
     request.rss_limit = Some(1);
     let outcome = measure_process(&request).expect("RSS-limited measurement");
@@ -249,6 +276,8 @@ fn remove_captures(outcome: &tq_test_support::benchmark::MeasuredOutcome) {
 
 #[test]
 fn direct_measurement_preserves_literal_arguments_and_stdin_eof() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let mut request = probe(&["literal-args", "space value", "* ; $HOME", "quote'\""]);
     request.retain_output = true;
     let outcome = measure_process(&request).unwrap();
@@ -275,6 +304,8 @@ fn direct_measurement_preserves_literal_arguments_and_stdin_eof() {
 
 #[test]
 fn blocked_stdin_and_nonzero_exit_complete_with_native_usage() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let mut request = probe(&["blocked-input", "10000"]);
     request.stdin = vec![b'x'; 8 * 1024 * 1024];
     request.timeout = Duration::from_millis(50);
@@ -295,6 +326,8 @@ fn blocked_stdin_and_nonzero_exit_complete_with_native_usage() {
 
 #[test]
 fn independent_released_allocations_do_not_accumulate_across_children() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let low = measure_process(&probe(&["noop"])).unwrap();
     let high = measure_process(&probe(&["allocate-burst", "67108864"])).unwrap();
     let after = measure_process(&probe(&["noop"])).unwrap();
@@ -311,6 +344,8 @@ fn independent_released_allocations_do_not_accumulate_across_children() {
 
 #[test]
 fn deadline_exit_races_resolve_to_one_terminal_outcome() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     for _ in 0..40 {
         let mut request = probe(&["sleep", "5"]);
         request.timeout = Duration::from_millis(5);
@@ -326,6 +361,8 @@ fn deadline_exit_races_resolve_to_one_terminal_outcome() {
 
 #[test]
 fn spawn_failure_is_an_infrastructure_error() {
+    #[cfg(windows)]
+    let _slot = measurement_test_slot();
     let directory = tempfile::tempdir().unwrap();
     let mut request = probe(&["noop"]);
     request.executable = directory.path().join("absent-executable");
@@ -336,6 +373,7 @@ fn spawn_failure_is_an_infrastructure_error() {
 }
 
 #[test]
+#[cfg(unix)]
 fn cancellation_terminates_and_retains_diagnostics_without_a_valid_sample() {
     use std::sync::{
         Arc,

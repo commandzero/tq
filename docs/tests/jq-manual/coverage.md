@@ -13,7 +13,7 @@ A mapped example is covered, but coverage alone does not mean it passes.
 
 ## Results
 
-The latest recorded macOS comparison reports:
+The macOS comparison reports:
 
 | Check | Exact matches | Differences | Cases |
 | --- | ---: | ---: | ---: |
@@ -86,7 +86,7 @@ These results describe the measured build, not every platform or release.
    jq 1.8.2 prints extra internal self-test messages that tq does not emit.
    Both tools pass the supplied test and exit 0.
 
-All 6 color cases are expected differences from tq's presentation styling.
+On macOS, all 6 color cases are expected presentation differences.
 They produce identical output after removing ANSI styling, even with the same palette.
 
 The reports mark a color difference as expected only when the observed data and
@@ -94,6 +94,59 @@ process behavior agree. Exact colored-byte checks remain strict.
 
 The math acceptance applies only to the 2 measured inputs.
 The suite retains every exact observation without blanket numerical tolerances.
+
+## Native platform results
+
+Optimized-build comparisons ran on local macOS, Linux (`ironhide`), and native
+Windows 11 Pro (`smokescreen`). Linux and Windows used release builds; the final
+macOS run used the optimized bench-profile binary left by preflight.
+WSL was transport only, not Windows test execution.
+
+| Platform | Primary exact / cases | Compact JSON exact / cases | TOON matches / cases |
+| --- | ---: | ---: | ---: |
+| macOS | 943/952 | 919/921 | 921/921 |
+| Linux | 937/952 | 913/921 | 921/921 |
+| Windows | 912/952 | 879/921 | 921/921 |
+
+The primary and compact campaigns overlap. Their combined difference counts
+are **9 on macOS, 15 on Linux, and 60 on Windows**; do not add the columns.
+All three strict commands exit 1. These are observed differences, not additional
+approvals or an all-platform compatibility pass.
+
+### Additional platform differences
+
+1. **Math rounding:** Linux `y0`/`yn` differ by 1 ULP; Windows by 2 ULP.
+   This affects `manual.math.y0`, `manual.math.yn`, and their
+   `manual.composition.arity.*` witnesses. Linux/Windows `erfc(2)` differs
+   by 1 ULP; `tgamma(0.5)` differs by 1 ULP.
+2. **Large/non-finite scale exponents:**
+   `manual.audit.math.integer-scale-boundary` and
+   `manual.composition.arity.scalbln.2` produce different values on Linux
+   and Windows. jq returns `[0,M,0,0,0]`; tq returns `[M,M,0,2,2]`, where
+   `M` is the largest finite binary64 value. **This is not rounding.**
+   tq uses safe Rust conversion rules; jq's out-of-range C conversions are
+   platform-dependent.
+3. **Unavailable Windows jq math functions:** `drem`, `exp10`, `gamma`,
+   `scalb`, and `significand` are absent from the pinned Windows jq build.
+   tq implements them. Their manual/composition witnesses and the `scalb`
+   boundary witness account for 11 differences.
+4. **Windows line endings:** 32 raw-input, streaming, I/O, and CLI cases
+   observe jq CRLF versus tq LF. Structured jq programs use explicit
+   `--binary`; raw contracts keep their original arguments. No captured
+   bytes are normalized into an exact match.
+5. **Windows ANSI and test-runner output:** the 6 color cases and
+   `manual.invoking.run-tests` also retain native newline differences.
+6. **Windows module lookup:** `manual.modules.path-tilde` and
+   `manual.modules.path-origin` fail in the pinned jq build while tq resolves
+   the supplied paths. These remain unapproved differences.
+
+[Platform witness metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
+records every difference ID, exact math observations, binary hashes, and the
+shared source snapshot. Raw reports remain under ignored `target/` storage.
+
+Remaining refinements are tracked separately:
+- [Windows compatibility — #69](https://github.com/commandzero/tq/issues/69).
+- [Linux compatibility — #70](https://github.com/commandzero/tq/issues/70).
 
 ## Longest-match regex support
 
@@ -121,9 +174,16 @@ These measurements are not general performance guarantees.
 - [Source inventory](../../../tests/compatibility/reviews/jq-manual/source-examples.toon): manual examples and source-to-test mappings.
 - [Test setup](../../../tests/compatibility/readme.md#jq-manual-coverage): reference setup and coverage checks.
 
-The core suite passed, including focused runs of 39 core regex tests and 3 CLI
-regex tests. Scoped regex Clippy and formatting checks passed. Full-workspace testing
-has not been verified to completion.
+- All-target/all-feature Clippy and workspace tests passed on all three hosts.
+- macOS final preflight passed, including formatting and strict OpenSpec validation.
+- Native PowerShell/cmd, binary-output, resource, and large-query stack tests passed.
+- Windows release builds and both formerly overflowing arity queries passed.
+- Windows CPU/RSS collection passes same-child counter checks, but timing
+  calibration remains incomplete. Separate control runs exceed the unchanged
+  20 ms CPU tolerance; no cross-platform performance acceptance is claimed.
+- The full compatibility campaign still has stale embedded-denial fixtures
+  running through the permissive CLI. Its three clock-comparison harness errors
+  remain unresolved; the manual campaign is a separate check.
 
 Run a new comparison from the repository root after configuring the reference
 and building tq:

@@ -3,7 +3,7 @@
 Matching tasks in this plan target jq behavior subject to the reviewed safe-library disparity contract. Completion requires implemented and tested behavior or a specifically reviewed, reproducible library/platform disparity; unresolved implementation gaps stay unchecked. Exact-parity reports remain distinct from completion with documented disparities.
 
 - [x] 1.8 Add reviewed disparity validation and separate exact/completion gate modes; reject stale or unknown approvals, preserve exact observations and all prior matches, and keep skips/timeouts/crashes as failures.
-- [x] 1.1 Pin the manual fingerprint, section inventory, and jq 1.8.1 build identity; verify a changed source or executable fingerprint fails reference validation.
+- [x] 1.1 Pin the manual fingerprint, section inventory, and matched-platform jq 1.8.2 build identities; verify a changed source or executable fingerprint fails reference validation.
 - [x] 1.2 Connect `gap-inventory.toon` to the executable catalog and review model; verify exactly 198 `failure` rows, 15 `expected-difference` rows, and 2 `reference-discrepancy` rows are accounted for, with no duplicate or missing IDs.
 - [x] 1.3 Separate source corrections from execution verdicts; verify both invalid arity probes, corrected `/0` witnesses, and both whitespace corrections retain original provenance and execute.
 - [x] 1.4 Add the strict manual campaign exit policy; test injected mismatch, skip, missing reference, timeout, normalization error, and deleted source mapping all cause nonzero exit.
@@ -78,7 +78,7 @@ Matching tasks in this plan target jq behavior subject to the reviewed safe-libr
 - [x] 8.2 Implement all documented array/null pattern/flag forms and flag combinations; verify argument interpretation and inline, extended, longest, multiline, and empty-match behavior against jq.
 - [x] 8.3 Preserve capture scope and replacement generator results in sub/gsub; verify zero/multiple replacement choices, unmatched captures, Unicode offsets, and errors.
 - [x] 8.4 Run every `regex` inventory entry and existing regex resource tests; replace historical policy labels with exact results or specifically reviewed safe-library disparities and verify bounded hostile-pattern failures.
-- [x] 8.5 Verify date, environment, clock, filename, and line behavior under controlled locale/timezone/files; test CLI default access and embedded denial independently on matched macOS and Linux platforms. Retain native Windows verification as explicitly deferred and unverified until a runner is available.
+- [x] 8.5 Verify date, environment, clock, filename, and line behavior under controlled locale/timezone/files; test CLI default access and embedded denial independently on local macOS, ironhide Linux, and native smokescreen Windows. WSL execution does not count as Windows evidence.
 
 ## 9. Modules, colors, and remaining CLI contracts
 
@@ -91,14 +91,24 @@ Matching tasks in this plan target jq behavior subject to the reviewed safe-libr
 
 ## 10. Cross-platform acceptance and release evidence
 
-- [ ] 10.1 Wire the strict campaign to advertised release OS/architectures with pinned matched jq builds; verify macOS and Linux execution and that missing target/reference evidence blocks a compatibility claim. Record native Windows verification as explicitly deferred and unverified without accepting or skipping its cases into passing totals.
-- [x] 10.2 Verify actual POSIX invocation on macOS and Linux, including quoted filters, variables, paths, and outputs. Retain PowerShell/cmd and Windows binary/newline tests, document native Windows execution as deferred until a runner is available, and do not count non-Windows shell execution as Windows evidence.
+- [ ] 10.1 Wire the strict campaign to advertised release OS/architectures with pinned matched jq builds; verify macOS and Linux execution and that missing target/reference evidence blocks a compatibility claim. Require native Windows execution on smokescreen alongside local macOS and ironhide Linux; preserve every non-match without accepting or skipping it into passing totals.
+- [x] 10.2 Verify actual POSIX invocation on macOS and Linux, including quoted filters, variables, paths, and outputs. Verify native PowerShell/cmd and Windows binary/newline tests on smokescreen; do not count non-Windows shell execution as Windows evidence.
 - [ ] 10.3 Reconcile the complete source inventory against executable evidence; require all original 518 cases and new witnesses to be exact matches or reviewed safe-library disparities, with zero skips, timeouts, unresolved failures, regressions, or missing mappings. Publish exact and disparity counts separately without a 100% exact-parity claim.
 - [ ] 10.4 Run workspace formatting, clippy, tests, native-format/resource regressions, and affected benchmark comparisons; preserve all 303 baseline matches and document any performance change before acceptance.
 - [ ] 10.5 Regenerate compatibility reports and update help, formats documentation, numeric/security migration notes, and changelog; verify TOON remains the documented default, `-c` selects compact JSON, and token savings remain separate from verdicts.
 - [ ] 10.6 Validate OpenSpec and affected documentation, verify implementation against all eight delta specs, then synchronize and archive only after completion; retain campaign results and the resolved gap inventory as review evidence.
 - [ ] 10.7 Complete `docs/tests/jq-manual/coverage.md` and supporting metadata in `tests/compatibility/reviews/` with observed jq/tq witnesses, target/dependency identity, practical impact, accepted bounds or restrictions, and regression evidence; retain explicit reconsideration criteria for after the spec is fully implemented.
 
-Task 10.7 remains open: the jq 1.8.2 summaries do not renew executable-bound
-approvals. Current source-controlled target identities, observations, and
-reconsideration/regression evidence are still required in the review metadata.
+Task 10.7 remains open: the jq 1.8.2 summaries and target-bound witness metadata
+do not renew executable-bound approvals. Accepted restrictions/bounds and
+complete reconsideration/regression evidence still require review.
+
+The native v6 runs are recorded in
+`tests/compatibility/reviews/native-platform-acceptance.toon` and summarized in
+`docs/tests/jq-manual/coverage.md`. Release manual comparisons and workspace
+checks now run on all three hosts. Tasks 3.14 and 10.1/10.3–10.7 remain open:
+platform differences are not newly approved, Windows calibration is incomplete,
+and the separate full compatibility campaign retains stale denial fixtures.
+No strict all-cases acceptance or archive follows from successful builds/tests.
+Windows refinements are tracked in https://github.com/commandzero/tq/issues/69;
+Linux refinements are tracked in https://github.com/commandzero/tq/issues/70.
