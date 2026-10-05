@@ -33,6 +33,18 @@ fn longest_match_cli_matches_jq_compact_output() {
 }
 
 #[test]
+fn longest_match_cli_accepts_late_literal_with_default_budget() {
+    let input = format!("\"{}a{}\"", "b".repeat(900), "b".repeat(99));
+    let (status, stdout, stderr) = execute(r#"match("a"; "l")"#, &input);
+    assert_eq!(status.unwrap(), ExitStatus::Success);
+    assert_eq!(
+        stdout,
+        b"{\"offset\":900,\"length\":1,\"string\":\"a\",\"captures\":[]}\n"
+    );
+    assert_eq!(stderr, [] as [u8; 0]);
+}
+
+#[test]
 fn longest_match_cli_preserves_unicode_byte_ties_across_global_pulls() {
     let (status, stdout, stderr) = execute(
         r#"[match("a|é|aa"; "lg") | [.offset, .string]]"#,

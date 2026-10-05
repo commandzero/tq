@@ -25,6 +25,7 @@ struct LongestRegex {
     flags: String,
     pattern: String,
     has_search_anchor: bool,
+    has_keep_out: bool,
     max_consumed: Option<ConsumedLength>,
 }
 
@@ -908,6 +909,9 @@ fn compile_regex(
             flags: flags.to_owned(),
             pattern: wrapped.as_str().to_owned(),
             has_search_anchor,
+            has_keep_out: tree
+                .expr
+                .has_descendant(|expr| matches!(expr, Expr::KeepOut)),
             max_consumed: ConsumedLength::maximum(&tree.expr),
         })
     } else {
@@ -952,6 +956,19 @@ fn charge_regex_work(remaining: &mut usize, cost: usize) -> Result<(), VmError> 
 }
 
 impl LongestRegex {
+    fn first_start(&self, present: &Captures<'_, str>, input_start: usize) -> usize {
+        // Without \K the reported start is the earliest viable consumed start.
+        // A reset hides the consumed start, so keep its exhaustive fallback.
+        if self.has_keep_out {
+            input_start
+        } else {
+            present
+                .get(0)
+                .expect("regex captures include whole match")
+                .start()
+        }
+    }
+
     fn search_cost(&self, scanned_bytes: usize, limits: VmLimits) -> usize {
         scanned_bytes
             .saturating_add(self.pattern.len())
@@ -1020,6 +1037,7 @@ impl RegexProgram {
             pattern,
             has_search_anchor,
             max_consumed,
+            ..
         } = longest;
         let engine_limits = longest_engine_limits(limits);
         let search_cost = longest.search_cost(input.haystack().len(), engine_limits);
@@ -1034,9 +1052,10 @@ impl RegexProgram {
             .captures_input(input.clone())
             .map_err(regex_runtime_error);
         checkpoint()?;
-        if present?.is_none() {
+        let Some(present) = present? else {
             return Ok(None);
-        }
+        };
+        let first_start = longest.first_start(&present, input.start());
         let text = input.haystack();
 
         let mut best = None;
@@ -1054,7 +1073,7 @@ impl RegexProgram {
             .chain(std::iter::once(text.len()))
             .enumerate()
         {
-            if start < input.start() {
+            if start < first_start {
                 continue;
             }
             if best.is_some()

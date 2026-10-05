@@ -80,6 +80,9 @@ fn early_exit_treats_closed_stdin_as_completed() {
 fn concurrent_children_do_not_inherit_other_invocations_capture_pipes() {
     const CALLERS: usize = 12;
     const ROUNDS: usize = 32;
+    // Snapshot once before these callers create any capture endpoints. Refreshing
+    // per invocation would incorrectly allow another active caller's pipes.
+    let baseline = parent_pipe_identities();
     let ready = std::sync::Barrier::new(CALLERS);
     std::thread::scope(|scope| {
         let workers: Vec<_> = (0..CALLERS)
@@ -88,23 +91,16 @@ fn concurrent_children_do_not_inherit_other_invocations_capture_pipes() {
                     let mut outcomes = Vec::with_capacity(ROUNDS);
                     for round in 0..ROUNDS {
                         ready.wait();
-                        let invocation = Invocation {
-                            executable: PathBuf::from("/usr/bin/perl"),
-                            args: vec![
-                                "-MFcntl=:mode".to_owned(),
-                                "-e".to_owned(),
-                                "for my $fd (3..255) { if (open(my $fh, '<&=' . $fd)) { my @s = stat($fh); print qq($fd\\n) if S_ISFIFO($s[2]); } }".to_owned(),
-                            ],
-                            stdin: Vec::new(),
-                            timeout: Duration::from_secs(2),
-                            current_dir: None,
-                            environment: BTreeMap::new(),
-                        };
+                        let invocation = capture_pipe_probe();
                         let outcome = if round % 2 == 0 {
                             run_process(&invocation)
                         } else {
-                            run_process_with_environment_bounded(&invocation, &BTreeMap::new(), 4096)
-                                .map(|result| result.outcome)
+                            run_process_with_environment_bounded(
+                                &invocation,
+                                &BTreeMap::new(),
+                                4096,
+                            )
+                            .map(|result| result.outcome)
                         };
                         // Assert only after all rounds so a failure cannot strand
                         // the remaining callers at the next barrier.
@@ -125,14 +121,215 @@ fn concurrent_children_do_not_inherit_other_invocations_capture_pipes() {
                 assert_eq!(outcome.status, ProcessStatus::Exited);
                 assert_eq!(outcome.exit_code, Some(0));
                 assert_eq!(outcome.stderr, [] as [u8; 0]);
+                let observed = observed_pipe_identities(&outcome.stdout);
+                let unexpected: Vec<_> = observed.difference(&baseline).collect();
                 assert!(
-                    outcome.stdout.is_empty(),
-                    "round {round}: inherited capture pipe descriptors: {}",
-                    String::from_utf8_lossy(&outcome.stdout)
+                    unexpected.is_empty(),
+                    "round {round}: inherited new capture pipe identities: {unexpected:?}"
                 );
             }
         }
     });
+}
+
+#[cfg(target_os = "linux")]
+const DESCRIPTOR_DIRECTORY: &str = "/proc/self/fd";
+#[cfg(target_os = "macos")]
+const DESCRIPTOR_DIRECTORY: &str = "/dev/fd";
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct PipeIdentity {
+    descriptor: i32,
+    device: u64,
+    inode: u64,
+}
+
+fn pipe_identity(descriptor: i32, metadata: &std::fs::Metadata) -> PipeIdentity {
+    use std::os::unix::fs::MetadataExt as _;
+
+    PipeIdentity {
+        descriptor,
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    }
+}
+
+fn descriptor_metadata(path: impl AsRef<std::path::Path>) -> std::io::Result<std::fs::Metadata> {
+    let metadata = std::fs::metadata(&path)?;
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::FileTypeExt as _;
+
+        if metadata.file_type().is_fifo() {
+            // macOS stat(/dev/fd/N) describes the fdescfs entry, not the pipe.
+            // Opening this pseudo-path duplicates the endpoint without waiting
+            // for a peer; fstat on that owned duplicate supplies its real identity.
+            let duplicate = match std::fs::File::open(&path) {
+                Ok(file) => file,
+                Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                    std::fs::OpenOptions::new().write(true).open(&path)?
+                }
+                Err(error) => return Err(error),
+            };
+            return duplicate.metadata();
+        }
+    }
+    Ok(metadata)
+}
+
+fn parent_pipe_identities() -> std::collections::BTreeSet<PipeIdentity> {
+    use std::os::unix::fs::FileTypeExt as _;
+
+    // Cargo jobserver pipes and other caller-owned descriptors may legitimately
+    // survive exec. Snapshot identity, not just fd numbers: reuse must not allow
+    // a newly created capture endpoint to masquerade as an existing pipe.
+    std::fs::read_dir(DESCRIPTOR_DIRECTORY)
+        .expect("parent descriptor directory")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("parent descriptor entries")
+        .into_iter()
+        .filter_map(|entry| {
+            let descriptor: i32 = entry.file_name().to_str()?.parse().ok()?;
+            if descriptor <= 2 {
+                return None;
+            }
+            match descriptor_metadata(entry.path()) {
+                Ok(metadata) if metadata.file_type().is_fifo() => {
+                    Some(pipe_identity(descriptor, &metadata))
+                }
+                Ok(_) => None,
+                // Concurrent tests may close a descriptor after readdir.
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::NotFound
+                        || error.raw_os_error() == Some(nix::errno::Errno::EBADF as i32) =>
+                {
+                    None
+                }
+                Err(error) => panic!("parent descriptor {descriptor}: {error}"),
+            }
+        })
+        .collect()
+}
+
+fn capture_pipe_probe() -> Invocation {
+    Invocation {
+        executable: PathBuf::from("/usr/bin/perl"),
+        args: vec![
+            "-MFcntl=:mode".to_owned(),
+            "-e".to_owned(),
+            "opendir(my $directory, $ARGV[0]) or die $!;
+             my @fds = grep { /^\\d+$/ && $_ > 2 } readdir($directory);
+             closedir($directory);
+             for my $fd (@fds) {
+                 if (open(my $fh, '<&=' . $fd)) {
+                     my @s = stat($fh);
+                     print qq($fd $s[0] $s[1]\\n) if S_ISFIFO($s[2]);
+                 }
+             }"
+            .to_owned(),
+            DESCRIPTOR_DIRECTORY.to_owned(),
+        ],
+        stdin: Vec::new(),
+        timeout: Duration::from_secs(2),
+        current_dir: None,
+        environment: BTreeMap::new(),
+    }
+}
+
+fn observed_pipe_identities(stdout: &[u8]) -> std::collections::BTreeSet<PipeIdentity> {
+    std::str::from_utf8(stdout)
+        .expect("pipe identity output is UTF-8")
+        .lines()
+        .map(|line| {
+            let mut fields = line.split_whitespace();
+            let identity = PipeIdentity {
+                descriptor: fields
+                    .next()
+                    .expect("descriptor")
+                    .parse()
+                    .expect("fd number"),
+                device: fields
+                    .next()
+                    .expect("device")
+                    .parse()
+                    .expect("device number"),
+                inode: fields.next().expect("inode").parse().expect("inode number"),
+            };
+            assert_eq!(fields.next(), None, "unexpected pipe identity field");
+            identity
+        })
+        .collect()
+}
+
+#[test]
+fn capture_pipe_probe_distinguishes_preexisting_pipes_and_reused_descriptors() {
+    use std::os::fd::AsRawFd as _;
+
+    const FIXTURE_ENV: &str = "TQ_CAPTURE_PIPE_IDENTITY_FIXTURE";
+    if std::env::var_os(FIXTURE_ENV).is_none() {
+        // Create deliberate inheritable pipes only in an isolated test process,
+        // so they cannot contaminate other tests' concurrent baseline snapshots.
+        let outcome = run_process(&Invocation {
+            executable: std::env::current_exe().expect("integration test executable"),
+            args: vec![
+                "--exact".to_owned(),
+                "capture_pipe_probe_distinguishes_preexisting_pipes_and_reused_descriptors"
+                    .to_owned(),
+                "--nocapture".to_owned(),
+            ],
+            stdin: Vec::new(),
+            timeout: Duration::from_secs(2),
+            current_dir: None,
+            environment: BTreeMap::from([(FIXTURE_ENV.to_owned(), "1".to_owned())]),
+        })
+        .expect("isolated pipe identity fixture");
+        assert_eq!(outcome.status, ProcessStatus::Exited);
+        assert_eq!(outcome.exit_code, Some(0), "{outcome:?}");
+        return;
+    }
+
+    let identity = |fd| {
+        let metadata = descriptor_metadata(format!("{DESCRIPTOR_DIRECTORY}/{fd}"))
+            .expect("owned pipe metadata");
+        pipe_identity(fd, &metadata)
+    };
+    let (mut existing_read, existing_write) = nix::unistd::pipe().expect("inherited pipe");
+    let existing = std::collections::BTreeSet::from([
+        identity(existing_read.as_raw_fd()),
+        identity(existing_write.as_raw_fd()),
+    ]);
+    let baseline = parent_pipe_identities();
+    assert!(existing.is_subset(&baseline));
+    let (new_read, new_write) = nix::unistd::pipe().expect("new inheritable pipe");
+    let new = std::collections::BTreeSet::from([
+        identity(new_read.as_raw_fd()),
+        identity(new_write.as_raw_fd()),
+    ]);
+    let observe = || {
+        let outcome = run_process(&capture_pipe_probe()).expect("pipe identity probe");
+        assert_eq!(outcome.status, ProcessStatus::Exited);
+        assert_eq!(outcome.exit_code, Some(0));
+        assert!(outcome.stderr.is_empty(), "{outcome:?}");
+        observed_pipe_identities(&outcome.stdout)
+    };
+    let observed = observe();
+    assert!(
+        existing.is_subset(&observed),
+        "pre-existing pipes must really survive exec"
+    );
+    assert_eq!(
+        observed
+            .difference(&baseline)
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        new
+    );
+
+    // Replacing an allowed fd with a different endpoint must still be detected.
+    rustix::io::dup2(&new_read, &mut existing_read).expect("reuse baseline descriptor");
+    let reused = identity(existing_read.as_raw_fd());
+    assert!(!baseline.contains(&reused));
+    assert!(observe().difference(&baseline).any(|pipe| *pipe == reused));
 }
 
 #[test]

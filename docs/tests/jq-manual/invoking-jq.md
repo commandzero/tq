@@ -322,10 +322,10 @@ target=macos binary-stdio=native formats=toon,yaml,json,json5,jsonl,toon-seq,jso
 jq -C .
 
 # jq
-\x1b[0;90m{\x1b[0m
-  \x1b[0;36m"z"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m\x1b[0;90m,\x1b[0m
-  \x1b[0;36m"a"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m2\x1b[0m
-\x1b[0;90m}\x1b[0m
+\x1b[1;39m{\x1b[0m
+  \x1b[1;34m"z"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m
+  \x1b[1;34m"a"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m2\x1b[0m
+\x1b[1;39m}\x1b[0m
 
 # tq -o json
 \x1b[0;90m{\x1b[0m
@@ -582,7 +582,7 @@ Options:
   -j, --join-output               emit raw output without separators
   -a, --ascii-output              escape non-ASCII JSON output
   -S, --sort-keys                 sort object keys recursively
-  -C, --color-output              force ANSI color for any output format (JQ_COLORS supported)
+  -C, --color-output              force ANSI color for any output format (TQ_COLORS/JQ_COLORS supported)
   -M, --monochrome-output         disable ANSI color
   --tab                           indent JSON with tabs
   --indent N                      indent structured output
@@ -625,7 +625,8 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,
 
 Color: automatic on terminals, plain in pipes/files; NO_COLOR disables automatic color.
 -C forces color, -M requests plain bytes; the last flag wins.
-JQ_COLORS accepts seven/eight SGR slots. Raw strings and proxy bytes stay verbatim.
+TQ_COLORS overrides JQ_COLORS; both accept seven/eight SGR slots.
+Raw strings and proxy bytes stay verbatim.
 
 # tq
 <not run>
@@ -821,9 +822,9 @@ jq -M .
 jq -C .
 
 # jq
-\x1b[0;90m{\x1b[0m
-  \x1b[0;36m"foo"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m
-\x1b[0;90m}\x1b[0m
+\x1b[1;39m{\x1b[0m
+  \x1b[1;34m"foo"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m
+\x1b[1;39m}\x1b[0m
 
 # tq -o json
 \x1b[0;90m{\x1b[0m
@@ -1446,7 +1447,7 @@ jq --version
 jq-1.8.2
 
 # tq -o json
-tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)
+tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown)
 
 # tq
 <not run>

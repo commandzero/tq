@@ -25,12 +25,15 @@
 23. [streaming](streaming.md)
 24. [types and values](types-and-values.md)
 
-The Results below compare a macOS ARM64 debug build of tq 0.4.0 with pinned
-jq 1.8.2. The run covers 952 cases; 9 exact-contract differences remain.
+The Results below compare a macOS ARM64 build of tq 0.4.1 with pinned jq 1.8.2.
+The recorded tq binary uses the optimized bench profile left by preflight.
+The run covers 952 cases; 9 exact-contract differences remain.
 
 See the [numbered difference list](coverage.md#differences-by-test) for each
-test's practical impact. Full executable identities and observations are retained locally
-in ignored `target/manual-comparison-jq-1.8.2.toon`.
+test's practical impact. [Platform witness metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
+records the exact source, profile, and executable identities. Full observations
+are retained locally in ignored
+`target/cross-platform-2026-10-04-3605d2d/macos-v6/report/manual-final-bound.toon`.
 
 These results describe this build and host, not every platform or release.
 See the [jq/tq option inventory](../../jq-1.8-cli-options.md) for the CLI contract.

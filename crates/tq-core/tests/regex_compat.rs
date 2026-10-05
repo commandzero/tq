@@ -420,6 +420,59 @@ fn regex_longest_match_bounds_preserve_unicode_flags_and_context() {
 }
 
 #[test]
+fn regex_longest_match_late_literal_fits_default_work_budget() {
+    let input = serde_json::to_string(&format!("{}a{}", "b".repeat(900), "b".repeat(99))).unwrap();
+    assert_eq!(
+        evaluate(r#"match("a"; "l")"#, &input)[0].to_string(),
+        r#"{"offset":900,"length":1,"string":"a","captures":[]}"#
+    );
+}
+
+#[test]
+fn regex_longest_match_presence_jumps_preserve_global_ranking_and_context() {
+    for (pattern, input, expected) in [
+        (
+            "a|abc",
+            format!(
+                "{}a{}abc{}",
+                "b".repeat(900),
+                "b".repeat(49),
+                "b".repeat(47)
+            ),
+            r#"[950,"abc"]"#,
+        ),
+        (
+            "a|(?<=b)é(?=b)",
+            format!("a{}é{}", "b".repeat(99), "b".repeat(99)),
+            r#"[100,"é"]"#,
+        ),
+        (r"abc\Kx|xx", "abcxx".to_owned(), r#"[3,"x"]"#),
+        (r"a+\Kb|bb", "aabbb".to_owned(), r#"[2,"b"]"#),
+        (r"(?<=\Gb)aa|a", "baa".to_owned(), r#"[1,"aa"]"#),
+    ] {
+        let query = format!(
+            "match({}; \"l\") | [.offset, .string]",
+            serde_json::to_string(pattern).unwrap()
+        );
+        let input = serde_json::to_string(&input).unwrap();
+        let values = evaluate_with_limits(&query, &input, VmLimits::default())
+            .unwrap_or_else(|error| panic!("{query}: {error:?}"));
+        assert_eq!(values[0].to_string(), expected, "{query}");
+    }
+    let input = serde_json::to_string(&format!(
+        "{}a{}a{}",
+        "b".repeat(900),
+        "b".repeat(89),
+        "b".repeat(9)
+    ))
+    .unwrap();
+    assert_eq!(
+        evaluate(r#"[match("a"; "lg") | [.offset, .string]]"#, &input)[0].to_string(),
+        r#"[[900,"a"],[990,"a"]]"#
+    );
+}
+
+#[test]
 fn regex_longest_match_absent_literal_accepts_large_input() {
     for size in [1_000_000, 1_048_576] {
         let input = serde_json::to_string(&"b".repeat(size)).unwrap();
