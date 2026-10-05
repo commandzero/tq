@@ -545,6 +545,111 @@ mod tests {
     }
 
     #[test]
+    fn constant_metadata_preserves_sequence_and_object_semantics() {
+        for (source, expected) in [
+            ("null", serde_json::json!(null)),
+            ("[empty]", serde_json::json!([])),
+            (
+                "[(1, (empty, 2)), [3, empty, (4, 5)], {}, empty]",
+                serde_json::json!([1, 2, [3, 4, 5], {}]),
+            ),
+            (
+                "{a: [empty], b: {c: 1}, a: [2,3]}",
+                serde_json::json!({"a": [2,3], "b": {"c": 1}}),
+            ),
+        ] {
+            let parsed = crate::parse(source).unwrap();
+            assert_eq!(
+                constant_value(parsed.ast()),
+                Some(Value::from_json(expected).unwrap()),
+                "{source}"
+            );
+        }
+        for source in [
+            "empty",
+            "1, 2",
+            ".",
+            "1 + 2",
+            "[1, $x]",
+            "{a: empty}",
+            "{a: (1,2)}",
+            r#"{("a"): 1}"#,
+        ] {
+            assert!(
+                constant_value(crate::parse(source).unwrap().ast()).is_none(),
+                "{source}"
+            );
+        }
+        let value = constant_value(crate::parse("{b: 0, a: 1, b: 2}").unwrap().ast()).unwrap();
+        let Value::Object(object) = value else {
+            panic!("constant object")
+        };
+        assert_eq!(
+            object.keys().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["b", "a"]
+        );
+    }
+
+    #[test]
+    fn metadata_collectors_follow_only_directive_continuations() {
+        let parsed = crate::parse(r#"module {}; def f: def nested: 0; nested; import "a" as a; include "b"; import "c" as $c; def g(x): x; ."#).unwrap();
+        let mut definitions = Vec::new();
+        collect_definition_names(parsed.ast(), &mut definitions);
+        assert_eq!(definitions, [(Arc::from("f"), 0), (Arc::from("g"), 1)]);
+        let mut dependencies = Vec::new();
+        collect_module_dependencies(parsed.ast(), &mut dependencies);
+        assert_eq!(
+            dependencies,
+            vec![
+                Value::from_json(serde_json::json!({"as": "a", "is_data": false, "relpath": "a"}))
+                    .unwrap(),
+                Value::from_json(serde_json::json!({"is_data": false, "relpath": "b"})).unwrap(),
+                Value::from_json(serde_json::json!({"is_data": true, "relpath": "c"})).unwrap(),
+            ]
+        );
+        assert_eq!(
+            enrich_module_metadata(Value::Null, parsed.ast()),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn iterative_splicing_preserves_definition_order_and_import_spans() {
+        let module = crate::parse("def first: 1; def second(x): x;").unwrap();
+        let body = crate::parse(".").unwrap();
+        let span = Span::new(SourceId::new(9), 10, 20);
+        let spliced =
+            splice_module(clone_expr(module.ast()), clone_expr(body.ast()), span).unwrap();
+        let ExprKind::Define {
+            definition: first,
+            body: next,
+        } = &spliced.kind
+        else {
+            panic!("first definition")
+        };
+        assert_eq!(first.name.as_ref(), "first");
+        assert_eq!(
+            first.span,
+            match &module.ast().kind {
+                ExprKind::Define { definition, .. } => definition.span,
+                _ => unreachable!(),
+            }
+        );
+        assert_eq!(spliced.span, span);
+        let ExprKind::Define {
+            definition: second,
+            body: tail,
+        } = &next.kind
+        else {
+            panic!("second definition")
+        };
+        assert_eq!(second.name.as_ref(), "second");
+        assert_eq!(next.span, span);
+        assert_eq!(tail.span, body.ast().span);
+        assert!(matches!(tail.kind, ExprKind::Identity));
+    }
+
+    #[test]
     fn startup_location_replacement_preserves_deep_leaf_span_and_value() {
         let startup = format!("def f:\n{}$__loc__{};", "[".repeat(1024), "]".repeat(1024));
         let parsed = crate::parse_with_startup("query.jq", b".", "startup.jq", startup.as_bytes())

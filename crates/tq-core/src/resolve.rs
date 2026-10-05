@@ -1006,65 +1006,69 @@ fn enrich_module_metadata(metadata: Value, expr: &Expr) -> Value {
     Value::object(metadata)
 }
 
-fn collect_module_dependencies(expr: &Expr, dependencies: &mut Vec<Value>) {
-    match &expr.kind {
-        ExprKind::Import {
-            path,
-            alias,
-            metadata,
-            body,
-        } => {
-            let mut dependency = crate::Object::new();
-            if let Some(metadata) = metadata
-                && let Some(Value::Object(values)) = constant_value(metadata)
-                && let Some(search) = values.get("search")
-            {
-                dependency.insert(Arc::from("search"), search.clone());
+fn collect_module_dependencies(mut expr: &Expr, dependencies: &mut Vec<Value>) {
+    loop {
+        match &expr.kind {
+            ExprKind::Import {
+                path,
+                alias,
+                metadata,
+                body,
+            } => {
+                let mut dependency = crate::Object::new();
+                if let Some(metadata) = metadata
+                    && let Some(Value::Object(values)) = constant_value(metadata)
+                    && let Some(search) = values.get("search")
+                {
+                    dependency.insert(Arc::from("search"), search.clone());
+                }
+                if alias.starts_with('$') {
+                    dependency.insert(Arc::from("is_data"), Value::Bool(true));
+                } else {
+                    dependency.insert(Arc::from("as"), Value::string(alias.as_ref()));
+                    dependency.insert(Arc::from("is_data"), Value::Bool(false));
+                }
+                dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
+                dependencies.push(Value::object(dependency));
+                expr = body;
             }
-            if alias.starts_with('$') {
-                dependency.insert(Arc::from("is_data"), Value::Bool(true));
-            } else {
-                dependency.insert(Arc::from("as"), Value::string(alias.as_ref()));
+            ExprKind::Include {
+                path,
+                metadata,
+                body,
+            } => {
+                let mut dependency = crate::Object::new();
+                if let Some(metadata) = metadata
+                    && let Some(Value::Object(values)) = constant_value(metadata)
+                    && let Some(search) = values.get("search")
+                {
+                    dependency.insert(Arc::from("search"), search.clone());
+                }
                 dependency.insert(Arc::from("is_data"), Value::Bool(false));
+                dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
+                dependencies.push(Value::object(dependency));
+                expr = body;
             }
-            dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
-            dependencies.push(Value::object(dependency));
-            collect_module_dependencies(body, dependencies);
-        }
-        ExprKind::Include {
-            path,
-            metadata,
-            body,
-        } => {
-            let mut dependency = crate::Object::new();
-            if let Some(metadata) = metadata
-                && let Some(Value::Object(values)) = constant_value(metadata)
-                && let Some(search) = values.get("search")
-            {
-                dependency.insert(Arc::from("search"), search.clone());
+            ExprKind::Define { body, .. } | ExprKind::Module { body, .. } => {
+                expr = body;
             }
-            dependency.insert(Arc::from("is_data"), Value::Bool(false));
-            dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
-            dependencies.push(Value::object(dependency));
-            collect_module_dependencies(body, dependencies);
+            _ => break,
         }
-        ExprKind::Define { body, .. } | ExprKind::Module { body, .. } => {
-            collect_module_dependencies(body, dependencies);
-        }
-        _ => {}
     }
 }
 
-fn collect_definition_names(expr: &Expr, definitions: &mut Vec<(Arc<str>, usize)>) {
-    match &expr.kind {
-        ExprKind::Define { definition, body } => {
-            definitions.push((Arc::clone(&definition.name), definition.parameters.len()));
-            collect_definition_names(body, definitions);
+fn collect_definition_names(mut expr: &Expr, definitions: &mut Vec<(Arc<str>, usize)>) {
+    loop {
+        match &expr.kind {
+            ExprKind::Define { definition, body } => {
+                definitions.push((Arc::clone(&definition.name), definition.parameters.len()));
+                expr = body;
+            }
+            ExprKind::Include { body, .. }
+            | ExprKind::Import { body, .. }
+            | ExprKind::Module { body, .. } => expr = body,
+            _ => break,
         }
-        ExprKind::Include { body, .. }
-        | ExprKind::Import { body, .. }
-        | ExprKind::Module { body, .. } => collect_definition_names(body, definitions),
-        _ => {}
     }
 }
 
@@ -1080,58 +1084,94 @@ fn validate_metadata(metadata: Option<&Expr>, span: Span) -> Result<(), Box<Diag
 }
 
 fn constant_value(expr: &Expr) -> Option<Value> {
-    match &expr.kind {
-        ExprKind::Literal(value) => Some(value.clone()),
-        ExprKind::Array(body) => {
-            let mut values = Vec::new();
-            constant_sequence(body, &mut values)?;
-            Some(Value::array(values))
-        }
-        ExprKind::Object(entries) => {
-            let mut object = crate::Object::new();
-            for entry in entries {
-                let ObjectKey::Static(key) = &entry.key else {
-                    return None;
-                };
-                object.insert(Arc::clone(key), constant_value(&entry.value)?);
+    enum Task<'a> {
+        Value(&'a Expr),
+        Sequence(&'a Expr),
+        Array(usize),
+        Object(Object, &'a [crate::ast::ObjectEntry]),
+        Insert(Object, &'a Arc<str>, &'a [crate::ast::ObjectEntry]),
+    }
+    let mut pending = vec![Task::Value(expr)];
+    let mut output = Vec::new();
+    while let Some(task) = pending.pop() {
+        match task {
+            Task::Value(expr) => match &expr.kind {
+                ExprKind::Literal(value) => output.push(value.clone()),
+                ExprKind::Array(body) => {
+                    pending.push(Task::Array(output.len()));
+                    pending.push(Task::Sequence(body));
+                }
+                ExprKind::Object(entries) => {
+                    pending.push(Task::Object(Object::new(), entries));
+                }
+                _ => return None,
+            },
+            // Commas concatenate only within an array constructor; empty is
+            // zero elements there, not a constant value at other positions.
+            Task::Sequence(expr) => match &expr.kind {
+                ExprKind::Comma(left, right) => {
+                    pending.push(Task::Sequence(right));
+                    pending.push(Task::Sequence(left));
+                }
+                ExprKind::Empty => {}
+                _ => pending.push(Task::Value(expr)),
+            },
+            Task::Array(offset) => {
+                let values = output.split_off(offset);
+                output.push(Value::array(values));
             }
-            Some(Value::object(object))
+            Task::Object(object, entries) => {
+                if let Some((entry, remaining)) = entries.split_first() {
+                    let ObjectKey::Static(key) = &entry.key else {
+                        return None;
+                    };
+                    pending.push(Task::Insert(object, key, remaining));
+                    pending.push(Task::Value(&entry.value));
+                } else {
+                    output.push(Value::object(object));
+                }
+            }
+            Task::Insert(mut object, key, remaining) => {
+                object.insert(Arc::clone(key), output.pop().expect("constant entry value"));
+                pending.push(Task::Object(object, remaining));
+            }
         }
-        _ => None,
     }
+    output.pop()
 }
 
-fn constant_sequence(expr: &Expr, output: &mut Vec<Value>) -> Option<()> {
-    if let ExprKind::Comma(left, right) = &expr.kind {
-        constant_sequence(left, output)?;
-        constant_sequence(right, output)
-    } else if matches!(expr.kind, ExprKind::Empty) {
-        Some(())
-    } else {
-        output.push(constant_value(expr)?);
-        Some(())
-    }
-}
-
-fn splice_module(module: Expr, body: Expr, span: Span) -> Result<Expr, Box<Diagnostic>> {
-    match module.kind {
-        ExprKind::Define {
-            definition,
-            body: module_body,
-        } => Ok(Expr::new(
+fn splice_module(mut module: Expr, mut body: Expr, span: Span) -> Result<Expr, Box<Diagnostic>> {
+    let mut definitions = Vec::new();
+    loop {
+        match module.kind {
             ExprKind::Define {
                 definition,
-                body: Box::new(splice_module(*module_body, body, span)?),
+                body: module_body,
+            } => {
+                definitions.push(definition);
+                module = *module_body;
+            }
+            ExprKind::Empty => break,
+            _ => {
+                return Err(module_error(
+                    "TQ-MODULE-CONTENT-001",
+                    "module files may contain metadata, imports, includes, and definitions"
+                        .to_owned(),
+                    module.span,
+                ));
+            }
+        }
+    }
+    for definition in definitions.into_iter().rev() {
+        body = Expr::new(
+            ExprKind::Define {
+                definition,
+                body: Box::new(body),
             },
             span,
-        )),
-        ExprKind::Empty => Ok(body),
-        _ => Err(module_error(
-            "TQ-MODULE-CONTENT-001",
-            "module files may contain metadata, imports, includes, and definitions".to_owned(),
-            module.span,
-        )),
+        );
     }
+    Ok(body)
 }
 
 fn qualify_module(expr: &mut Expr, alias: &str) {
@@ -1140,10 +1180,10 @@ fn qualify_module(expr: &mut Expr, alias: &str) {
     qualify_expr(expr, alias, &definitions);
 }
 
-fn collect_definitions(expr: &Expr, definitions: &mut BTreeSet<(Arc<str>, usize)>) {
-    if let ExprKind::Define { definition, body } = &expr.kind {
+fn collect_definitions(mut expr: &Expr, definitions: &mut BTreeSet<(Arc<str>, usize)>) {
+    while let ExprKind::Define { definition, body } = &expr.kind {
         definitions.insert((Arc::clone(&definition.name), definition.parameters.len()));
-        collect_definitions(body, definitions);
+        expr = body;
     }
 }
 
