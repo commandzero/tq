@@ -11,7 +11,7 @@ use tq_test_support::{
         LaunchIsolationEvidence, MeasurementProtocol, OutputContractKind, RegressionGate,
         RegressionThresholds, RssProvenance, SoftObjectiveStatus, WorkerIdentity,
         collect_environment, compare_reports, correctness_gate, evaluate_regression,
-        populate_reference_ratios, semantic_digest, summarize_samples,
+        populate_reference_ratios, render_markdown_pages, semantic_digest, summarize_samples,
     },
     compatibility::{ProcessStatus, ToolIdentity, ToolKind},
     corpus::ArtifactIdentity,
@@ -685,6 +685,250 @@ fn uncalibrated_native_samples_are_not_comparison_evidence() {
     populate_reference_ratios(&mut ratio_report.cases, &["jq-json"]);
     assert!(ratio_report.cases[0].reference_ratios.is_empty());
     assert!(ratio_report.cases[0].reference_peak_rss_ratios.is_empty());
+}
+
+#[test]
+fn windows_samples_without_publication_evidence_cannot_support_comparisons() {
+    for missing in ["protocol", "accuracy", "isolation"] {
+        let mut report = windows_campaign(1000, 1000);
+        for sample in &mut report.cases[0].samples {
+            match missing {
+                "protocol" => sample.measurement_protocol = None,
+                "accuracy" => {
+                    sample
+                        .measurement_protocol
+                        .as_mut()
+                        .unwrap()
+                        .validated_accuracy_micros = None;
+                }
+                "isolation" => {
+                    sample
+                        .measurement_protocol
+                        .as_mut()
+                        .unwrap()
+                        .isolation_evidence = None;
+                }
+                _ => unreachable!(),
+            }
+        }
+        report.cases[0].summary = summarize_samples(&report.cases[0].samples, 100, 1);
+        assert!(
+            report.validate_for_publication().is_err(),
+            "missing {missing}"
+        );
+        assert!(
+            !compare_reports(&report, &report).comparable,
+            "missing {missing}"
+        );
+        let gate = evaluate_regression(&report, &report, regression_thresholds());
+        assert!(!gate.evaluated, "missing {missing}");
+        assert_eq!(gate.failures, [] as [String; 0]);
+        assert_ne!(gate.unavailable, [] as [String; 0]);
+
+        let mut reference = report.cases[0].clone();
+        reference.adapter_id = "jq-json".to_owned();
+        report.cases.push(reference);
+        populate_reference_ratios(&mut report.cases, &["jq-json"]);
+        let row = &report.cases[0];
+        assert!(row.reference_ratios.is_empty(), "missing {missing}");
+        assert!(
+            row.reference_peak_rss_ratios.is_empty(),
+            "missing {missing}"
+        );
+        assert!(
+            row.soft_performance_objective.is_none(),
+            "missing {missing}"
+        );
+    }
+}
+
+#[test]
+fn windows_markdown_publication_rejects_uncalibrated_evidence_before_writing() {
+    let mut report = windows_campaign(1000, 1000);
+    for sample in &mut report.cases[0].samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .unwrap()
+            .validated_accuracy_micros = None;
+    }
+    let directory = tempfile::tempdir().expect("markdown directory");
+    let page = directory.path().join("issue5-identity.md");
+    std::fs::write(&page, "existing publication").expect("existing page");
+    let error = render_markdown_pages(directory.path(), &report)
+        .expect_err("uncalibrated Windows reports cannot write publication pages");
+    assert!(error.to_string().contains("calibrated worker"), "{error}");
+    assert_eq!(
+        std::fs::read_to_string(page).unwrap(),
+        "existing publication"
+    );
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn calibrated_synthetic_windows_samples_support_publication_ratios_and_regression() {
+    let baseline = windows_campaign(1000, 1000);
+    assert!(baseline.validate_authoritative_rss().is_ok());
+    assert!(baseline.validate_for_publication().is_ok());
+    assert!(compare_reports(&baseline, &baseline).comparable);
+    let gate = evaluate_regression(&baseline, &baseline, regression_thresholds());
+    assert!(gate.evaluated);
+    assert_eq!(gate.failures, [] as [String; 0]);
+    assert_eq!(gate.unavailable, [] as [String; 0]);
+
+    let slower = windows_campaign(2000, 2000);
+    let gate = evaluate_regression(&baseline, &slower, regression_thresholds());
+    assert!(gate.evaluated);
+    assert_eq!(
+        gate.failures.len(),
+        2,
+        "wall and RSS must independently regress"
+    );
+
+    let mut report = baseline;
+    let mut reference = report.cases[0].clone();
+    reference.adapter_id = "jq-json".to_owned();
+    report.cases.push(reference);
+    populate_reference_ratios(&mut report.cases, &["jq-json"]);
+    assert_eq!(report.cases[0].reference_ratios["jq-json"], 1.0);
+    assert_eq!(report.cases[0].reference_peak_rss_ratios["jq-json"], 1.0);
+    let objective = report.cases[0].soft_performance_objective.as_ref().unwrap();
+    assert_eq!(objective.wall_time, SoftObjectiveStatus::Met);
+    assert_eq!(objective.peak_rss, SoftObjectiveStatus::Met);
+}
+
+#[test]
+fn windows_and_linux_sources_cannot_compare_even_with_identical_protocols() {
+    let baseline = windows_campaign(1000, 1000);
+    let mut candidate = baseline.clone();
+    for sample in &mut candidate.cases[0].samples {
+        sample.rss_provenance = Some(RssProvenance::LinuxWait4);
+    }
+    assert!(candidate.validate_for_publication().is_ok());
+    assert!(!compare_reports(&baseline, &candidate).comparable);
+    let gate = evaluate_regression(&baseline, &candidate, regression_thresholds());
+    assert!(!gate.evaluated);
+    assert_eq!(gate.failures, [] as [String; 0]);
+    assert_ne!(gate.unavailable, [] as [String; 0]);
+
+    let mut reference = candidate.cases.remove(0);
+    reference.adapter_id = "jq-json".to_owned();
+    let mut report = baseline;
+    report.cases.push(reference);
+    populate_reference_ratios(&mut report.cases, &["jq-json"]);
+    assert!(report.cases[0].reference_ratios.is_empty());
+    assert!(report.cases[0].reference_peak_rss_ratios.is_empty());
+    let objective = report.cases[0].soft_performance_objective.as_ref().unwrap();
+    assert_eq!(objective.wall_time, SoftObjectiveStatus::NotComparable);
+    assert_eq!(objective.peak_rss, SoftObjectiveStatus::NotComparable);
+}
+
+#[test]
+fn windows_native_evidence_requires_cpu_protocol_and_worker_identity() {
+    for missing in ["user_cpu", "system_cpu", "protocol", "worker", "scope"] {
+        let mut report = windows_campaign(1000, 1000);
+        for sample in &mut report.cases[0].samples {
+            match missing {
+                "user_cpu" => sample.user_cpu_micros = None,
+                "system_cpu" => sample.system_cpu_micros = None,
+                "protocol" => sample.measurement_protocol = None,
+                "worker" => sample.measurement_protocol.as_mut().unwrap().worker = None,
+                "scope" => {
+                    sample.measurement_protocol.as_mut().unwrap().rss_scope =
+                        "windows-target".to_owned();
+                }
+                _ => unreachable!(),
+            }
+        }
+        assert!(
+            report.validate_for_publication().is_err(),
+            "missing {missing}"
+        );
+        let gate = evaluate_regression(&report, &report, regression_thresholds());
+        assert!(!gate.evaluated, "missing {missing}");
+        if matches!(missing, "user_cpu" | "system_cpu" | "protocol") {
+            assert!(
+                report.validate_authoritative_rss().is_err(),
+                "missing {missing}"
+            );
+        }
+    }
+}
+
+#[test]
+fn windows_instrumented_samples_require_native_and_publication_evidence() {
+    let mut report = windows_campaign(1000, 1000);
+    report.cases[0].limits.rss_bytes = Some(128 * 1024 * 1024);
+    assert!(
+        report.validate_authoritative_rss().is_err(),
+        "RSS enforcement is required"
+    );
+    report.cases[0].instrumented_samples = report.cases[0].samples.clone();
+    for sample in &mut report.cases[0].instrumented_samples {
+        sample
+            .measurement_protocol
+            .as_mut()
+            .unwrap()
+            .rss_poll_interval_micros = Some(25_000);
+    }
+    assert!(report.validate_authoritative_rss().is_ok());
+    assert!(report.validate_for_publication().is_ok());
+    assert!(evaluate_regression(&report, &report, regression_thresholds()).evaluated);
+
+    for missing in ["protocol", "user_cpu", "sampler", "accuracy", "isolation"] {
+        let mut invalid = report.clone();
+        let sample = &mut invalid.cases[0].instrumented_samples[1];
+        match missing {
+            "protocol" => sample.measurement_protocol = None,
+            "user_cpu" => sample.user_cpu_micros = None,
+            "sampler" => {
+                sample
+                    .measurement_protocol
+                    .as_mut()
+                    .unwrap()
+                    .rss_poll_interval_micros = None;
+            }
+            "accuracy" => {
+                sample
+                    .measurement_protocol
+                    .as_mut()
+                    .unwrap()
+                    .validated_accuracy_micros = None;
+            }
+            "isolation" => {
+                sample
+                    .measurement_protocol
+                    .as_mut()
+                    .unwrap()
+                    .isolation_evidence = None;
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            invalid.validate_for_publication().is_err(),
+            "missing {missing}"
+        );
+        let gate = evaluate_regression(&report, &invalid, regression_thresholds());
+        assert!(!gate.evaluated, "missing {missing}");
+        assert_eq!(gate.failures, [] as [String; 0]);
+    }
+}
+
+// Portable report-contract fixtures, not evidence of real Windows calibration.
+fn windows_campaign(wall: u128, rss: u64) -> BenchmarkCampaignReport {
+    let mut report = campaign("machine-a", "digest-a", wall, rss);
+    for sample in &mut report.cases[0].samples {
+        sample.rss_provenance = Some(RssProvenance::WindowsPeakWorkingSet);
+        let protocol = sample
+            .measurement_protocol
+            .as_mut()
+            .expect("synthetic protocol");
+        "synthetic-windows-direct-spawn-to-exit-observation"
+            .clone_into(&mut protocol.timing_method);
+        "windows-exact-target-process-lifetime peak working set including threads, excluding descendants".clone_into(&mut protocol.rss_scope);
+    }
+    report.cases[0].summary = summarize_samples(&report.cases[0].samples, 100, 1);
+    report
 }
 
 #[test]

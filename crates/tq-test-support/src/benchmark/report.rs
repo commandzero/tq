@@ -381,15 +381,13 @@ impl BenchmarkCampaignReport {
                         row.case_id, row.adapter_id, index
                     ));
                 }
-                if matches!(
-                    sample.rss_provenance,
-                    Some(RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4)
-                ) && (sample
-                    .measurement_protocol
-                    .as_ref()
-                    .is_none_or(|protocol| !protocol.is_valid())
-                    || sample.user_cpu_micros.is_none()
-                    || sample.system_cpu_micros.is_none())
+                if sample.rss_provenance.is_some_and(is_native_rss_provenance)
+                    && (sample
+                        .measurement_protocol
+                        .as_ref()
+                        .is_none_or(|protocol| !protocol.is_valid())
+                        || sample.user_cpu_micros.is_none()
+                        || sample.system_cpu_micros.is_none())
                 {
                     return Err(format!(
                         "{} {} sample {} lacks native collection evidence",
@@ -1320,10 +1318,7 @@ fn normalize_corpus_arguments<'a>(
 
 fn row_native_contract(row: &BenchmarkRow) -> Option<&MeasurementProtocol> {
     let source = row_rss_source(row)?;
-    if !matches!(
-        source,
-        RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
-    ) {
+    if !is_native_rss_provenance(source) {
         return None;
     }
     row.samples
@@ -1448,7 +1443,9 @@ fn instrumented_sample_has_native_evidence(sample: &BenchmarkSample) -> bool {
 const fn is_native_rss_provenance(source: RssProvenance) -> bool {
     matches!(
         source,
-        RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
+        RssProvenance::DarwinWait4
+            | RssProvenance::LinuxWait4
+            | RssProvenance::WindowsPeakWorkingSet
     )
 }
 
@@ -1480,13 +1477,11 @@ fn format_disclosure(
 
 fn row_rss_source(row: &BenchmarkRow) -> Option<RssProvenance> {
     let source = row.samples.first()?.rss_provenance?;
-    if matches!(
-        source,
-        RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
-    ) && row.samples[0]
-        .measurement_protocol
-        .as_ref()
-        .is_none_or(|protocol| !protocol.is_valid())
+    if is_native_rss_provenance(source)
+        && row.samples[0]
+            .measurement_protocol
+            .as_ref()
+            .is_none_or(|protocol| !protocol.is_valid())
     {
         return None;
     }
@@ -1496,10 +1491,8 @@ fn row_rss_source(row: &BenchmarkRow) -> Option<RssProvenance> {
             sample.rss_provenance == Some(source)
                 && sample.measurement_protocol == row.samples[0].measurement_protocol
                 && sample.peak_rss_bytes.is_some_and(|bytes| bytes > 0)
-                && (!matches!(
-                    source,
-                    RssProvenance::DarwinWait4 | RssProvenance::LinuxWait4
-                ) || (sample.user_cpu_micros.is_some() && sample.system_cpu_micros.is_some()))
+                && (!is_native_rss_provenance(source)
+                    || (sample.user_cpu_micros.is_some() && sample.system_cpu_micros.is_some()))
         })
         .then_some(source)
 }
