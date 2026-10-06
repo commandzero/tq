@@ -41,11 +41,26 @@ and JSON companion contracts without disclosure. Linux's final workspace records
 pass separately. macOS final full preflight/all-feature workspace pass. Ignored
 accounting tests and these correctness runs establish no calibration.
 
-Windows was unreachable; its v6 912/952, 879/921, and 921/921 results with
-60 unique differences are historical, not candidate renewal. Its retained full
-raw report and all 81 v6 manifest entries hash-match; availability is not native
-renewal. Live #69/#70/#31 scope-transfer bodies were verified on 2026-10-06,
-with all three issues open. The user-approved
+Windows now has native release/default renewal in
+`target/closeout/windows/final-286b5f6/native`: **912/952** primary,
+**879/921** compact, **921/921** TOON and **60 unique differences** under #69.
+All 303 protected IDs are present, but only **291 primary** and **289
+primary-plus-compact** match—not 303 exact as on macOS/Linux. Its full campaign
+covers 1,220 cases/4,804 executed observations with zero harness/contract failures
+and **146 difference cases**. All 297 CLI composition cases execute, retaining
+8 math/reference-availability differences; 297 embedded/resource witnesses pass.
+Final all-feature workspace, strict Clippy and formatting pass; 10 entries remain
+ignored, with five reference tests explicitly passed separately. No unknown
+workspace pass total or calibrated performance result is implied.
+
+Windows source is `286b5f6` plus one test-only catalog-reference overlay, with
+exact source/profile/frozen binary mapping—not a full release rebuild or campaign
+rerun after the test fix. Product/helper code remains unchanged, including relative
+to macOS/Linux final-help sources. Actual system SSH/SCP succeeded and execution
+was native PowerShell; earlier macOS-client failures are historical. No security
+changes. Windows v6 raw evidence remains retained and separately hash-scoped.
+Live #69/#70/#31 scope-transfer bodies were verified at the preceding 2026-10-06
+checkpoint. The user-approved
 scope transfer leaves the enumerated Windows 60 under [#69](https://github.com/commandzero/tq/issues/69)
 and Linux 15 under [#70](https://github.com/commandzero/tq/issues/70), unresolved,
 with exact witnesses retained for reconsideration after platform/reference fixes.

@@ -1,8 +1,9 @@
 date: 2026-10-06
 purpose: Current implementation/evidence closeout metadata; not strict or reviewed-completion acceptance.
 base_revision: 3e0dedbb2aa4160acad5fca44fb41b5c10d70e83
+base_revision_scope: Retained macOS/Linux checkpoint base only; current Windows base is platforms.windows.candidate_base 286b5f6 plus the one test overlay, not a clean-commit whole-tree claim.
 source_policy: Latest newhelp-final macOS/help-final Linux snapshots include final crates/tq-cli/src/args.rs help wording and regression test at base plus uncommitted changes; not clean-commit builds. Current means retained executable-source snapshots, not later documentation edits or arbitrary working trees. Late-p2 and older identities remain checkpoint evidence only.
-latest_source_map: platforms is final-help evidence; late_p2_platforms and previous_platforms preserve older checkpoints. shared_full.macos is explicitly retained pre-help P2 diagnostic evidence; shared_full.linux is a fresh help-final execution. Original artifacts remain retained, not overwritten.
+latest_source_map: platforms.macos/linux retain final-help source-bound runs; platforms.windows is native final-286b5f6 plus one test-only overlay, mapped to unchanged frozen release binaries. Current product/helper source matches macOS/Linux snapshots; only the reference integration test differs in code. Earlier late-p2/v6/access records remain checkpoints. shared_full.macos is pre-help P2 diagnostic evidence; Linux final-help and Windows final release full runs are separately bound.
 reference: jq 1.8.2
 comparison_policy: Exact declared contracts; no blanket numerical tolerance or ANSI/CRLF normalization. Primary and compact campaigns overlap; unique differences are not column sums. TOON checks preserve tq JSON execution, not independent proof of jq parity.
 strict_acceptance: FAIL
@@ -10,9 +11,15 @@ reviewed_completion_acceptance: not established by this update
 new_approvals: false
 performance_acceptance: false
 scope_transfer: Existing user-approved implementation/evidence scope transfer only; Linux 15 to #70, Windows 60 to #69, calibration/performance to #31 and platform follow-ups. Transferred verdicts remain unresolved/unapproved.
+closeout:
+  tasks: 69/69 complete under revised implementation/evidence scope.
+  archive: openspec/changes/archive/2026-10-06-achieve-jq-manual-parity
+  specs: Eight main specs synchronized; 32 delta requirements and 123 scenarios independently verified, with 57 older unmentioned requirements preserved; 21 main specs pass strict validation.
+  final_mac_preflight: target/closeout/macos/archived-final-20261006T222329Z/summary.json; full isolated preflight, all-feature workspace and four explicit reference/relocation tests pass on the final test overlay. An earlier validation-environment override failure is retained separately.
+  acceptance: Neither exact/reviewed-completion compatibility nor calibrated performance acceptance follows from archival.
 retention:
   location: Ignored local target/ storage; actual files and manifest hashes checked on 2026-10-06.
-  verification: Final-help 121 macOS and 65 Linux manifest entries all present and SHA-256 matching; retained 12-entry P2 shared campaign and 81-entry historical Windows v6 manifests also match. Late-p2 and earlier verification counts remain checkpoint history, not final-help identities.
+  verification: Windows native-final-artifact-manifest.json has 368 retained entries with matching sizes/SHA-256; final-help 121 macOS and 65 Linux entries verified at preceding checkpoint. Older 12-entry P2 and 81-entry v6 Windows manifests remain verified history, not renewed identities.
   limit: No off-host durable archive verified; this review metadata does not retain the raw bytes. Preserve source snapshots, reports, logs, frozen binaries, and manifests before cleaning target/.
   redaction: No credentials, environment secrets, private transport address, or user-home paths copied into this record; raw evidence remains local.
 live_issue_verification:
@@ -94,10 +101,62 @@ platforms:
     latest_checks: Strict all-target/all-feature workspace Clippy exit 0; 10 fakehost regressions, 43 embedded/catalog guards, one help regression and release help verified; fresh strict manual/full campaigns.
     full_validator_preflight: Not claimed; complete okf/OpenSpec provisioning/preflight remains #70 follow-up, distinct from passing full Cargo workspace.
   windows:
-    status: offline; final-help native renewal blocked under #69
-    native_candidate_renewal: false
-    retention_reference: late_p2_platforms.windows records unchanged retained v6 raw report/manifest hashes; 81 historical entries reverified locally, not current execution or binary equivalence.
-    access_reference: target/closeout/windows/summary.json; no new native access or campaign claimed.
+    root: target/closeout/windows/final-286b5f6/native
+    target: x86_64-pc-windows-msvc
+    host: smokescreen; Windows 11 Pro 10.0.26300 AMD64
+    date: 2026-10-06
+    status: Native final-candidate renewal complete with mapped test-only overlay; strict acceptance remains failed.
+    native_candidate_renewal: true
+    candidate_base: 286b5f6690bc1bee260cba007f3953c52178bf68
+    source_archive: ../source-286b5f6.tar
+    source_archive_sha256: 263f5292633a2b42b4c50788a4b54df5a34c2e6b5517182c3389b9932cbbb63e
+    source_files: 884
+    overlay_file: crates/tq-test-support/tests/compatibility_catalog_contracts.rs
+    overlay_sha256: a86772509c2e279b823e6f02529e976c73b8c75ed30d23bea1620acf828a6c30
+    overlay_diff_sha256: c3bbcbc56aa1165c8d4b27f1d116d92f8125e2b41872d5635ce07ba0eaec2bc7
+    overlay_kind: Parent-authored integration-test-only compact_reference_args extraction; Windows structured jq probes prepend --binary; exact stdout/stderr assertions and raw arguments unchanged. No product/helper runtime change or lint suppression.
+    source_binding: Before/after overlay verification records one base difference, all product/helper source prefixes unchanged, local test overlay identical. Current CLI/core/formats/TOON/test-support source prefixes also match retained macOS/Linux final-help manifests; later doc edits are not full-tree equality.
+    source_evidence[2]{path,sha256}:
+      evidence/source-final-test-overlay-before-gates.json,937d9425172da9554964a3e6cff25aaffa5d7d0cb0b868cdba45e37c7fc43090
+      evidence/source-final-test-overlay-after-all-gates.json,99ac55eee48a51241d24dbd5a67a49dd9960bfe1510854f2bc99c93b98d52d63
+    profile: Frozen workspace release/default, strip=symbols, locked; MSVC native execution. Workspace tests use default test/dev, no stack/debug overrides.
+    tools[6]{tool,sha256}:
+      tq,0b90407caff7d8d9673308d41c6618e8cdbfbe386aa9a593d9984174e1522b90
+      tq-compat,72e67fe285ac1281585b0b8d6dc4189edf9aea267d94cc0cfaf79c2bff66be47
+      tq-compat-embedded,9b3ac66f597dbccd092f8d02c1dd9286ded9ca94e295098c08c190a2243a8147
+      tq-manual-compare,8dcf185151ad49701c3ffd6d7d83c09be07165f6ac57bfff1be2ba0a46cb5926
+      jq,a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627
+      yq,2aee32f1de46a20672f48c25df3018839798bd509143f2ce05fdab1550ff5592
+    evidence[7]{path,sha256}:
+      native-final-success-summary.json,9864fd8289c2be46256fabe8082cb2f1869f1c0690e9481d95b3106dee32a7c6
+      native-final-69-task-proof.json,c53b0bba8b3e9d12b92bfa2150d498a2a5aa894864bdef60e7f3500d610c6fbe
+      native-final-artifact-manifest.json,4a5d96f3c7c4d5185d889b480e6ef55e0d58977ba8548872f36d260524c0d2ad
+      evidence/manual-release-final.json,fe9bc4f30fc8a01a1a4438891114090b3fb728d7cb3d481345b3ca31f8cba6e5
+      evidence/shared-full-release-final.json,c1ae98add26ef36a28ee893f4399124aafc970fa8170c6bc59dcd8d74d40c1fc
+      evidence/composition-cli-release-final.json,b7b91993bd71813fd0f41ef51c1ab019e3b71ef145a4b9ffe424f26aa70f3467
+      evidence/direct-denial-release-observations.json,5f4f578a53f7c8d148002fadc0f4881400923658e9fb5e85c5ef0b95271f9ec0
+    release_mapping: Release campaigns not rerun and no full release product/helper rebuild claimed after test fix. Product/helper/reference source and frozen before/after hashes unchanged; 327 preceding evidence files verified and retained binaries match. Fresh overlay gates plus targeted debug/release reference tests establish mapping, not cross-platform binary equality.
+    transport: Actual /usr/bin/ssh and /usr/bin/scp succeed; native Windows PowerShell executes all tests/campaigns. WSL is transport only. Earlier macOS-client SSH failures and blocked readiness summaries are historical client-side observations, not the current host state; no security changes made.
+    strict_exit: 1
+    reviewed_disparities_applied: 0
+    unique_difference_ids: Same 60 #69 witnesses, zero new unowned manual/reference failures.
+    original_cases_present: 518
+    protected_ids_present: 303
+    protected_primary_matches: 291
+    protected_primary_and_compact_matches: 289
+    exact_303_pass_claim: false
+    protected_policy: Presence is not exact acceptance; remaining protected differences retain native raw-byte/math/reference verdicts under #69. macOS/Linux still retain 303 exact; no blanket baseline waiver.
+    composition_cli: 297 cases, 8 deferred math/reference-availability differing cases, zero harness/declared-contract failures and no tq execution gaps; all 873 tq observations executed.
+    composition_embedded: 297 witnesses plus resource/recursion/cancellation checks pass in fresh final-overlay workspace.
+    latest_checks: Final-overlay all-feature workspace, strict all-target/all-feature Clippy and formatting exit 0; native shell/byte/newline/stack guards retained and mapped. No unowned validation failures; total workspace pass count not asserted.
+    workspace_ignored: 10 ordinary workspace entries; all five relevant ignored reference tests explicitly pass separately, not 10 acceptance passes.
+    explicitly_passed_reference_tests[5]: jq_reference_independently_verifies_the_corrected_catalog_contracts,jq_reference_matches_the_published_manual_results,native::semantic_binary_mode_does_not_modify_raw_cli_or_raw_input_streams,complete_manual_corpus_executes_from_a_relocated_fixture_only_checkout,focused_manual_cases_execute_from_relocated_fixtures
+    reference_red_green: Structured catalog CRLF mismatch corrected with --binary, exact assertions pass debug and targeted release. compact_reference_args extraction resolves 101/100 Clippy line limit without suppression; historical red logs retained.
+    direct_denial: 12 frozen-release exact byte observations across two denied authorities, JSON/YAML/TOON input and TOON/compact JSON output pass, policy exit 5; no output/disclosure.
+    historical_retention: v6 source/executable/raw metadata remains unchanged under late_p2_platforms.windows; earlier offline summaries are retained history, not final verdicts.
+    native_task_evidence_ready: true
+    archive_ready: false
+    parent_remaining: Cross-host/eight-spec/docs/task reconciliation and authorized synchronization/archive remain outside native-only proof; no task states edited.
 help_contract:
   changed_file: crates/tq-cli/src/args.rs
   cause: Old help incorrectly called the process environment snapshot redaction-safe and obscured CLI ambient admission versus embedded capability controls.
@@ -269,9 +328,9 @@ campaigns[9]{platform,evidence_scope,campaign,exact,cases}:
   linux,current,primary,937,952
   linux,current,compact_json,913,921
   linux,current,toon,921,921
-  windows,historical-v6-only,primary,912,952
-  windows,historical-v6-only,compact_json,879,921
-  windows,historical-v6-only,toon,921,921
+  windows,current-final-native-mapped-overlay,primary,912,952
+  windows,current-final-native-mapped-overlay,compact_json,879,921
+  windows,current-final-native-mapped-overlay,toon,921,921
 shared_full:
   macos:
     root: target/compatibility/embedded-denial-p2-closeout-3e0dedb
@@ -295,6 +354,13 @@ shared_full:
     execution: Fresh help-final full campaign using final CLI/helper/embedded host hashes in platforms.linux; 99 pairwise-difference cases. Earlier late-p2 full.json remains checkpoint evidence.
     report: target/closeout/linux/help-final/evidence/shared-full.json
     report_sha256: 575726451cb6e8c2d2863ca990cca66cb74c856faadf9a7a995343d419bed657
+  windows:
+    root: target/closeout/windows/final-286b5f6/native
+    report: evidence/shared-full-release-final.json
+    execution: Native frozen release campaign mapped across test-only overlay by unchanged source and binary hashes; no post-overlay full rerun claimed.
+    report_sha256: c1ae98add26ef36a28ee893f4399124aafc970fa8170c6bc59dcd8d74d40c1fc
+    pairwise_difference_cases: 146
+    tq_observations: 3277 executed and 13 unsupported; unsupported remains unavailable, not pass.
   common:
     cases: 1220
     executed_observations: 4804
@@ -357,7 +423,7 @@ macos_expected_scope:
   regression_evidence: Latest newhelp-final/manual-full-final.json retains the same nine difference IDs and scoped math/color/runner observations; help observation changed, so no whole-report equality claim. Late-p2 and 20261006T071209Z/macos-nine-differences.json remain checkpoint evidence; all 303 protected exact contracts retained.
   reconsideration: After implementation or math-library/reference changes rerun these inputs and boundary witnesses; after presentation/runner changes rerun exact bytes and supplied-test status. Preserve the intentional output-colors contract unless separately changed; never infer blanket approval.
 follow_up_map:
-  authoritative_scope: openspec/changes/achieve-jq-manual-parity/specs/cross-tool-compatibility/spec.md target/case transfer table; no contracts outside that table transferred.
+  authoritative_scope: openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/specs/cross-tool-compatibility/spec.md target/case transfer table, synchronized into openspec/specs/cross-tool-compatibility/spec.md; no contracts outside that table transferred.
   exact_id_reference: tests/compatibility/reviews/native-platform-acceptance.toon difference_groups.linux and difference_groups.windows (immutable record hash above); includes every enumerated ID, raw math observations, and historical source identity. Current Linux summary/manual report independently retain the same 15 IDs.
   linux:
     owner: https://github.com/commandzero/tq/issues/70
@@ -381,8 +447,8 @@ follow_up_map:
       module-lookup,2
     unavailable_functions[5]: drem,exp10,gamma,scalb,significand
     module_ids[2]: manual.modules.path-origin,manual.modules.path-tilde
-    impact: Historical jq lacks five math functions that tq implements; jq CRLF versus tq LF affects exact raw contracts; native jq module lookup fails where tq resolves supplied paths. Neither missing reference functions nor changed types/cardinality are rounding or matches.
-    regression_evidence: Historical v6 exact ID/observation map only; current access/readiness blockers retained. Requires native PowerShell release execution and pinned reference, not WSL/cross-compile proof.
+    impact: Current pinned Windows jq lacks five math functions that tq implements; jq CRLF versus tq LF affects raw contracts; native jq module lookup fails where tq resolves supplied paths. Availability/type/cardinality differences are not rounding or matches. 303 protected IDs present but only 291 primary/289 primary+compact match.
+    regression_evidence: Current native final-286b5f6 release reports, mapped test overlay, 297 CLI/embedded composition and native exact-byte/reference guards; historical v6 remains separate. Reconsider exact target/case contracts after reference/library/platform fixes, preserving bytes and protected-ID accounting.
   scale_conversion:
     observations: "jq [0,M,0,0,0] versus tq [M,M,0,2,2], M = maximum finite binary64."
     cause: Safe Rust conversion versus platform-dependent jq out-of-range C conversion; not ULP rounding.
@@ -395,8 +461,8 @@ calibration:
   publication: Unfinished macOS calibration and affected benchmark comparisons remain unpublished as accepted performance evidence. Historical workload tables remain historical.
   reconsideration: Obtain independent native, source/executable-bound calibration and launch-isolation evidence under unchanged limits before publishing accepted performance; Windows scope is not macOS proof.
 remaining_blockers:
-  native_windows: Only pending fresh native platform campaign is offline smokescreen Windows; restore access and capture stable-source native release/manual/full/composition/embedded/resource/shell/stack/reference/provenance evidence under #69. Retained v6 raw hashes do not substitute.
+  native_windows: Native renewal complete; no native execution blocker or new unowned failure remains. Strict 60 #69 differences and non-exact protected observations remain unresolved, not converted into matches.
   linux_preflight: Full validator provisioning/preflight not executed; platform follow-up under #70.
-  publication: Parent completed final-help rendering/provenance reconciliation; index and all 21 Results blocks use newhelp-final, only help capture changed and authored blocks preserved. This owned four-file update completes latest metadata/source labels, without touching generated files or historical native-platform-acceptance.toon.
-  tasks_and_specs: Live issue scope verified at preceding checkpoint; final-help task 10.5 documentation/help proof reports no blocking mismatches. Parent retains overall task/artifact verification against all eight revised deltas and active OpenSpec PR-boundary/synchronization obligations; final boundary exits 1 on uncommitted OpenSpec diff. No task/spec edits, synchronization, archival, or commits performed here.
-  strict_and_reviewed_gates: Current macOS 9 and Linux 15 strict failures retained; Windows 60 historical/unrenewed. Transfer does not claim 100% parity or reviewed-completion success.
+  publication: Current manual index records renewed Windows evidence alongside source-bound newhelp-final macOS Results; historical native-platform-acceptance.toon remains unchanged.
+  tasks_and_specs: All 69 original tasks complete under the approved implementation/evidence scope; eight delta specs synchronized and archived at openspec/changes/archive/2026-10-06-achieve-jq-manual-parity. Final committed repository/PR-boundary checks are verified separately; the archive does not make failing acceptance gates pass.
+  strict_and_reviewed_gates: Current macOS 9, Linux 15 and native Windows 60 strict differences retained. Windows protected 291 primary/289 primary+compact is not 303 exact; macOS/Linux 303 exact preserved. Transfer does not claim 100% parity or reviewed-completion success.

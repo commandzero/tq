@@ -225,6 +225,16 @@ fn foreach_catalog_keeps_ordered_prefix_and_exact_raised_error() {
     );
 }
 
+fn compact_reference_args(query: String) -> Vec<String> {
+    let mut args = vec!["-c".into(), query];
+    if cfg!(windows) {
+        // Structured JSON witnesses use binary reference mode. Raw CLI/newline
+        // contracts remain tested separately with their authored arguments.
+        args.insert(0, "--binary".into());
+    }
+    args
+}
+
 #[test]
 #[ignore = "requires the reviewed matched-platform jq 1.8.2 reference"]
 fn jq_reference_independently_verifies_the_corrected_catalog_contracts() {
@@ -304,7 +314,7 @@ fn jq_reference_independently_verifies_the_corrected_catalog_contracts() {
         let case = case(id);
         let outcome = run_process(&Invocation {
             executable: reference.path.clone(),
-            args: vec!["-c".into(), case.query],
+            args: compact_reference_args(case.query),
             stdin: input.to_vec(),
             timeout: Duration::from_secs(3),
             current_dir: Some(root.clone()),

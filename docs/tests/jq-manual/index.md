@@ -32,19 +32,23 @@ CLI help fixes, not a clean-commit build or the historical bench-profile capture
 952 cases; 9 exact-contract differences remain and the strict command exits 1.
 
 See the [numbered difference list](coverage.md#differences-by-test) for each
-test's practical impact. [Earlier late-P2 closeout metadata](../../../tests/compatibility/reviews/parity-closeout.toon)
-records that checkpoint's source manifests, profiles, executable/report hashes,
-and retained raw evidence. The newhelp-final snapshot adds corrected CLI help
+test's practical impact. [Current closeout metadata](../../../tests/compatibility/reviews/parity-closeout.toon)
+records source manifests, profiles, executable/report hashes, and retained raw
+evidence for all three hosts. The newhelp-final snapshot adds corrected CLI help
 and its regression test; fresh product/helper binaries were frozen after the
 final release/default build. Current hashes and validation provenance are retained
 in `target/closeout/macos/newhelp-final/summary.json`. Full observations are
 retained locally in ignored
 `target/closeout/macos/newhelp-final/manual-full-final.json`.
 
-The native Windows host was offline on 2026-10-06 (SSH exit 255), so its
-candidate refresh remains unresolved. [Historical platform metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
-retains the Windows v6 checkpoint; it does not prove current-candidate execution.
-These macOS results do not establish all-platform or performance acceptance.
+Native Windows release evidence was renewed on smokescreen for `286b5f6`,
+with a test-only binary-reference fix; product/helper source and frozen binary
+hashes are unchanged by that fix. Windows retains 60 differences under #69;
+Linux retains 15 under #70. The [coverage summary](coverage.md#native-platform-results)
+records their counts and limitations separately from these macOS Results.
+[Historical platform metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
+retains the earlier v6 checkpoint. No exact all-platform or calibrated
+performance acceptance is claimed.
 See the [jq/tq option inventory](../../jq-1.8-cli-options.md) for the CLI contract.
 
 <!-- tq-manual-compare:begin section=index -->

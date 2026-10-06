@@ -18,12 +18,14 @@ eight [math boundary witnesses](reviews/jq-manual/math-boundaries.toon), eight
 [path boundary witnesses](reviews/jq-manual/path-boundaries.toon), and one
 [regex boundary witness](reviews/jq-manual/regex-boundaries.toon), for
 554 required cases before subsequent semantic and composition witnesses. The
-expanded execution campaign now contains 905 cases; this is a separate denominator
+expanded manual execution campaign now contains 952 cases; this is a separate denominator
 from the source examples and callable signatures. The arity case checks advertised availability, not function
 semantics. New witnesses supplement the original 518 cases; they cannot replace
-them or relax the 303 original exact-match requirements. The active
-[behavior audit](../../openspec/changes/achieve-jq-manual-parity/source-behavior-audit.md)
-tracks evidence still needed beyond the published examples.
+them or relax the strict gate's 303 original exact-match requirements. The archived
+[behavior audit](../../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/source-behavior-audit.md)
+preserves the source audit beyond published examples. The
+[closeout evidence](reviews/parity-closeout.toon) distinguishes completed implementation
+coverage from unresolved platform contracts transferred to #69/#70.
 The source-linked [semantic completeness index](reviews/jq-manual/completeness.toon)
 maps all 220 callable signatures to a bounded public-VM execution witness and
 keeps exact value/error/empty/flag/process verdicts in their owning ledgers.

@@ -117,7 +117,7 @@ witnesses and protected contracts rather than renewing approvals automatically.
 
 ## Native platform results
 
-Latest closeout evidence dated 2026-10-06 is in
+Latest macOS/Linux closeout evidence dated 2026-10-06 is in
 `target/closeout/macos/newhelp-final` and `target/closeout/linux/help-final`, using newly
 built frozen release campaign executables. Both full source snapshots contain
 884 files at base `3e0dedb` plus uncommitted changes, not clean-commit builds.
@@ -137,22 +137,43 @@ workspace, manual/full campaigns, help, guards and explicit reference/relocation
 checks. Reconsider help after parser/capability changes by rerunning the wording
 regression, release `--help`, and embedded authority guards.
 
-Windows (`smokescreen`) was unreachable on 2026-10-06 (SSH exit 255). Local
-readiness tests are not native Windows execution. The Windows row below is
-**historical implementation-v6 evidence (2026-10-04/05)**, not candidate renewal;
-WSL was transport only in that historical run.
+Windows (`smokescreen`, Windows 11 Pro AMD64/MSVC) now has native release/default
+renewal in `target/closeout/windows/final-286b5f6/native`. Source is base
+`286b5f6` plus **one integration-test-only overlay**,
+`crates/tq-test-support/tests/compatibility_catalog_contracts.rs`, SHA-256
+`a86772509c2e279b823e6f02529e976c73b8c75ed30d23bea1620acf828a6c30`.
+Structured jq probes use `--binary` while retaining exact stdout/stderr assertions
+and authored raw arguments; `compact_reference_args` extraction changes tests,
+not runtime product/helper code. Frozen release source/binary identities are
+unchanged across the overlay: campaigns are mapped, **not a full release rebuild
+or campaign rerun after the test fix**. macOS/Linux product/helper sources also
+remain unchanged; this test is their only crate-source delta.
+
+Actual system `/usr/bin/ssh` and `/usr/bin/scp` succeeded; tests execute in native
+Windows PowerShell, with WSL only transport. Earlier macOS-client SSH failures
+and blocked readiness summaries remain historical, not current host availability.
+No security changes were made.
+
+Windows retains all **518 original cases** and all **303 protected IDs**, but
+only **291 protected primary matches** and **289 primary-plus-compact matches**.
+That is **not 303 exact**; macOS/Linux still preserve 303 exact. All 297 Windows
+CLI composition cases execute without tq gaps; 8 math/reference-availability
+cases differ under #69. All 297 embedded witnesses and resource/recursion/
+cancellation checks pass. Reference absence and deferred differences remain
+observations, not successful matches.
 
 | Platform | Primary exact / cases | Compact JSON exact / cases | TOON matches / cases |
 | --- | ---: | ---: | ---: |
 | macOS | 943/952 | 919/921 | 921/921 |
 | Linux | 937/952 | 913/921 | 921/921 |
-| Windows — historical v6 only | 912/952 | 879/921 | 921/921 |
+| Windows — current native release, mapped test overlay | 912/952 | 879/921 | 921/921 |
 
 The primary and compact campaigns overlap. Their combined difference counts
 are **9 on macOS, 15 on Linux, and 60 on Windows**; do not add the columns.
-Current macOS/Linux strict commands exit 1; historical Windows also exited 1.
-These are observed differences, not additional approvals, renewed Windows
-evidence, or an all-platform compatibility pass.
+All three retained native strict commands exit 1. Windows counts happen to equal
+the historical v6 counts, but are now tied to different current release hashes
+and mapped source proof. Renewal is evidence, not additional approvals or an
+all-platform compatibility pass.
 
 ### Additional platform differences
 
@@ -198,7 +219,8 @@ from strict or reviewed-completion acceptance:
 - [Windows — #69](https://github.com/commandzero/tq/issues/69) owns the enumerated
   60 target/case differences: 6 rounding, 2 scale conversion, 11 unavailable
   reference-function, 32 newline, 6 ANSI/newline, 1 internal-runner/newline,
-  and 2 module-lookup witnesses. Native candidate renewal remains blocked.
+  and 2 module-lookup witnesses. Native renewal is complete; differences remain
+  unresolved, including the non-exact protected contracts.
 - [Linux — #70](https://github.com/commandzero/tq/issues/70) owns the enumerated
   15 differences: 6 rounding, 2 scale conversion, 6 ANSI, and 1 internal-runner
   witness. Current execution retains these as unresolved, not approved.
@@ -253,15 +275,20 @@ These measurements are not general performance guarantees.
   10 fakehost regressions, 43 embedded/catalog guards, help regression and release
   help checks pass. Full validator provisioning/preflight remains a #70 follow-up,
   distinct from the passing full Cargo workspace.
-- Windows native-shell, binary-output, stack, build, and workspace results are
-  historical v6/checkpoint evidence only. Candidate renewal and automated native
-  release-host wiring remain pending under #69; readiness also detected a
-  concurrently changing harness test, requiring a stable source snapshot.
+- Windows final-overlay all-feature workspace, strict all-target/all-feature
+  Clippy and formatting pass; native shell/byte/newline/stack and release campaign
+  evidence are retained and source/hash-mapped. **10 ordinary workspace entries
+  are ignored**; all **5 relevant reference tests explicitly pass separately**
+  (catalog, published manual, native raw/binary bytes, full/focused relocation).
+  The catalog also passes targeted release exact assertions. No workspace pass
+  total is asserted here; remaining ignored helpers/accounting are not passes.
+  Historical CRLF-reference and 101/100 Clippy failures remain in red logs.
 - Corrected shared full campaigns cover **1,220 cases**, **4,804 executed** and
   **1,961 unsupported observations** each, with **0 harness errors and 0 declared
   contract failures**. Embedded environment/platform denials now use the embedded
   host for JSON/YAML/TOON; the stale denial/clock harness-error claim is superseded
-  for these measured campaigns, not for unexecuted Windows.
+  for all three retained source-bound native campaigns. Windows additionally
+  retains 12 exact release denial byte observations with runtime-policy exit 5.
 - macOS reuses the separately source-bound
   `target/compatibility/embedded-denial-p2-closeout-3e0dedb/full.json` campaign:
   93 cases retain the P2 checkpoint's 224 pairwise differences. This copied/
@@ -270,8 +297,11 @@ These measurements are not general performance guarantees.
   to final-help is diagnostic help wording and its test. Runner/policy/catalog
   logic is unchanged, but CLI/helper/embedded hashes differ—never same-hash proof.
   Linux reruns the full campaign with the final-help CLI/helper/embedded host and
-  retains 99 pairwise-difference cases. Both recorded campaigns exit 0 with
-  `observed-differences`, **not strict manual acceptance**.
+  retains 99 pairwise-difference cases. Windows's current mapped release full
+  campaign retains **146 difference cases**, with zero harness/declared-contract
+  failures and 4,804 executed observations; its unsupported rows stay unsupported.
+  All recorded full campaigns exit 0 with `observed-differences`, **not strict
+  manual acceptance**.
 - P2 regressions in `crates/tq-test-support/tests/compatibility_fake_executables.rs`
   verify selected-authority denial without output/disclosure and independently
   enforce the JSON companion contract. Unrelated errors, permissive host results
@@ -296,8 +326,11 @@ Results blocks. The parent has rendered the **newhelp-final** report into all
 21 section Results blocks and updated index provenance. Twenty section bodies
 are byte-identical; invoking-jq changes the help capture, not match counts.
 Authored blocks remain preserved and repeated rendering is idempotent. Final
-help/version/documentation proof reports no blocking mismatches; this update
-changes only the owned reader docs/metadata, not generated files.
+help/version/documentation proof reports no blocking mismatches. The manual
+index now records renewed Windows provenance alongside the macOS Results.
+The [implementation/evidence change](../../../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/tasks.md)
+is verified, synchronized and archived with 69 tasks complete under the
+approved scope; #69/#70 and calibrated performance follow-ups remain open.
 Current published-reference and source/pin/strict-gate checks pass in the retained
 campaigns; this does not turn the manual strict exit 1 into success.
 
