@@ -322,10 +322,10 @@ target=macos binary-stdio=native formats=toon,yaml,json,json5,jsonl,toon-seq,jso
 jq -C .
 
 # jq
-\x1b[1;39m{\x1b[0m
-  \x1b[1;34m"z"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m
-  \x1b[1;34m"a"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m2\x1b[0m
-\x1b[1;39m}\x1b[0m
+\x1b[0;90m{\x1b[0m
+  \x1b[0;36m"z"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m\x1b[0;90m,\x1b[0m
+  \x1b[0;36m"a"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m2\x1b[0m
+\x1b[0;90m}\x1b[0m
 
 # tq -o json
 \x1b[0;90m{\x1b[0m
@@ -587,8 +587,8 @@ Options:
   --tab                           indent JSON with tabs
   --indent N                      indent structured output
   --unbuffered                    flush after every output
-  --allow-environment             permit env to inspect a redaction-safe process snapshot
-  --allow-platform                permit clock, timezone, and input filename built-ins
+  --allow-environment             admit environment access for embedded callers; enabled by the CLI
+  --allow-platform                admit platform access for embedded callers; enabled by the CLI
   --stream                        read path/value events
   --stream-errors                 report stream parse errors as values
   -x, --proxy-on-error            pass through sources rejected by structured parsing
@@ -822,9 +822,9 @@ jq -M .
 jq -C .
 
 # jq
-\x1b[1;39m{\x1b[0m
-  \x1b[1;34m"foo"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m
-\x1b[1;39m}\x1b[0m
+\x1b[0;90m{\x1b[0m
+  \x1b[0;36m"foo"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m
+\x1b[0;90m}\x1b[0m
 
 # tq -o json
 \x1b[0;90m{\x1b[0m

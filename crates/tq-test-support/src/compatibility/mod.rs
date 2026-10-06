@@ -17,10 +17,13 @@ pub use baseline::{
 };
 pub use case::{
     BaselinePolicy, CaseAdapter, CaseClassification, CaseFixture, CaseStatus, CatalogError,
-    CompatibilityCase, CompatibilityCatalog, ContractKind, ExpectedContract, FixtureFormat,
-    InvocationMode, ToolAdapters, TqContract, load_catalog,
+    CompatibilityCase, CompatibilityCatalog, ContractKind, ExecutionMode, ExpectedContract,
+    FixtureFormat, InvocationMode, ToolAdapters, TqContract, load_catalog,
 };
-pub use discovery::{ExecutableConfig, ToolDiscoveryError, ToolIdentity, ToolKind, discover_tool};
+pub use discovery::{
+    ExecutableConfig, ToolDiscoveryError, ToolIdentity, ToolKind, discover_embedded_host,
+    discover_tool,
+};
 pub use manual::{
     DisparityEvidence, DisparityValidationError, GapBaselineVerdict, GapInventorySummary,
     ManualGapEntry, ManualGapInventory, ManualInventoryError, ManualVerdictCounts,
@@ -44,9 +47,9 @@ pub use process::{
     ProcessStatus, run_process, run_process_with_environment, run_process_with_environment_bounded,
 };
 pub use report::{
-    CapabilityCounts, CapabilityDisposition, CaseReport, CompatibilityReport, CoverageCount,
-    FinalStatus, ObservationState, REPORT_SCHEMA_VERSION, ReferenceExecution, SemanticDiff,
-    ToolObservation, encode_hex, tq_contract_matches,
+    CapabilityCounts, CapabilityDisposition, CaseReport, CompatibilityReport, ContractFailure,
+    CoverageCount, FinalStatus, ObservationState, REPORT_SCHEMA_VERSION, ReferenceExecution,
+    SemanticDiff, ToolObservation, TqExecutionProvenance, encode_hex, tq_contract_matches,
 };
 pub use runner::{
     CampaignProfile, RunnerError, compare_manual, compare_manual_with_disparities, run_campaign,

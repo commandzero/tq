@@ -102,6 +102,7 @@ fn presentation_report(reference_body: &str, actual_body: &str) -> serde_json::V
             jq: Some(jq),
             tq: Some(tq),
             yq: None,
+            ..Default::default()
         },
         directory.path(),
         Duration::from_millis(200),
@@ -233,6 +234,7 @@ fn manual_comparison_forces_authored_tq_output_flags_to_each_contract() {
             jq: Some(executable.clone()),
             tq: Some(executable),
             yq: None,
+            ..Default::default()
         },
         directory.path(),
         Duration::from_secs(2),
@@ -331,6 +333,7 @@ fn manual_comparison_validates_unframed_cardinality_and_errors() {
             jq: Some(executable.clone()),
             tq: Some(executable),
             yq: None,
+            ..Default::default()
         },
         directory.path(),
         Duration::from_secs(2),

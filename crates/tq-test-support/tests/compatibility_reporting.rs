@@ -73,6 +73,8 @@ fn report(value: i64, duration: u128) -> CompatibilityReport {
                 note: None,
             }],
             semantic_diffs: Vec::new(),
+            contract_failures: Vec::new(),
+            tq_execution: None,
         }],
         coverage: BTreeMap::from([(
             "value.identity".to_owned(),
@@ -102,6 +104,18 @@ fn reference_stream_configuration_is_explicit_without_rewriting_historical_repor
     assert!(historical.get("reference_execution").is_none());
     let restored: CompatibilityReport = serde_json::from_value(historical).unwrap();
     assert!(restored.reference_execution.is_none());
+    assert!(restored.cases[0].contract_failures.is_empty());
+    assert!(restored.cases[0].tq_execution.is_none());
+    assert!(
+        serde_json::to_value(&restored).unwrap()["cases"][0]
+            .get("contract_failures")
+            .is_none()
+    );
+    assert!(
+        serde_json::to_value(&restored).unwrap()["cases"][0]
+            .get("tq_execution")
+            .is_none()
+    );
     report.reference_execution = Some(tq_test_support::compatibility::ReferenceExecution {
         target: "x86_64-windows".to_owned(),
         jq_structured_program_prefix_args: vec!["--binary".to_owned()],

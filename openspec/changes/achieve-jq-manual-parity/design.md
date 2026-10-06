@@ -8,7 +8,7 @@ The current evaluator shares parsing, resolution, VM execution, and values acros
 
 The design uses one evaluator for native formats and jq parity. Fixes belong in language, value, I/O, and standard-library behavior, not in special cases for manual case IDs. Every recorded gap gets an execution result and every existing match remains a regression test.
 
-This work does not replace TOON as the default, change TOON syntax, run jq as a production subprocess, embed libjq, or claim that finite tests prove equivalence for every possible jq program. The release claim is complete tested coverage of the pinned manual on verified targets, with explicit native-output, product-identity, and reviewed safe-library disparities. It is not an exact-parity claim.
+This work does not replace TOON as the default, change TOON syntax, run jq as a production subprocess, embed libjq, or claim that finite tests prove equivalence for every possible jq program. The implementation/evidence closeout claim is tested implementation and complete execution accounting of the pinned manual on measured targets, with explicit native-output/product-identity contracts and enumerated unresolved Linux/Windows follow-ups. The authoritative target/case map is the implementation/evidence closeout requirement in `specs/cross-tool-compatibility/spec.md`. Closeout is neither an exact-parity claim nor a reviewed-completion acceptance claim; release gates remain unchanged.
 
 ## Decisions
 
@@ -16,9 +16,9 @@ This work does not replace TOON as the default, change TOON syntax, run jq as a 
 
 Use safe Rust and existing Rust libraries. Keep `unsafe_code = forbid`; do not introduce direct FFI, a native engine dependency, or a maintained unsafe bridge to chase exact jq behavior. Existing platform implementation details behind the Rust standard library are not a request to replace the standard library.
 
-The matching requirements below describe the target behavior, subject to narrowly reviewed safe-library disparities. Implement missing functions, argument forms, and language behavior before considering an exception. A dependency limitation must be demonstrated, not inferred from missing API names or untested concerns.
+The matching requirements below describe the target behavior, subject to narrowly reviewed safe-library disparities. Implement missing functions, argument forms, and language behavior before considering an exception. The confirmed closeout transfer is not an exception or approval: only the mapped target/case contracts move to #70/#69 while their verdicts remain unresolved. A dependency limitation must be demonstrated, not inferred from missing API names or untested concerns.
 
-Maintain `docs/tests/jq-manual/coverage.md` as the public difference summary, with supporting witness and approval metadata in `tests/compatibility/reviews/`. Retain reproducible query/input, jq and tq observations, reference and target identity, cause, practical impact, safety or implementation tradeoff, regression evidence, and a future reconsideration condition in the corresponding records. Reconsider these disparities after the spec is fully implemented. Exact matches, documented disparities, and unresolved failures remain separate counts. Never turn a disparity into an exact match or hide it with blanket normalization. Numeric differences require a function-specific justified error bound and boundary tests; changed types, result cardinality, domain handling, or unknown functions are not rounding differences. Resource tests verify the chosen engine's real limits without claiming an unmeasured cancellation deadline.
+Maintain `docs/tests/jq-manual/coverage.md` as the public difference summary, with supporting witness and approval metadata in `tests/compatibility/reviews/`. Retain reproducible query/input, jq and tq observations, reference and target identity, cause, practical impact, safety or implementation tradeoff, regression evidence, and a future reconsideration condition in the corresponding records. Reconsider these disparities after the spec is fully implemented. Exact matches, documented disparities, and unresolved failures remain separate counts. Deferred entries require ownership, impact, regression evidence, and reconsideration criteria, not invented accepted bounds or renewed approvals. Never turn a disparity into an exact match or hide it with blanket normalization. Numeric differences require a function-specific justified error bound and boundary tests; changed types, result cardinality, domain handling, or unknown functions are not rounding differences. Resource tests verify the chosen engine's real limits without claiming an unmeasured cancellation deadline.
 
 ### One strict campaign, separate source provenance
 
@@ -100,8 +100,7 @@ Add source-linked composition witnesses without modifying the original manual
 snapshot or its protected case IDs. Test each affected operation both inside a
 definition and around a call, plus filter/value parameters, nested captures,
 recursion, empty/multiple results, errors, cancellation, and tight limits.
-Regenerate all three required native campaigns and review executable-bound approvals after the
-implementation stabilizes. Earlier matching reports remain checkpoint evidence.
+Reconcile final candidate source/executable/profile identities against all three native campaigns after implementation stabilizes; refresh campaigns where equivalence cannot be proved. Review executable-bound approvals only for differences actually proposed for acceptance. The enumerated #70/#69 contracts stay unresolved; earlier matching reports remain checkpoint evidence.
 
 ### Separate numeric provenance from computed values
 
@@ -147,15 +146,21 @@ This is a deliberate change to earlier CLI confinement. Document the security co
 
 ## Required native platform acceptance
 
-The user superseded the Windows deferral. Final acceptance requires fresh,
-source/executable-bound jq 1.8.2 campaigns on local macOS, ironhide Linux x86_64,
-and smokescreen Windows 11 Pro `x86_64-pc-windows-msvc`. Windows commands must
+The user confirmed implementation/evidence closeout with enumerated Linux
+compatibility refinements transferred to #70, Windows refinements to #69, and
+calibrated performance acceptance to #31/platform follow-ups. This supersedes
+prior wording that required all-target passing acceptance and calibration
+before this change could close. It does not waive native execution: closeout
+requires final-candidate source/executable-bound jq 1.8.2 evidence on local
+macOS, ironhide Linux x86_64, and smokescreen Windows 11 Pro
+`x86_64-pc-windows-msvc`, refreshed where identity cannot be proved. Windows commands must
 execute native Windows jq/tq binaries in native PowerShell. An SSH session into
 WSL proves only Linux behavior, not Windows acceptance; cross-compilation and
 PowerShell on macOS/Linux also do not count. Retain applicable cmd invocation,
 binary/newline, terminal, date/environment, module/path, and live unbuffered
-witnesses. Missing execution or reference identity blocks acceptance, not merely
-an unqualified compatibility claim.
+witnesses. Missing execution or reference identity blocks closeout as well as acceptance.
+Only the target/case map in `specs/cross-tool-compatibility/spec.md` transfers
+unresolved acceptance obligations; it is not a blanket platform waiver.
 
 Native Windows compatibility capture is implemented with overlapped named
 pipes and JobObjects for bounded child execution, concurrent stdin/stdout/stderr
@@ -170,7 +175,11 @@ surviving isolated worker. Accounting implementation is distinct from its
 validation. Separate control executions vary in 15.625 ms CPU quanta, with
 observed differences up to 62.5 ms exceeding the unchanged 20 ms check.
 Validation remains incomplete; no tolerance change or performance acceptance
-is authorized, and issue #31 remains open. Wall time, WSL measurements,
+is authorized, and issue #31 remains open. Calibration acceptance is a
+follow-up, not a prerequisite for this change's revised closeout. The v6
+record establishes no fresh calibration on any platform; unfinished macOS
+calibration and affected benchmark comparisons remain explicitly unpublished
+as accepted performance evidence. #31's Windows scope is not macOS proof. Wall time, WSL measurements,
 placeholder zeros, or successful compatibility capture cannot replace native
 resource validation. Renew target-scoped disparity evidence against jq 1.8.2
 only after review; existing approvals are not portable to Windows or a new
@@ -181,10 +190,18 @@ reported native launch verified with state `0`. No further security changes
 are needed. This launch prerequisite does not establish campaign, resource,
 or performance acceptance.
 
-The earlier deferral in `tasks.md`, `platform-reference-investigation.md`, and
-`implementation-review.md` is superseded acceptance guidance, not a waiver.
-Those task/history files are outside this planning edit's ownership; their
-checkpoints remain historical and task reconciliation is still required.
+The current closeout requirement supersedes earlier acceptance guidance in
+planning and checkpoint history. Historical observations and approvals remain
+bound to their recorded builds. `native-platform-acceptance.toon` v6 is base
+`3605d2d` plus its 59-file overlay, not automatically the current worktree;
+macOS final-bound evidence is bench-profile, with earlier release provenance
+retained separately. Linux full validator preflight and automated Windows
+release-host wiring remain platform follow-ups, not executed passes. Shared
+full-campaign denial-fixture/clock harness debt is owned by #69/#70, not a
+product disparity or a passing full campaign. None of these transfers changes
+the strict runner, reviewed-completion model, inventory, or 303-match baseline
+protection. MacOS's nine compatibility differences are not transferred and
+still require contract/evidence reconciliation before closeout.
 
 ## Risks / Trade-offs
 
@@ -198,6 +215,6 @@ checkpoints remain historical and task reconciliation is still required.
 
 Land the strict campaign and frozen inventory first, with the known failing state visible. Close workstreams in dependency order, then remove obsolete expected-difference policies only as executable contracts pass. Preserve negative arity probes as provenance-backed tests.
 
-Update help, format compatibility documentation, capability reports, and breaking-change notes with implementation. Keep token-saving reports about representation separate from correctness verdicts. Run workspace tests, formatting, linting, native-format/resource regressions, and the complete target campaign before claiming completion.
+Update help, format compatibility documentation, capability reports, and breaking-change notes with implementation. Keep token-saving reports about representation separate from correctness verdicts. Run workspace tests, formatting, linting, native-format/resource regressions, and final-candidate native campaign reconciliation before claiming implementation/evidence closeout. Preserve actual strict failures and enumerate every transferred obligation; calibrated benchmark acceptance remains unpublished until separately established.
 
-No production data migration is needed. Rollback restores the previous implementation and its truthful partial-compatibility report; it must not retain a 100% claim while restoring old behavior. Synchronize and archive this change only after implementation verification, following the repository's PR policy.
+No production data migration is needed. Rollback restores the previous implementation and its truthful partial-compatibility report; it must not retain a 100% claim while restoring old behavior. Synchronize and archive this change only after verification of all eight deltas against the revised closeout scope, following the repository's PR policy. This planning revision performs neither operation and closes no evidence task.

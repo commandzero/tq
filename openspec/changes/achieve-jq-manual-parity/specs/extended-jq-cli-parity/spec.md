@@ -1,6 +1,8 @@
 ## MODIFIED Requirements
 
 ### Requirement: Reviewed jq option parity
+For implementation/evidence closeout only, the Linux/Windows color-presentation and `manual.invoking.run-tests` diagnostic contracts and the 32 Windows newline contracts explicitly enumerated in `cross-tool-compatibility` are transferred to #70/#69. Exact observations and failed acceptance verdicts remain unchanged. This is not an option-implementation waiver, an ANSI/CRLF normalizer, a new disparity approval, or transfer of the macOS test-runner diagnostic obligation.
+
 The system SHALL implement every jq 1.8 option documented by the pinned manual using jq 1.8.2 as the execution reference according to executable cases for argv parsing, input consumption, output bytes, diagnostics, and exit status. The default structured-output representation adaptation SHALL be TOON when no output format or compact option selects JSON. Color presentation SHALL follow the archived `output-colors` main spec's explicit tq contract rather than exact jq default ANSI styling. Unsupported recognized manual options SHALL be implementation gaps, not accepted permanent differences. Explicit tq-only options SHALL retain their documented contracts.
 
 #### Scenario: Supported option combination

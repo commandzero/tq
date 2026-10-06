@@ -56,7 +56,8 @@ Execute the cases against jq and the current tq build:
 ```sh
 cargo build -p tq-cli -p tq-test-support --bins
 TQ_JQ=target/reference-build/jq/jq TQ_BIN=target/debug/tq \
-  target/debug/tq-compat run --profile full --json target/manual-compatibility.json | tq -x
+TQ_EMBEDDED_HOST=target/debug/tq-compat-embedded \
+  target/debug/tq-compat run --profile full --json target/manual-compatibility.json
 ```
 
 Use the full profile; smoke excludes jq-target cases. A covered example can
@@ -67,6 +68,111 @@ CLI adapters can set `env` for one child process, supply `trailing_args` after
 the query, and set `omit_query` for commands such as `--from-file` or `--help`.
 Set `expected.compare_stderr` for examples whose diagnostic bytes are observable
 results, such as `debug` and `stderr`.
+
+### Embedded capability-denial observations
+
+The shared full campaign keeps process CLI admission separate from embedded
+policy denial. `adapters.tq.execution_mode` is a closed enum: `process` (the
+omitted-field default), `embedded-deny-environment`, or
+`embedded-deny-platform`. Embedded modes are tq-only error contracts with
+`runtime-policy`, stdin input, and the original query; they cannot override the
+query, omit it, or supply authored CLI/trailing arguments. JSON/YAML/TOON input
+expansion and strict TOON/JSON companion matching remain unchanged.
+
+Build `tq-compat-embedded` together with the campaign binaries using `--bins`.
+It is a test-support subprocess host, not a new public tq option. It calls
+`parse_args_with_policy` and `run_with_io` with the selected authority explicitly
+false, admitting the other authority. The parent retains normal subprocess
+isolation, environment overrides, deadlines, and byte capture. Use
+`TQ_EMBEDDED_HOST` to select an immutable host explicitly; otherwise discovery
+checks beside `TQ_BIN`, then the repository's release/debug build directories.
+It never substitutes the process CLI or searches PATH for an embedded host.
+An invalid explicit override or missing required host fails the campaign.
+
+Each embedded case's `tq_execution` records its mode and actual host canonical
+path, version, byte count, and SHA-256. This identity replaces the top-level
+`tools` tq CLI identity **for that case's tq observations only**. Keep host,
+runner, and CLI builds together; do not claim that an embedded host tests an
+arbitrarily supplied `TQ_BIN` executable. Capture immutable executable hashes
+before/after release evidence runs.
+
+The shared runner enforces tq's declared error class even when no reference
+adapter applies. Embedded denial additionally requires runtime exit 5, empty
+stdout/results, and a single redacted authority-specific diagnostic without
+internal ambient names or the campaign sentinel. Semantic contract violations
+are recorded in per-case `contract_failures`, preserving actual bytes/statuses
+rather than recategorizing them as malformed output. They fail the command and
+cannot be counted as supported capabilities. These report fields default to
+absent/empty when reading historical schema-v1 reports; existing observation
+fields are unchanged. Consumers must inspect `contract_failures` as well as
+`semantic_diffs` and harness errors.
+
+A shared campaign can still exit zero with `observed-differences`; it is not the
+strict manual acceptance gate. Native-platform differences and calibrated
+performance acceptance remain separate evidence, not waived by this repair.
+Do not print ambient environment objects when reproducing denial failures;
+retain raw evidence only in ignored campaign storage.
+
+The macOS repair run on base `3e0dedb` plus the harness changes is retained at
+`target/compatibility/embedded-denial-closeout-3e0dedb/`: `full.json`, `full.log`,
+and before/after executable hash manifests. It used the reviewed jq 1.8.2
+reference and hash-checked yq 4.53.2. Both denial cases passed all three input
+representations with zero output, runtime-policy exit 5, and the embedded host
+identity. The 1,220-case campaign had 4,804 executed observations and no harness
+errors, but still failed: 93 cases had pairwise differences and four cases had
+12 declared-error-contract violations. At that point, the four stale contracts were
+`fold.foreach.partial-error` and `interpolation.partial-error` (declared
+`runtime-explicit`, observed `runtime-type-path`), `regex.unsupported-lookaround`
+(declared unsupported error, observed success), and `update.invalid-lvalue`
+(declared compile error, observed runtime error). This is repair evidence, not
+strict all-cases acceptance or a renewal of historical approvals.
+
+#### Independently verified catalog contract corrections
+
+The subsequent catalog closeout retains all four filters, inputs, and stable
+IDs. Pinned jq 1.8.2 and real tq executions independently establish:
+
+| Case | Required behavior |
+| --- | --- |
+| `fold.foreach.partial-error` | Emit `1`, then `3`, then raise `"boom"`; runtime exit 5 |
+| `interpolation.partial-error` | Emit `"before=1"`, then raise `"boom"`; runtime exit 5 |
+| `regex.unsupported-lookaround` | `test("(?=a)")` returns `true` on `"a"` and `"ba"`, `false` on `"b"`; successful result-sequence contract |
+| `update.invalid-lvalue` | `(1 + 2) = 3` fails at runtime with exit 5 and no stdout; the error is catchable |
+
+The three failures use the existing `runtime-type-path` normalized family.
+That family includes explicit `error(value)` as well as type/path failures;
+these two `error("boom")` filters are not reinterpreted as literal type errors.
+Regression tests require their exact output prefixes, diagnostics, and caught
+`"boom"` values, not just an arbitrary nonzero exit. The invalid-path regression
+also distinguishes runtime catchability from compile failure. jq and tq retain
+their different invalid-path diagnostic text; no byte-comparison relaxation or
+new disparity approval follows from correcting the error class.
+
+The historical `regex.unsupported-lookaround` ID stays unchanged for evidence
+provenance, but its title, capability tags, and adapter note now describe
+supported positive lookahead. Its baseline becomes **required**, not
+informative. Positive, negative, and non-anchored search witnesses guard against
+a constant boolean or a silently removed check. Historical review summaries
+remain historical and are not rewritten.
+
+Closeout evidence belongs under
+`target/compatibility/catalog-contract-closeout-3e0dedb/`, separate from the
+original failing run. It contains independent jq/tq probes, frozen-executable
+identities, a hashed current-source snapshot, full campaign observations, and a
+redacted summary. Pairwise differences remain observable even after declared
+contract and harness failures are eliminated; this does not grant strict
+manual or calibrated performance acceptance.
+
+Focused regression checks:
+
+```sh
+cargo test --locked -p tq-test-support --test compatibility_embedded \
+  --test compatibility_catalog_contracts --test compatibility_cases \
+  --test compatibility_fake_executables --test compatibility_schema \
+  --test compatibility_discovery --test compatibility_reporting
+TQ_JQ=target/reference-build/jq/jq cargo test --locked -p tq-test-support \
+  --test compatibility_catalog_contracts jq_reference -- --ignored
+```
 
 ### JSON equivalence and output size
 

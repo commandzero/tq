@@ -1,6 +1,6 @@
 ## 1. Freeze coverage and make failures enforceable
 
-Matching tasks in this plan target jq behavior subject to the reviewed safe-library disparity contract. Completion requires implemented and tested behavior or a specifically reviewed, reproducible library/platform disparity; unresolved implementation gaps stay unchecked. Exact-parity reports remain distinct from completion with documented disparities.
+Matching tasks target jq behavior subject to the reviewed safe-library disparity contract. Reviewed-completion acceptance still requires exact contracts or specifically reviewed, reproducible disparities. The user-confirmed implementation/evidence closeout instead follows the authoritative target/case map in `specs/cross-tool-compatibility/spec.md`: only enumerated Linux/Windows refinements move to #70/#69, and calibrated performance acceptance remains under #31/platform follow-ups. Transfer is not acceptance, approval, a gate pass, or permission to omit cases. Unresolved implementation gaps and retained evidence obligations stay unchecked. MacOS compatibility differences are not transferred; unfinished macOS calibration/comparisons remain explicitly unpublished as accepted performance evidence.
 
 - [x] 1.8 Add reviewed disparity validation and separate exact/completion gate modes; reject stale or unknown approvals, preserve exact observations and all prior matches, and keep skips/timeouts/crashes as failures.
 - [x] 1.1 Pin the manual fingerprint, section inventory, and matched-platform jq 1.8.2 build identities; verify a changed source or executable fingerprint fails reference validation.
@@ -34,7 +34,10 @@ Matching tasks in this plan target jq behavior subject to the reviewed safe-libr
 - [x] 3.11 Implement bounded fold and path/update composition with user calls in generators, initializers, updates, extraction, selected paths, and RHS filters; preserve branch state, ordering, and cancellation.
 - [x] 3.12 Integrate documented scalar and generator built-ins into user-filter execution without a restrictive arity whitelist or an unbounded collector fallback; verify math, string, collection, and generator family witnesses.
 - [x] 3.13 Integrate callback-driven regex, recursive utilities, input, and process effects with composed user filters; verify lexical replacement scope, shared input consumption, debug/stderr ordering, non-catchable halt, and live early termination.
-- [ ] 3.14 Run the full composition inventory through CLI and embedded interfaces, including recursion and tight resource limits; require no deferred execution gaps, then refresh native campaigns, approvals, and performance evidence before final acceptance.
+- [ ] 3.14 Verify the full 297-case composition inventory through CLI and public embedded interfaces, including recursion, cancellation, and tight resource limits, with no deferred execution gaps. Reconcile final-candidate source/executable/profile identities and refresh native campaigns where identity cannot be proved; retain mapped #69/#70 differences as unresolved. Renew approvals only for independently reviewed acceptance, not deferred contracts; calibrated performance acceptance is follow-up work.
+  - Performed — macOS late-p2: 297/297 CLI composition matches; embedded 297 witnesses (249 direct comparisons, 48 independent expectations), eight composition-resource and six recursive-composition tests pass in the all-feature workspace run.
+  - Performed — Linux late-p2: fresh manual execution retains the same three transferred composition differences; no new manual failure IDs. Embedded inventory and current focused stack/resource execution are recorded; changed executable hashes are not treated as binary equality with prior runs.
+  - Remaining — renew native Windows CLI/embedded composition, recursion, cancellation and resource checks on a stable final candidate, then reconcile all three host identities. Offline SSH and local macOS readiness do not satisfy this substep.
 
 ## 4. Path selection and assignment
 
@@ -91,24 +94,65 @@ Matching tasks in this plan target jq behavior subject to the reviewed safe-libr
 
 ## 10. Cross-platform acceptance and release evidence
 
-- [ ] 10.1 Wire the strict campaign to advertised release OS/architectures with pinned matched jq builds; verify macOS and Linux execution and that missing target/reference evidence blocks a compatibility claim. Require native Windows execution on smokescreen alongside local macOS and ironhide Linux; preserve every non-match without accepting or skipping it into passing totals.
+- [ ] 10.1 Reconcile final-candidate strict campaign execution and matched jq 1.8.2 identities on local macOS, ironhide Linux, and native smokescreen Windows, refreshing campaigns where source/executable/profile identity cannot be proved. Retain every non-match and missing-evidence limitation without passing acceptance claims. Record automated Windows release-host wiring under #69 and Linux full validator preflight under #70 as unexecuted follow-ups; the current workflows do not establish all advertised targets.
+  - Performed — macOS `newhelp-final` release/default strict execution: 943/952 primary, 919/921 compact, 921/921 TOON; strict exit 1, nine unchanged differences, zero approvals applied. Product/helper source hashes match the current implementation at review.
+  - Performed — Linux `help-final` fresh locked release: 937/952 primary, 913/921 compact, 921/921 TOON; strict exit 1 with exactly the same 15 #70 IDs. Source, reference and frozen binary stability are recorded.
+  - Remaining — restore smokescreen access and renew native Windows release/reference/manual/shell/binary/newline/stack/workspace provenance. The retained SSH exit 255 establishes unavailable access, not a platform waiver or candidate verification.
 - [x] 10.2 Verify actual POSIX invocation on macOS and Linux, including quoted filters, variables, paths, and outputs. Verify native PowerShell/cmd and Windows binary/newline tests on smokescreen; do not count non-Windows shell execution as Windows evidence.
-- [ ] 10.3 Reconcile the complete source inventory against executable evidence; require all original 518 cases and new witnesses to be exact matches or reviewed safe-library disparities, with zero skips, timeouts, unresolved failures, regressions, or missing mappings. Publish exact and disparity counts separately without a 100% exact-parity claim.
-- [ ] 10.4 Run workspace formatting, clippy, tests, native-format/resource regressions, and affected benchmark comparisons; preserve all 303 baseline matches and document any performance change before acceptance.
-- [ ] 10.5 Regenerate compatibility reports and update help, formats documentation, numeric/security migration notes, and changelog; verify TOON remains the documented default, `-c` selects compact JSON, and token savings remain separate from verdicts.
-- [ ] 10.6 Validate OpenSpec and affected documentation, verify implementation against all eight delta specs, then synchronize and archive only after completion; retain campaign results and the resolved gap inventory as review evidence.
-- [ ] 10.7 Complete `docs/tests/jq-manual/coverage.md` and supporting metadata in `tests/compatibility/reviews/` with observed jq/tq witnesses, target/dependency identity, practical impact, accepted bounds or restrictions, and regression evidence; retain explicit reconsideration criteria for after the spec is fully implemented.
+- [ ] 10.3 Reconcile all original 518 cases and added witnesses against final-candidate executable evidence, source mappings, and the explicit target/case follow-up map. Preserve exact matches, genuinely approved disparities, and unresolved transferred differences as separate outcomes; verify the 303 protected baseline contracts without silently changing the pin or gate. Require no missing mappings, skips, timeouts, crashes, unowned failures, or unexplained regressions. Resolve/review macOS's nine non-transferred contracts before closeout; claim neither exact nor reviewed-completion acceptance for deferred differences.
+  - Performed — macOS `newhelp-final` and Linux `help-final` reports preserve all 518 original cases, 303/303 protected exact contracts, 952-case execution and source/reference mappings. No new failure IDs or hidden manual execution failures are recorded.
+  - Performed — macOS's nine scoped expected behaviors were reviewed against actual observations: erfc(2) 2 ULP higher, tgamma(0.5) 1 ULP lower, six output-colors presentation contracts with diagnostically identical plain bytes/process status, and the run-tests internal suffix with the supplied test passing in both tools. These are existing input/contract-scoped expected behaviors, not fresh executable-bound approvals; all nine strict failures remain.
+  - Remaining — reconcile renewed native Windows 518/303 accounting and mapped differences against final source; resolve any new or unowned failure rather than applying a blanket follow-up waiver.
+- [ ] 10.4 Verify final-candidate workspace formatting, Clippy, tests, native-format and bounded-resource regressions, and protected baseline evidence. Disclose performance observations and explicitly defer calibration/calibrated benchmark acceptance to #31/platform follow-ups; unfinished macOS calibration and affected comparisons remain unpublished as accepted performance evidence. Historical controls and microbench smoke do not establish current calibration. Reconcile the full-campaign denial-fixture/clock harness debt as explicit #69/#70 follow-ups, not product disparities or a passing full campaign.
+  - Performed — macOS `newhelp-final` full preflight, all-feature workspace tests and release build exit 0; three earlier disk-full preflight attempts remain recorded failures. The successful run disabled incremental compilation/dev-test debug symbols, not checks; named native-format, parser/resolver, composition, resource, CLI and gate suites are present in the retained logs. Microbench smoke is correctness/smoke evidence only.
+  - Performed — Linux `help-final` fresh all-feature workspace execution passes 1,891 tests (zero failures, 11 ignored in that command); the pinned/published-reference and both relocation tests pass explicit separate runs. Strict workspace/all-target/all-feature Clippy and release build exit 0. Linux full validator preflight remains the explicit unexecuted #70 follow-up; ignored native performance controls are not calibration proof.
+  - Performed — repaired macOS/Linux shared full campaigns cover 1,220 cases with zero declared-contract failures and zero harness errors. MacOS retains pre-help P2 diagnostic evidence, not a final-help full-campaign rerun or whole-source/executable equality claim; only help strings/regression changed in crate sources. Linux `help-final` is a fresh rerun (4,804 executed, 1,961 unsupported observations, 99 differing cases). Unsupported observations and pairwise differences remain, so exit 0 is not exact manual acceptance.
+  - Remaining — current native Windows regressions and repaired embedded-denial/full-campaign execution. Calibration stays deferred under #31/platform follow-ups; no accepted performance publication on macOS or any other platform is claimed.
+- [x] 10.5 Regenerate compatibility reports and update help, formats documentation, numeric/security migration notes, and changelog; verify TOON remains the documented default, `-c` selects compact JSON, and token savings remain separate from verdicts.
+  - Performed — current coverage/compatibility prose and witness metadata distinguish exact failures, scoped expected macOS behaviors, unresolved #69/#70 transfers, historical Windows evidence, and deferred performance acceptance. Help/option assertions, output defaults, compact selection and migration/changelog behavior have implementation/test mappings.
+  - Performed — `target/closeout/macos/newhelp-final/task-10.5-final-proof.json` records zero blocking documentation mismatches. `crates/tq-cli/src/args.rs` help and `help_distinguishes_cli_ambient_access_from_embedded_admission` distinguish process ambient access from embedded admission without claiming redaction. The manual/options reference is pinned to jq 1.8.2; migration targets 0.4.1 while retaining the historical 0.4.0 API boundary and separately scoped native-format jq 1.8.1.
+  - Performed — the newest frozen report is rendered into all 21 section Results blocks and the index identifies its source/release provenance; only the help capture changes, 20 section files are byte-identical and repeat rendering is idempotent. README/help/formats, numeric/security migration and changelog guidance agree; token savings remain separate from verdicts. All eight proof-document hashes match current files; documentation validation exits 0 and 147 local links across 31 files pass (external URLs not fetched). This completes documentation publication, not Windows renewal or acceptance.
+- [ ] 10.6 Validate OpenSpec and affected documentation and verify implementation/evidence against all eight revised delta specs. Only after retained closeout obligations have proof, synchronize and archive under repository policy; retain source-bound campaign results and gap/follow-up reconciliation without changing original inventory or gate outcomes. No synchronization or archival is performed by this scope revision.
+  - Performed — implementation/test/evidence mapping for all eight deltas (32 requirements, 123 scenarios) is recorded in the 2026-10-06 progress section of `implementation-review.md`; the mapping does not substitute for missing native Windows scenario execution.
+  - Performed — final help/report/documentation publication is verified under 10.5; witness reconciliation remains complete under 10.7. Current macOS/Linux manifest checks verify all 121/65 entries locally; this is not off-host archival proof. Strict OpenSpec validation, `scripts/docs-check.sh` and scoped artifact `git diff --check` exit 0 with docs/review metadata unchanged during validation. This checkpoint is not final native/platform or PR-boundary verification.
+  - Remaining — finish native Windows renewal, validate the final artifact/docs state after concurrent metadata work, verify final candidate identity, and only then synchronize and archive when authorized. The separate PR-boundary check currently fails on uncommitted OpenSpec changes; preflight success does not clear it.
+- [x] 10.7 Complete the witness reconciliation for `docs/tests/jq-manual/coverage.md` and supporting metadata in `tests/compatibility/reviews/`: observed jq/tq contracts, source/executable/profile and dependency identities, practical impact, regression evidence, owners, and reconsideration criteria. Accepted bounds/restrictions apply only to independently approved disparities; transferred #69/#70 entries remain explicitly unresolved/unapproved. Verify durable raw-evidence availability and hashes, and reconcile live issue acceptance wording with the confirmed parent closeout scope.
+  - Performed — read and reconciled current coverage prose and `parity-closeout.toon` witness impacts, expected scopes, follow-up owners and reconsideration criteria; reviewed the late-p2 observations independently. Historical approvals are not renewed.
+  - Performed — all 81 macOS and 60 Linux late-p2 artifact-manifest entries are locally present and SHA-256 matching. Source snapshots, logs, reports and frozen binaries are retained under ignored `target/`; no off-host durable archive has been verified.
+  - Performed — live #69/#70 explicitly approve parent scope transfer without acceptance; #31 now states that the runner/backend exist but calibration/native renewal remain incomplete. All three issues remain open.
+  - Performed — reviewed the completed late-p2 identity promotion in coverage prose and `parity-closeout.toon`: 16 directly referenced current/historical/shared artifact hashes match, as do 12 shared P2 and 81 historical Windows manifest entries. Historical Windows retention is explicitly not candidate renewal. Metadata records current helper/product profiles and identities, causes, regression witnesses, practical impact, precise expected scopes, owners and reconsideration criteria; no deferred approval is invented.
+  - Performed — latest `parity-closeout.toon` promotion now records macOS `newhelp-final` and Linux `help-final` sources, reports and executable identities, retaining late-p2/v6 as history and macOS shared P2 as pre-help diagnostic evidence. Current manifest/source/document hash verification supports these labels; no whole-source identity is inferred across the help change.
+  - Performed — `scripts/docs-check.sh` passes on the updated bundle. Retention is verified locally, with the no-off-host-archive limitation and preserve-before-cleanup obligation explicitly recorded. This checkbox completes witness/documentation reconciliation, not Windows execution, generated-page publication under 10.5, calibration, spec synchronization or archival.
 
-Task 10.7 remains open: the jq 1.8.2 summaries and target-bound witness metadata
-do not renew executable-bound approvals. Accepted restrictions/bounds and
-complete reconsideration/regression evidence still require review.
+Current task count is 64/69 complete, with five original tasks still open:
+3.14, 10.1, 10.3, 10.4 and 10.6. This update newly completes only 10.5;
+10.7 remains complete from the preceding witness reconciliation. Named plain
+subitems distinguish performed work from remaining obligations without adding
+checkboxes or changing the 69 task IDs.
+The current evidence is `target/closeout/macos/newhelp-final/` and
+`target/closeout/linux/help-final/` (late-p2 retained as a previous checkpoint),
+with base `3e0dedb` plus recorded uncommitted changes, stable source-bound
+snapshots and frozen release binaries. Their strict reports retain 9/15 unique
+differences and exit 1. Windows's 60 differences remain historical v6 evidence
+only; native candidate renewal is blocked by smokescreen SSH exit 255.
+No spec waiver is made. Current coverage/witness metadata and local-retention
+reconciliation are complete under 10.7, including explicit retention limits;
+there is no claim of an off-host durable archive. Generated-page/provenance-link
+and final documentation reconciliation are complete under 10.5. Native Windows
+renewal and final verification/synchronization/archival remain pending.
 
-The native v6 runs are recorded in
-`tests/compatibility/reviews/native-platform-acceptance.toon` and summarized in
-`docs/tests/jq-manual/coverage.md`. Release manual comparisons and workspace
-checks now run on all three hosts. Tasks 3.14 and 10.1/10.3–10.7 remain open:
-platform differences are not newly approved, Windows calibration is incomplete,
-and the separate full compatibility campaign retains stale denial fixtures.
-No strict all-cases acceptance or archive follows from successful builds/tests.
-Windows refinements are tracked in https://github.com/commandzero/tq/issues/69;
-Linux refinements are tracked in https://github.com/commandzero/tq/issues/70.
+The confirmed transfer is limited to the explicit map in
+`specs/cross-tool-compatibility/spec.md`:
+- Windows refinements: https://github.com/commandzero/tq/issues/69.
+- Linux refinements: https://github.com/commandzero/tq/issues/70.
+- Calibrated performance acceptance: https://github.com/commandzero/tq/issues/31
+  and platform follow-ups; #31 remains open. MacOS's unfinished calibration and
+  affected comparisons remain explicitly unpublished as accepted performance
+  evidence, not covered by an inferred Windows approval.
+
+The corrected macOS/Linux shared full campaigns supersede their stale
+denial-fixture/clock harness errors with zero declared-contract/harness failures,
+while preserving unsupported observations and pairwise differences. Windows's
+corrected full campaign is still unexecuted. No exact or reviewed-completion
+gate pass, newly approved difference, synchronization, archive, or issue closure
+follows from this progress update.

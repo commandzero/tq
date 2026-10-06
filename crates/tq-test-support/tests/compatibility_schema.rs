@@ -30,6 +30,62 @@ fn valid_case() -> serde_json::Value {
     })
 }
 
+fn embedded_case() -> serde_json::Value {
+    let mut case = valid_case();
+    case["adapters"] =
+        json!({"tq": {"supported": true, "execution_mode": "embedded-deny-environment"}});
+    case["expected"] =
+        json!({"contract": "error", "baseline": "not-applicable", "error_class": "runtime-policy"});
+    case
+}
+
+#[test]
+fn embedded_mode_requires_a_tq_error_contract_and_unmodified_query_invocation() {
+    let validator = validator();
+    assert!(validator.is_valid(&embedded_case()));
+    for (field, value) in [
+        ("execution_mode", json!("inferred")),
+        ("args", json!(["--allow-environment"])),
+        ("trailing_args", json!(["extra"])),
+        ("query", json!("1")),
+        ("omit_query", json!(true)),
+        ("supported", json!(false)),
+    ] {
+        let mut case = embedded_case();
+        case["adapters"]["tq"][field] = value;
+        assert!(!validator.is_valid(&case), "{field}");
+    }
+    for tool in ["jq", "yq"] {
+        let mut case = embedded_case();
+        case["adapters"][tool] = json!({"execution_mode": "embedded-deny-platform"});
+        assert!(!validator.is_valid(&case), "{tool}");
+    }
+    let mut case = embedded_case();
+    case["expected"]["error_class"] = json!("runtime-type-path");
+    assert!(!validator.is_valid(&case));
+    case = embedded_case();
+    case["invocation_mode"] = json!("file");
+    assert!(!validator.is_valid(&case));
+}
+
+#[test]
+fn catalog_rejects_invalid_interface_selection_without_schema_validation() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut case = embedded_case();
+    case["adapters"]["jq"] = json!({"execution_mode": "embedded-deny-platform"});
+    std::fs::write(
+        directory.path().join("invalid.jsonl"),
+        serde_json::to_vec(&case).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        tq_test_support::compatibility::load_catalog(directory.path()),
+        Err(tq_test_support::compatibility::CatalogError::ExecutionMode(
+            _
+        ))
+    ));
+}
+
 #[test]
 fn complete_versioned_case_is_valid() {
     assert!(validator().is_valid(&valid_case()));

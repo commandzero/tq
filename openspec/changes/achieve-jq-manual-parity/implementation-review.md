@@ -1,10 +1,238 @@
 # Implementation review and checkpoint history
 
-Implementation resumed after the dependency-policy decision. The user selected
-close compatibility through safe Rust and existing Rust libraries, with measured
-disparities documented for later reconsideration. Completed tasks are recorded in
-the live task checklist. The final verification section distinguishes accepted
-evidence from historical checkpoints. No checkpoint establishes 100% exact parity.
+## Current closeout progress and eight-delta verification, 2026-10-06
+
+Using change `achieve-jq-manual-parity`. This review inspects implementation,
+tests, retained native evidence and live follow-ups without changing code,
+spec requirements, source inventories, gates or approvals. It updates only
+progress/accounting. The confirmed scope transfer below remains authoritative;
+missing current Windows execution is not waived.
+
+### Evidence renewed and independently reconciled
+
+- macOS `target/closeout/macos/newhelp-final/summary.json`: fresh locked release/default
+  strict run has 943/952 exact primary contracts, 919/921 compact, 921/921 TOON,
+  nine failures, zero applied disparities, all 518 original IDs and 303/303
+  protected exact matches; strict exit remains 1. All 4,667 manual observations
+  execute and exit;
+  297/297 CLI composition cases match. Full preflight and all-feature workspace
+  tests exit 0. The retained log contains the embedded 297-case inventory test
+  (249 direct comparisons, 48 independent expectations), eight resource and
+  six recursive-composition tests, and the CLI/native-format/gate suites below.
+  Release build and both explicitly invoked relocation tests also pass. Only
+  `args.rs` help/regression changed since late-p2; only `manual.invoking.help`
+  stdout changes in the report (excluding timing), with no changed verdicts.
+  Three earlier disk-full preflight attempts remain failed historical attempts;
+  the successful run disables incremental compilation/dev-test debug symbols,
+  not checks.
+- Linux `target/closeout/linux/help-final/summary.json`: fresh locked release run
+  has 937/952 exact primary, 913/921 compact, 921/921 TOON, all original 518 cases,
+  303 protected matches and exactly the previous 15 #70 IDs, including three
+  composition differences. Strict exit remains 1, with zero applied disparities
+  and no new manual failure IDs. Fresh all-feature workspace execution passes
+  1,891 tests, zero failures, with 11 ignored in that command; pinned/published
+  reference and both relocation tests pass explicit separate runs. Strict
+  workspace/all-target/all-feature Clippy, help regression and release build
+  exit 0. This supersedes late-p2's prior-only full-suite limitation, not ignored
+  native calibration controls. Linux full validator preflight remains an
+  unexecuted #70 follow-up, not a claimed pass.
+- Independently checked SHA-256 and local presence of all 121 macOS
+  `newhelp-final` and 65 Linux `help-final` manifest entries, plus all eight
+  current document hashes in the task-10.5 proof. Earlier checks covered all
+  81 macOS and 60 Linux late-p2 manifest entries. Current macOS product/helper
+  source records are checked against implementation at review; late-p2 remains
+  historical after the help change. Documentation/spec edits are not evidence
+  of product drift; final
+  candidate identity still needs rechecking after any implementation change.
+  Subsequently verified all 12 shared P2 and 81 historical Windows manifest
+  entries, plus all 16 artifact hashes directly referenced by the promoted
+  current/historical/shared metadata. These retained local files are not an
+  off-host durable archive; preserve snapshots, reports, logs, binaries and
+  manifests before cleaning `target/`. Historical hash integrity proves only
+  retained availability, not current Windows execution.
+- Corrected shared full campaigns cover 1,220 cases, 4,804 executed and 1,961
+  unsupported observations, zero declared-contract failures and zero harness
+  errors. MacOS retains pre-help P2 diagnostic evidence (93 differing cases,
+  224 pairwise differences), not a final-help full-campaign rerun: only help
+  strings/regression changed among crate sources, supporting scoped diagnostic
+  relevance rather than whole-source/executable equality. Linux freshly reruns
+  (99 differing cases). Both
+  exit 0 as `observed-differences`, not exact manual acceptance. The Linux
+  `help-final` full campaign exits 0 with the same 99 differing cases. Embedded denial
+  checks now enforce runtime-policy exit 5 and empty output independently for
+  JSON/YAML/TOON, including the JSON companion path. Windows has not executed
+  these updated contracts. The inspected subprocess host uses the existing
+  public `tq_cli::{CapabilityPolicy, parse_args_with_policy, run_with_io}` API,
+  with no first-party unsafe/FFI; workspace lint policy forbids unsafe code.
+  Its dependency addition is a local `tq-cli` path with default features disabled,
+  not a new external dependency. Denial tests exercise the selected authority
+  while admitting the other, without allow-flag workarounds or process fallback.
+- `target/closeout/windows/summary.json` records SSH exit 255 on 2026-10-06;
+  smokescreen is unreachable. Local 58-test macOS readiness and historical v6
+  Windows observations do not renew native candidate evidence. Stabilize a
+  source snapshot and restore access before native release/PowerShell/cmd,
+  binary/newline, reference/relocation, stack, embedded/composition, resource,
+  workspace and repaired full-campaign execution.
+- Live #69/#70 now explicitly permit parent closeout after retained proof and
+  spec synchronization under the approved scope transfer, without approving
+  deferred differences or granting either manual gate pass. #31 now correctly
+  records the existing native runner/backend and incomplete calibration; all
+  three issues remain open. Unfinished macOS calibration/comparisons remain
+  unpublished as accepted performance evidence. No calibration is renewed here.
+
+### MacOS's nine non-transferred contracts
+
+The current raw report was reviewed against the existing expected scopes in
+`docs/tests/jq-manual/coverage.md` and
+`tests/compatibility/reviews/parity-closeout.toon`, not transferred to #69/#70:
+
+- `manual.audit.math.erfc-ulp`, input 2: jq `0.0046777349810472645`, tq
+  `0.004677734981047266` (2 ULP higher).
+- `manual.audit.math.tgamma-ulp`, input 0.5: jq `1.772453850905516`, tq
+  `1.7724538509055159` (1 ULP lower).
+- The six recorded ANSI witnesses all retain equal process statuses and equal
+  plain bytes in a separate diagnostic SGR comparison. This does not normalize
+  their raw observations or make them exact; tq's structural quote/SGR/reset
+  presentation is governed by the main `output-colors` contract.
+- `manual.invoking.run-tests`: both supplied tests report 1/1 passed and exit 0.
+  tq stdout equals jq's prefix through the two `Test jq_state` lines; jq alone
+  appends compile-args, recompile and exhaust/reuse internal self-test messages.
+  `crates/tq-cli/tests/extended_cli.rs:1016` independently checks passing/failing,
+  compile-error, malformed and empty-result test-file contracts.
+
+This is current witness/impact review of existing input/contract-scoped expected
+behaviors, not a fresh serialized `ReviewedDisparity` approval or a completion
+run. Every one of the nine strict failures remains. Bounds are not promoted to
+function-wide guarantees; input/reference/library or presentation/runner changes
+require reconsideration and exact reruns. Reporting-only presentation notes
+cannot pass either gate (`compatibility_manual_gate.rs:77`).
+
+### All eight deltas mapped to implementation and actual tests
+
+The eight deltas contain 32 requirements and 123 named scenarios. The mapping
+below covers their requirement families and links them to inspected code/tests,
+source-linked manual execution, and retained test logs. It is not a claim that
+finite witnesses prove all programs or that every platform scenario has run.
+The listed test suites map to retained macOS all-feature workspace evidence,
+renewed by `newhelp-final`; Linux `help-final` now renews the full all-feature
+workspace as described above. Windows renewal remains a blocker.
+Paths in the table are repository-relative.
+
+| Delta / requirement families | Implementation seam | Test and executable evidence | Remaining qualification |
+| --- | --- | --- | --- |
+| `cross-tool-compatibility` — reviewed disparities, pinned inventory, execution gate, output/identity, source corrections, closeout transfer, platform/resources | `crates/tq-test-support/src/compatibility/manual.rs` (explicit approval validation, inventory and encoding integrity), `manual_pin.rs` (518/303 protection), `src/bin/tq-manual-compare.rs` (reference/source validation and strict vs completion dispatch) | `compatibility_manual_gate`, `manual_pin`, `manual_completeness`, `composition_inventory`; actual newhelp-final/help-final source-verified 952-case reports and live issue map. The injected failure, missing/forged encoding, capability-workaround, stale-approval and baseline guards remain unchanged. | Native Windows missing-evidence scenario is currently blocking, not passing. Scope ownership and current witness review are not approvals. |
+| `extended-jq-cli-parity` — options, governed scripting, colors/terminal, test files | `crates/tq-cli/src/args.rs:650` and option-finalization guards; `runner.rs:463` test-file evaluation; `crates/tq-core/src/presentation.rs` and `crates/tq-formats/src/output.rs` | CLI `manual_arguments`, `extended_cli`, `colors`, `output_colors`, `compatibility_contract`, `platform_shell`; `run_tests_executes_stdin_test_files_and_reports_failures`, help/identity assertions, palette precedence and PTY tests; invoking/color manual witnesses | Preserve intentional tq ANSI styling and internal-runner suffix observations. Renew native Windows option/terminal/newline checks. |
+| `jq-core-language` — literal/runtime numbers, bindings/syntax, grammar/generators, built-ins, paths/assignments, math, typed errors | `crates/tq-core/src/number.rs`, `json_input.rs`, parser/resolver machinery, `eval.rs` managed continuations/path work, `collection.rs`, `math.rs:66` and `eval/scalar.rs` | `manual_grammar` (precedence, destructuring, alternatives, typed catch and folds), `runtime_numbers`, `math_compat`, `collection_compat`, `sql_compat`, `user_path_update_composition`, `manual_signature_matrix`; manual basic/math/assignment/arity witnesses plus composition inventory | Only enumerated #70/#69 numeric/availability contracts transferred; no missing function/arity or deferred execution allowance. Preserve specific macOS math witnesses and tight limits. |
+| `jq-reduce-foreach` — reduce and foreach scope/cardinality/state | `crates/tq-core/src/eval.rs` `FoldInitial`/`FoldItem`/`FoldUpdate`, `FoldState` and generator tasks; VM fold entry/resource handling | `manual_grammar.rs:949,1001`; `user_fold_composition.rs:58–167` checks initializer independence, ordered updates/extraction, prior errors and cancellation; VM fold tests at `vm.rs:1637–1801` | No scope waiver; existing native/manual/composition evidence covers folds, Windows current execution still pending. |
+| `jq-regex-date-platform` — regex and date/platform metadata | `crates/tq-core/src/stdlib.rs` safe `fancy_regex` cursor/substitution/engine limits, UTC/local date functions; shared VM input context and CLI source cursor | Core `regex_compat`, `date_compat`, CLI `regex_compat`, `date_platform`, `input_streams`; array/null flags, Unicode offsets, bounded regex failures, replacements, controlled clock/metadata, embedded denial and manual regex/date/I/O cases | No whole-pattern-recursion/instant mid-match cancellation guarantee. Windows date/metadata/newline scenarios require native renewal; old capture implementation alone is not acceptance. |
+| `jq-user-functions-modules` — user-filter lexical composition/recursion and module lookup/data/metadata | `crates/tq-core/src/eval.rs` bounded managed continuations and admission; resolver `ModuleLoader` in `resolve.rs:363–625`, cache/cycle/byte limits; CLI startup/module roots in `runner.rs` | `composition_inventory.rs:960–1030` executes all 297 public-VM witnesses; `user_function_composition`, `user_fold_composition`, `user_regex_composition`, `user_recursive_composition`, `user_composition_resources`; CLI `modules` including `$ORIGIN`, search termination, data imports and metadata | Only two Windows module lookup cases transferred. Public-VM direct comparisons are not independent jq oracles for every embedded result. Renew Windows composition/resource/module evidence. |
+| `toon-stream-io` — explicit RS sequence and default LF result output | `crates/tq-formats/src/output.rs:14–24,75–89` distinct `Sequence`/default `Values`/`Unframed`, shared serializers; CLI result commitment and sequence dispatch | `compact_selection.rs:223–246` asserts zero/multiple results and prior output after error; CLI `extended_cli`, `input_streams`, `native_formats`; actual 921/921 TOON contracts on both refreshed hosts | No changes to TOON framing contract; TOON success never repairs a jq JSON failure. Native Windows observation is still historical. |
+| `tq-cli` — output controls, shared remaining input, documented options, JSON sequence/stream, process effects | `crates/tq-cli/src/args.rs` pre-read option normalization; `runner.rs` shared cursor, JSON sequence and effects; `crates/tq-core/src/json_input.rs` shared safe grammar; `VmError::Halt` distinct control termination | CLI `compact_selection`, `manual_arguments`, `input_streams`, `json_root_boundaries`, `effects`, `user_effect_composition`, `compatibility_contract`; live `unbuffered_stdout_reaches_a_live_consumer_before_stdin_eof`, halt/raw-stderr and ordered-input tests; invoking/streaming/I/O manual cases | Only mapped Windows byte contracts deferred; no new normalization, allow-flag workaround or catchable halt. Renew native Windows process evidence. |
+
+### Accounting and exact remaining blockers
+
+The original 69 task identities are retained: 64 complete, five open
+(3.14, 10.1, 10.3, 10.4, 10.6). This update newly checks only 10.5;
+10.7 remains complete from the preceding late-p2 witness/metadata, local hash
+and live-issue reconciliation. Plain named subitems record performed portions
+without adding checkboxes or inflating the denominator.
+
+Task 10.5 is supported by
+`target/closeout/macos/newhelp-final/task-10.5-final-proof.json`: zero blocking
+mismatches, tested help distinctions between process ambient access and embedded
+admission (no false redaction claim), jq 1.8.2 manual/options pin, current 0.4.1
+migration target with the historical 0.4.0 boundary retained, and separately
+scoped native-format jq 1.8.1. README/help/formats agree on default LF TOON,
+`-c` JSON and sequence distinctions; numeric/security/changelog guidance agrees
+and token savings remain separate from verdicts. All 21 section Results blocks
+were rendered from the newest report, with current index provenance, authored
+blocks preserved, 20 section files byte-identical and repeat-render idempotence.
+All eight proof-document hashes match current files. Retained documentation
+validation exits 0 and 147 local links across 31 files pass; external URLs were
+not fetched. Separately owned final witness-metadata promotion is now present
+in `parity-closeout.toon`: latest macOS/Linux sources and identities are recorded,
+late-p2/v6 remain history, and macOS shared P2 is explicitly pre-help diagnostic
+evidence. This review does not edit those files. Strict OpenSpec validation,
+`scripts/docs-check.sh` and scoped artifact `git diff --check` all exit 0;
+documentation/review metadata hashes remain unchanged during validation.
+Advisory frontmatter and informational bundle/lint notes are not errors.
+Final verification must still include renewed native Windows evidence.
+These completed documentation steps do not renew Windows, establish off-host
+retention, approve a difference, pass either gate or accept performance.
+
+The blockers are: (1) native Windows candidate renewal and final source/reference
+identity under 3.14 and 10.1/10.3/10.4; (2) final all-eight-delta/artifact/docs
+verification after native evidence and concurrent metadata are stable; and
+(3) authorized spec synchronization/archival and committed PR-boundary validation. The recorded PR boundary exits 1 on uncommitted
+OpenSpec changes, even though macOS preflight succeeds. No main spec edit,
+archive, synchronization, commit, new approval, gate relaxation or performance
+acceptance occurs in this progress review. Earlier checkpoint statements below
+are superseded only as to current progress, not their retained observations.
+
+## Confirmed implementation/evidence closeout scope, 2026-10-05
+
+The user confirmed a scope transfer after the read-only audit at `3e0dedb`:
+close this implementation/evidence change after its retained proof obligations,
+with enumerated Linux compatibility refinements under #70, native Windows
+refinements under #69, and calibrated performance acceptance under #31/platform
+follow-ups. The authoritative target/case map and closure contract are in
+`specs/cross-tool-compatibility/spec.md`; they reference the existing
+`tests/compatibility/reviews/native-platform-acceptance.toon` v6 record. No
+inventory, protected baseline, strict gate, reviewed-completion gate, or
+executable-bound approval is changed by this planning revision.
+
+At this 2026-10-05 scope-revision checkpoint, the checklist was 62/69 complete
+with seven tasks open: 3.14 and 10.1/10.3–10.7. That revision checked no task
+and ran no native campaign. The current 2026-10-06 accounting above supersedes
+this and subsequent historical counts.
+
+V6 records 952 primary cases and 921 compact/TOON contracts on each host:
+macOS primary/compact exact counts are 943/919, Linux 937/913, and Windows
+912/879; TOON contracts are 921/921 on every host. The overlapping campaign
+union has 9/15/60 differing IDs respectively, and every strict command exits 1.
+These are observed failures, not renewed approvals or exact/reviewed-completion
+acceptance. The 15 Linux and 60 Windows target/case contracts alone are
+transferred; macOS's two math, six color, and one test-runner contracts still
+require current identity-bound review or contract resolution before closeout.
+
+The evidence is base `3605d2d` plus its recorded 59-file v6 overlay, not
+automatically current HEAD. MacOS final-bound observations use a bench-profile
+optimized binary; earlier release-profile evidence is retained separately.
+Linux full validator preflight was not rerun. Windows standalone checks partly
+retain v5 provenance. Durable raw reports and hashes need verification; the
+referenced evidence root was unavailable in the audit checkout. Final candidate
+source/executable/profile equivalence must be proved or campaigns refreshed.
+
+No fresh v6 calibration is established on any platform. Native Windows
+accounting implementation and same-child checks do not establish calibration
+or close #31. MacOS unfinished calibration and affected benchmark comparisons
+remain explicitly unpublished as accepted performance evidence; Windows issue
+scope is not macOS proof. No tolerance relaxation or sampled-memory substitution
+is authorized. Bounded-resource correctness remains a closeout obligation.
+Shared full-campaign `environment.denied`/`platform.denied` routing and three
+companion-output harness errors move to #69/#70 as harness debt, not product
+disparities or a passing full campaign. Linux validator provisioning/full
+preflight and automated native Windows release-host wiring remain explicit
+platform follow-ups, not executed checks.
+
+Retained closeout work is final campaign/identity reconciliation; CLI/embedded
+composition, recursion, cancellation and tight-limit verification; 518-case and
+303-protected-contract accounting; non-transferred macOS contract review;
+truthful reports/help/migration/changelog and archive-sensitive links; practical
+impact/regression/reconsideration metadata and durable evidence; live issue
+wording reconciliation; and final verification against all eight revised deltas.
+Only then may synchronization and archival occur under repository policy.
+Neither is performed here. This revision approves no deferred difference,
+claims no manual gate pass, and closes no issue.
+
+## Historical checkpoints
+
+The sections below retain earlier implementation reviews and acceptance-policy
+checkpoints. Their task counts, native-acceptance/calibration prerequisites,
+reference identities, and archive-readiness statements are historical where
+superseded by the confirmed scope above. Their actual observations and scoped
+approvals are unchanged. Completed tasks are recorded in the live checklist;
+no historical checkpoint establishes 100% exact parity.
 
 ## Embedded inventory execution, 2026-09-15
 

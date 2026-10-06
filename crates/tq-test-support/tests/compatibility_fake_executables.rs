@@ -106,6 +106,7 @@ fn case_adapters_preserve_argument_order_and_child_environment() {
             jq: Some(executable.clone()),
             yq: Some(executable.clone()),
             tq: Some(executable),
+            ..Default::default()
         },
         directory.path(),
         Duration::from_secs(2),
@@ -140,6 +141,323 @@ fn fake(directory: &Path, name: &str, body: &str) -> std::path::PathBuf {
     permissions.set_mode(0o755);
     fs::set_permissions(&path, permissions).expect("make fake executable");
     path
+}
+
+#[test]
+fn tq_only_error_contract_rejects_success_and_wrong_error_class() {
+    let _lock = fixture_executable_test_lock();
+    let directory = tempfile::tempdir().unwrap();
+    for (name, body, expected_code) in [
+        ("permissive", "printf '1\\n'", 0),
+        (
+            "wrong-error",
+            "printf 'tq: runtime error: wrong type\\n' >&2; exit 5",
+            5,
+        ),
+    ] {
+        let executable = fake(
+            directory.path(),
+            name,
+            &format!("if [ \"$1\" = --version ]; then printf 'tq-test\\n'; exit 0; fi\n{body}"),
+        );
+        let case = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "id": "policy.denied", "title": "Explicit denial",
+            "classification": "jq-target", "capabilities": ["policy.denied"], "status": "mvp",
+            "fixture": {"format": "json", "inline": "null"}, "query": "env",
+            "adapters": {"tq": {"supported": true}}, "invocation_mode": "stdin",
+            "expected": {"contract": "error", "baseline": "not-applicable", "error_class": "runtime-policy"}
+        })).unwrap();
+        let report = run_campaign(
+            &CompatibilityCatalog {
+                cases: vec![case],
+                identity: ArtifactIdentity {
+                    path: "test".into(),
+                    bytes: 0,
+                    sha256: String::new(),
+                },
+            },
+            CampaignProfile::Full,
+            &ExecutableConfig {
+                tq: Some(executable),
+                ..Default::default()
+            },
+            directory.path(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(
+            report.final_status,
+            tq_test_support::compatibility::FinalStatus::Failed,
+            "{name}"
+        );
+        assert_ne!(
+            report.capability_matrix["policy.denied"],
+            tq_test_support::compatibility::CapabilityDisposition::Supported
+        );
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            json["cases"][0]["contract_failures"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        for observation in report.cases[0]
+            .observations
+            .iter()
+            .filter(|o| o.tool == ToolKind::Tq)
+        {
+            assert_eq!(
+                observation.state,
+                tq_test_support::compatibility::ObservationState::Executed
+            );
+            assert_eq!(observation.exit_code, Some(expected_code));
+            assert_ne!(observation.error_class, Some(ErrorClass::MalformedOutput));
+            if expected_code == 0 {
+                assert_eq!(observation.results, [serde_json::json!(1)]);
+            }
+        }
+        assert!(report.render_human().contains("declared error contract"));
+    }
+}
+
+#[test]
+fn embedded_host_must_deny_the_selected_authority_without_output_or_disclosure() {
+    let _lock = fixture_executable_test_lock();
+    let directory = tempfile::tempdir().unwrap();
+    for (name, body) in [
+        ("permissive-host", "printf '1\\n'"),
+        (
+            "same-line-disclosure",
+            "printf 'tq: runtime error: private-sentinel-value env requires environment access permitted by capability policy\\n' >&2; exit 5",
+        ),
+        (
+            "extra-diagnostic-line",
+            "printf 'tq: runtime error: env requires environment access permitted by capability policy\\nprivate-data\\n' >&2; exit 5",
+        ),
+        (
+            "wrong-authority",
+            "printf 'tq: runtime error: now requires platform access permitted by capability policy\\n' >&2; exit 5",
+        ),
+        (
+            "leaky-host",
+            "printf 'tq: runtime error: env requires environment access permitted by capability policy present\\n' >&2; exit 5",
+        ),
+        (
+            "partial-output",
+            "printf '1\\n'; printf 'tq: runtime error: env requires environment access permitted by capability policy\\n' >&2; exit 5",
+        ),
+    ] {
+        let host = fake(
+            directory.path(),
+            name,
+            &format!(
+                "if [ \"$1\" = --version ]; then printf 'embedded-test\\n'; exit 0; fi\n{body}"
+            ),
+        );
+        let case = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "id": "arbitrary.policy", "title": "Embedded policy contract",
+            "classification": "jq-target", "capabilities": ["policy.denied"], "status": "mvp",
+            "fixture": {"format": "json", "inline": "null"}, "query": "env",
+            "adapters": {"tq": {"supported": true, "execution_mode": "embedded-deny-environment"}},
+            "invocation_mode": "stdin",
+            "expected": {"contract": "error", "baseline": "not-applicable", "error_class": "runtime-policy"}
+        })).unwrap();
+        let report = run_campaign(
+            &CompatibilityCatalog {
+                cases: vec![case],
+                identity: ArtifactIdentity {
+                    path: "test".into(),
+                    bytes: 0,
+                    sha256: String::new(),
+                },
+            },
+            CampaignProfile::Full,
+            &ExecutableConfig {
+                embedded_host: Some(host.clone()),
+                ..Default::default()
+            },
+            directory.path(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(
+            report.final_status,
+            tq_test_support::compatibility::FinalStatus::Failed,
+            "{name}"
+        );
+        assert_eq!(report.cases[0].contract_failures.len(), 6, "{name}");
+        assert_eq!(
+            report.cases[0].tq_execution.as_ref().unwrap().host.path,
+            host.canonicalize().unwrap()
+        );
+        assert!(
+            report.cases[0]
+                .observations
+                .iter()
+                .filter(|o| o.tool == ToolKind::Tq)
+                .all(|o| o.state == tq_test_support::compatibility::ObservationState::Executed)
+        );
+    }
+}
+
+#[test]
+fn embedded_json_companion_independently_enforces_the_denial_contract() {
+    let _lock = fixture_executable_test_lock();
+    let directory = tempfile::tempdir().unwrap();
+    for (name, diagnostic, valid) in [
+        (
+            "valid",
+            "env requires environment access permitted by capability policy\\n",
+            true,
+        ),
+        (
+            "wrong-authority",
+            "now requires platform access permitted by capability policy\\n",
+            false,
+        ),
+        (
+            "extra-line",
+            "env requires environment access permitted by capability policy\\nprivate-data\\n",
+            false,
+        ),
+        (
+            "same-line",
+            "private-sentinel-value env requires environment access permitted by capability policy\\n",
+            false,
+        ),
+    ] {
+        let host = fake(
+            directory.path(),
+            name,
+            &format!(
+                "if [ \"$1\" = --version ]; then printf 'embedded-test\\n'; exit 0; fi\nprevious=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = --output-format ] || [ \"$previous\" = -o ]; then\n    if [ \"$argument\" = json ]; then printf 'tq: runtime error: {diagnostic}' >&2; exit 5; fi\n  fi\n  previous=\"$argument\"\ndone\nprintf 'tq: runtime error: env requires environment access permitted by capability policy\\n' >&2\nexit 5"
+            ),
+        );
+        let case = serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "id": "arbitrary.companion", "title": "Independent companion denial",
+            "classification": "jq-target", "capabilities": ["policy.denied"], "status": "mvp",
+            "fixture": {"format": "json", "inline": "null"}, "query": "env",
+            "adapters": {"tq": {"supported": true, "execution_mode": "embedded-deny-environment"}},
+            "invocation_mode": "stdin",
+            "expected": {"contract": "error", "baseline": "not-applicable", "error_class": "runtime-policy"}
+        })).unwrap();
+        let report = run_campaign(
+            &CompatibilityCatalog {
+                cases: vec![case],
+                identity: ArtifactIdentity {
+                    path: "test".into(),
+                    bytes: 0,
+                    sha256: String::new(),
+                },
+            },
+            CampaignProfile::Full,
+            &ExecutableConfig {
+                embedded_host: Some(host),
+                ..Default::default()
+            },
+            directory.path(),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert_eq!(
+            report.final_status,
+            if valid {
+                tq_test_support::compatibility::FinalStatus::Passed
+            } else {
+                tq_test_support::compatibility::FinalStatus::Failed
+            },
+            "{name}"
+        );
+        assert_eq!(
+            report.cases[0].contract_failures.len(),
+            if valid { 0 } else { 3 },
+            "{name}"
+        );
+        for failure in &report.cases[0].contract_failures {
+            assert!(failure.summary.contains("JSON companion"), "{name}");
+        }
+        for observation in report.cases[0]
+            .observations
+            .iter()
+            .filter(|o| o.tool == ToolKind::Tq)
+        {
+            assert_eq!(
+                observation.state,
+                tq_test_support::compatibility::ObservationState::Executed,
+                "{name}"
+            );
+            assert_eq!(observation.exit_code, Some(5));
+            assert_eq!(observation.error_class, Some(ErrorClass::RuntimePolicy));
+            assert_eq!(observation.stdout_hex.as_deref(), Some(""));
+            assert_eq!(
+                observation.stderr_hex,
+                Some(tq_test_support::compatibility::encode_hex(
+                    b"tq: runtime error: env requires environment access permitted by capability policy\n"
+                ))
+            );
+            assert_eq!(observation.results, [] as [serde_json::Value; 0]);
+        }
+    }
+}
+
+#[test]
+fn explicit_embedded_mode_never_falls_back_to_the_process_cli() {
+    let _lock = fixture_executable_test_lock();
+    let directory = tempfile::tempdir().unwrap();
+    let executable = fake(
+        directory.path(),
+        "permissive-tq",
+        "if [ \"$1\" = --version ]; then printf 'tq-test\\n'; exit 0; fi\nprintf '1\\n'",
+    );
+    let case = serde_json::from_value(serde_json::json!({
+        "schema_version": 1, "id": "arbitrary.embedded", "title": "Explicit interface",
+        "classification": "jq-target", "capabilities": ["policy.denied"], "status": "mvp",
+        "fixture": {"format": "json", "inline": "null"}, "query": "env",
+        "adapters": {"tq": {"supported": true, "execution_mode": "embedded-deny-environment"}},
+        "invocation_mode": "stdin",
+        "expected": {"contract": "error", "baseline": "not-applicable", "error_class": "runtime-policy"}
+    })).unwrap();
+    let report = run_campaign(
+        &CompatibilityCatalog {
+            cases: vec![case],
+            identity: ArtifactIdentity {
+                path: "test".into(),
+                bytes: 0,
+                sha256: String::new(),
+            },
+        },
+        CampaignProfile::Full,
+        &ExecutableConfig {
+            tq: Some(executable),
+            ..Default::default()
+        },
+        directory.path(),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    assert_eq!(
+        report.final_status,
+        tq_test_support::compatibility::FinalStatus::Failed
+    );
+    for observation in report.cases[0]
+        .observations
+        .iter()
+        .filter(|o| o.tool == ToolKind::Tq)
+    {
+        assert_eq!(
+            observation.state,
+            tq_test_support::compatibility::ObservationState::HarnessError
+        );
+        assert_eq!(observation.exit_code, None);
+        assert!(
+            observation
+                .note
+                .as_deref()
+                .unwrap()
+                .contains("embedded host")
+        );
+    }
 }
 
 #[test]
@@ -263,6 +581,7 @@ esac
             jq: Some(executable.clone()),
             tq: Some(executable),
             yq: None,
+            ..Default::default()
         },
         directory.path(),
         Duration::from_secs(2),
@@ -411,6 +730,7 @@ esac
             jq: Some(executable.clone()),
             tq: Some(executable),
             yq: None,
+            ..Default::default()
         },
         directory.path(),
         Duration::from_secs(2),

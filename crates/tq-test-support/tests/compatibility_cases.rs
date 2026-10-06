@@ -361,7 +361,7 @@ fn regex_date_and_platform_cases_cover_portable_and_governed_behavior() {
             "regex.splits",
             "regex.sub",
             "regex.gsub",
-            "regex.unsupported",
+            "regex.lookaround",
             "date.fromdateiso8601",
             "date.todateiso8601",
             "date.strptime",

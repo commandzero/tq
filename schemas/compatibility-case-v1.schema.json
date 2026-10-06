@@ -30,12 +30,7 @@
       "minLength": 1
     },
     "classification": {
-      "enum": [
-        "common",
-        "jq-target",
-        "cli",
-        "deferred"
-      ]
+      "enum": ["common", "jq-target", "cli", "deferred"]
     },
     "capabilities": {
       "type": "array",
@@ -47,29 +42,17 @@
       }
     },
     "status": {
-      "enum": [
-        "mvp",
-        "deferred"
-      ]
+      "enum": ["mvp", "deferred"]
     },
     "fixture": {
       "oneOf": [
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "format",
-            "inline"
-          ],
+          "required": ["format", "inline"],
           "properties": {
             "format": {
-              "enum": [
-                "json",
-                "yaml",
-                "toon",
-                "raw",
-                "none"
-              ]
+              "enum": ["json", "yaml", "toon", "raw", "none"]
             },
             "inline": {
               "type": "string"
@@ -79,18 +62,10 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "format",
-            "path"
-          ],
+          "required": ["format", "path"],
           "properties": {
             "format": {
-              "enum": [
-                "json",
-                "yaml",
-                "toon",
-                "raw"
-              ]
+              "enum": ["json", "yaml", "toon", "raw"]
             },
             "path": {
               "type": "string",
@@ -109,10 +84,16 @@
       "additionalProperties": false,
       "properties": {
         "jq": {
-          "$ref": "#/$defs/adapter"
+          "allOf": [
+            { "$ref": "#/$defs/adapter" },
+            { "properties": { "execution_mode": { "const": "process" } } }
+          ]
         },
         "yq": {
-          "$ref": "#/$defs/adapter"
+          "allOf": [
+            { "$ref": "#/$defs/adapter" },
+            { "properties": { "execution_mode": { "const": "process" } } }
+          ]
         },
         "tq": {
           "$ref": "#/$defs/adapter"
@@ -120,34 +101,18 @@
       }
     },
     "invocation_mode": {
-      "enum": [
-        "stdin",
-        "file",
-        "null-input"
-      ]
+      "enum": ["stdin", "file", "null-input"]
     },
     "expected": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "contract",
-        "baseline"
-      ],
+      "required": ["contract", "baseline"],
       "properties": {
         "contract": {
-          "enum": [
-            "result-sequence",
-            "raw-bytes",
-            "error",
-            "exit-status"
-          ]
+          "enum": ["result-sequence", "raw-bytes", "error", "exit-status"]
         },
         "baseline": {
-          "enum": [
-            "required",
-            "informative",
-            "not-applicable"
-          ]
+          "enum": ["required", "informative", "not-applicable"]
         },
         "error_class": {
           "type": "string",
@@ -157,15 +122,61 @@
           "type": "boolean"
         },
         "tq_contract": {
-          "enum": [
-            "version",
-            "build-configuration",
-            "help"
-          ]
+          "enum": ["version", "build-configuration", "help"]
         }
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "adapters": {
+            "required": ["tq"],
+            "properties": {
+              "tq": {
+                "required": ["execution_mode"],
+                "properties": {
+                  "execution_mode": {
+                    "enum": [
+                      "embedded-deny-environment",
+                      "embedded-deny-platform"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "invocation_mode": { "const": "stdin" },
+          "expected": {
+            "required": ["error_class"],
+            "properties": {
+              "contract": { "const": "error" },
+              "error_class": { "const": "runtime-policy" }
+            }
+          },
+          "adapters": {
+            "properties": {
+              "tq": {
+                "required": ["supported"],
+                "not": { "required": ["query"] },
+                "properties": {
+                  "supported": { "const": true },
+                  "omit_query": { "const": false },
+                  "args": { "maxItems": 0 },
+                  "trailing_args": { "maxItems": 0 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "adapter": {
       "type": "object",
@@ -182,6 +193,14 @@
         },
         "supported": {
           "type": "boolean"
+        },
+        "execution_mode": {
+          "enum": [
+            "process",
+            "embedded-deny-environment",
+            "embedded-deny-platform"
+          ],
+          "default": "process"
         },
         "trailing_args": {
           "type": "array",

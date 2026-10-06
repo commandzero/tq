@@ -33,6 +33,36 @@ fn explicit_executable_is_canonicalized_hashed_and_versioned() {
 }
 
 #[test]
+fn embedded_host_override_is_authoritative_and_uses_its_own_identity() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let config = ExecutableConfig {
+        embedded_host: Some(env!("CARGO_BIN_EXE_tq-compat-embedded").into()),
+        ..Default::default()
+    };
+    let identity = tq_test_support::compatibility::discover_embedded_host(&config, &root)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        identity.path,
+        std::fs::canonicalize(config.embedded_host.unwrap()).unwrap()
+    );
+    assert!(identity.version.starts_with("tq-compat-embedded "));
+    assert_eq!(
+        identity.executable.bytes,
+        std::fs::metadata(&identity.path).unwrap().len()
+    );
+    assert_eq!(identity.executable.sha256.len(), 64);
+    let invalid = ExecutableConfig {
+        embedded_host: Some(root.join("missing-embedded-host")),
+        ..Default::default()
+    };
+    assert!(matches!(
+        tq_test_support::compatibility::discover_embedded_host(&invalid, &root),
+        Err(ToolDiscoveryError::InvalidEmbeddedOverride(_))
+    ));
+}
+
+#[test]
 fn invalid_explicit_override_is_an_error_and_optional_tq_discovery_is_best_effort() {
     let temp = tempfile::tempdir().expect("temporary directory");
     let config = ExecutableConfig {

@@ -444,13 +444,13 @@ const OPTION_REGISTRY: &[OptionSpec] = &[
         short: None,
         syntax: "--allow-environment",
         value: false,
-        description: "permit env to inspect a redaction-safe process snapshot",
+        description: "admit environment access for embedded callers; enabled by the CLI",
     },
     OptionSpec {
         short: None,
         syntax: "--allow-platform",
         value: false,
-        description: "permit clock, timezone, and input filename built-ins",
+        description: "admit platform access for embedded callers; enabled by the CLI",
     },
     OptionSpec {
         short: None,
@@ -1483,6 +1483,14 @@ mod tests {
             help.lines().next(),
             Some(format!("tq - jq-compatible queries over {names}").as_str())
         );
+    }
+
+    #[test]
+    fn help_distinguishes_cli_ambient_access_from_embedded_admission() {
+        let help = generated_help();
+        assert!(help.contains("admit environment access for embedded callers; enabled by the CLI"));
+        assert!(help.contains("admit platform access for embedded callers; enabled by the CLI"));
+        assert!(!help.contains("redaction-safe"));
     }
 
     #[test]

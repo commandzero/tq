@@ -2486,6 +2486,7 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "toon-format",
+ "tq-cli",
  "tq-core",
  "tq-formats",
  "tq-toon",

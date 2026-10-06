@@ -16,6 +16,7 @@ mod native {
             jq: Some(root.join("target/reference-build/jq/jq.exe")),
             tq: Some(root.join("target/debug/tq.exe")),
             yq: None,
+            ..Default::default()
         };
         let pin = tq_test_support::fixture_data::read(
             &root.join("tests/compatibility/reviews/jq-manual/reference-pin.toon"),

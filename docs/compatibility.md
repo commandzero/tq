@@ -135,7 +135,71 @@ Identity JSON or strict TOON conversion may use the optimized `transcode` plan:
 - [Campaign instructions](../tests/compatibility/readme.md): reference setup and reproduction commands.
 - [Native-format review](../tests/compatibility/reviews/native-formats-v1.md): format-specific comparison evidence.
 
-The published manual run is macOS ARM64 evidence, not native Linux or Windows verification.
+The latest 2026-10-06 macOS **newhelp-final** and Linux **help-final**
+[closeout evidence](../tests/compatibility/reviews/parity-closeout.toon) is bound
+to 884-file snapshots at base `3e0dedb` plus uncommitted fixes, not clean-commit
+releases or claims about later edits. Final `crates/tq-cli/src/args.rs` help and
+its regression distinguish CLI ambient access from embedded admission, removing
+the false redaction wording without changing runtime policy. Earlier evidence
+remains checkpoint-only; final product/helper hashes differ. Frozen release
+runs against jq 1.8.2 record macOS ARM64 **943/952**
+primary, **919/921** compact, **921/921** TOON matches and Linux x86_64
+**937/952**, **913/921**, **921/921**. Both preserve all 518 original cases and
+303 protected exact contracts. Strict manual exit 1 remains on both.
+
+macOS retains the existing user-accepted scoped `erfc(2)` 2-ULP and
+`tgamma(0.5)` 1-ULP differences, 6 intentional ANSI presentations governed by
+the main `output-colors` contract, and jq's internal `--run-tests` diagnostic
+suffix (both supplied programs pass and exit 0). These are not exact matches
+or fresh executable approvals; current strict reports apply no reviewed disparities.
+Safe Rust `libm` and pinned jq round the two math inputs differently; the exact
+regression witnesses are in `tests/compatibility/cases/manual-math-boundaries.jsonl`.
+Color regressions are in `crates/tq-cli/tests/output_colors.rs`; supplied-test
+runner regressions are in `crates/tq-cli/tests/extended_cli.rs`. The closeout
+record maps cases, causes, regression paths and reconsideration conditions;
+library/reference or presentation/runner changes require exact witness reruns.
+
+Windows was unreachable for renewal. Historical v6 results (912/952 primary,
+879/921 compact, 921/921 TOON; 60 unique differences) are not current-candidate
+native verification. All 81 retained Windows v6 manifest entries and the four
+historical metadata references hash-match, including retained full raw manual
+evidence; this establishes retention integrity only. Live #69/#70/#31 bodies
+were verified on 2026-10-06 with all three issues open. The user-approved scope
+transfer assigns only the enumerated
+Windows 60 to [#69](https://github.com/commandzero/tq/issues/69) and Linux 15 to
+[#70](https://github.com/commandzero/tq/issues/70); they remain unresolved, with
+target/case ownership, practical impact, and reconsideration criteria in the
+closeout record. Recheck exact witnesses and protected contracts after
+implementation or reference/library/platform changes before changing verdicts.
+
+Corrected shared full campaigns cover 1,220 cases and 4,804 executed observations
+with zero harness errors or declared-contract failures, retaining pairwise
+mismatches and unsupported observations as `observed-differences`, not strict
+acceptance. macOS retains the separately hashed P2 campaign that **predates the
+help fix**, not a final-help full rerun: only diagnostic help strings/test differ
+among crate sources, but final CLI/helper/embedded hashes are not equal. Linux
+reruns the full campaign with final-help binaries. Its workspace records **1,891
+passed, 0 failed, 11 ignored**, with four reference/relocation entries explicitly
+passed separately; remaining ignored accounting/worker/helper entries are not
+acceptance or calibration proof. macOS final full preflight/all-feature tests
+pass. P2 adversarial denial and companion contracts remain tested.
+
+The parent rendered the newest macOS report into all 21 generated Results blocks
+and updated index provenance; only the help capture changes. Help regression
+`args::tests::help_distinguishes_cli_ambient_access_from_embedded_admission`
+passes on both platforms; parser/capability/help changes require rechecking it,
+release `--help` and embedded guards. No fresh disparity approvals follow.
+
+Calibration/performance acceptance remains deferred under
+[#31](https://github.com/commandzero/tq/issues/31) and platform follow-ups. No fresh
+calibration is established on any platform; Windows accounting checks do not
+prove macOS calibration. Unfinished macOS calibration and affected benchmark
+comparisons remain unpublished as accepted performance evidence. Native Windows
+renewal is the only pending fresh native platform campaign. Linux full validator
+preflight remains a #70 follow-up; active OpenSpec PR-boundary and overall task/
+artifact verification remain parent obligations, not implied passes. Final help/
+version/documentation proof reports no blocking mismatch; the separate macOS
+PR-boundary check still exits 1 on uncommitted OpenSpec changes.
 
 - Ordered JSON results and process behavior are compared.
 - Compact JSON also requires exact stdout bytes.

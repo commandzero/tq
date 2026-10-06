@@ -73,6 +73,9 @@ pub fn compare_manual_with_disparities(
             .iter()
             .find(|case| case.id == id)
             .ok_or("unknown case ID")?;
+        if !case.has_valid_execution_mode() || !case.adapters.tq.execution_mode.is_process() {
+            return Err("manual comparison requires process adapters; embedded denial belongs to the shared campaign".into());
+        }
         rows.push(compare_case(case, &jq, &tq, root, timeout, &tokenizers)?);
     }
     let mut report = json!({
@@ -698,7 +701,10 @@ fn successful_observation(value: &ToolObservation) -> bool {
         && value.process_status == Some(super::super::ProcessStatus::Exited)
 }
 
-fn expected_error(expected: Option<&str>, actual: Option<super::super::ErrorClass>) -> bool {
+pub(super) fn expected_error(
+    expected: Option<&str>,
+    actual: Option<super::super::ErrorClass>,
+) -> bool {
     expected.is_none_or(|expected| {
         let expected = if expected == "compile" {
             "query-compile"

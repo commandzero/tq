@@ -48,16 +48,19 @@ pub struct ExecutableConfig {
     pub yq: Option<PathBuf>,
     /// tq executable override.
     pub tq: Option<PathBuf>,
+    /// Test-support executable hosting the real tq embedded API.
+    pub embedded_host: Option<PathBuf>,
 }
 
 impl ExecutableConfig {
-    /// Reads `TQ_JQ`, `TQ_YQ`, and `TQ_BIN` overrides.
+    /// Reads `TQ_JQ`, `TQ_YQ`, `TQ_BIN`, and `TQ_EMBEDDED_HOST` overrides.
     #[must_use]
     pub fn from_env() -> Self {
         Self {
             jq: env::var_os("TQ_JQ").map(PathBuf::from),
             yq: env::var_os("TQ_YQ").map(PathBuf::from),
             tq: env::var_os("TQ_BIN").map(PathBuf::from),
+            embedded_host: env::var_os("TQ_EMBEDDED_HOST").map(PathBuf::from),
         }
     }
 
@@ -99,6 +102,9 @@ pub enum ToolDiscoveryError {
         /// Rejected path.
         path: PathBuf,
     },
+    /// Explicit embedded-host override is not executable.
+    #[error("configured embedded host is not usable: {0}")]
+    InvalidEmbeddedOverride(PathBuf),
     /// Filesystem identity failed.
     #[error("tool identity I/O failed: {0}")]
     Io(#[from] io::Error),
@@ -149,6 +155,46 @@ pub fn discover_tool(
     if path.as_os_str().is_empty() {
         return Ok(None);
     }
+    identify_tool(kind, &path, repository_root)
+}
+
+/// Discovers a separate embedded API host, never substituting the process CLI.
+///
+/// # Errors
+///
+/// Returns errors for invalid explicit overrides or failed identity capture.
+pub fn discover_embedded_host(
+    config: &ExecutableConfig,
+    repository_root: &Path,
+) -> Result<Option<ToolIdentity>, ToolDiscoveryError> {
+    let name = format!("tq-compat-embedded{}", std::env::consts::EXE_SUFFIX);
+    let path = if let Some(path) = &config.embedded_host {
+        if !is_executable(path) {
+            return Err(ToolDiscoveryError::InvalidEmbeddedOverride(path.clone()));
+        }
+        path.clone()
+    } else {
+        let mut candidates = Vec::new();
+        if let Some(parent) = config.tq.as_deref().and_then(Path::parent) {
+            candidates.push(parent.join(&name));
+        }
+        candidates.extend([
+            repository_root.join("target/release").join(&name),
+            repository_root.join("target/debug").join(&name),
+        ]);
+        let Some(path) = candidates.into_iter().find(|path| is_executable(path)) else {
+            return Ok(None);
+        };
+        path
+    };
+    identify_tool(ToolKind::Tq, &path, repository_root)
+}
+
+fn identify_tool(
+    kind: ToolKind,
+    path: &Path,
+    repository_root: &Path,
+) -> Result<Option<ToolIdentity>, ToolDiscoveryError> {
     let path = fs::canonicalize(path)?;
     let bytes = fs::read(&path)?;
     let digest = Sha256::digest(&bytes);

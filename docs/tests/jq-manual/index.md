@@ -25,17 +25,26 @@
 23. [streaming](streaming.md)
 24. [types and values](types-and-values.md)
 
-The Results below compare a macOS ARM64 build of tq 0.4.1 with pinned jq 1.8.2.
-The recorded tq binary uses the optimized bench profile left by preflight.
-The run covers 952 cases; 9 exact-contract differences remain.
+The Results below use the 2026-10-06 newhelp-final macOS ARM64 final-candidate observations:
+tq 0.4.1, release/default, compared with pinned jq 1.8.2. The source is base
+`3e0dedb` plus uncommitted implementation, reconciled catalog, runner P2, and
+CLI help fixes, not a clean-commit build or the historical bench-profile capture. The run covers
+952 cases; 9 exact-contract differences remain and the strict command exits 1.
 
 See the [numbered difference list](coverage.md#differences-by-test) for each
-test's practical impact. [Platform witness metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
-records the exact source, profile, and executable identities. Full observations
-are retained locally in ignored
-`target/cross-platform-2026-10-04-3605d2d/macos-v6/report/manual-final-bound.toon`.
+test's practical impact. [Earlier late-P2 closeout metadata](../../../tests/compatibility/reviews/parity-closeout.toon)
+records that checkpoint's source manifests, profiles, executable/report hashes,
+and retained raw evidence. The newhelp-final snapshot adds corrected CLI help
+and its regression test; fresh product/helper binaries were frozen after the
+final release/default build. Current hashes and validation provenance are retained
+in `target/closeout/macos/newhelp-final/summary.json`. Full observations are
+retained locally in ignored
+`target/closeout/macos/newhelp-final/manual-full-final.json`.
 
-These results describe this build and host, not every platform or release.
+The native Windows host was offline on 2026-10-06 (SSH exit 255), so its
+candidate refresh remains unresolved. [Historical platform metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
+retains the Windows v6 checkpoint; it does not prove current-candidate execution.
+These macOS results do not establish all-platform or performance acceptance.
 See the [jq/tq option inventory](../../jq-1.8-cli-options.md) for the CLI contract.
 
 <!-- tq-manual-compare:begin section=index -->

@@ -42,6 +42,8 @@ Every admitted documented operation SHALL remain executable inside a user-define
 - **THEN** execution stops boundedly under the existing resource contract without native-stack recursion or losing the pending branch's lexical environment
 
 ### Requirement: Deterministic modules
+For implementation/evidence closeout only, the pinned native Windows reference lookup differences in `manual.modules.path-origin` and `manual.modules.path-tilde` are transferred to #69 under the `cross-tool-compatibility` target/case map. Their observed jq failures and tq resolutions remain unresolved/unapproved, not exact matches. All other lookup, startup, confinement, cycle, caching, and bounded-read requirements remain closeout obligations; user-filter composition is not deferred.
+
 The process CLI SHALL support jq-compatible `include`, filter `import`, JSON data `import`, default and explicit search paths, startup definitions, search substitutions, metadata search restrictions, and dependency metadata. Module lookup SHALL follow the pinned reference's order and error rules, including relative module origin, `~`, `$ORIGIN`, repeated path components, search termination, and both single-file and directory forms. Compilation SHALL preserve caching, cycle detection, bounded reads, and source identity. Embedded callers SHALL retain canonical confinement to their explicitly allowed roots, independently of the normal CLI lookup contract.
 
 #### Scenario: Module import

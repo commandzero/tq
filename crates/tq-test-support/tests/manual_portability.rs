@@ -84,6 +84,7 @@ fn executable_config(original: &Path) -> ExecutableConfig {
         ))),
         tq: Some(original.join(format!("target/debug/tq{}", std::env::consts::EXE_SUFFIX))),
         yq: None,
+        ..Default::default()
     }
 }
 

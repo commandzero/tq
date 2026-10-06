@@ -39,10 +39,10 @@ acceptance.
 
 ## Rust library migration to 0.4.0
 
-The workspace crates move together from 0.3.0 to 0.4.0. This minor-version
-boundary identifies incompatible pre-1.0 Rust API changes, not a change to the
-jq language target or a completed compatibility claim. Update dependencies on
-the published tq crates together to avoid mixing incompatible value types.
+The incompatible API boundary is 0.4.0; the current upgrade target is 0.4.1.
+Upgrade all workspace crates together from 0.3.0 to 0.4.1 to avoid mixing
+incompatible value types. This pre-1.0 API change does not change the jq language
+target or establish a completed compatibility claim.
 
 `tq_formats::Document` adds the required public `line_number: u64` field.
 Code constructing a struct literal must supply the one-based physical source
