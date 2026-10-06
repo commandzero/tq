@@ -28,22 +28,25 @@ fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+fn archive_date(folder: &str) -> Option<&str> {
+    let date = folder.get(..10)?;
+    (folder.as_bytes().get(10) == Some(&b'-')
+        && date.bytes().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        }))
+    .then_some(date)
+}
+
 fn change_id(path: &str) -> Option<String> {
     let rest = path.strip_prefix("openspec/changes/")?;
     let id = if let Some(archive) = rest.strip_prefix("archive/") {
         let folder = archive.split_once('/')?.0;
         // Archive names are YYYY-MM-DD-<change-id>.
-        if folder.len() < 12
-            || folder.as_bytes()[4] != b'-'
-            || folder.as_bytes()[7] != b'-'
-            || folder.as_bytes()[10] != b'-'
-            || folder.as_bytes()[..10]
-                .iter()
-                .enumerate()
-                .any(|(i, b)| i != 4 && i != 7 && !b.is_ascii_digit())
-        {
-            return None;
-        }
+        archive_date(folder)?;
         folder.get(11..)?
     } else {
         rest.split_once('/')?.0
@@ -88,7 +91,83 @@ fn normalize(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+struct ArchivedDelta {
+    archive: String,
+    suffix: String,
+    text: String,
+    requirements: Vec<Requirement>,
+}
+
+impl ArchivedDelta {
+    fn date(&self) -> &str {
+        archive_date(self.archive.rsplit('/').next().unwrap()).unwrap()
+    }
+}
+
+fn expected_bodies(
+    delta: &ArchivedDelta,
+    deltas: &[ArchivedDelta],
+) -> Check<BTreeMap<String, String>> {
+    let mut expected = BTreeMap::new();
+    for requirement in delta.requirements.iter().filter(|r| {
+        matches!(
+            r.mode.as_str(),
+            "ADDED Requirements" | "MODIFIED Requirements"
+        )
+    }) {
+        let mut dated = BTreeMap::<&str, Vec<&Requirement>>::new();
+        for candidate in deltas
+            .iter()
+            .filter(|d| d.suffix == delta.suffix && d.date() >= delta.date())
+        {
+            for successor in candidate.requirements.iter().filter(|r| {
+                r.name == requirement.name
+                    && matches!(
+                        r.mode.as_str(),
+                        "ADDED Requirements" | "MODIFIED Requirements"
+                    )
+            }) {
+                dated.entry(candidate.date()).or_default().push(successor);
+            }
+        }
+        let mut body = normalize(&requirement.body);
+        for (date, successors) in dated {
+            let next = normalize(&successors[0].body);
+            if successors.iter().any(|r| normalize(&r.body) != next) {
+                return Err(format!(
+                    "{}: conflicting requirement bodies on archive date {date}",
+                    requirement.name
+                ));
+            }
+            if date > delta.date() {
+                // Only an explicit, strictly later MODIFIED operation can replace a body.
+                if next != body && successors.iter().any(|r| r.mode == "ADDED Requirements") {
+                    return Err(format!(
+                        "{}: later ADDED requirement cannot supersede an archived body",
+                        requirement.name
+                    ));
+                }
+                if successors.iter().any(|r| r.mode == "MODIFIED Requirements") {
+                    body = next;
+                }
+            }
+        }
+        expected.insert(requirement.name.clone(), body);
+    }
+    Ok(expected)
+}
+
+#[cfg(test)]
 fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
+    synchronized_with_expected(delta, main, previous, &BTreeMap::new())
+}
+
+fn synchronized_with_expected(
+    delta: &str,
+    main: &str,
+    previous: &str,
+    expected: &BTreeMap<String, String>,
+) -> Check<()> {
     for section in delta.lines().filter_map(|line| line.strip_prefix("## ")) {
         if !matches!(
             section,
@@ -124,7 +203,11 @@ fn synchronized(delta: &str, main: &str, previous: &str) -> Check<()> {
                 if !requirement.body.contains("#### Scenario:") {
                     return Err(format!("{} has no scenario", requirement.name));
                 }
-                if main_map.get(requirement.name.as_str()) != Some(&normalize(&requirement.body)) {
+                let body = expected
+                    .get(&requirement.name)
+                    .cloned()
+                    .unwrap_or_else(|| normalize(&requirement.body));
+                if main_map.get(requirement.name.as_str()) != Some(&body) {
                     return Err(format!(
                         "{} is missing or differs from the archived requirement and scenarios",
                         requirement.name
@@ -322,11 +405,17 @@ fn openspec(root: &Path, base: &str, head: &str) -> Check<Vec<String>> {
                 return Err(format!("{id}: archive lost artifact {suffix}"));
             }
         }
-        let deltas: Vec<_> = paths
+        selected.push(archive.clone());
+    }
+    // Collect successors only after committed-diff association and unique archive
+    // selection. Historical archives outside this PR cannot waive synchronization.
+    let mut deltas = Vec::new();
+    for archive in &selected {
+        let delta_paths: Vec<_> = paths
             .iter()
             .filter(|p| p.starts_with(&format!("{archive}/specs/")) && p.ends_with("/spec.md"))
             .collect();
-        if deltas.is_empty() {
+        if delta_paths.is_empty() {
             let explanation = git(
                 root,
                 &["show", &format!("{head}:{archive}/no-spec-deltas.md")],
@@ -334,28 +423,42 @@ fn openspec(root: &Path, base: &str, head: &str) -> Check<Vec<String>> {
             .unwrap_or_default();
             if explanation.trim().is_empty() {
                 return Err(format!(
-                    "{id}: no spec deltas; add a reviewed no-spec-deltas.md explanation to the archive"
+                    "{archive}: no spec deltas; add a reviewed no-spec-deltas.md explanation to the archive"
                 ));
             }
         }
-        for path in deltas {
+        for path in delta_paths {
             let suffix = path.strip_prefix(&format!("{archive}/specs/")).unwrap();
-            let delta = git(root, &["show", &format!("{head}:{path}")])?;
-            let main = git(root, &["show", &format!("{head}:openspec/specs/{suffix}")])
-                .unwrap_or_default();
-            let previous = git(
-                root,
-                &[
-                    "show",
-                    &format!("{}:openspec/specs/{suffix}", merge_base.trim()),
-                ],
-            )
-            .unwrap_or_default();
-            synchronized(&delta, &main, &previous).map_err(|e| format!("{id}/{suffix}: {e}"))?;
-            covered_specs.insert(format!("openspec/specs/{suffix}"));
+            let text = git(root, &["show", &format!("{head}:{path}")])?;
+            deltas.push(ArchivedDelta {
+                archive: archive.clone(),
+                suffix: suffix.to_owned(),
+                requirements: requirements(&text)
+                    .map_err(|e| format!("{archive}/{suffix}: {e}"))?,
+                text,
+            });
         }
-        eprintln!("{id}: archived and synchronized; review any no-spec-deltas explanation.");
-        selected.push(archive.clone());
+    }
+    for delta in &deltas {
+        let suffix = &delta.suffix;
+        let main =
+            git(root, &["show", &format!("{head}:openspec/specs/{suffix}")]).unwrap_or_default();
+        let previous = git(
+            root,
+            &[
+                "show",
+                &format!("{}:openspec/specs/{suffix}", merge_base.trim()),
+            ],
+        )
+        .unwrap_or_default();
+        let expected = expected_bodies(delta, &deltas)
+            .map_err(|e| format!("{}/{suffix}: {e}", delta.archive))?;
+        synchronized_with_expected(&delta.text, &main, &previous, &expected)
+            .map_err(|e| format!("{}/{suffix}: {e}", delta.archive))?;
+        covered_specs.insert(format!("openspec/specs/{suffix}"));
+    }
+    for archive in &selected {
+        eprintln!("{archive}: archived and synchronized; review any no-spec-deltas explanation.");
     }
     if let Some(path) = changed_specs.difference(&covered_specs).next() {
         return Err(format!(
@@ -474,11 +577,14 @@ mod tests {
             .unwrap();
             git(&self.0, &["rev-parse", "HEAD"]).unwrap().trim().into()
         }
-        fn archive(&self, id: &str) {
-            let root = format!("openspec/changes/archive/2026-09-06-{id}");
+        fn archive_at(&self, date: &str, id: &str, delta: &str) {
+            let root = format!("openspec/changes/archive/{date}-{id}");
             self.write(&format!("{root}/proposal.md"), "A behavior change");
             self.write(&format!("{root}/tasks.md"), "- [x] Implement");
-            self.write(&format!("{root}/specs/test/spec.md"), DELTA);
+            self.write(&format!("{root}/specs/test/spec.md"), delta);
+        }
+        fn archive(&self, id: &str) {
+            self.archive_at("2026-09-06", id, DELTA);
         }
     }
     impl Drop for Repo {
@@ -661,6 +767,297 @@ mod tests {
     }
 
     #[test]
+    fn supersession_uses_dates_not_ids_and_checks_unaffected_requirements() {
+        for mode in ["ADDED", "MODIFIED"] {
+            let repo = Repo::new();
+            let base = repo.commit();
+            let unaffected = DELTA.replace("Behavior", "Unaffected");
+            repo.archive_at(
+                "2026-10-04",
+                "output-colors",
+                &format!("{}{unaffected}", DELTA.replace("ADDED", mode)),
+            );
+            let latest = DELTA
+                .replace("ADDED", "MODIFIED")
+                .replace("correct", "latest");
+            repo.archive_at("2026-10-06", "achieve-jq-manual-parity", &latest);
+            let main = format!(
+                "{}{}",
+                MAIN.replace("correct", "latest"),
+                MAIN.replace("Behavior", "Unaffected")
+            );
+            repo.write("openspec/specs/test/spec.md", &main);
+            let head = repo.commit();
+            let selected = openspec(&repo.0, &base, &head).unwrap();
+            assert_eq!(selected.len(), 2);
+            assert!(selected.iter().any(|p| p.ends_with("output-colors")));
+            repo.write(
+                "openspec/specs/test/spec.md",
+                &main.replace("Requirement: Unaffected", "Requirement: Missing"),
+            );
+            let head = repo.commit();
+            assert!(
+                openspec(&repo.0, &base, &head)
+                    .unwrap_err()
+                    .contains("Unaffected")
+            );
+        }
+    }
+
+    #[test]
+    fn supersession_allows_three_later_modifications() {
+        let repo = Repo::new();
+        let base = repo.commit();
+        repo.archive_at("2026-10-01", "z-original", DELTA);
+        for (date, id, body) in [
+            ("2026-10-02", "y-first", "first"),
+            ("2026-10-03", "x-second", "second"),
+            ("2026-10-04", "a-final", "final"),
+        ] {
+            repo.archive_at(
+                date,
+                id,
+                &DELTA.replace("ADDED", "MODIFIED").replace("correct", body),
+            );
+        }
+        repo.write(
+            "openspec/specs/test/spec.md",
+            &MAIN.replace("correct", "final"),
+        );
+        let head = repo.commit();
+        assert_eq!(openspec(&repo.0, &base, &head).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn supersession_rejects_added_stale_same_date_and_wrong_identity() {
+        for case in [
+            "added",
+            "stale",
+            "same-date",
+            "capability",
+            "name",
+            "scenario",
+        ] {
+            let repo = Repo::new();
+            let base = repo.commit();
+            repo.archive_at("2026-10-04", "z-original", DELTA);
+            let mut later = DELTA
+                .replace("ADDED", "MODIFIED")
+                .replace("correct", "latest");
+            if case == "added" {
+                later = later.replace("MODIFIED", "ADDED");
+            }
+            if case == "name" {
+                later = later.replace("Behavior", "Other");
+            }
+            if case == "scenario" {
+                later = later.replace("Scenario: Input", "Scenario: Different");
+            }
+            let date = if case == "same-date" {
+                "2026-10-04"
+            } else {
+                "2026-10-06"
+            };
+            repo.archive_at(date, "a-later", &later);
+            if case == "capability" {
+                fs::rename(
+                    repo.0.join(format!(
+                        "openspec/changes/archive/{date}-a-later/specs/test"
+                    )),
+                    repo.0.join(format!(
+                        "openspec/changes/archive/{date}-a-later/specs/other"
+                    )),
+                )
+                .unwrap();
+                repo.write(
+                    "openspec/specs/other/spec.md",
+                    &MAIN.replace("correct", "latest"),
+                );
+            }
+            let mut main = if case == "stale" {
+                MAIN.to_owned()
+            } else {
+                MAIN.replace("correct", "latest")
+            };
+            if case == "name" {
+                main.push_str(
+                    &MAIN
+                        .replace("Behavior", "Other")
+                        .replace("correct", "latest"),
+                );
+            }
+            repo.write("openspec/specs/test/spec.md", &main);
+            let head = repo.commit();
+            assert!(openspec(&repo.0, &base, &head).is_err(), "{case}");
+        }
+    }
+
+    #[test]
+    fn final_modification_cannot_mask_conflicting_intermediate_operations() {
+        for case in ["same-date", "added"] {
+            let repo = Repo::new();
+            let base = repo.commit();
+            repo.archive_at("2026-10-04", "z-original", DELTA);
+            let date = if case == "same-date" {
+                "2026-10-04"
+            } else {
+                "2026-10-05"
+            };
+            let mode = if case == "added" { "ADDED" } else { "MODIFIED" };
+            repo.archive_at(
+                date,
+                "y-intermediate",
+                &DELTA
+                    .replace("ADDED", mode)
+                    .replace("correct", "intermediate"),
+            );
+            repo.archive_at(
+                "2026-10-06",
+                "a-final",
+                &DELTA
+                    .replace("ADDED", "MODIFIED")
+                    .replace("correct", "final"),
+            );
+            repo.write(
+                "openspec/specs/test/spec.md",
+                &MAIN.replace("correct", "final"),
+            );
+            let head = repo.commit();
+            let error = openspec(&repo.0, &base, &head).unwrap_err();
+            let diagnostic = if case == "same-date" {
+                "conflicting requirement bodies"
+            } else {
+                "later ADDED requirement cannot supersede"
+            };
+            assert!(error.contains(diagnostic), "{case}: {error}");
+        }
+    }
+
+    #[test]
+    fn same_date_identical_requirements_pass_with_normalization() {
+        let repo = Repo::new();
+        let base = repo.commit();
+        repo.archive_at("2026-10-04", "z-original", DELTA);
+        repo.archive_at(
+            "2026-10-04",
+            "a-identical",
+            &DELTA
+                .replace("ADDED", "MODIFIED")
+                .replace("SHALL work", "SHALL   work"),
+        );
+        repo.write("openspec/specs/test/spec.md", MAIN);
+        let head = repo.commit();
+        assert_eq!(openspec(&repo.0, &base, &head).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn unassociated_historical_archive_cannot_supersede() {
+        let repo = Repo::new();
+        let latest = DELTA
+            .replace("ADDED", "MODIFIED")
+            .replace("correct", "latest");
+        repo.archive_at("2026-10-06", "a-history", &latest);
+        repo.write(
+            "openspec/specs/test/spec.md",
+            &MAIN.replace("correct", "latest"),
+        );
+        let base = repo.commit();
+        repo.archive_at("2026-10-04", "z-original", DELTA);
+        let head = repo.commit();
+        assert!(openspec(&repo.0, &base, &head).is_err());
+    }
+
+    #[test]
+    fn supersession_still_validates_older_and_later_delta_syntax() {
+        for bad in ["older", "later"] {
+            for (malformed, diagnostic) in [
+                (
+                    DELTA.replace("#### Scenario:", "#### Example:"),
+                    "has no scenario",
+                ),
+                (
+                    format!("{DELTA}## UNKNOWN Requirements\n"),
+                    "Unsupported delta section",
+                ),
+                (format!("{DELTA}{DELTA}"), "Duplicate requirement"),
+            ] {
+                let repo = Repo::new();
+                let base = repo.commit();
+                let latest = DELTA
+                    .replace("ADDED", "MODIFIED")
+                    .replace("correct", "latest");
+                let malformed = if bad == "later" {
+                    malformed
+                        .replace("ADDED", "MODIFIED")
+                        .replace("correct", "latest")
+                } else {
+                    malformed
+                };
+                repo.archive_at(
+                    "2026-10-04",
+                    "z-original",
+                    if bad == "older" { &malformed } else { DELTA },
+                );
+                repo.archive_at(
+                    "2026-10-06",
+                    "a-later",
+                    if bad == "later" { &malformed } else { &latest },
+                );
+                let mut main = MAIN.replace("correct", "latest");
+                if bad == "later" && diagnostic == "has no scenario" {
+                    main = main.replace("#### Scenario:", "#### Example:");
+                }
+                repo.write("openspec/specs/test/spec.md", &main);
+                let head = repo.commit();
+                let error = openspec(&repo.0, &base, &head).unwrap_err();
+                assert!(error.contains(diagnostic), "{bad}: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn supersession_preserves_artifacts_in_both_archives() {
+        for id in ["z-original", "a-later"] {
+            let repo = Repo::new();
+            repo.write(
+                &format!("openspec/changes/{id}/design.md"),
+                "Preserve design",
+            );
+            let base = repo.commit();
+            fs::remove_dir_all(repo.0.join(format!("openspec/changes/{id}"))).unwrap();
+            repo.archive_at("2026-10-04", "z-original", DELTA);
+            repo.archive_at(
+                "2026-10-06",
+                "a-later",
+                &DELTA
+                    .replace("ADDED", "MODIFIED")
+                    .replace("correct", "latest"),
+            );
+            repo.write(
+                "openspec/specs/test/spec.md",
+                &MAIN.replace("correct", "latest"),
+            );
+            let head = repo.commit();
+            assert!(
+                openspec(&repo.0, &base, &head)
+                    .unwrap_err()
+                    .contains("lost artifact design.md")
+            );
+            let date = if id == "z-original" {
+                "2026-10-04"
+            } else {
+                "2026-10-06"
+            };
+            repo.write(
+                &format!("openspec/changes/archive/{date}-{id}/design.md"),
+                "Preserve design",
+            );
+            let head = repo.commit();
+            assert_eq!(openspec(&repo.0, &base, &head).unwrap().len(), 2);
+        }
+    }
+
+    #[test]
     fn native_task_gate_rejects_incomplete_selected_archives_only() {
         let repo = Repo::new();
         for script in [
@@ -687,7 +1084,15 @@ mod tests {
         );
         repo.write("openspec/specs/test/spec.md", &format!("# Test\n\n## Purpose\nVerify repository policy without changing native task validation semantics.\n\n{MAIN}"));
         let base = repo.commit();
-        repo.archive("selected");
+        repo.archive_at("2026-09-04", "z-original", DELTA);
+        repo.archive_at(
+            "2026-09-06",
+            "selected",
+            &DELTA
+                .replace("ADDED", "MODIFIED")
+                .replace("correct", "latest"),
+        );
+        repo.write("openspec/specs/test/spec.md", &format!("# Test\n\n## Purpose\nVerify repository policy without changing native task validation semantics.\n\n{}", MAIN.replace("correct", "latest")));
         repo.write(
             "openspec/changes/archive/2026-09-06-selected/tasks.md",
             "- [ ] Finish selected change\n",
@@ -724,6 +1129,25 @@ mod tests {
             String::from_utf8_lossy(&complete.stdout),
             String::from_utf8_lossy(&complete.stderr)
         );
+        repo.write(
+            "openspec/changes/archive/2026-09-04-z-original/tasks.md",
+            "- [ ] Finish older change\n",
+        );
+        let head = repo.commit();
+        let older_incomplete = run(&head);
+        assert!(!older_incomplete.status.success());
+        let diagnostic = format!(
+            "{}{}",
+            String::from_utf8_lossy(&older_incomplete.stdout),
+            String::from_utf8_lossy(&older_incomplete.stderr)
+        );
+        assert!(diagnostic.contains("z-original"), "{diagnostic}");
+        repo.write(
+            "openspec/changes/archive/2026-09-04-z-original/tasks.md",
+            "- [x] Finish older change\n",
+        );
+        let head = repo.commit();
+        assert!(run(&head).status.success());
         repo.write("openspec/specs/untracked/spec.md", MAIN);
         let untracked = run(&head);
         assert!(!untracked.status.success());
