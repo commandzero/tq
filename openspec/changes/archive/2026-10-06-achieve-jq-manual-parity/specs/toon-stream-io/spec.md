@@ -10,14 +10,17 @@ Sequence framing SHALL be distinct from the bytes of a standalone TOON document.
 #### Scenario: Emit multiple results
 - **WHEN** a filter emits two multiline objects with `--seq` using default TOON output or `-o toon`/`--output-format toon`
 - **THEN** the output contains two independently parseable RS-framed records in emission order
+- **AND** the same result-cardinality and RS-framing contract applies to explicit `-o toon-seq`/`--output-format toon-seq` output without changing input selection
 
 #### Scenario: Emit zero results
 - **WHEN** a filter emits no values with `--seq` using default TOON output or `-o toon`/`--output-format toon`
 - **THEN** the structured sequence output is empty
+- **AND** the same result-cardinality and RS-framing contract applies to explicit `-o toon-seq`/`--output-format toon-seq` output without changing input selection
 
 #### Scenario: Emit one result
 - **WHEN** a filter emits one structured value with `--seq` using default TOON output or `-o toon`/`--output-format toon`
 - **THEN** the output contains exactly one RS-framed record
+- **AND** the same result-cardinality and RS-framing contract applies to explicit `-o toon-seq`/`--output-format toon-seq` output without changing input selection
 
 ### Requirement: Default TOON result output
 When structured TOON output is selected by default or explicitly, and neither sequence framing nor `--unframed` is requested, the CLI SHALL encode zero or more results in emission order. Each result SHALL use canonical TOON followed by LF, without an RS prefix. Cardinality and filter keywords MUST NOT select framing or cause an output error. Zero results SHALL produce empty stdout. Completed results SHALL remain visible if evaluation later fails. Formatting applies to each value; concatenated output is not guaranteed to be one parseable TOON document. Explicit sequence mode provides unambiguous record boundaries.
