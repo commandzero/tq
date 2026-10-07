@@ -800,10 +800,10 @@ observations:
     jq:
       state: executed
       results[1]:
-        - [3]{n}:
-          1
-          2
-          2
+        - [3]:
+          - n: 1
+          - n: 2
+          - n: 2
       stdout_hex: 5b0a20207b0a20202020226e223a20310a20207d2c0a20207b0a20202020226e223a20320a20207d2c0a20207b0a20202020226e223a20320a20207d0a5d0a
       raw_stdout_hex: null
       stderr_hex: null
@@ -824,10 +824,10 @@ observations:
     yq:
       state: executed
       results[1]:
-        - [3]{n}:
-          1
-          2
-          2
+        - [3]:
+          - n: 1
+          - n: 2
+          - n: 2
       stdout_hex: 5b7b226e223a317d2c7b226e223a327d2c7b226e223a327d5d0a
       raw_stdout_hex: null
       stderr_hex: null

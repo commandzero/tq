@@ -214,9 +214,21 @@ fn canonical_stream_gate_rejects_reordered_members_and_malformed_output() {
     let yaml = temp.path().join("source.yaml");
     let toon = temp.path().join("source.toon");
     let tq = temp.path().join("tq-fake.sh");
-    fs::write(&source, br#"{"outer":{"first":34.0,"second":[1,2]}}"#).expect("source");
-    fs::write(&yaml, br#"{"outer":{"first":34,"second":[1,2]}}"#).expect("yaml");
-    fs::write(&toon, br#"{"outer":{"first":34,"second":[1,2]}}"#).expect("toon");
+    fs::write(
+        &source,
+        br#"{"orders":[{"z":2,"a":1}],"outer":{"first":34.0,"second":[1,2]}}"#,
+    )
+    .expect("source");
+    fs::write(
+        &yaml,
+        br#"{"orders":[{"z":2,"a":1}],"outer":{"first":34,"second":[1,2]}}"#,
+    )
+    .expect("yaml");
+    fs::write(
+        &toon,
+        br#"{"orders":[{"a":1,"z":2}],"outer":{"first":34,"second":[1,2]}}"#,
+    )
+    .expect("toon header order");
     fs::write(
         &tq,
         "#!/bin/sh\nfor arg do input=\"$arg\"; done\ncat \"$input\"\n",
@@ -228,13 +240,21 @@ fn canonical_stream_gate_rejects_reordered_members_and_malformed_output() {
 
     validate_generated_representations_with_tq(&tq, &source, &yaml, &toon)
         .expect("nested numeric spelling is equivalent");
-    fs::write(&yaml, br#"{"outer":{"second":[1,2],"first":34}}"#).expect("reordered yaml");
+    fs::write(
+        &yaml,
+        br#"{"orders":[{"z":2,"a":1}],"outer":{"second":[1,2],"first":34}}"#,
+    )
+    .expect("reordered yaml");
     assert!(matches!(
         validate_generated_representations_with_tq(&tq, &source, &yaml, &toon),
         Err(ConversionError::TqSemantic { format, .. }) if format == "yaml"
     ));
 
-    fs::write(&yaml, br#"{"outer":{"first":34,"second":[1,2]}}"#).expect("restore yaml");
+    fs::write(
+        &yaml,
+        br#"{"orders":[{"z":2,"a":1}],"outer":{"first":34,"second":[1,2]}}"#,
+    )
+    .expect("restore yaml");
     fs::write(&toon, b"{\"outer\":\x0c{\"first\":34,\"second\":[1,2]}}")
         .expect("malformed toon stream");
     assert!(matches!(
@@ -250,7 +270,7 @@ fn semantic_validation_cache_hits_and_invalidates_on_identity_change() {
     let source = temp.path().join("source.json");
     let yaml = temp.path().join("source.yaml");
     let toon = temp.path().join("source.toon");
-    let count = temp.path().join("invocations");
+    let deny = temp.path().join("deny-execution");
     let tq = temp.path().join("tq-fake.sh");
     let document = br#"{"a":34.0,"items":[1,2]}"#;
     for path in [&source, &yaml, &toon] {
@@ -259,8 +279,8 @@ fn semantic_validation_cache_hits_and_invalidates_on_identity_change() {
     fs::write(
         &tq,
         format!(
-            "#!/bin/sh\nprintf x >> '{}'\nfor arg do input=\"$arg\"; done\ncat \"$input\"\n",
-            count.display()
+            "#!/bin/sh\nif [ -e '{}' ]; then exit 23; fi\nfor arg do input=\"$arg\"; done\ncat \"$input\"\n",
+            deny.display()
         ),
     )
     .expect("fake tq");
@@ -283,43 +303,43 @@ fn semantic_validation_cache_hits_and_invalidates_on_identity_change() {
             &source_identity,
             artifacts,
         )
-        .expect("semantic validation");
     };
-    validate(&generated);
-    assert_eq!(fs::read(&count).expect("invocation count").len(), 3);
-
-    validate(&generated);
-    assert_eq!(fs::read(&count).expect("cached invocation count").len(), 3);
+    validate(&generated).expect("initial semantic validation");
+    fs::write(&deny, b"deny").expect("disable child execution");
+    validate(&generated).expect("unchanged identity uses accepted cache without execution");
 
     let cache_path = temp.path().join("semantic-validation-cache-v1.json");
-    let stale_cache = fs::read_to_string(&cache_path)
-        .expect("semantic cache")
-        .replace("tq-semantic-equivalence-v3", "tq-semantic-equivalence-v2");
-    fs::write(&cache_path, stale_cache).expect("stale semantic policy");
-    validate(&generated);
-    assert_eq!(
-        fs::read(&count).expect("policy invalidation count").len(),
-        6
-    );
+    let mut stale_cache: Value =
+        serde_json::from_slice(&fs::read(&cache_path).expect("semantic cache")).unwrap();
+    for entry in stale_cache["entries"].as_array_mut().unwrap() {
+        entry["policy_version"] = Value::String("invalid-semantic-policy".to_owned());
+    }
+    fs::write(&cache_path, serde_json::to_vec(&stale_cache).unwrap()).expect("stale policy");
+    assert!(matches!(
+        validate(&generated),
+        Err(ConversionError::Tq { .. })
+    ));
+    fs::remove_file(&deny).expect("restore child execution");
+    validate(&generated).expect("refresh accepted semantic policy");
+    fs::write(&deny, b"deny").expect("disable child execution");
 
     let mut changed = generated.clone();
     changed.yaml.sha256 = "identity-changed".to_owned();
-    validate(&changed);
-    assert_eq!(
-        fs::read(&count)
-            .expect("invalidated invocation count")
-            .len(),
-        9
-    );
+    assert!(matches!(
+        validate(&changed),
+        Err(ConversionError::Tq { .. })
+    ));
+    fs::remove_file(&deny).expect("restore child execution");
+    validate(&generated).expect("refresh original identities");
+    fs::write(&deny, b"deny").expect("disable child execution");
 
     let mut script = fs::read(&tq).expect("fake script bytes");
     script.extend_from_slice(b"\n# binary identity change\n");
     fs::write(&tq, script).expect("changed fake binary");
-    validate(&generated);
-    assert_eq!(
-        fs::read(&count).expect("binary invalidation count").len(),
-        12
-    );
+    assert!(matches!(
+        validate(&generated),
+        Err(ConversionError::Tq { .. })
+    ));
 }
 
 #[cfg(unix)]

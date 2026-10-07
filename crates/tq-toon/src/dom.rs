@@ -5,7 +5,7 @@ use std::{io::BufRead, sync::Arc};
 use thiserror::Error;
 use tq_core::{Object, SourceId, Value};
 
-use crate::{DecodeError, Decoder, DecoderConfig, Event, EventConsumer, PathExpansion, Scalar};
+use crate::{DecodeError, Decoder, DecoderConfig, Event, EventConsumer, Scalar};
 
 /// Invalid event sequence received by [`DomBuilder`].
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -28,12 +28,6 @@ pub enum DomError {
     /// No complete document value was produced.
     #[error("TOON event stream did not produce one complete value")]
     IncompleteDocument,
-    /// Two keys conflict while applying safe dotted-path expansion.
-    #[error("TOON path expansion conflicts at key '{key}'")]
-    PathConflict {
-        /// Conflicting key segment.
-        key: Arc<str>,
-    },
 }
 
 /// Error returned by [`decode_to_value`].
@@ -54,23 +48,15 @@ pub struct DomBuilder {
     root: Option<Value>,
     started: bool,
     ended: bool,
-    path_expansion: PathExpansion,
-    strict: bool,
 }
 
 #[derive(Debug)]
 enum Frame {
     Object {
         values: Object,
-        pending_key: Option<PendingKey>,
+        pending_key: Option<Arc<str>>,
     },
     Array(Vec<Value>),
-}
-
-#[derive(Debug)]
-struct PendingKey {
-    value: Arc<str>,
-    quoted: bool,
 }
 
 impl DomBuilder {
@@ -78,16 +64,6 @@ impl DomBuilder {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Creates a builder with the materialization policies from a decoder.
-    #[must_use]
-    pub fn with_config(config: DecoderConfig) -> Self {
-        Self {
-            path_expansion: config.path_expansion,
-            strict: config.strict,
-            ..Self::default()
-        }
     }
 
     /// Returns the single completed document.
@@ -114,7 +90,8 @@ impl DomBuilder {
                 pending_key,
             }) => {
                 let key = pending_key.take().ok_or(DomError::UnexpectedValue)?;
-                insert_object_value(values, key, value, self.path_expansion, self.strict)
+                values.insert(key, value);
+                Ok(())
             }
             None if self.root.is_none() => {
                 self.root = Some(value);
@@ -182,11 +159,11 @@ impl EventConsumer for DomBuilder {
                 Ok(())
             }
             Event::ArrayEnd { .. } if self.started && !self.ended => self.close_array(),
-            Event::Key { value, quoted, .. } if self.started && !self.ended => {
+            Event::Key { value, .. } if self.started && !self.ended => {
                 let Some(Frame::Object { pending_key, .. }) = self.frames.last_mut() else {
                     return Err(DomError::UnexpectedKey);
                 };
-                if pending_key.replace(PendingKey { value, quoted }).is_some() {
+                if pending_key.replace(value).is_some() {
                     return Err(DomError::UnexpectedKey);
                 }
                 Ok(())
@@ -222,73 +199,11 @@ pub fn decode_to_value<R: BufRead>(
     config: DecoderConfig,
 ) -> Result<Value, DomDecodeError> {
     let mut decoder = Decoder::new(reader, source, config);
-    let mut builder = DomBuilder::with_config(config);
+    let mut builder = DomBuilder::new();
     while let Some(event) = decoder.next_event()? {
         builder.consume(event)?;
     }
     builder.finish().map_err(Into::into)
-}
-
-fn insert_object_value(
-    object: &mut Object,
-    key: PendingKey,
-    value: Value,
-    expansion: PathExpansion,
-    strict: bool,
-) -> Result<(), DomError> {
-    let segments = key.value.split('.').collect::<Vec<_>>();
-    if expansion == PathExpansion::Safe
-        && !key.quoted
-        && segments.len() > 1
-        && segments.iter().all(|segment| identifier_segment(segment))
-    {
-        return merge_path(object, &segments, value, strict);
-    }
-    if strict && object.contains_key(&key.value) {
-        return Err(DomError::PathConflict { key: key.value });
-    }
-    object.insert(key.value, value);
-    Ok(())
-}
-
-fn merge_path(
-    object: &mut Object,
-    segments: &[&str],
-    value: Value,
-    strict: bool,
-) -> Result<(), DomError> {
-    let (first, remaining) = segments.split_first().expect("path has segments");
-    let key: Arc<str> = Arc::from(*first);
-    if remaining.is_empty() {
-        if strict && object.contains_key(&key) {
-            return Err(DomError::PathConflict { key });
-        }
-        object.insert(key, value);
-        return Ok(());
-    }
-
-    if !object.contains_key(&key) {
-        object.insert(Arc::clone(&key), Value::object(Object::new()));
-    }
-    let nested = object.get_mut(&key).expect("nested key was inserted");
-    if !matches!(nested, Value::Object(_)) {
-        if strict {
-            return Err(DomError::PathConflict { key });
-        }
-        *nested = Value::object(Object::new());
-    }
-    let Value::Object(nested) = nested else {
-        unreachable!("non-object replaced above")
-    };
-    merge_path(Arc::make_mut(nested), remaining, value, strict)
-}
-
-fn identifier_segment(segment: &str) -> bool {
-    let mut characters = segment.chars();
-    characters
-        .next()
-        .is_some_and(|character| character.is_alphabetic() || character == '_')
-        && characters.all(|character| character.is_alphanumeric() || character == '_')
 }
 
 #[cfg(test)]

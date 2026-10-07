@@ -1,6 +1,9 @@
 //! Private structural replay records for bounded container preparation.
 
-use std::sync::Arc;
+use std::{
+    io::{self, Write},
+    sync::Arc,
+};
 
 use tq_core::{Number, Object, Value};
 
@@ -17,28 +20,58 @@ const OBJECT_START: u8 = 7;
 const KEY: u8 = 8;
 const OBJECT_END: u8 = 9;
 
-pub(crate) fn encode(value: &Value) -> Vec<u8> {
-    let mut output = Vec::new();
-    encode_into(value, &mut output);
-    output
-}
-
-pub(crate) fn encode_scalar(value: ScalarToken<'_>) -> Vec<u8> {
-    let mut output = Vec::new();
+/// Encodes one value directly into its bounded replay destination.
+pub(crate) fn encode_to(value: &Value, output: &mut (impl Write + ?Sized)) -> io::Result<()> {
     match value {
-        ScalarToken::Null => output.push(NULL),
-        ScalarToken::Bool(false) => output.push(FALSE),
-        ScalarToken::Bool(true) => output.push(TRUE),
-        ScalarToken::Number(value) => {
-            output.push(NUMBER);
-            write_bytes(value.as_bytes(), &mut output);
+        Value::Null => output.write_all(&[NULL]),
+        Value::Bool(false) => output.write_all(&[FALSE]),
+        Value::Bool(true) => output.write_all(&[TRUE]),
+        Value::Number(value) if value.as_f64().is_nan() => output.write_all(&[NULL]),
+        Value::Number(value) => {
+            output.write_all(&[NUMBER])?;
+            write_bytes_to(value.canonical_numeric().as_bytes(), output)
         }
-        ScalarToken::String(value) => {
-            output.push(STRING);
-            write_bytes(value.as_bytes(), &mut output);
+        Value::String(value) => {
+            output.write_all(&[STRING])?;
+            write_bytes_to(value.as_bytes(), output)
+        }
+        Value::Array(values) => {
+            output.write_all(&[ARRAY_START])?;
+            write_length_to(values.len(), output)?;
+            for value in values.iter() {
+                encode_to(value, output)?;
+            }
+            output.write_all(&[ARRAY_END])
+        }
+        Value::Object(values) => {
+            output.write_all(&[OBJECT_START])?;
+            write_length_to(values.len(), output)?;
+            for (key, value) in values.iter() {
+                output.write_all(&[KEY])?;
+                write_bytes_to(key.as_bytes(), output)?;
+                encode_to(value, output)?;
+            }
+            output.write_all(&[OBJECT_END])
         }
     }
-    output
+}
+
+pub(crate) fn encoded_len(value: &Value) -> usize {
+    match value {
+        Value::Null | Value::Bool(_) => 1,
+        Value::Number(number) if number.as_f64().is_nan() => 1,
+        Value::Number(number) => number.canonical_numeric().len().saturating_add(9),
+        Value::String(value) => value.len().saturating_add(9),
+        Value::Array(values) => values.iter().fold(10_usize, |length, value| {
+            length.saturating_add(encoded_len(value))
+        }),
+        Value::Object(values) => values.iter().fold(10_usize, |length, (key, value)| {
+            length
+                .saturating_add(9)
+                .saturating_add(key.len())
+                .saturating_add(encoded_len(value))
+        }),
+    }
 }
 
 pub(crate) fn decode_scalar(bytes: &[u8]) -> Result<ScalarToken<'_>, &'static str> {
@@ -66,50 +99,13 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Value, &'static str> {
     Ok(value)
 }
 
-fn encode_into(value: &Value, output: &mut Vec<u8>) {
-    match value {
-        Value::Null => output.push(NULL),
-        Value::Bool(false) => output.push(FALSE),
-        Value::Bool(true) => output.push(TRUE),
-        // Replay prepares output, so apply the same non-finite projection as
-        // the writer before storing a finite numeric token.
-        Value::Number(value) if value.as_f64().is_nan() => output.push(NULL),
-        Value::Number(value) => {
-            output.push(NUMBER);
-            write_bytes(value.canonical_numeric().as_bytes(), output);
-        }
-        Value::String(value) => {
-            output.push(STRING);
-            write_bytes(value.as_bytes(), output);
-        }
-        Value::Array(values) => {
-            output.push(ARRAY_START);
-            write_length(values.len(), output);
-            for value in values.iter() {
-                encode_into(value, output);
-            }
-            output.push(ARRAY_END);
-        }
-        Value::Object(values) => {
-            output.push(OBJECT_START);
-            write_length(values.len(), output);
-            for (key, value) in values.iter() {
-                output.push(KEY);
-                write_bytes(key.as_bytes(), output);
-                encode_into(value, output);
-            }
-            output.push(OBJECT_END);
-        }
-    }
+fn write_bytes_to(bytes: &[u8], output: &mut (impl Write + ?Sized)) -> io::Result<()> {
+    write_length_to(bytes.len(), output)?;
+    output.write_all(bytes)
 }
 
-fn write_bytes(bytes: &[u8], output: &mut Vec<u8>) {
-    write_length(bytes.len(), output);
-    output.extend_from_slice(bytes);
-}
-
-fn write_length(length: usize, output: &mut Vec<u8>) {
-    output.extend_from_slice(&u64::try_from(length).unwrap_or(u64::MAX).to_le_bytes());
+fn write_length_to(length: usize, output: &mut (impl Write + ?Sized)) -> io::Result<()> {
+    output.write_all(&u64::try_from(length).unwrap_or(u64::MAX).to_le_bytes())
 }
 
 struct Decoder<'a> {
@@ -220,8 +216,13 @@ impl<'a> Decoder<'a> {
 mod tests {
     use tq_core::Value;
 
-    use super::{ARRAY_START, OBJECT_START, decode, encode};
+    use super::{ARRAY_START, OBJECT_START, decode, encode_to};
 
+    fn encode(value: &Value) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        encode_to(value, &mut encoded).unwrap();
+        encoded
+    }
     #[test]
     fn nested_values_round_trip_without_json_records() {
         let value: Value =

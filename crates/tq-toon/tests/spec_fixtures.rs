@@ -1,119 +1,219 @@
-//! Vendored TOON specification fixtures and decoder differential tests.
+//! Complete pinned TOON 4.1 decode expectations, semantic events and oracle checks.
 
-use std::{fs, io::Cursor, path::PathBuf};
+mod support;
+
+use std::io::{BufReader, Cursor};
 
 use serde_json::Value as JsonValue;
-use toon_format::types::PathExpansionMode as ReferencePathExpansion;
-use tq_core::{SourceId, Value};
-use tq_toon::{DecoderConfig, PathExpansion, decode_to_value};
+use tq_core::{Number, SourceId, Value};
+use tq_toon::{Decoder, DecoderConfig, DomBuilder, decode_to_value};
 
-fn fixture_files() -> Vec<PathBuf> {
-    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spec-v3/decode");
-    let mut files = fs::read_dir(directory)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "json")
-        })
-        .collect::<Vec<_>>();
-    files.sort();
-    files
-}
-
-fn option<'a>(test: &'a JsonValue, name: &str) -> Option<&'a JsonValue> {
-    test.get("options").and_then(|options| options.get(name))
-}
+use support::{assert_ordered, decoder_config, fixtures};
 
 #[test]
-fn specification_decode_fixtures_match_expected_values_and_errors() {
-    let mut exercised = 0_usize;
-    for path in fixture_files() {
-        let fixture: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        for test in fixture["tests"].as_array().unwrap() {
-            let name = test["name"].as_str().unwrap();
+fn official_decode_fixtures_match_dom_events_and_reference() {
+    for (path, fixture) in fixtures("decode") {
+        for (index, test) in fixture["tests"].as_array().unwrap().iter().enumerate() {
+            let context = format!("{path}[{index}]: {}", test["name"].as_str().unwrap());
             let input = test["input"].as_str().unwrap();
-            let config = DecoderConfig {
-                strict: option(test, "strict")
-                    .and_then(JsonValue::as_bool)
-                    .unwrap_or(true),
-                indent_size: option(test, "indent")
-                    .and_then(JsonValue::as_u64)
-                    .map_or(2, |value| usize::try_from(value).unwrap()),
-                path_expansion: match option(test, "expandPaths").and_then(JsonValue::as_str) {
-                    Some("safe") => PathExpansion::Safe,
-                    _ => PathExpansion::Off,
-                },
-                ..DecoderConfig::default()
-            };
-
+            let config = decoder_config(test);
+            let reference_options = toon_format::DecodeOptions::new()
+                .with_strict(config.strict)
+                .with_indent(toon_format::Indent::Spaces(config.indent_size));
+            let reference = toon_format::decode::<JsonValue>(input, &reference_options);
             let actual = decode_to_value(Cursor::new(input.as_bytes()), SourceId::new(1), config);
-            let should_error = test
-                .get("shouldError")
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(false);
-            if should_error {
-                assert!(actual.is_err(), "{name}: unexpectedly decoded {input:?}");
+            // A one-byte buffered reader also exercises fragmented UTF-8, escapes,
+            // BOM and CRLF without changing fixture bytes or source positions.
+            let mut decoder = Decoder::new(
+                BufReader::with_capacity(1, Cursor::new(input.as_bytes())),
+                SourceId::new(2),
+                config,
+            );
+            let mut builder = DomBuilder::new();
+            let events = decoder.decode_into(&mut builder);
+            if test["shouldError"].as_bool().unwrap_or(false) {
+                assert!(actual.is_err(), "{context}: DOM accepted {input:?}");
+                assert!(events.is_err(), "{context}: events accepted {input:?}");
+                assert!(
+                    reference.is_err(),
+                    "{context}: oracle disagrees with official expected error: {reference:?}"
+                );
+                let mut discard =
+                    Decoder::new(Cursor::new(input.as_bytes()), SourceId::new(3), config);
+                let discarded = loop {
+                    match discard.next_event() {
+                        Ok(Some(_)) => {}
+                        result => break result,
+                    }
+                };
+                assert!(
+                    discarded.is_err(),
+                    "{context}: discarding event consumer accepted invalid input"
+                );
             } else {
                 let expected = Value::from_json(test["expected"].clone()).unwrap();
-                assert_eq!(
-                    actual.unwrap_or_else(|error| panic!("{name}: {error}; input={input:?}")),
-                    expected,
-                    "{name}; input={input:?}"
+                let actual =
+                    actual.unwrap_or_else(|error| panic!("{context}: {error}; input={input:?}"));
+                events.unwrap_or_else(|error| panic!("{context}: event decode: {error:?}"));
+                let event_value = builder.finish().unwrap();
+                let reference = Value::from_json(reference.unwrap_or_else(|error| {
+                    panic!("{context}: oracle rejected official valid input: {error}")
+                }))
+                .unwrap();
+                assert_ordered(&actual, &expected, &context);
+                assert_ordered(&event_value, &expected, &format!("{context} events"));
+                assert_ordered(
+                    &event_value,
+                    &actual,
+                    &format!("{context} DOM/event agreement"),
+                );
+                assert_ordered(
+                    &reference,
+                    &expected,
+                    &format!("{context} oracle/official agreement"),
                 );
             }
-            exercised += 1;
         }
     }
-
-    assert_eq!(exercised, 202, "fixture coverage unexpectedly changed");
 }
 
 #[test]
-fn successful_default_strict_cases_match_reference_decoder() {
-    let mut compared = 0_usize;
-    for path in fixture_files() {
-        let fixture: JsonValue = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        for test in fixture["tests"].as_array().unwrap() {
-            if test
-                .get("shouldError")
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(false)
-            {
-                continue;
+fn literal_dotted_and_prototype_keys_survive_nested_and_keyed_events() {
+    for (input, expected) in [
+        (
+            "records[2]{a.b,meta{__proto__,constructor}}:\n  x,1,2\n  y,3,4",
+            r#"{"records":[{"a.b":"x","meta":{"__proto__":1,"constructor":2}},{"a.b":"y","meta":{"__proto__":3,"constructor":4}}]}"#,
+        ),
+        (
+            "users[2:]{profile{a.b,prototype}}:\n  alice: x,1\n  bob: y,2",
+            r#"{"users":{"alice":{"profile":{"a.b":"x","prototype":1}},"bob":{"profile":{"a.b":"y","prototype":2}}}}"#,
+        ),
+    ] {
+        let expected: Value = serde_json::from_str(expected).unwrap();
+        let config = DecoderConfig::default();
+        let mut decoder = Decoder::new(Cursor::new(input), SourceId::new(1), config);
+        let mut builder = DomBuilder::new();
+        decoder.decode_into(&mut builder).unwrap();
+        assert_ordered(&builder.finish().unwrap(), &expected, input);
+        assert_ordered(
+            &decode_to_value(Cursor::new(input), SourceId::new(1), config).unwrap(),
+            &expected,
+            input,
+        );
+    }
+}
+
+#[test]
+fn numeric_domains_are_explicit_without_tolerances_or_fixture_exclusions() {
+    // These implementation-defined out-of-oracle-domain values are not
+    // exclusions from the official suite. Each implementation's documented
+    // policy is independently asserted; neither is used to bless the other.
+    for (input, reference_expected) in [
+        (
+            "18446744073709551616",
+            JsonValue::String("18446744073709551616".to_owned()),
+        ),
+        (
+            "-9223372036854775809",
+            JsonValue::String("-9223372036854775809".to_owned()),
+        ),
+        ("1E1234567890", JsonValue::String("1E1234567890".to_owned())),
+    ] {
+        let expected = Value::Number(Number::parse(input).unwrap());
+        let config = DecoderConfig::default();
+        let actual = decode_to_value(Cursor::new(input), SourceId::new(1), config).unwrap();
+        assert_ordered(&actual, &expected, input);
+        let mut decoder = Decoder::new(Cursor::new(input), SourceId::new(2), config);
+        let mut builder = DomBuilder::new();
+        decoder.decode_into(&mut builder).unwrap();
+        assert_ordered(&builder.finish().unwrap(), &expected, input);
+        let reference: JsonValue = toon_format::decode_default(input).unwrap();
+        assert_eq!(
+            reference, reference_expected,
+            "{input}: documented oracle out-of-range policy"
+        );
+    }
+    for input in [
+        "-9223372036854775808",
+        "18446744073709551615",
+        "9007199254740993",
+        "0.3333333333333333",
+        "1e-10",
+    ] {
+        let expected = Value::Number(Number::parse(input).unwrap());
+        let actual = decode_to_value(
+            Cursor::new(input),
+            SourceId::new(1),
+            DecoderConfig::default(),
+        )
+        .unwrap();
+        let reference: JsonValue = toon_format::decode_default(input).unwrap();
+        assert_ordered(&actual, &expected, input);
+        assert_ordered(&Value::from_json(reference).unwrap(), &expected, input);
+    }
+}
+
+#[test]
+fn strict_errors_are_enforced_without_dom_or_retained_values() {
+    for input in [
+        "a: 1\na: 2",
+        "m[2:]{v}:\n  a: 1\n  a: 2",
+        "items[0]{meta{x,x}}:",
+        "m[0:]{meta{x,x}}:",
+        "items[0]{meta{}}:",
+        "m[0:]{a,a}:",
+        "items[1|]{a,b}:\n  1|2",
+        "items[2]{meta{x,y}}:\n  1,2",
+        "m[1:]{meta{x,y}}:\n  a: 1",
+        "m[1:]{meta{x,y}}:\n  a: 1,2,3",
+    ] {
+        let mut decoder = Decoder::new(
+            Cursor::new(input),
+            SourceId::new(1),
+            DecoderConfig::default(),
+        );
+        let result = loop {
+            match decoder.next_event() {
+                Ok(Some(_)) => {}
+                result => break result,
             }
-            let name = test["name"].as_str().unwrap();
-            let input = test["input"].as_str().unwrap();
-            let strict = option(test, "strict")
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(true);
-            let indent = option(test, "indent")
-                .and_then(JsonValue::as_u64)
-                .map_or(2, |value| usize::try_from(value).unwrap());
-            let expansion = match option(test, "expandPaths").and_then(JsonValue::as_str) {
-                Some("safe") => ReferencePathExpansion::Safe,
-                _ => ReferencePathExpansion::Off,
-            };
-            let reference_options = toon_format::DecodeOptions::new()
-                .with_strict(strict)
-                .with_indent(toon_format::Indent::Spaces(indent))
-                .with_expand_paths(expansion);
-            let reference = toon_format::decode::<JsonValue>(input, &reference_options)
-                .unwrap_or_else(|error| panic!("reference rejected {name}: {error}"));
+        };
+        assert!(
+            result.is_err(),
+            "discarding events accepted strict defect: {input:?}"
+        );
+    }
+}
+
+#[test]
+fn surrogate_escapes_and_misplaced_scalars_fail_in_both_modes() {
+    for input in [
+        r#"value: "\uD800""#,
+        r#"value: "\uDC00""#,
+        r#"value: "\uD83D\uDE80""#,
+        "items[1]:\n  - x: 1\n  bare",
+        "object:\n  a: 1\n  bare",
+    ] {
+        for strict in [true, false] {
             let config = DecoderConfig {
                 strict,
-                indent_size: indent,
-                path_expansion: match expansion {
-                    ReferencePathExpansion::Safe => PathExpansion::Safe,
-                    ReferencePathExpansion::Off => PathExpansion::Off,
-                },
                 ..DecoderConfig::default()
             };
-            let actual = decode_to_value(Cursor::new(input.as_bytes()), SourceId::new(2), config)
-                .unwrap_or_else(|error| panic!("tq rejected {name}: {error}"));
-            assert_eq!(actual, Value::from_json(reference).unwrap(), "{name}");
-            compared += 1;
+            assert!(
+                decode_to_value(Cursor::new(input), SourceId::new(1), config).is_err(),
+                "{input:?}, strict={strict}"
+            );
+            let mut decoder = Decoder::new(Cursor::new(input), SourceId::new(2), config);
+            let result = loop {
+                match decoder.next_event() {
+                    Ok(Some(_)) => {}
+                    result => break result,
+                }
+            };
+            assert!(
+                result.is_err(),
+                "{input:?}, strict={strict}: event-discard defect"
+            );
         }
     }
-    assert!(compared >= 160, "differential coverage unexpectedly shrank");
 }

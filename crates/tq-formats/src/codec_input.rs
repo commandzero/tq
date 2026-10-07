@@ -26,6 +26,10 @@ pub(crate) fn consume<R: Read, C: EventConsumer>(
 where
     C::Error: fmt::Display,
 {
+    if options.format == InputFormat::Toon {
+        crate::adapters::require_strict_toon_events(options.toon)
+            .map_err(InputDeliveryError::Input)?;
+    }
     let mut bridge = CodecConsumer {
         consumer,
         failure: None,
@@ -41,15 +45,19 @@ where
             },
         )
         .map(|_| ()),
-        InputFormat::Toon => tq_toon::Decoder::new(BufReader::new(reader), source, options.toon)
-            .decode_into(&mut bridge)
-            .map_err(|error| match error {
-                tq_toon::DecodeIntoError::Decode(error) => crate::adapters::toon_input_error(error),
-                tq_toon::DecodeIntoError::Consumer(message) => FormatError::Parse {
-                    format: options.format,
-                    message,
-                },
-            }),
+        InputFormat::Toon => tq_toon::Decoder::new(
+            BufReader::new(reader),
+            source,
+            options.bounded_toon_config(),
+        )
+        .decode_into(&mut bridge)
+        .map_err(|error| match error {
+            tq_toon::DecodeIntoError::Decode(error) => crate::adapters::toon_input_error(error),
+            tq_toon::DecodeIntoError::Consumer(message) => FormatError::Parse {
+                format: options.format,
+                message,
+            },
+        }),
         _ => Err(FormatError::Parse {
             format: options.format,
             message: "direct codec consumers require JSON or TOON event input".to_owned(),
@@ -115,5 +123,70 @@ where
     fn consume_number_literal(&mut self, span: Span, literal: String) -> Result<(), String> {
         let result = self.consumer.consume_number_literal(span, literal);
         self.text_result(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
+    use tq_core::SourceId;
+    use tq_toon::{Event, EventConsumer};
+
+    use super::consume;
+    use crate::{DecodeOptions, FormatError, InputDeliveryError, InputFormat};
+
+    struct Discard;
+
+    impl EventConsumer for Discard {
+        type Error = String;
+
+        fn consume(&mut self, _event: Event) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    struct CountingReader(Arc<AtomicUsize>);
+
+    impl io::Read for CountingReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn non_strict_toon_codec_events_are_rejected_without_reading() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let mut consumer = Discard;
+        let error = consume(
+            CountingReader(Arc::clone(&reads)),
+            DecodeOptions {
+                format: InputFormat::Toon,
+                toon: tq_toon::DecoderConfig {
+                    strict: false,
+                    ..tq_toon::DecoderConfig::default()
+                },
+                ..DecodeOptions::default()
+            },
+            SourceId::new(0),
+            &mut consumer,
+        )
+        .unwrap_err();
+
+        assert_eq!(reads.load(Ordering::Relaxed), 0);
+        assert!(matches!(
+            error,
+            InputDeliveryError::Input(FormatError::Parse {
+                format: InputFormat::Toon,
+                ..
+            })
+        ));
     }
 }

@@ -31,7 +31,7 @@ The output placeholder at line 48 is intentionally linked to its exercising case
 <!-- tq-manual-compare:begin section=io -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/io.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/io.toon)
 
 
 | Verdict | Cases |

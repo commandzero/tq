@@ -39,8 +39,8 @@ acceptance.
 
 ## Rust library migration to 0.4.0
 
-The incompatible API boundary is 0.4.0; the current upgrade target is 0.4.1.
-Upgrade all workspace crates together from 0.3.0 to 0.4.1 to avoid mixing
+The incompatible value-model boundary remains 0.4.0; the current upgrade target
+is 0.5.0. Upgrade all workspace crates together from 0.3.0 to 0.5.0 to avoid mixing
 incompatible value types. This pre-1.0 API change does not change the jq language
 target or establish a completed compatibility claim.
 
@@ -65,6 +65,33 @@ This is a Rust construction-contract change; CLI users do not construct these
 values. Decoders populate the field themselves. For multiline or multi-document
 sources, preserve the physical line position rather than deriving it from the
 document index. The unreleased version bump does not publish crates or tags.
+
+## Native TOON 4.1 migration to 0.5.0
+
+Upgrade `tq-core`, `tq-toon`, `tq-formats`, `tq-cli`, and comparison helpers
+together. `WriterConfig` no longer has key-folding/flattening fields;
+`DecoderConfig` no longer has path-expansion configuration. Remove those fields
+and the `KeyFolding` / `PathExpansion` imports rather than substituting aliases.
+The CLI rejects `--fold-keys` and `--flatten-depth` before reading input.
+
+Quoted and unquoted dotted names are literal keys. Use `.["profile.city"]` to
+query that literal name; recursive headers such as `profile{city}` explicitly
+construct a nested `profile` object. Uniform array rows and keyed object values
+use the first row's recursive header order. Later matching rows may have a
+different insertion order; ordinary expanded objects and keyed entry order do
+not gain a general order-insensitive comparison.
+
+Root/object-field empty arrays use `[]`; anonymous nested arrays retain counted
+list headers, including `[0]:`. Full-line comments, BOM/CRLF, and quoted control
+escapes are accepted. Encoding and strict input acceptance follow 4.1 rather
+than retaining v3 folding behavior. JSON and TOON sequence directions and
+default LF result terminators are unchanged.
+
+Identity transcode prepares complete object/array shapes in a shared bounded
+arena and replay store before selecting canonical layouts. Replay bodies may
+spill, but active key indexes and recursive schemas remain memory-bounded.
+Non-strict duplicate semantics use a staged/document path where consumers
+cannot retract values.
 
 ## Minimum Rust version
 

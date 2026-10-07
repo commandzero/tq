@@ -49,7 +49,7 @@ Ubuntu build success alone does not establish compatibility with older glibc.
 To reproduce one native job, use a clean checkout of the tag:
 
 ```sh
-./scripts/release-package.sh v0.4.0
+./scripts/release-package.sh v0.5.0
 ```
 
 The version above is an example, not a release claim.
@@ -63,6 +63,19 @@ Each archive has `tq`, `LICENSE`, and `release.txt` at its root.
 The metadata records tag, commit, compiler, default features, target, and host.
 A `.sha256` sidecar records the digest and archive basename, without a builder
 path. Existing outputs cause failure rather than replacement.
+
+Before tagging, exercise the archive boundaries with a locally built candidate:
+
+```sh
+cargo build --release --locked -p tq-cli --bin tq
+TQ_PACKAGE_SMOKE_BINARY="$PWD/target/release/tq" ./scripts/release-package-test.sh
+```
+
+This disposable 0.5.0 fixture packages the real executable and license, checks
+the extracted version/query/checksum, and tests invalid identities and
+non-clobbering publication. Compiler/preflight steps remain fixture shims;
+this smoke does not replace native release checks or authorize a release.
+Its temporary fixture tags do not tag the product repository.
 
 Download each workflow artifact, verify its sidecar with `shasum -a 256 -c`,
 and collect the complete matrix before creating a draft GitHub release.
@@ -88,7 +101,7 @@ After tq-cli publishes, test the consumer installation in a temporary root:
 
 ```sh
 install_root=$(mktemp -d)
-cargo install tq-cli --version '=0.4.0' --locked --root "$install_root"
+cargo install tq-cli --version '=0.5.0' --locked --root "$install_root"
 "$install_root/bin/tq" --version
 printf '{"answer":42}\n' | "$install_root/bin/tq" -i json -o json -c '.answer'
 ```

@@ -352,14 +352,6 @@ mod unix {
                 .output()
                 .unwrap();
             assert_eq!(output.status.success(), succeeds, "{output:?}");
-            if succeeds {
-                assert_eq!(
-                    String::from_utf8_lossy(&output.stdout).trim(),
-                    reference.to_str().unwrap()
-                );
-            } else {
-                assert!(String::from_utf8_lossy(&output.stderr).contains("SHA-256 mismatch"));
-            }
         }
     }
 

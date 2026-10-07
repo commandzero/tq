@@ -24,6 +24,9 @@ pub enum SequenceError {
     /// Output I/O failed.
     #[error("TOON sequence output I/O failed: {0}")]
     Io(#[from] std::io::Error),
+    /// Canonical encoding failed.
+    #[error(transparent)]
+    Writer(#[from] WriterError),
     /// Exactly-one mode received the wrong number of results.
     #[error(transparent)]
     Cardinality(#[from] CardinalityError),
@@ -67,7 +70,7 @@ where
     for value in values {
         writer.write_all(b"\x1e")?;
         write_value_colored(&mut writer, value.borrow(), config, palette)
-            .map_err(|WriterError::Io(error)| error)?;
+            .map_err(sequence_writer_error)?;
         writer.write_all(b"\n")?;
     }
     Ok(())
@@ -117,8 +120,15 @@ where
         return Err(CardinalityError::Multiple.into());
     }
     write_value_colored(&mut writer, first.borrow(), config, palette)
-        .map_err(|WriterError::Io(error)| error)?;
+        .map_err(sequence_writer_error)?;
     Ok(())
+}
+
+fn sequence_writer_error(error: WriterError) -> SequenceError {
+    match error {
+        WriterError::Io(error) => SequenceError::Io(error),
+        error @ WriterError::Schema { .. } => SequenceError::Writer(error),
+    }
 }
 
 #[cfg(test)]

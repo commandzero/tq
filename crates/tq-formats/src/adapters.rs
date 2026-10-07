@@ -36,7 +36,7 @@ pub struct DecodeOptions {
     pub maximum_token_bytes: usize,
     /// Maximum bytes in one physical JSON Lines record or delimited logical row.
     pub maximum_line_bytes: usize,
-    /// Maximum fields in a delimited header or row.
+    /// Maximum delimited fields or active TOON sibling names and schema nodes.
     pub maximum_fields: usize,
     /// TOON decoder controls.
     pub toon: DecoderConfig,
@@ -89,6 +89,30 @@ impl Default for DecodeOptions {
     }
 }
 
+impl DecodeOptions {
+    pub(crate) fn bounded_toon_config(self) -> DecoderConfig {
+        DecoderConfig {
+            maximum_depth: self.toon.maximum_depth.min(self.maximum_depth),
+            maximum_token_bytes: self.toon.maximum_token_bytes.min(self.maximum_token_bytes),
+            maximum_line_bytes: self.toon.maximum_line_bytes.min(self.maximum_line_bytes),
+            maximum_fields: self.toon.maximum_fields.min(self.maximum_fields),
+            ..self.toon
+        }
+    }
+}
+
+pub(crate) fn require_strict_toon_events(config: DecoderConfig) -> Result<(), FormatError> {
+    if config.strict {
+        Ok(())
+    } else {
+        Err(FormatError::Parse {
+            format: InputFormat::Toon,
+            message: "non-strict TOON requires document decoding for last-write-wins values"
+                .to_owned(),
+        })
+    }
+}
+
 /// Preserves TOON decoder failure classifications.
 pub(crate) fn toon_input_error(error: tq_toon::DecodeError) -> FormatError {
     match error {
@@ -98,6 +122,8 @@ pub(crate) fn toon_input_error(error: tq_toon::DecodeError) -> FormatError {
                 "token-bytes" => "token-bytes",
                 "line-bytes" => "line-bytes",
                 "lookahead-bytes" => "lookahead-bytes",
+                "fields" => "fields",
+                "name-bytes" => "name-bytes",
                 _ => "toon-decoder",
             })
         }
@@ -1164,8 +1190,9 @@ pub fn decode_bytes(
         return Err(FormatError::Resource("source-bytes"));
     }
     let identity = identity.into();
+    let toon = options.bounded_toon_config();
     match options.format {
-        InputFormat::Toon => decode_toon(bytes, identity, options.toon),
+        InputFormat::Toon => decode_toon(bytes, identity, toon),
         InputFormat::Yaml => decode_yaml(bytes, identity),
         InputFormat::Json => decode_json_with_options(bytes, identity, options),
         InputFormat::Json5 => decode_json5(bytes, identity, options),
@@ -1173,7 +1200,7 @@ pub fn decode_bytes(
         InputFormat::ToonSequence => decode_toon_sequence_with_frame_limit(
             bytes,
             identity,
-            options.toon,
+            toon,
             options.maximum_frame_bytes,
         ),
         InputFormat::JsonSequence | InputFormat::Csv | InputFormat::Tsv => {
@@ -1204,7 +1231,7 @@ pub fn decode_bytes(
         InputFormat::Auto => {
             let report = probe_format(bytes, options.toon.maximum_lookahead_bytes)?;
             match report.selected {
-                InputFormat::Toon => decode_toon(bytes, identity, options.toon),
+                InputFormat::Toon => decode_toon(bytes, identity, toon),
                 InputFormat::Yaml => decode_yaml(bytes, identity),
                 InputFormat::Json => decode_json_with_options(bytes, identity, options),
                 InputFormat::JsonSequence => decode_bytes(
@@ -1446,47 +1473,60 @@ pub fn probe_format(
     maximum_lookahead_bytes: usize,
 ) -> Result<ProbeReport, FormatError> {
     let inspected = bytes.len().min(maximum_lookahead_bytes);
-    let prefix = &bytes[..inspected];
-    if let Some(index) = prefix
+    // A leading RS commits at the byte boundary; payload errors belong to
+    // the sequence parser, not UTF-8 validation of the probe suffix.
+    if let Some(position) = bytes[..inspected]
         .iter()
-        .position(|byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
-        && prefix[index] == 0x1e
+        .position(|&byte| !matches!(byte, b' ' | b'\t' | b'\r' | b'\n'))
+        && bytes[position] == 0x1e
     {
         return Ok(ProbeReport {
             selected: InputFormat::JsonSequence,
             lookahead_bytes: inspected,
-            commitment_bytes: index + 1,
-            rejections: vec![(
-                InputFormat::Toon,
-                "leading RS selects JSON Text Sequences".to_owned(),
-            )],
+            commitment_bytes: position + 1,
+            rejections: Vec::new(),
         });
     }
-    let text = match std::str::from_utf8(prefix) {
-        Ok(text) => text,
-        Err(error) if error.error_len().is_none() && inspected < bytes.len() => {
-            std::str::from_utf8(&prefix[..error.valid_up_to()]).map_err(|_| FormatError::Probe {
-                summary: "TOON, YAML, and JSON could not validate the lookahead prefix".to_owned(),
-            })?
-        }
-        Err(error) => {
-            return Err(FormatError::Probe {
-                summary: format!(
-                    "TOON: invalid UTF-8 at {}; YAML: invalid UTF-8; JSON: invalid UTF-8",
-                    error.valid_up_to()
-                ),
-            });
-        }
+    let text_end = probe_text_end(bytes, inspected)?;
+    let text = std::str::from_utf8(&bytes[..text_end])
+        .map_err(|error| invalid_probe_utf8(error.valid_up_to()))?;
+    let (start, unfinished_comment, toon_preamble) = initial_probe_content(text);
+    let meaningful = if unfinished_comment {
+        ""
+    } else {
+        &text[start..]
     };
-    let trimmed = text.trim_start();
+    let trimmed = meaningful.trim_start_matches([' ', '\t', '\r', '\n']);
     let first_line = trimmed.lines().next().unwrap_or("");
     let toon_header = root_toon_array_header(first_line);
-    let (selected, rejection) = if trimmed.starts_with('{') {
+    let toon_header_fragment = root_toon_array_header_fragment(first_line);
+    if !toon_preamble
+        && !toon_header
+        && !toon_header_fragment
+        && first_line.starts_with('[')
+        && !first_line.contains(']')
+        && root_toon_array_header_prefix(first_line)
+    {
+        return Err(FormatError::Probe {
+            summary: "TOON/JSON root array prefix exhausted the configured lookahead".to_owned(),
+        });
+    }
+    let structural_prefix = trimmed.starts_with(['{', '['])
+        || trimmed.starts_with("---")
+        || trimmed.starts_with('%')
+        || trimmed.starts_with("- ");
+    let json_scalar = !structural_prefix && json_scalar_stream_is_complete(trimmed);
+    let has_json_prefix = trimmed.starts_with('{')
+        || (trimmed.starts_with('[') && !toon_header && !toon_header_fragment)
+        || json_scalar;
+    let (selected, rejection) = if trimmed.is_empty() || (toon_preamble && has_json_prefix) {
+        (InputFormat::Toon, None)
+    } else if trimmed.starts_with('{') {
         (
             InputFormat::Json,
             Some("JSON object opener is not canonical TOON".to_owned()),
         )
-    } else if trimmed.starts_with('[') && !toon_header {
+    } else if trimmed.starts_with('[') && !toon_header && !toon_header_fragment {
         (
             InputFormat::Json,
             Some("JSON array opener is not a TOON counted-array header".to_owned()),
@@ -1501,7 +1541,7 @@ pub fn probe_format(
             InputFormat::Yaml,
             Some("YAML root-sequence marker".to_owned()),
         )
-    } else if json_scalar_stream_is_complete(trimmed) {
+    } else if json_scalar {
         (
             InputFormat::Json,
             Some("JSON scalar stream is not canonical TOON".to_owned()),
@@ -1509,7 +1549,16 @@ pub fn probe_format(
     } else {
         (InputFormat::Toon, None)
     };
-    let commitment = first_line.len().min(inspected);
+    let commitment = if trimmed.is_empty() {
+        0
+    } else {
+        start.saturating_add(
+            text[start..]
+                .find('\n')
+                .unwrap_or_else(|| text.len().saturating_sub(start)),
+        )
+    }
+    .min(inspected);
     Ok(if let Some(rejection) = rejection {
         ProbeReport {
             selected,
@@ -1525,6 +1574,120 @@ pub fn probe_format(
             rejections: Vec::new(),
         }
     })
+}
+
+fn invalid_probe_utf8(offset: usize) -> FormatError {
+    FormatError::Probe {
+        summary: format!(
+            "TOON: invalid UTF-8 at {offset}; YAML: invalid UTF-8; JSON: invalid UTF-8"
+        ),
+    }
+}
+
+fn utf8_completion(bytes: &[u8], inspected: usize) -> Result<Option<(usize, usize)>, FormatError> {
+    let prefix = &bytes[..inspected];
+    match std::str::from_utf8(prefix) {
+        Ok(_) => Ok(None),
+        Err(error) if error.error_len().is_some() => {
+            let start = error.valid_up_to();
+            let lead = prefix[start];
+            let width = match lead {
+                0xC2..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF4 => 4,
+                _ => return Err(invalid_probe_utf8(start)),
+            };
+            for (index, byte) in prefix
+                .iter()
+                .copied()
+                .enumerate()
+                .take(start + width)
+                .skip(start + 1)
+            {
+                if !valid_utf8_continuation(lead, index - start, byte) {
+                    return Err(invalid_probe_utf8(index));
+                }
+            }
+            Err(invalid_probe_utf8(start))
+        }
+        Err(error) => {
+            let start = error.valid_up_to();
+            let lead = prefix[start];
+            let width = match lead {
+                0xC2..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF4 => 4,
+                _ => return Err(invalid_probe_utf8(start)),
+            };
+            for (index, byte) in prefix.iter().copied().enumerate().skip(start + 1) {
+                if !valid_utf8_continuation(lead, index - start, byte) {
+                    return Err(invalid_probe_utf8(index));
+                }
+            }
+            Ok(Some((start, start + width)))
+        }
+    }
+}
+
+fn valid_utf8_continuation(lead: u8, position: usize, byte: u8) -> bool {
+    let (minimum, maximum) = match (lead, position) {
+        (0xE0, 1) => (0xA0, 0xBF),
+        (0xED, 1) => (0x80, 0x9F),
+        (0xF0, 1) => (0x90, 0xBF),
+        (0xF4, 1) => (0x80, 0x8F),
+        (0xC2..=0xDF | 0xE1..=0xEC | 0xEE..=0xEF | 0xF1..=0xF3, 1)
+        | (0xE0..=0xEF, 2)
+        | (0xF0..=0xF4, 2..=3) => (0x80, 0xBF),
+        _ => return false,
+    };
+    (minimum..=maximum).contains(&byte)
+}
+
+fn probe_text_end(bytes: &[u8], inspected: usize) -> Result<usize, FormatError> {
+    let Some((start, end)) = utf8_completion(bytes, inspected)? else {
+        return Ok(inspected);
+    };
+    if bytes.len() < end {
+        return Err(invalid_probe_utf8(start));
+    }
+    let lead = bytes[start];
+    for (index, byte) in bytes.iter().copied().enumerate().take(end).skip(inspected) {
+        if !valid_utf8_continuation(lead, index - start, byte) {
+            return Err(invalid_probe_utf8(index));
+        }
+    }
+    Ok(end)
+}
+
+fn initial_probe_content(text: &str) -> (usize, bool, bool) {
+    let has_bom = text.starts_with('\u{feff}');
+    let mut offset = if has_bom { '\u{feff}'.len_utf8() } else { 0 };
+    let mut has_comment = false;
+    loop {
+        let remaining = &text[offset..];
+        if remaining.is_empty() {
+            return (offset, false, has_bom || has_comment);
+        }
+        let line_end = remaining.find('\n').unwrap_or(remaining.len());
+        let line = &remaining[..line_end];
+        if line.chars().all(char::is_whitespace) {
+            if line_end == remaining.len() {
+                return (text.len(), false, has_bom || has_comment);
+            }
+            offset += line_end + 1;
+            continue;
+        }
+        let comment_candidate = line.strip_suffix('\r').unwrap_or(line);
+        if comment_candidate.trim_start_matches(' ').starts_with('#') {
+            has_comment = true;
+            if line_end == remaining.len() {
+                return (text.len(), true, true);
+            }
+            offset += line_end + 1;
+            continue;
+        }
+        return (offset, false, has_bom || has_comment);
+    }
 }
 
 fn json_scalar_stream_is_complete(input: &str) -> bool {
@@ -1551,12 +1714,12 @@ fn json_scalar_stream_is_complete(input: &str) -> bool {
     count >= 2 || (count == 1 && (first == Some(b'"') || input.as_bytes().last() == Some(&b'\n')))
 }
 
-/// Reads bounded lookahead, returns its decision, and preserves every byte in a
-/// replay reader for the selected parser.
+/// Reads bounded lookahead and preserves the inspected bytes for replay.
 ///
-/// Up to three continuation bytes beyond the configured lookahead are retained
-/// solely to distinguish a split UTF-8 scalar from invalid input; the reported
-/// inspected and commitment offsets remain within the configured bound.
+/// The configured lookahead is exact for ASCII. Only continuation bytes needed
+/// to validate one UTF-8 scalar that starts inside the prefix may be read past
+/// that boundary; they remain in the replay stream and do not extend reported
+/// offsets.
 ///
 /// # Errors
 ///
@@ -1565,16 +1728,33 @@ pub fn probe_reader<R: Read>(
     mut reader: R,
     maximum_lookahead_bytes: usize,
 ) -> Result<(ProbeReport, ReplayReader<R>), FormatError> {
-    let capacity = maximum_lookahead_bytes.saturating_add(3);
-    let mut prefix = Vec::with_capacity(capacity);
-    while prefix.len() < capacity {
+    let mut prefix = Vec::with_capacity(maximum_lookahead_bytes);
+    while prefix.len() < maximum_lookahead_bytes {
         let mut byte = [0_u8; 1];
         if reader.read(&mut byte)? == 0 {
             break;
         }
         prefix.push(byte[0]);
+        if utf8_completion(&prefix, prefix.len())?.is_some() {
+            continue;
+        }
         if probe_commit_boundary(&prefix, maximum_lookahead_bytes) {
             break;
+        }
+    }
+    if prefix.len() == maximum_lookahead_bytes
+        && let Some((start, end)) = utf8_completion(&prefix, maximum_lookahead_bytes)?
+    {
+        while prefix.len() < end {
+            let mut byte = [0_u8; 1];
+            if reader.read(&mut byte)? == 0 {
+                return Err(invalid_probe_utf8(start));
+            }
+            let position = prefix.len();
+            if !valid_utf8_continuation(prefix[start], position - start, byte[0]) {
+                return Err(invalid_probe_utf8(position));
+            }
+            prefix.push(byte[0]);
         }
     }
     let report = probe_format(&prefix, maximum_lookahead_bytes)?;
@@ -1591,66 +1771,103 @@ fn probe_commit_boundary(bytes: &[u8], maximum_lookahead_bytes: usize) -> bool {
     let Ok(report) = probe_format(bytes, maximum_lookahead_bytes) else {
         return false;
     };
-    let Ok(text) = std::str::from_utf8(bytes) else {
+    let Ok(text_end) = probe_text_end(bytes, bytes.len().min(maximum_lookahead_bytes)) else {
         return false;
     };
-    let trimmed = text.trim_start();
+    let Ok(text) = std::str::from_utf8(&bytes[..text_end]) else {
+        return false;
+    };
+    let (start, unfinished_comment, _) = initial_probe_content(text);
+    if unfinished_comment {
+        return false;
+    }
+    let meaningful = &text[start..];
+    let trimmed = meaningful.trim_start();
     if trimmed.is_empty() {
         return false;
     }
-    // A root TOON counted-array header begins with the same `[` byte as a JSON
-    // array.  Do not commit to JSON while the count/header is still arriving;
-    // a one-byte probe otherwise permanently selects JSON for a fragmented
-    // `[2]:` or `[2]{key}:` document.  A physical newline ends that candidate
-    // because TOON headers cannot span lines.
-    let first_line = trimmed.lines().next().unwrap_or("");
-    if root_toon_array_header_prefix(first_line) && bytes.last() != Some(&b'\n') {
+    // A root counted-array header shares `[` with JSON arrays. Wait for the
+    // physical line boundary before committing a fragmented header candidate.
+    let first_line = meaningful.lines().next().unwrap_or("");
+    let line_terminated = meaningful.contains('\n');
+    if root_toon_array_header_prefix(first_line) && !line_terminated {
         return false;
     }
     let structural_prefix = trimmed.starts_with(['{', '[', '%'])
         || trimmed.starts_with("---")
         || trimmed.starts_with("- ");
-    structural_prefix && report.selected != InputFormat::Toon || bytes.last() == Some(&b'\n')
+    structural_prefix && report.selected != InputFormat::Toon || line_terminated
 }
 
 fn root_toon_array_header_prefix(line: &str) -> bool {
-    if !line.starts_with('[') {
+    let line = line.trim_start();
+    let Some(declaration) = line.strip_prefix('[') else {
         return false;
-    }
-    if line == "[" {
+    };
+    if declaration.is_empty() {
         return true;
     }
-    if let Some(close) = line.find(']') {
-        if root_toon_array_header(line) {
-            return true;
-        }
-        if close + 1 == line.len() {
-            let declaration = &line[1..close];
-            let count = declaration
-                .strip_suffix([',', '|', '\t'])
-                .unwrap_or(declaration);
-            return !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit());
-        }
+    let digit_end = declaration.bytes().take_while(u8::is_ascii_digit).count();
+    if digit_end == 0 {
         return false;
     }
-    let declaration = &line[1..];
-    let count = declaration
-        .strip_suffix([',', '|', '\t'])
-        .unwrap_or(declaration);
-    !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
+    let suffix = &declaration[digit_end..];
+    if suffix.is_empty() {
+        return true;
+    }
+    if let Some(close) = suffix.find(']') {
+        let header_suffix = &suffix[..close];
+        let after = &suffix[close + 1..];
+        return header_suffix
+            .bytes()
+            .all(|byte| matches!(byte, b':' | b',' | b'|' | b'\t'))
+            && (after.is_empty() || after.starts_with([':', '{']) || root_toon_array_header(line));
+    }
+    suffix
+        .bytes()
+        .all(|byte| matches!(byte, b':' | b',' | b'|' | b'\t'))
+}
+
+fn root_toon_array_header_fragment(line: &str) -> bool {
+    let line = line.trim_start();
+    let Some(declaration) = line.strip_prefix('[') else {
+        return false;
+    };
+    let digit_end = declaration.bytes().take_while(u8::is_ascii_digit).count();
+    if digit_end == 0 {
+        return false;
+    }
+    let suffix = &declaration[digit_end..];
+    !suffix.is_empty()
+        && !suffix.contains(']')
+        && suffix
+            .bytes()
+            .all(|byte| matches!(byte, b':' | b'|' | b'\t'))
 }
 
 fn root_toon_array_header(line: &str) -> bool {
+    let line = line.trim_start();
     let Some(close) = line.find(']') else {
         return false;
     };
     let declaration = &line[1..close];
-    let count = declaration
-        .strip_suffix([',', '|', '\t'])
-        .unwrap_or(declaration);
-    !count.is_empty()
-        && count.bytes().all(|byte| byte.is_ascii_digit())
-        && line[close + 1..].starts_with([':', '{'])
+    let digit_end = declaration.bytes().take_while(u8::is_ascii_digit).count();
+    if digit_end == 0 {
+        return false;
+    }
+    let suffix = &declaration[digit_end..];
+    if !suffix
+        .bytes()
+        .all(|byte| matches!(byte, b':' | b',' | b'|' | b'\t'))
+    {
+        return false;
+    }
+    let after = &line[close + 1..];
+    if suffix.contains(':') {
+        after.is_empty() || after.starts_with([':', '{'])
+    } else {
+        after.starts_with([':', '{'])
+    }
 }
 
 /// Decodes one strict TOON document.
@@ -3049,6 +3266,187 @@ second \n line with "quotes""""}"#,
             let mut recovered = Vec::new();
             replay.read_to_end(&mut recovered).unwrap();
             assert_eq!(recovered, source);
+        }
+    }
+
+    #[test]
+    fn bounded_probe_reads_no_extra_ascii_and_completes_only_trailing_unicode() {
+        let bounded = BoundedReader::new(b"key: value\n", 4);
+        let (report, _) = super::probe_reader(bounded, 4).unwrap();
+        assert_eq!(report.lookahead_bytes, 4);
+
+        let malformed = [0xF0, 0x9F, b'x', b'y'];
+        let error = super::probe_format(&malformed, 2).unwrap_err().to_string();
+        assert!(error.contains("invalid UTF-8 at 2"), "{error}");
+
+        let incomplete = [0xF0, 0x9F];
+        assert!(
+            super::probe_format(&incomplete, 2)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid UTF-8 at 0")
+        );
+        assert!(super::probe_reader(BoundedReader::new(&incomplete, 3), 2).is_err());
+
+        let source = "😀: value\n".as_bytes();
+        let (report, replay) = super::probe_reader(BoundedReader::new(source, 4), 2).unwrap();
+        assert_eq!(report.lookahead_bytes, 2);
+        assert_eq!(replay.reader.offset, 4);
+    }
+
+    #[test]
+    fn exhausted_ambiguous_array_prefix_reports_probe_error_without_blocking_override() {
+        let source = b"[2]: 1,2\n";
+        assert!(matches!(
+            super::probe_reader(BoundedReader::new(source, 2), 2),
+            Err(crate::FormatError::Probe { .. })
+        ));
+        assert!(matches!(
+            decode_bytes(
+                source,
+                "automatic",
+                DecodeOptions {
+                    toon: DecoderConfig {
+                        maximum_lookahead_bytes: 2,
+                        ..DecoderConfig::default()
+                    },
+                    ..DecodeOptions::default()
+                }
+            ),
+            Err(crate::FormatError::Probe { .. })
+        ));
+
+        let explicit = decode_bytes(
+            source,
+            "explicit.toon",
+            DecodeOptions {
+                format: InputFormat::Toon,
+                toon: DecoderConfig {
+                    maximum_lookahead_bytes: 2,
+                    ..DecoderConfig::default()
+                },
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(explicit[0].value.to_string(), "[1,2]");
+    }
+
+    #[test]
+    fn initial_bom_comments_do_not_commit_until_meaningful_toon_line() {
+        let source = b"\xef\xbb\xbf  # first\r\n   # second\nvalue: 1\nrest: 2";
+        let (report, replay) = super::probe_reader(BoundedReader::new(source, 64), 64).unwrap();
+        assert_eq!(report.selected, InputFormat::Toon);
+        assert_eq!(
+            replay.reader.offset,
+            b"\xef\xbb\xbf  # first\r\n   # second\nvalue: 1\n".len()
+        );
+
+        let documents = decode_bytes(source, "comments", DecodeOptions::default()).unwrap();
+        assert_eq!(documents[0].value.to_string(), r#"{"value":1,"rest":2}"#);
+
+        let (unfinished, _) = super::probe_reader(
+            BoundedReader::new(b"  # unfinished comment\nvalue: 1", 8),
+            8,
+        )
+        .unwrap();
+        assert_eq!(unfinished.selected, InputFormat::Toon);
+        assert_eq!(unfinished.commitment_bytes, 0);
+        assert_eq!(unfinished.lookahead_bytes, 8);
+    }
+
+    #[test]
+    fn auto_detection_commits_keyed_root_headers_and_preserves_empty_array_tie_break() {
+        for (source, expected) in [
+            (
+                b"[2:]{profile{name,city}}:\n  a: Ada,DK\n  b: Bob,US".as_slice(),
+                r#"{"a":{"profile":{"name":"Ada","city":"DK"}},"b":{"profile":{"name":"Bob","city":"US"}}}"#,
+            ),
+            (
+                b"[2:|]{profile{name|city}}:\n  a: Ada|DK\n  b: Bob|US".as_slice(),
+                r#"{"a":{"profile":{"name":"Ada","city":"DK"}},"b":{"profile":{"name":"Bob","city":"US"}}}"#,
+            ),
+            (
+                b"[2:\t]{profile{name\tcity}}:\n  a: Ada\tDK\n  b: Bob\tUS".as_slice(),
+                r#"{"a":{"profile":{"name":"Ada","city":"DK"}},"b":{"profile":{"name":"Bob","city":"US"}}}"#,
+            ),
+        ] {
+            let (report, mut replay) =
+                super::probe_reader(BufReader::with_capacity(1, source), 64).unwrap();
+            assert_eq!(report.selected, InputFormat::Toon);
+            let mut bytes = Vec::new();
+            replay.read_to_end(&mut bytes).unwrap();
+            assert_eq!(bytes, source);
+            let documents = decode_bytes(source, "keyed", DecodeOptions::default()).unwrap();
+            assert_eq!(documents[0].value.to_string(), expected);
+        }
+
+        let report = super::probe_format(b"[]", 2).unwrap();
+        assert_eq!(report.selected, InputFormat::Json);
+        let automatic = decode_bytes(b"[]", "automatic", DecodeOptions::default()).unwrap();
+        let explicit = decode_bytes(
+            b"[]",
+            "explicit.toon",
+            DecodeOptions {
+                format: InputFormat::Toon,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(automatic[0].value, Value::array([]));
+        assert_eq!(automatic[0].format, InputFormat::Json);
+        assert_eq!(explicit[0].value, Value::array([]));
+        assert_eq!(explicit[0].format, InputFormat::Toon);
+
+        for source in [
+            b"# TOON comment\n[]".as_slice(),
+            b"\xef\xbb\xbf[]".as_slice(),
+        ] {
+            let report = super::probe_format(source, 64).unwrap();
+            assert_eq!(report.selected, InputFormat::Toon);
+            let documents = decode_bytes(source, "toon-empty", DecodeOptions::default()).unwrap();
+            assert_eq!(documents[0].value, Value::array([]));
+            assert_eq!(documents[0].format, InputFormat::Toon);
+        }
+
+        for (source, expected) in [
+            (b"# comment\n\"hello\"".as_slice(), "\"hello\""),
+            (b"\xef\xbb\xbftrue\n".as_slice(), "true"),
+        ] {
+            assert_eq!(
+                super::probe_format(source, 64).unwrap().selected,
+                InputFormat::Toon
+            );
+            let documents =
+                decode_bytes(source, "toon-preamble", DecodeOptions::default()).unwrap();
+            assert_eq!(documents[0].value.to_string(), expected);
+        }
+        assert_eq!(
+            super::probe_format(b"# comment\n{\"value\":1}", 64)
+                .unwrap()
+                .selected,
+            InputFormat::Toon
+        );
+    }
+
+    #[test]
+    fn malformed_recognized_keyed_headers_remain_committed_to_toon() {
+        for source in [
+            b"[02:]{v}:\n  a: 1\n  b: 2".as_slice(),
+            b"[2|:]{v}:\n  a: 1\n  b: 2".as_slice(),
+            b"[2:]{v}: inline\n  a: 1\n  b: 2".as_slice(),
+        ] {
+            assert_eq!(
+                super::probe_format(source, 64).unwrap().selected,
+                InputFormat::Toon
+            );
+            assert!(matches!(
+                decode_bytes(source, "committed", DecodeOptions::default()),
+                Err(crate::FormatError::Parse {
+                    format: InputFormat::Toon,
+                    ..
+                })
+            ));
         }
     }
 

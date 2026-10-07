@@ -54,7 +54,7 @@ Inventory: 37 records (5 tables, 9 fenced blocks, 23 inline/prose examples): 15 
 <!-- tq-manual-compare:begin section=types-and-values -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/types-and-values.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/types-and-values.toon)
 
 
 | Verdict | Cases |
@@ -80,8 +80,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 288 | 188 | -100 | -34.72% |
-| `cl100k_base` | 288 | 193 | -95 | -32.99% |
+| `o200k_base` | 288 | 186 | -102 | -35.42% |
+| `cl100k_base` | 288 | 191 | -97 | -33.68% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -297,13 +297,13 @@ jq '[]'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.types.inline-empty-object
 

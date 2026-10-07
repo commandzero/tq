@@ -123,7 +123,7 @@ In that audit, jq completed 50/50 cases, yq 4.53.2 completed 45/46 enabled cases
 <!-- tq-manual-compare:begin section=basic-filters -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/basic-filters.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/basic-filters.toon)
 
 
 | Verdict | Cases |
@@ -149,8 +149,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 254 | 290 | 36 | +14.17% |
-| `cl100k_base` | 253 | 290 | 37 | +14.62% |
+| `o200k_base` | 254 | 288 | 34 | +13.39% |
+| `cl100k_base` | 253 | 288 | 35 | +13.83% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -718,13 +718,13 @@ jq '[.foo?]'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.basic.optional-computed-field
 

@@ -10,7 +10,7 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-13T15:30:24Z }
 <!-- tq-manual-compare:begin section=arity-inventory -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/arity-inventory.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/arity-inventory.toon)
 
 
 | Verdict | Cases |
@@ -36,8 +36,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 3 | 2 | +200% |
-| `cl100k_base` | 1 | 3 | 2 | +200% |
+| `o200k_base` | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 0 | +0% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -62,12 +62,12 @@ jq '["abs/0","acos/0","acosh/0","add/0","add/1","all/0","all/1","all/2","any/0",
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 <!-- tq-manual-compare:end -->

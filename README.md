@@ -33,6 +33,11 @@ cargo install tq-cli
 
 `tq` autodetects the input format on stdin and outputs TOON by default.
 
+Native input and canonical output follow TOON 4.1. Uniform nested rows use
+recursive field groups, and uniform keyed objects use keyed table headers.
+Dotted names remain literal keys: `profile.city` is not expanded into an object.
+The removed `--fold-keys` and `--flatten-depth` switches are unknown options.
+
 ```sh
 echo '{"foo":"bar"}' | tq
 # => foo: bar
@@ -144,27 +149,31 @@ and blocking.
 
 For the identity query `.` with JSON or strict TOON input and canonical TOON
 output, the planner selects `transcode`. This path bypasses jq bytecode and uses
-one bounded preparation arena. The JSON decoder stages object members as they
-arrive. If a later member repeats a name, transcode rejects and discards the
-current record instead of applying jq's last-value normalization. Unframed
-output stays empty as well.
+one bounded preparation arena. Objects and arrays wait for shape validation
+before choosing recursive/keyed tables or expanded layouts. Active key indexes
+and schemas stay memory-bounded; completed bodies use one shared replay store
+that can spill to private files. A wide key index can exhaust the memory budget
+even when disk space remains available.
 
-Safe key folding, sorted keys, raw or joined output, slurp, explicit jq stream
-mode, non-TOON output, and non-identity queries use the existing plans.
+If a later JSON member repeats a name, transcode rejects and discards the
+current record instead of applying jq's last-value normalization. Non-strict
+TOON uses a document plan so last-write-wins remains sound. Sorted keys, raw or
+joined output, slurp, explicit jq stream mode, non-TOON output, and non-identity
+queries use the existing plans.
 
 A document plan keeps one decoded document, while slurp keeps every input
 document. Sorting, uniqueness, and final reductions need blocking state. A fold
 keeps one immutable accumulator plus bounded evaluator state. Transcode may
-write array preparation, staged sequence records, or atomic unframed output to
-private temporary files. Sequence output preserves completed records before a
+write object/array replay bodies, staged values, sequence records, or atomic
+unframed output to private temporary files. Sequence output preserves completed records before a
 later error. Unframed output publishes nothing until exactly one successful
 result is known.
 
 CLI memory defaults scale with available RAM: preparation uses a 1/8 ceiling,
 while hybrid and decoder in-flight buffers each use 1/32. These are not
 preallocated reservations; explicit byte-limit flags override them. Readable
-Linux cgroup limits constrain the available-memory snapshot. Array preparation
-stays in memory until the shared budget requires spilling. See
+Linux cgroup limits constrain the available-memory snapshot. Object/array
+replay bodies stay in memory until the shared budget requires spilling. See
 [memory and limits](docs/compatibility.md#memory-and-limits) for discovery
 fallbacks and the scope of these ceilings.
 
@@ -173,8 +182,8 @@ The resource controls are `--max-input-bytes`, `--max-depth`,
 `--max-vm-steps`, `--max-results`, `--max-output-bytes`,
 `--prepare-memory-bytes`, and `--max-spool-bytes`. The evaluator checks for
 SIGINT between units of work. A closed downstream pipe exits successfully.
-`--report-file` records transcode preparation high-water bytes, object-index
-spills, array preparations, spool bytes written and replayed, and the final
+`--report-file` records transcode preparation high-water bytes, object and array
+preparations, spool bytes written and replayed, and the final
 resource outcome. `--explain-json` includes the identity proof, decoder
 duplicate policy, commitment mode, retained state, configured limits, and any
 deterministic transcode fallback reason. JSON explanations also state the

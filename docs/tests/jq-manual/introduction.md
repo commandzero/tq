@@ -18,7 +18,7 @@ The parent audit maps its 3 concrete filter examples in the
 <!-- tq-manual-compare:begin section=introduction -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/introduction.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/introduction.toon)
 
 
 | Verdict | Cases |

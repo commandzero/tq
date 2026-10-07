@@ -180,11 +180,12 @@ mod tests {
     }
 
     #[test]
-    fn control_strings_round_trip_losslessly() {
+    fn control_strings_round_trip_losslessly_and_keep_literal_markers() {
         let value = serde_json::json!(["\u{0}\u{1e}\u{1b}", "é😀"]);
+        let encoded = super::to_toon(&value).unwrap();
+        assert!(encoded.contains(super::STRING_BYTES));
         assert_eq!(
-            super::from_toon::<serde_json::Value>(super::to_toon(&value).unwrap().as_bytes())
-                .unwrap(),
+            super::from_toon::<serde_json::Value>(encoded.as_bytes()).unwrap(),
             value
         );
     }

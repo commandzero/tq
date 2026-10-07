@@ -36,7 +36,7 @@ The jq-target cases deliberately keep tq enabled. Tilde, `$ORIGIN`, HOME auto-so
 <!-- tq-manual-compare:begin section=modules -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/modules.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/modules.toon)
 
 
 | Verdict | Cases |
@@ -62,8 +62,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 160 | 106 | -54 | -33.75% |
-| `cl100k_base` | 160 | 106 | -54 | -33.75% |
+| `o200k_base` | 160 | 105 | -55 | -34.38% |
+| `cl100k_base` | 160 | 105 | -55 | -34.38% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -355,14 +355,14 @@ jq -L tests/fixtures/manual-modules 'import "basic" as b; "basic" | modulemeta'
 
 # tq
 homepage: "https://example.invalid/basic"
-deps[0]:
+deps: []
 defs[1]: value/0
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 31 | 31 | 21 | -10 | -32.26% |
-| `cl100k_base` | 31 | 31 | 21 | -10 | -32.26% |
+| `o200k_base` | 31 | 31 | 20 | -11 | -35.48% |
+| `cl100k_base` | 31 | 31 | 20 | -11 | -35.48% |
 
 #### manual.modules.modulemeta-deps
 

@@ -8,6 +8,7 @@ use tq_core::{Number, SourcePosition, Span};
 mod decoder;
 mod dom;
 mod replay;
+mod schema;
 mod sequence;
 mod spool;
 mod transcode;
@@ -21,13 +22,11 @@ pub use sequence::{
 };
 pub use spool::{
     ArrayPreparationConfig, PreparationArena, PreparationFrame, PreparationLimits,
-    PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PreparedObject,
-    PublicationBuffer, PublicationError, SpoolError,
+    PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PublicationBuffer,
+    PublicationError, SpoolError,
 };
 pub use transcode::{TranscodeCommitment, TranscodeConsumer, TranscodeError};
-pub use writer::{
-    Delimiter, KeyFolding, WriterConfig, WriterError, encode, write_value, write_value_colored,
-};
+pub use writer::{Delimiter, WriterConfig, WriterError, encode, write_value, write_value_colored};
 
 /// Bounded decoder configuration. Declared collection lengths never directly
 /// become allocation capacities.
@@ -37,8 +36,10 @@ pub struct DecoderConfig {
     pub indent_size: usize,
     /// Enforce counts, indentation, delimiters, and blank-line rules.
     pub strict: bool,
-    /// Safe dotted-key expansion policy used by DOM consumers.
-    pub path_expansion: PathExpansion,
+    /// Maximum active sibling names and recursive schema field nodes combined.
+    pub maximum_fields: usize,
+    /// Maximum decoded bytes retained in active sibling and schema names.
+    pub maximum_name_bytes: usize,
     /// Maximum structural nesting.
     pub maximum_depth: usize,
     /// Maximum bytes in one scalar/key token.
@@ -54,23 +55,14 @@ impl Default for DecoderConfig {
         Self {
             indent_size: 2,
             strict: true,
-            path_expansion: PathExpansion::Off,
+            maximum_fields: 65_536,
+            maximum_name_bytes: 16 * 1024 * 1024,
             maximum_depth: 256,
             maximum_token_bytes: 8 * 1024 * 1024,
             maximum_line_bytes: 16 * 1024 * 1024,
             maximum_lookahead_bytes: 64 * 1024,
         }
     }
-}
-
-/// Dotted object-key expansion mode for materialized values.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum PathExpansion {
-    /// Preserve decoded keys literally.
-    #[default]
-    Off,
-    /// Expand unquoted dotted keys only when every segment is an identifier.
-    Safe,
 }
 
 /// Scalar emitted by the query-independent TOON decoder boundary.

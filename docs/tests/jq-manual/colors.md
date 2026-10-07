@@ -16,7 +16,7 @@ The eight slot records (lines 18–25) all reuse the aggregate object fixture, w
 <!-- tq-manual-compare:begin section=colors -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/colors.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/colors.toon)
 
 
 | Verdict | Cases |

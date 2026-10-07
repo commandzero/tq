@@ -10,7 +10,7 @@ generated: { by: "tq-manual-compare/0.1.0", at: "2026-09-10T20:22:34.585009Z" }
 <!-- tq-manual-compare:begin section=path-boundaries -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/path-boundaries.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/path-boundaries.toon)
 
 
 | Verdict | Cases |

@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::corpus::uniform_object_values;
+
 use super::{ProcessOutcome, ProcessStatus, ToolKind};
 
 /// Stable compatibility error taxonomy.
@@ -258,13 +260,9 @@ pub fn toon_values_match(stdout: &[u8], expected: &[Value]) -> bool {
                 )
                 .is_ok_and(|documents| {
                     documents.len() == 1
-                        && documents[0]
-                            .value
-                            .to_json()
-                            .ok()
-                            .map(canonicalize_numbers)
-                            .as_ref()
-                            == Some(expected_value)
+                        && documents[0].value.to_json().is_ok_and(|actual| {
+                            toon_value_equal(expected_value, &actual, false, true)
+                        })
                 })
             });
         let Some(end) = end else {
@@ -273,6 +271,57 @@ pub fn toon_values_match(stdout: &[u8], expected: &[Value]) -> bool {
         start = end;
     }
     start == stdout.len()
+}
+
+fn toon_value_equal(
+    expected: &Value,
+    actual: &Value,
+    header_order_allowed: bool,
+    layout_allowed: bool,
+) -> bool {
+    match (expected, actual) {
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(left), Value::Bool(right)) => left == right,
+        (Value::String(left), Value::String(right)) => left == right,
+        (Value::Number(left), Value::Number(right)) => {
+            match (
+                crate::benchmark::canonical_number(&left.to_string()),
+                crate::benchmark::canonical_number(&right.to_string()),
+            ) {
+                (Ok(left), Ok(right)) => left == right,
+                _ => false,
+            }
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            if left.len() != right.len() {
+                return false;
+            }
+            let table_rows = layout_allowed
+                && uniform_object_values(left.iter())
+                && uniform_object_values(right.iter());
+            left.iter()
+                .zip(right)
+                .all(|(left, right)| toon_value_equal(left, right, table_rows, false))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            let keys_match = if header_order_allowed {
+                left.len() == right.len() && left.keys().all(|key| right.contains_key(key))
+            } else {
+                left.keys().eq(right.keys())
+            };
+            if left.len() != right.len() || !keys_match {
+                return false;
+            }
+            let keyed_rows = layout_allowed
+                && left.len() >= 2
+                && uniform_object_values(left.values())
+                && uniform_object_values(right.values());
+            left.iter().all(|(key, value)| {
+                toon_value_equal(value, &right[key], header_order_allowed || keyed_rows, true)
+            })
+        }
+        _ => false,
+    }
 }
 
 /// Matches one unframed TOON document against the companion JSON value.
@@ -301,8 +350,7 @@ pub(crate) fn toon_unframed_value_match(stdout: &[u8], expected: &[Value]) -> bo
                 .to_json()
                 .ok()
                 .map(canonicalize_numbers)
-                .as_ref()
-                == Some(&expected[0])
+                .is_some_and(|actual| toon_value_equal(&expected[0], &actual, false, true))
     })
 }
 
@@ -437,8 +485,20 @@ fn observation(
 mod tests {
     use super::{
         ProcessOutcome, ProcessStatus, normalize_toon_document, normalize_toon_sequence,
-        toon_unframed_value_match,
+        toon_unframed_value_match, toon_values_match,
     };
+
+    fn outcome(stdout: &[u8]) -> ProcessOutcome {
+        ProcessOutcome {
+            status: ProcessStatus::Exited,
+            exit_code: Some(0),
+            signal: None,
+            stdout: stdout.to_vec(),
+            stderr: Vec::new(),
+            wall_time_micros: 1,
+            recorded_command: Vec::new(),
+        }
+    }
 
     #[test]
     fn ordinary_toon_results_use_expected_boundaries_and_preserve_all_bytes() {
@@ -454,6 +514,95 @@ mod tests {
             b"0\n1e3\n",
             &[serde_json::json!(0), serde_json::json!(1000)]
         ));
+    }
+
+    #[test]
+    fn default_toon_boundaries_cover_empty_keyed_nested_and_string_values() {
+        let values = [
+            serde_json::json!([]),
+            serde_json::json!({"users":{"alice":{"id":1,"profile":{"name":"A","active":true}},"bob":{"id":2,"profile":{"name":"B","active":false}}}}),
+            serde_json::json!({"rows":[{"id":1,"meta":{"left":"x","right":"y"}},{"id":2,"meta":{"left":"u","right":"v"}}]}),
+            serde_json::json!("001"),
+            serde_json::json!({}),
+        ];
+        let stdout = b"[]\nusers[2:]{profile{active,name},id}:\n  alice: true,A,1\n  bob: false,B,2\nrows[2]{meta{right,left},id}:\n  y,x,1\n  v,u,2\n\"001\"\n\n";
+        assert!(toon_values_match(stdout, &values));
+        assert!(toon_values_match(b"", &[]));
+        assert!(toon_values_match(b"[]\n", &[serde_json::json!([])]));
+        assert!(toon_values_match(b"\"001\"\n", &[serde_json::json!("001")]));
+        assert!(!toon_values_match(stdout, &values[..values.len() - 1]));
+        assert!(!toon_values_match(
+            b"[]\nmalformed[2]{id}:\n  1",
+            &[
+                serde_json::json!([]),
+                serde_json::json!({"malformed":[{"id":1}]})
+            ]
+        ));
+        assert!(!toon_values_match(
+            b"[]\ntrailing malformed bytes\n",
+            &[serde_json::json!([])]
+        ));
+
+        let keyed = normalize_toon_document(&outcome(
+            b"users[2:]{profile{active,name},id}:\n  alice: true,A,1\n  bob: false,B,2",
+        ))
+        .unwrap();
+        assert_eq!(
+            keyed.results,
+            [
+                serde_json::json!({"users":{"alice":{"id":1,"profile":{"name":"A","active":true}},"bob":{"id":2,"profile":{"name":"B","active":false}}}})
+            ]
+        );
+        assert_eq!(
+            normalize_toon_document(&outcome(b"[]")).unwrap().results,
+            [serde_json::json!([])]
+        );
+        assert!(normalize_toon_document(&outcome(b"[]\ntrailing")).is_err());
+        assert!(!super::toon_value_equal(
+            &serde_json::json!({"left":1,"right":2}),
+            &serde_json::json!({"right":2,"left":1}),
+            false,
+            true,
+        ));
+        assert!(!toon_values_match(
+            b"outer:\n  right: 2\n  left: 1\n",
+            &[serde_json::json!({"outer":{"left":1,"right":2}})]
+        ));
+        assert!(!super::toon_value_equal(
+            &serde_json::json!([{"a":[],"b":1}]),
+            &serde_json::json!([{"b":1,"a":[]}]),
+            false,
+            true,
+        ));
+        assert!(!super::toon_value_equal(
+            &serde_json::json!([[{"a":1,"b":2},{"a":3,"b":4}]]),
+            &serde_json::json!([[{"b":2,"a":1},{"b":4,"a":3}]]),
+            false,
+            true,
+        ));
+        assert!(!super::toon_value_equal(
+            &serde_json::json!([{"x":{"a":1,"b":2},"y":{"a":3,"b":4}},{}]),
+            &serde_json::json!([{"x":{"b":2,"a":1},"y":{"b":4,"a":3}},{}]),
+            false,
+            true,
+        ));
+        assert!(super::toon_value_equal(
+            &serde_json::json!([{"a":1,"b":2},{"a":3,"b":4}]),
+            &serde_json::json!([{"b":2,"a":1},{"b":4,"a":3}]),
+            false,
+            true,
+        ));
+        assert!(super::toon_value_equal(
+            &serde_json::json!({"x":{"a":1,"b":2},"y":{"a":3,"b":4}}),
+            &serde_json::json!({"x":{"b":2,"a":1},"y":{"b":4,"a":3}}),
+            false,
+            true,
+        ));
+        assert!(!toon_values_match(
+            b"left: 1\nright: 2\n",
+            &[serde_json::json!({"right":2,"left":1})]
+        ));
+        assert!(!toon_values_match(b"1\n", &[serde_json::json!("1")]));
     }
 
     #[test]

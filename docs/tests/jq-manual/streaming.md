@@ -30,7 +30,7 @@ Inventory: 13 records (3 tables, 7 prose/examples, 3 non-executable grammar plac
 <!-- tq-manual-compare:begin section=streaming -->
 ## Results
 
-[Case collection](../../../tests/compatibility/reviews/jq-manual/streaming.toon)
+[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/streaming.toon)
 
 
 | Verdict | Cases |

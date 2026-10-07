@@ -71,3 +71,12 @@ fn probe_json_sequence_commits_only_to_a_leading_separator() {
         Some(NativeFormat::JsonSequence)
     );
 }
+
+#[test]
+fn unicode_whitespace_before_array_tokens_is_toon_string_data() {
+    for prefix in ['\u{0085}', '\u{00a0}', '\u{2028}', '\u{3000}'] {
+        let input = format!("{prefix}[]");
+        let report = tq_formats::probe_format(input.as_bytes(), 64).unwrap();
+        assert_eq!(report.selected, InputFormat::Toon, "{input:?}");
+    }
+}

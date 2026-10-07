@@ -46,6 +46,13 @@ checkout. `R` means read, `W` means write, and `-` means no native support.
   triple-double-quoted strings.
 - tq keeps `.json` strict. Use `-i json5` or a `.json5` extension for JSON5.
   JSON5 is input-only and document-at-a-time.
+- tq's native TOON parser and canonical writer follow 4.1. Recursive field
+  groups reconstruct nested objects; keyed headers preserve entry order.
+  Matching rows use recursive header field order, not each row's original
+  insertion order. Dotted names remain literal; folding/expansion options are
+  removed. Root/object-field empty arrays use `[]`; anonymous nested arrays
+  retain counted list form. Bare root `[]` autodetects as JSON because both
+  formats describe the same value; explicit TOON and `.toon` still select TOON.
 - tq writes zero or more LF-terminated TOON values by default. `-c` selects
   compact JSON; `-o json` selects pretty JSON. `--seq` reads JSON Text Sequences
   and writes RS-framed TOON Text Sequences by default. Thus `jq --seq` corresponds
