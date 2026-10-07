@@ -1,12 +1,19 @@
 # Implementation review and checkpoint history
 
+## Completed revised-scope closeout, 2026-10-06
+
+All 69 original tasks are complete under the user-approved implementation/evidence scope. Fresh native Windows release and final test-overlay validation resolve the earlier renewal blocker without changing the 60 #69-owned differences. The eight main specs are synchronized: all 32 delta requirement descriptions and 123 scenarios were independently checked; 57 older unmentioned requirements and all Purpose sections remain intact. Strict main-spec validation passes 21/21. This change is archived at `openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/`.
+
+Closeout is not exact or reviewed-completion acceptance. Strict manual runs still exit 1, with 9/15/60 unique macOS/Linux/Windows differences; Windows has 303 protected IDs but only 291 primary and 289 primary-plus-compact matches. Issues #69/#70 and #31 remain open, with no fresh disparity approvals or calibrated performance publication. Earlier progress and failed-build/access checkpoints below retain their original scope. Final committed repository and PR-boundary checks are verified separately.
+
 ## Current closeout progress and eight-delta verification, 2026-10-06
 
 Using change `achieve-jq-manual-parity`. This review inspects implementation,
 tests, retained native evidence and live follow-ups without changing code,
 spec requirements, source inventories, gates or approvals. It updates only
 progress/accounting. The confirmed scope transfer below remains authoritative;
-missing current Windows execution is not waived.
+current native Windows execution is now verified rather than waived. This
+checkpoint supersedes earlier offline/history-only Windows statements.
 
 ### Evidence renewed and independently reconciled
 
@@ -60,19 +67,49 @@ missing current Windows execution is not waived.
   exit 0 as `observed-differences`, not exact manual acceptance. The Linux
   `help-final` full campaign exits 0 with the same 99 differing cases. Embedded denial
   checks now enforce runtime-policy exit 5 and empty output independently for
-  JSON/YAML/TOON, including the JSON companion path. Windows has not executed
-  these updated contracts. The inspected subprocess host uses the existing
+  JSON/YAML/TOON, including the JSON companion path. Windows now executes the
+  repaired full campaign and retains 12 exact release denial byte captures. The inspected subprocess host uses the existing
   public `tq_cli::{CapabilityPolicy, parse_args_with_policy, run_with_io}` API,
   with no first-party unsafe/FFI; workspace lint policy forbids unsafe code.
   Its dependency addition is a local `tq-cli` path with default features disabled,
   not a new external dependency. Denial tests exercise the selected authority
   while admitting the other, without allow-flag workarounds or process fallback.
-- `target/closeout/windows/summary.json` records SSH exit 255 on 2026-10-06;
-  smokescreen is unreachable. Local 58-test macOS readiness and historical v6
-  Windows observations do not renew native candidate evidence. Stabilize a
-  source snapshot and restore access before native release/PowerShell/cmd,
-  binary/newline, reference/relocation, stack, embedded/composition, resource,
-  workspace and repaired full-campaign execution.
+- Windows `target/closeout/windows/final-286b5f6/native/` now provides
+  `native-final-success-summary.json`, `native-final-69-task-proof.json` and
+  `native-final-artifact-manifest.json`. Independently verified all 368 manifest
+  entries locally. Raw native PowerShell/MSVC release/default manual execution
+  retains 912/952 primary, 879/921 compact and 921/921 TOON; strict exit 1 and
+  zero applied disparities. All 4,667 observations execute and exit. The exact
+  primary/compact difference union is the same 60 mapped #69 IDs, with no new
+  unowned IDs. Earlier SSH exit 255/v6 observations remain historical, not proof
+  of this renewed execution.
+- Windows final-overlay fmt, strict workspace/all-target/all-feature Clippy and
+  all-feature workspace exit 0; retained test-result totals are 1,728 passed,
+  zero failed, 10 ordinarily ignored. The catalog reference test explicitly
+  passes in debug and release, and four other ignored published-reference,
+  relocation and raw binary/newline tests explicitly pass. PowerShell/cmd,
+  parser/resolver/CLI stack, native-format and resource/recursion/cancellation
+  guards are present in retained native logs. All 297 CLI composition cases
+  execute without tq gaps; eight semantic-difference IDs are mapped to #69.
+  All 297 public embedded witnesses pass. The release full campaign has 1,220
+  cases, 4,804 executed/1,961 unsupported observations, 146 differing cases,
+  zero declared-contract/harness failures and exit 0 `observed-differences`;
+  neither that status nor denial correctness establishes exact manual acceptance.
+- Windows source before/after records independently reconcile at base
+  `286b5f6690bc1bee260cba007f3953c52178bf68` plus only
+  `crates/tq-test-support/tests/compatibility_catalog_contracts.rs`, SHA-256
+  `a86772509c2e279b823e6f02529e976c73b8c75ed30d23bea1620acf828a6c30`.
+  All 392 current native code/fixture/dependency entries checked match; macOS's
+  71 product and 64 helper source records still match current code. Windows's
+  final source records are equal before/after; the only base difference is that
+  integration test. Product/helper source and frozen release/reference hashes
+  are unchanged. Release campaigns were not rerun for the test overlay: this
+  is an explicit identity mapping of preserved release proof, not a new campaign.
+  The overlay adds Windows `--binary` only to structured catalog reference probes
+  and extracts an argument helper; stdout/stderr/status assertions stay exact.
+  Authored raw CLI/newline probes, manual inventory and strict gates do not change.
+  Historical catalog CRLF and intermediate Clippy failures remain retained as
+  failures, now resolved by passing debug/release assertions and strict Clippy.
 - Live #69/#70 now explicitly permit parent closeout after retained proof and
   spec synchronization under the approved scope transfer, without approving
   deferred differences or granting either manual gate pass. #31 now correctly
@@ -115,26 +152,126 @@ source-linked manual execution, and retained test logs. It is not a claim that
 finite witnesses prove all programs or that every platform scenario has run.
 The listed test suites map to retained macOS all-feature workspace evidence,
 renewed by `newhelp-final`; Linux `help-final` now renews the full all-feature
-workspace as described above. Windows renewal remains a blocker.
+workspace as described above. Windows now supplies renewed native final-overlay
+workspace and identity-mapped release evidence. Platform-conditional tests are
+not automatically evidence that every scenario ran on every host.
 Paths in the table are repository-relative.
 
 | Delta / requirement families | Implementation seam | Test and executable evidence | Remaining qualification |
 | --- | --- | --- | --- |
-| `cross-tool-compatibility` — reviewed disparities, pinned inventory, execution gate, output/identity, source corrections, closeout transfer, platform/resources | `crates/tq-test-support/src/compatibility/manual.rs` (explicit approval validation, inventory and encoding integrity), `manual_pin.rs` (518/303 protection), `src/bin/tq-manual-compare.rs` (reference/source validation and strict vs completion dispatch) | `compatibility_manual_gate`, `manual_pin`, `manual_completeness`, `composition_inventory`; actual newhelp-final/help-final source-verified 952-case reports and live issue map. The injected failure, missing/forged encoding, capability-workaround, stale-approval and baseline guards remain unchanged. | Native Windows missing-evidence scenario is currently blocking, not passing. Scope ownership and current witness review are not approvals. |
-| `extended-jq-cli-parity` — options, governed scripting, colors/terminal, test files | `crates/tq-cli/src/args.rs:650` and option-finalization guards; `runner.rs:463` test-file evaluation; `crates/tq-core/src/presentation.rs` and `crates/tq-formats/src/output.rs` | CLI `manual_arguments`, `extended_cli`, `colors`, `output_colors`, `compatibility_contract`, `platform_shell`; `run_tests_executes_stdin_test_files_and_reports_failures`, help/identity assertions, palette precedence and PTY tests; invoking/color manual witnesses | Preserve intentional tq ANSI styling and internal-runner suffix observations. Renew native Windows option/terminal/newline checks. |
+| `cross-tool-compatibility` — reviewed disparities, pinned inventory, execution gate, output/identity, source corrections, closeout transfer, platform/resources | `crates/tq-test-support/src/compatibility/manual.rs` (explicit approval validation, inventory and encoding integrity), `manual_pin.rs` (518/303 protection), `src/bin/tq-manual-compare.rs` (reference/source validation and strict vs completion dispatch) | `compatibility_manual_gate`, `manual_pin`, `manual_completeness`, `composition_inventory`; actual newhelp-final/help-final/native final-286b5f6 source-verified 952-case reports and live issue map. The injected failure, missing/forged encoding, capability-workaround, stale-approval and baseline guards remain unchanged. | Native Windows evidence is now present; the missing-evidence rejection remains required. Windows protected accounting is 303 present, 291 primary/289 primary-plus-compact matches, not 303 exact. Ownership is not approval. |
+| `extended-jq-cli-parity` — options, governed scripting, colors/terminal, test files | `crates/tq-cli/src/args.rs:650` and option-finalization guards; `runner.rs:463` test-file evaluation; `crates/tq-core/src/presentation.rs` and `crates/tq-formats/src/output.rs` | CLI `manual_arguments`, `extended_cli`, `colors`, `output_colors`, `compatibility_contract`, `platform_shell`; `run_tests_executes_stdin_test_files_and_reports_failures`, help/identity assertions, palette precedence and PTY tests; invoking/color manual witnesses | Preserve intentional tq ANSI styling and internal-runner suffix observations. Native Windows shell/option/byte checks are renewed; mapped #69 observations remain failures. |
 | `jq-core-language` — literal/runtime numbers, bindings/syntax, grammar/generators, built-ins, paths/assignments, math, typed errors | `crates/tq-core/src/number.rs`, `json_input.rs`, parser/resolver machinery, `eval.rs` managed continuations/path work, `collection.rs`, `math.rs:66` and `eval/scalar.rs` | `manual_grammar` (precedence, destructuring, alternatives, typed catch and folds), `runtime_numbers`, `math_compat`, `collection_compat`, `sql_compat`, `user_path_update_composition`, `manual_signature_matrix`; manual basic/math/assignment/arity witnesses plus composition inventory | Only enumerated #70/#69 numeric/availability contracts transferred; no missing function/arity or deferred execution allowance. Preserve specific macOS math witnesses and tight limits. |
-| `jq-reduce-foreach` — reduce and foreach scope/cardinality/state | `crates/tq-core/src/eval.rs` `FoldInitial`/`FoldItem`/`FoldUpdate`, `FoldState` and generator tasks; VM fold entry/resource handling | `manual_grammar.rs:949,1001`; `user_fold_composition.rs:58–167` checks initializer independence, ordered updates/extraction, prior errors and cancellation; VM fold tests at `vm.rs:1637–1801` | No scope waiver; existing native/manual/composition evidence covers folds, Windows current execution still pending. |
-| `jq-regex-date-platform` — regex and date/platform metadata | `crates/tq-core/src/stdlib.rs` safe `fancy_regex` cursor/substitution/engine limits, UTC/local date functions; shared VM input context and CLI source cursor | Core `regex_compat`, `date_compat`, CLI `regex_compat`, `date_platform`, `input_streams`; array/null flags, Unicode offsets, bounded regex failures, replacements, controlled clock/metadata, embedded denial and manual regex/date/I/O cases | No whole-pattern-recursion/instant mid-match cancellation guarantee. Windows date/metadata/newline scenarios require native renewal; old capture implementation alone is not acceptance. |
-| `jq-user-functions-modules` — user-filter lexical composition/recursion and module lookup/data/metadata | `crates/tq-core/src/eval.rs` bounded managed continuations and admission; resolver `ModuleLoader` in `resolve.rs:363–625`, cache/cycle/byte limits; CLI startup/module roots in `runner.rs` | `composition_inventory.rs:960–1030` executes all 297 public-VM witnesses; `user_function_composition`, `user_fold_composition`, `user_regex_composition`, `user_recursive_composition`, `user_composition_resources`; CLI `modules` including `$ORIGIN`, search termination, data imports and metadata | Only two Windows module lookup cases transferred. Public-VM direct comparisons are not independent jq oracles for every embedded result. Renew Windows composition/resource/module evidence. |
-| `toon-stream-io` — explicit RS sequence and default LF result output | `crates/tq-formats/src/output.rs:14–24,75–89` distinct `Sequence`/default `Values`/`Unframed`, shared serializers; CLI result commitment and sequence dispatch | `compact_selection.rs:223–246` asserts zero/multiple results and prior output after error; CLI `extended_cli`, `input_streams`, `native_formats`; actual 921/921 TOON contracts on both refreshed hosts | No changes to TOON framing contract; TOON success never repairs a jq JSON failure. Native Windows observation is still historical. |
-| `tq-cli` — output controls, shared remaining input, documented options, JSON sequence/stream, process effects | `crates/tq-cli/src/args.rs` pre-read option normalization; `runner.rs` shared cursor, JSON sequence and effects; `crates/tq-core/src/json_input.rs` shared safe grammar; `VmError::Halt` distinct control termination | CLI `compact_selection`, `manual_arguments`, `input_streams`, `json_root_boundaries`, `effects`, `user_effect_composition`, `compatibility_contract`; live `unbuffered_stdout_reaches_a_live_consumer_before_stdin_eof`, halt/raw-stderr and ordered-input tests; invoking/streaming/I/O manual cases | Only mapped Windows byte contracts deferred; no new normalization, allow-flag workaround or catchable halt. Renew native Windows process evidence. |
+| `jq-reduce-foreach` — reduce and foreach scope/cardinality/state | `crates/tq-core/src/eval.rs` `FoldInitial`/`FoldItem`/`FoldUpdate`, `FoldState` and generator tasks; VM fold entry/resource handling | `manual_grammar.rs:949,1001`; `user_fold_composition.rs:58–167` checks initializer independence, ordered updates/extraction, prior errors and cancellation; VM fold tests at `vm.rs:1637–1801` | No scope waiver; existing native/manual/composition evidence covers folds, Windows native workspace/manual/composition evidence is renewed. |
+| `jq-regex-date-platform` — regex and date/platform metadata | `crates/tq-core/src/stdlib.rs` safe `fancy_regex` cursor/substitution/engine limits, UTC/local date functions; shared VM input context and CLI source cursor | Core `regex_compat`, `date_compat`, CLI `regex_compat`, `date_platform`, `input_streams`; array/null flags, Unicode offsets, bounded regex failures, replacements, controlled clock/metadata, embedded denial and manual regex/date/I/O cases | No whole-pattern-recursion/instant mid-match cancellation guarantee. Windows native date/metadata/denial execution is renewed; mapped newline differences remain #69 failures, not capture-backend acceptance. |
+| `jq-user-functions-modules` — user-filter lexical composition/recursion and module lookup/data/metadata | `crates/tq-core/src/eval.rs` bounded managed continuations and admission; resolver `ModuleLoader` in `resolve.rs:363–625`, cache/cycle/byte limits; CLI startup/module roots in `runner.rs` | `composition_inventory.rs:960–1030` executes all 297 public-VM witnesses; `user_function_composition`, `user_fold_composition`, `user_regex_composition`, `user_recursive_composition`, `user_composition_resources`; CLI `modules` including `$ORIGIN`, search termination, data imports and metadata | Only two Windows module lookup cases transferred. Public-VM direct comparisons are not independent jq oracles for every embedded result. Windows composition/resource/module execution is renewed; transferred differences remain unresolved. |
+| `toon-stream-io` — explicit RS sequence and default LF result output | `crates/tq-formats/src/output.rs:14–24,75–89` distinct `Sequence`/default `Values`/`Unframed`, shared serializers; CLI result commitment and sequence dispatch | `compact_selection.rs:223–246` asserts zero/multiple results and prior output after error; CLI `extended_cli`, `input_streams`, `native_formats`; actual 921/921 TOON contracts on all three refreshed native hosts | No changes to TOON framing contract; TOON success never repairs a jq JSON failure. Native Windows release observation is renewed and identity-mapped through the test-only overlay. |
+| `tq-cli` — output controls, shared remaining input, documented options, JSON sequence/stream, process effects | `crates/tq-cli/src/args.rs` pre-read option normalization; `runner.rs` shared cursor, JSON sequence and effects; `crates/tq-core/src/json_input.rs` shared safe grammar; `VmError::Halt` distinct control termination | CLI `compact_selection`, `manual_arguments`, `input_streams`, `json_root_boundaries`, `effects`, `user_effect_composition`, `compatibility_contract`; live `unbuffered_stdout_reaches_a_live_consumer_before_stdin_eof`, halt/raw-stderr and ordered-input tests; invoking/streaming/I/O manual cases | Only mapped Windows byte contracts deferred; no new normalization, allow-flag workaround or catchable halt. Windows native process evidence is renewed. Live held-open stdin tests are Unix-only; macOS/Linux process witnesses and Windows flush/cancellation tests are distinct evidence, not a claimed native Windows live-pipe run. |
+
+### Final protected-baseline and follow-up reconciliation
+
+Read all eight current delta specs, proposal/design and the 69-task inventory.
+The unchanged gap inventory still contains 198 failures, 15 expected differences
+and two reference discrepancies. Independently parsed the pinned 518 baseline
+IDs and 303 protected IDs, then joined them to the raw Windows release report:
+none is missing; 291 primary and 289 primary-plus-compact protected contracts
+match. All 14 protected union-difference IDs belong to the existing #69 map:
+
+- Newline contracts: `manual.invoking.ascii-escape`,
+  `manual.invoking.compact-output`, `manual.invoking.exit-false`,
+  `manual.invoking.exit-null`, `manual.invoking.exit-true`,
+  `manual.invoking.indent-output`, `manual.invoking.monochrome-output`,
+  `manual.invoking.raw-input`, `manual.invoking.raw-output`,
+  `manual.invoking.sort-keys`, `manual.invoking.tab-output`, and
+  `manual.streaming.stream-errors-form`.
+- Native lookup contracts: `manual.modules.path-origin` and
+  `manual.modules.path-tilde`.
+
+These are explicit unresolved protected-baseline outcomes, not 303 exact passes
+or newly approved disparities. The complete raw Windows primary/compact union
+is exactly the 60 #69 IDs in `specs/cross-tool-compatibility/spec.md`; the Linux
+raw union is exactly its 15 #70 IDs. The map continues to reference the immutable
+`native-platform-acceptance.toon` v6 witness record, not implicitly replace its
+identities with current ones. Windows's eight CLI composition differences are
+`manual.composition.arity.{drem.2,exp10.0,gamma.0,scalb.2,scalbln.2,significand.0,y0.0,yn.2}`,
+all members of that #69 set; every tq composition observation executes and exits.
+There is no unmapped failure or deferred tq composition execution to waive.
+
+The closeout requirement expressly separates verification/accounting from
+acceptance. Completing 10.3 means preserving and owning these outcomes under
+that revised requirement. The unchanged acceptance requirement still demands
+continued exact protected matches and must reject this Windows report.
+`manual_pin.rs:265` rejects reclassifying an original match as a disparity;
+its test passes in the final native workspace, as do strict rejection of old
+failures, missing source mappings, injected execution errors and reporting-only
+presentation notes. Strict exit remains 1 on all three hosts; reviewed-completion
+acceptance is not established and zero disparities are applied. No pin, original
+case, gate, comparison normalizer or serialized approval is edited here.
+
+### Final requirement/scenario evidence map
+
+The table below covers all 32 requirements and their 123 named scenarios in
+spec order, supplementing the implementation seams above. Scenario counts are
+coverage bookkeeping, not passing-acceptance counts. Test names denote existing
+CLI/core/test-support integration suites; the native final-overlay workspace
+log and identity-mapped release reports above supply Windows execution evidence,
+with macOS/Linux retained logs supplying Unix-only process witnesses. Negative
+scenarios are enforced rejection contracts, not fabricated successful executions.
+Mapped differences and deferred calibration remain qualified as described above.
+
+| Delta / requirement | Scenarios and conditions covered | Implementation/test or raw evidence |
+| --- | --- | --- |
+| `cross-tool-compatibility`: Reviewed safe-library disparities | 2: measured math; demonstrated dependency limitation | `compatibility/manual.rs` identity-bound approval model; `compatibility_manual_gate`, measured math witnesses; no new approval |
+| Complete pinned manual parity inventory | 3: missing source case; overload forms; changed snapshot | `manual_pin`, `manual_completeness`, source-verified 952-case reports; 518/303 joins |
+| Manual parity is an execution gate | 3: old policy; remaining failure; historical regression | `compatibility_manual_gate`, `manual_pin`; all native strict commands exit 1 |
+| Explicit output-mode and identity contracts | 4: JSON semantics; compact mismatch; TOON default; wrong identity | `compatibility_manual_gate`, `compact_selection`, `compatibility_contract`; raw primary/compact/TOON campaigns |
+| Reference corrections do not suppress execution | 1: incorrect manual arity | `manual_pin`, `math_compat`, valid `/0` and invalid `/2` raw witnesses with source provenance |
+| Implementation and evidence closeout with enumerated follow-ups | 3: owned transfer; unmapped/missing execution; unfinished calibration | Exact 60/15 raw-set joins and 69-task proof; missing-execution gate tests; #31 explicitly unaccepted |
+| Reproducible platform and resource scope | 6: missing native proof; WSL exclusion; incomplete accounting; symbol availability; tight limits; live unbuffered | Native host/reference/source/capture records; `platform_shell`, Windows raw-byte/reference tests, resource suites; live Unix process tests; #69 symbol failures/#31 calibration retained |
+| `extended-jq-cli-parity`: Reviewed jq option parity | 2: supported combinations; invalid/no-read combinations | `args.rs` normalization, `manual_arguments`, `compact_selection`, `extended_cli` |
+| Governed scripting integration | 3: broken pipe/files; CLI environment; embedded denial | `runner.rs`, `input_streams`, `effects`, `compatibility_embedded`; 12 exact Windows denial captures |
+| jq colors and terminal behavior | 3: custom palette; force/suppression; tq selection/fallback | Shared presentation/output code, `colors`, `output_colors`, raw color witnesses; tq presentation is not exact jq ANSI |
+| jq test file execution | 2: valid file; failing/malformed/compile expectations | `runner.rs` test-file evaluator, `extended_cli` and manual run-tests; internal suffix remains scoped, not approved |
+| `jq-core-language`: jq decimal-literal hybrid numbers | 6: integer identity; arithmetic; exponent; tight envelope; runtime non-finite; input non-finite | `number.rs`/`json_input.rs`, `runtime_numbers`, `json_root_boundaries`, numeric/resource and native-format tests |
+| Variable binding | 7: multiple bindings; unknown variable; special variables; lexical shadow; external special args; alternatives; capture | Parser/resolver/eval lexical machinery; `manual_grammar`, `user_function_composition`, `manual_arguments` |
+| Deferred syntax is explicit | 5: admitted built-in; bad reference arity; non-finite; labels/break; recursion | Parser/resolver/stdlib admission, `manual_signature_matrix`, `manual_completeness`, `composition_inventory`, raw arity/control witnesses |
+| Complete manual grammar and generator semantics | 3: boolean precedence; index generator; bounded consumers | `manual_grammar`, `user_function_composition`, managed eval continuations |
+| Complete manual built-in families | 2: overload inventory; string/collection variants | `collection_compat`, `sql_compat`, `manual_signature_matrix`, 297-witness inventory and manual built-ins |
+| Assignment path provenance and cardinality | 2: plain/update generators; nested selected assignment | Managed path/update code, `manual_grammar`, `user_path_update_composition`, manual assignment |
+| Full manual math and numeric behavior | 2: inventory; numeric boundaries | `math.rs`, `math_compat`, raw math/composition/arity cases; only enumerated #69/#70 outcomes transferred |
+| Error values retain jq types | 1: structured catch values | Typed eval/VM errors, `manual_grammar`, error/manual composition witnesses |
+| `jq-reduce-foreach`: Reduce semantics | 3: ordered reduction; destructuring; multiple update states | `FoldState`/continuations, VM fold tests, `manual_grammar`, `user_fold_composition` |
+| Foreach semantics | 3: extraction; omitted extraction; bound variable | Same fold machinery/suites; partial-error prefix also proved by debug/release catalog reference assertions |
+| `jq-regex-date-platform`: Regex built-ins | 5: captures; errors/limits; array/null; flags/longest; replacement generators | Safe bounded stdlib regex, core/CLI `regex_compat`, `user_regex_composition`; positive/negative lookaround catalog assertions |
+| Date and platform built-ins | 7: UTC; denial; consumed location; line with denial; missing line context; platform date; native Windows metadata | Shared input context/date stdlib, `date_compat`, `date_platform`, `input_streams`, native manual/denial/reference records |
+| `jq-user-functions-modules`: User-defined filters | 9: recursion; callbacks; invalid calls; capture; constructors/slices; folds/built-ins; branching calls; effects/termination; tight recursion | Managed eval/VM; all composition families, 297 CLI and 297 embedded witnesses, eight resource and six recursive-composition tests |
+| Deterministic modules | 6: import; escape/cycle; JSON data; startup; metadata; repeated/terminated paths | `ModuleLoader`/CLI startup, core and CLI `modules`; only path-origin/path-tilde Windows observations transferred |
+| `toon-stream-io`: TOON Text Sequence framing | 3: multiple/zero/one result | Shared distinct output framing, `compact_selection`, `extended_cli`, `native_formats` |
+| Default TOON result output | 3: multiple/empty selection; prior result before error | Shared values framing/CLI commitment; `compact_selection`, raw TOON campaign 921/921 each native host |
+| `tq-cli`: Output formatting controls | 10: default/sequence; compact selector/combinations/conflict; delimiter; JSONL aliases/pretty/raw conflicts/color | `args.rs`/shared output; `compact_selection`, `manual_arguments`, `native_formats`, `output_colors` |
+| Remaining input consumption | 5: stdin/files; exhaustion; decode failure; null-input | Shared runner cursor/JSON parser, `input_streams`, `json_root_boundaries`, composed input cases |
+| Deferred jq CLI options are rejected clearly | 2: module path; unknown option | Argument/resolver module admission, `manual_arguments`, `modules`, invoking witnesses |
+| JSON sequence and stream parity | 4: JSON sequence; native sequence; malformed recovery; reconstruction | Shared JSON/event cursor and output dispatch, `input_streams`, `json_root_boundaries`, `extended_cli`, streaming witnesses |
+| Process effects and termination | 3: debug generator; explicit halt; incremental pipe output | Distinct `VmError::Halt`, `effects`, `user_effect_composition`; live Unix held-open stdin tests; Windows flush/cancellation tests, not a claimed native live-pipe run |
+
+Coherence: execution semantics remain shared, bounded, safe and independent of
+case IDs; CLI ambient admission and embedded denial use the public API; native
+formats/default framing remain distinct from jq JSON comparison. The single
+reference-test overlay changes neither product evaluation nor raw-contract
+assertions. MacOS's nine non-transferred math/presentation/runner observations
+retain the current input/contract-scoped review above, not fresh approvals.
+No implementation or ownership blocker was found for 3.14/10.1/10.3/10.4 under
+the confirmed closeout scope. This is implementation/evidence verification,
+not archive readiness or universal/all-platform acceptance. Full Linux validator
+preflight, automated Windows release-host wiring and calibration remain explicit
+follow-ups; parent final state checks and synchronization/archive remain 10.6.
 
 ### Accounting and exact remaining blockers
 
-The original 69 task identities are retained: 64 complete, five open
-(3.14, 10.1, 10.3, 10.4, 10.6). This update newly checks only 10.5;
-10.7 remains complete from the preceding late-p2 witness/metadata, local hash
-and live-issue reconciliation. Plain named subitems record performed portions
+The original 69 task identities are retained: 68 complete, only 10.6 open.
+This update newly checks 3.14, 10.1, 10.3 and 10.4 from verified native Windows
+proof and cross-host revised-scope reconciliation. Tasks 10.5/10.7 remain
+complete from preceding documentation/witness and local-hash reconciliation. Plain named subitems record performed portions
 without adding checkboxes or inflating the denominator.
 
 Task 10.5 is supported by
@@ -147,7 +284,10 @@ scoped native-format jq 1.8.1. README/help/formats agree on default LF TOON,
 and token savings remain separate from verdicts. All 21 section Results blocks
 were rendered from the newest report, with current index provenance, authored
 blocks preserved, 20 section files byte-identical and repeat-render idempotence.
-All eight proof-document hashes match current files. Retained documentation
+All eight proof-document hashes matched at the completed 10.5 checkpoint;
+`docs/compatibility.md` has since changed in the separately owned Windows reader
+update, so current documentation is not asserted hash-equal to that older proof.
+Retained documentation
 validation exits 0 and 147 local links across 31 files pass; external URLs were
 not fetched. Separately owned final witness-metadata promotion is now present
 in `parity-closeout.toon`: latest macOS/Linux sources and identities are recorded,
@@ -156,14 +296,22 @@ evidence. This review does not edit those files. Strict OpenSpec validation,
 `scripts/docs-check.sh` and scoped artifact `git diff --check` all exit 0;
 documentation/review metadata hashes remain unchanged during validation.
 Advisory frontmatter and informational bundle/lint notes are not errors.
-Final verification must still include renewed native Windows evidence.
-These completed documentation steps do not renew Windows, establish off-host
-retention, approve a difference, pass either gate or accept performance.
+The current review additionally verifies the renewed native Windows evidence
+and all eight revised deltas below. Documentation proof does not itself renew
+Windows, establish off-host retention, approve a difference, pass either gate
+or accept performance.
 
-The blockers are: (1) native Windows candidate renewal and final source/reference
-identity under 3.14 and 10.1/10.3/10.4; (2) final all-eight-delta/artifact/docs
-verification after native evidence and concurrent metadata are stable; and
-(3) authorized spec synchronization/archival and committed PR-boundary validation. The recorded PR boundary exits 1 on uncommitted
+The remaining task is 10.6: parent final artifact/docs/metadata and candidate-state
+checks, authorized main-spec synchronization/archival under repository policy,
+and the required PR-boundary validation. Native Windows renewal and the four
+implementation/evidence tasks are no longer blocked. Current `parity-closeout.toon` now records final native Windows evidence and
+separates earlier offline/v6 history. A real remaining documentation inconsistency
+is `docs/tests/jq-manual/index.md:44`: it still states that Windows is offline
+and candidate refresh unresolved. Parent must correct that current-state prose
+before final closeout; passing docs syntax/link checks do not detect this semantic
+staleness. This is retained under 10.6, not a renewed native-execution blocker
+or retroactive failure of the completed final-help 10.5 checkpoint. This review
+edits no documentation or review metadata outside the two allowed change artifacts. The recorded PR boundary exits 1 on uncommitted
 OpenSpec changes, even though macOS preflight succeeds. No main spec edit,
 archive, synchronization, commit, new approval, gate relaxation or performance
 acceptance occurs in this progress review. Earlier checkpoint statements below

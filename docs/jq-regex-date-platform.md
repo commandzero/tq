@@ -50,9 +50,9 @@ Compatibility reports distinguish these error classes:
 
 ## Date and time policy
 
-The ambient-access defaults below describe the current implementation of the
-active `achieve-jq-manual-parity` change. The main CLI spec still specifies
-default-denied access; its verification and synchronization remain pending.
+The ambient-access defaults below match the implementation and synchronized
+main CLI spec: process invocations admit these effects by default; embedded
+callers retain explicit capability controls.
 
 UTC behavior does not depend on the host. `fromdate`, `fromdateiso8601`, `todate`,
 `todateiso8601`, `gmtime`, `mktime`, `strptime`, and `strftime` use a reviewed

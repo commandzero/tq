@@ -141,8 +141,10 @@ impl CaptureWorker {
         // not discard diagnostic bytes merely because the target was stopped.
         // A blocked synchronous file write cannot be safely aborted. Target
         // exit, resource collection and job cleanup already happened. Keep this
-        // owner alive and yield while the coordinator bounds its caller wait.
-        // No spawn_blocking task or detached writer can outlive this ownership.
+        // owner alive and yield to run_owned_measurement's post-collection
+        // watchdog, which bounds this wait by failing the isolated worker closed
+        // even with a live coordinator. Returning a timeout here would just
+        // block in Drop's join or require detaching the owned writer.
         while !self.writer.as_ref().expect("owned writer").is_finished() {
             tokio::time::sleep(EXIT_POLL).await;
         }

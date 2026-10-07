@@ -169,6 +169,8 @@ pub(super) async fn measure_target_with_sinks(
     };
     let wall_time_micros = started.elapsed().as_micros();
     let resources = owner.resources();
+    #[cfg(test)]
+    control.record_accounting_attempt();
     // Collect before releasing the accounting handle, then kill remaining
     // descendants. Neither tree cleanup nor pipe draining extends wall time.
     let cleanup_deadline = Instant::now() + std::time::Duration::from_secs(1);

@@ -159,13 +159,33 @@ runner regressions are in `crates/tq-cli/tests/extended_cli.rs`. The closeout
 record maps cases, causes, regression paths and reconsideration conditions;
 library/reference or presentation/runner changes require exact witness reruns.
 
-Windows was unreachable for renewal. Historical v6 results (912/952 primary,
-879/921 compact, 921/921 TOON; 60 unique differences) are not current-candidate
-native verification. All 81 retained Windows v6 manifest entries and the four
-historical metadata references hash-match, including retained full raw manual
-evidence; this establishes retention integrity only. Live #69/#70/#31 bodies
-were verified on 2026-10-06 with all three issues open. The user-approved scope
-transfer assigns only the enumerated
+Windows now has native release/default evidence in
+`target/closeout/windows/final-286b5f6/native`: **912/952 primary, 879/921 compact,
+921/921 TOON**, with **60 unique differences** and strict exit 1. All **303
+protected IDs** are present, but only **291 primary** and **289 primary-plus-compact**
+match—not 303 exact. macOS/Linux retain 303 exact. The Windows full campaign
+covers 1,220 cases/4,804 executed observations, zero harness/contract failures and
+146 difference cases. All 297 CLI composition cases execute, retaining 8 deferred
+math/reference-availability differences; 297 embedded witnesses and resource/
+recursion/cancellation checks pass. Final all-feature workspace, strict Clippy
+and formatting pass; 10 ignored entries and five explicitly passed reference
+tests are recorded separately, without inventing a workspace pass total.
+
+Windows source is base `286b5f6` plus one integration-test-only overlay in
+`crates/tq-test-support/tests/compatibility_catalog_contracts.rs`, SHA-256
+`a86772509c2e279b823e6f02529e976c73b8c75ed30d23bea1620acf828a6c30`.
+The patch keeps exact assertions and adds structured Windows `--binary` reference
+arguments; final extraction resolves a test lint, not runtime behavior. Product/
+helper source and frozen binary hashes are unchanged across the overlay, so
+release campaigns are mapped—not claimed rebuilt/rerun after the test fix.
+macOS/Linux final-help product/helper sources remain unchanged with this test-only
+delta. System `/usr/bin/ssh`/`scp` succeeded, and native PowerShell executes the
+campaigns; earlier macOS-client failures are historical, WSL is transport only,
+and no security changes were made. Older Windows v6 raw evidence remains retained
+and hash-scoped, not conflated with the renewed release.
+
+Live #69/#70/#31 bodies were verified at the preceding 2026-10-06 checkpoint.
+The user-approved scope transfer assigns only the enumerated
 Windows 60 to [#69](https://github.com/commandzero/tq/issues/69) and Linux 15 to
 [#70](https://github.com/commandzero/tq/issues/70); they remain unresolved, with
 target/case ownership, practical impact, and reconsideration criteria in the
@@ -195,11 +215,12 @@ Calibration/performance acceptance remains deferred under
 calibration is established on any platform; Windows accounting checks do not
 prove macOS calibration. Unfinished macOS calibration and affected benchmark
 comparisons remain unpublished as accepted performance evidence. Native Windows
-renewal is the only pending fresh native platform campaign. Linux full validator
-preflight remains a #70 follow-up; active OpenSpec PR-boundary and overall task/
-artifact verification remain parent obligations, not implied passes. Final help/
-version/documentation proof reports no blocking mismatch; the separate macOS
-PR-boundary check still exits 1 on uncommitted OpenSpec changes.
+renewal is complete; strict differences are not resolved by execution success.
+Linux full validator preflight remains a #70 follow-up. The implementation/evidence
+change is verified, synchronized into the main specs, and
+[archived](../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/tasks.md)
+with all 69 tasks complete under the approved scope. That closeout does not
+establish exact compatibility or calibrated performance acceptance.
 
 - Ordered JSON results and process behavior are compared.
 - Compact JSON also requires exact stdout bytes.
