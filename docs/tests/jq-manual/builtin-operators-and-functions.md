@@ -1514,18 +1514,18 @@ Coverage status is about whether the manual example has a case. Execution status
 
 | Verdict | Cases |
 | --- | ---: |
-| match | 229 |
+| Exact match | 229 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
 | compact_json | 227 | 227 |
 | toon | 227 | 227 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
@@ -1540,10 +1540,9 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+No differences.
 
 ### Cases
 
@@ -1702,8 +1701,8 @@ tq: runtime error: boom
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### builtin.explode
 
@@ -3138,8 +3137,8 @@ Error: something went wrong
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | n/a | n/a | n/a |
-| `cl100k_base` | 0 | 0 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual-bof-prose-map-select
 
@@ -3576,7 +3575,7 @@ jq 'JOIN({"a":{"id":"a","v":1}}; .id)'
 
 
 [stderr]
-jq: error (at <stdin>:0): Cannot index string with string "id"
+jq: error (at <stdin>:0): Cannot index string with string ("id")
 
 # tq -o json
 
@@ -3593,8 +3592,8 @@ tq: runtime error: field access cannot be applied to string
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual-bof-synth-sql-join3
 
@@ -7877,8 +7876,8 @@ failure
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | n/a | n/a | n/a |
-| `cl100k_base` | 0 | 0 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.math.floor
 

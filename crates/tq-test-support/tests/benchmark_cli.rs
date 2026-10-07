@@ -7,9 +7,10 @@ use std::{
 };
 
 use serde_json::{Value, json};
-use tq_test_support::{
-    benchmark::load_benchmark_catalog,
-    corpus::{GeneratedArtifacts, SnapshotState, build_source_snapshot, write_snapshot_manifest},
+use tq_test_support::benchmark::load_benchmark_catalog;
+#[cfg(unix)]
+use tq_test_support::corpus::{
+    GeneratedArtifacts, SnapshotState, build_source_snapshot, write_snapshot_manifest,
 };
 
 fn write_report(path: &Path, final_status: &str) {
@@ -383,11 +384,12 @@ fn quick_uses_standard_sources_and_one_measured_invocation_per_row() {
         assert_eq!(row["warmups"], 0);
         assert_eq!(row["requested_samples"], 1);
         assert_eq!(row["samples"].as_array().expect("samples").len(), 1);
-        assert!(
+        assert_eq!(
             row["instrumented_samples"]
                 .as_array()
                 .expect("instrumented")
-                .is_empty()
+                .as_slice(),
+            [] as [serde_json::Value; 0]
         );
     }
     for row in standard["cases"].as_array().expect("standard rows") {
@@ -906,6 +908,7 @@ fn native_delimited_raw_contract_unwraps_reference_scalars() {
     }
 }
 
+#[cfg(unix)]
 fn test_snapshot_input(source_json_file: PathBuf) -> tq_test_support::corpus::SourceSnapshotInput {
     tq_test_support::corpus::SourceSnapshotInput {
         campaign_id: "2026-09-13T00:00:00Z".to_owned(),
@@ -939,6 +942,7 @@ fn test_snapshot_input(source_json_file: PathBuf) -> tq_test_support::corpus::So
     }
 }
 
+#[cfg(unix)]
 fn artifact_identity(path: &str, file: &Path) -> tq_test_support::corpus::ArtifactIdentity {
     use sha2::{Digest as _, Sha256};
     use std::fmt::Write as _;

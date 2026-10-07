@@ -15,18 +15,18 @@ generated: { by: "tq-manual-compare/0.1.0", at: "2026-09-10T20:22:34.585009Z" }
 
 | Verdict | Cases |
 | --- | ---: |
-| match | 23 |
+| Exact match | 23 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
 | compact_json | 21 | 21 |
 | toon | 21 | 21 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
@@ -36,15 +36,14 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 48 | 44 | -4 | -8.33% |
-| `cl100k_base` | 48 | 44 | -4 | -8.33% |
+| `o200k_base` | 48 | 43 | -5 | -10.42% |
+| `cl100k_base` | 48 | 43 | -5 | -10.42% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+No differences.
 
 ### Cases
 
@@ -77,8 +76,8 @@ tq: runtime error: iterate cannot be applied to null
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-array-ancestor-type
 
@@ -90,7 +89,7 @@ jq '.items[1].features[].id'
 
 
 [stderr]
-jq: error (at <stdin>:0): Cannot index number with string "features"
+jq: error (at <stdin>:0): Cannot index number with string ("features")
 
 # tq -o json
 
@@ -107,8 +106,8 @@ tq: runtime error: field access cannot be applied to number
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-auto
 
@@ -272,8 +271,8 @@ tq: Json input rejected: invalid JSON at byte 47, line 1, column 48: expected JS
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-no-vm
 
@@ -302,8 +301,8 @@ tq: Json input rejected: invalid JSON at byte 47, line 1, column 48: expected JS
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-null-prefix
 
@@ -332,8 +331,8 @@ tq: runtime error: iterate cannot be applied to null
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-object-order
 
@@ -416,8 +415,8 @@ tq: Json input rejected: invalid JSON at byte 62, line 1, column 63: expected JS
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
-| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-root-array
 
@@ -429,7 +428,7 @@ jq '.features[].id'
 
 
 [stderr]
-jq: error (at <stdin>:0): Cannot index array with string "features"
+jq: error (at <stdin>:0): Cannot index array with string ("features")
 
 # tq -o json
 
@@ -446,8 +445,8 @@ tq: runtime error: field access cannot be applied to array
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-root-empty-array
 
@@ -459,7 +458,7 @@ jq '.features[].id'
 
 
 [stderr]
-jq: error (at <stdin>:0): Cannot index array with string "features"
+jq: error (at <stdin>:0): Cannot index array with string ("features")
 
 # tq -o json
 
@@ -476,8 +475,8 @@ tq: runtime error: field access cannot be applied to array
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-root-scalar
 
@@ -489,7 +488,7 @@ jq '.features[].id'
 
 
 [stderr]
-jq: error (at <stdin>:0): Cannot index number with string "features"
+jq: error (at <stdin>:0): Cannot index number with string ("features")
 
 # tq -o json
 
@@ -506,8 +505,8 @@ tq: runtime error: field access cannot be applied to number
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.json-root-boundary-runtime-order
 
@@ -539,8 +538,8 @@ tq: Json input rejected: invalid JSON at byte 19, line 1, column 20: expected JS
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.runtime.continuation.effect-order
 
@@ -578,8 +577,8 @@ tq: runtime error: last
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
-| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.runtime.continuation.empty-exit
 
@@ -605,8 +604,8 @@ tq: runtime error: cannot add string and number
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | n/a | n/a | n/a |
-| `cl100k_base` | 0 | 0 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.runtime.continuation.halt-stops
 
@@ -632,8 +631,8 @@ jq 'if . == 1 then halt_error(7) else . end'
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | n/a | n/a | n/a |
-| `cl100k_base` | 0 | 0 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.runtime.continuation.intermediate-error
 
@@ -701,8 +700,8 @@ tq: Json input rejected: invalid JSON at byte 6, line 3, column 1: expected obje
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.runtime.continuation.raw-lines
 
@@ -727,8 +726,8 @@ jq: error (at <stdin>:2): bad
 tq: runtime error: bad
 
 # tq
-"a"
-"b"
+a
+b
 
 
 [stderr]
@@ -737,7 +736,7 @@ tq: runtime error: bad
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 5 | 5 | 5 | 0 | +0% |
-| `cl100k_base` | 5 | 5 | 5 | 0 | +0% |
+| `o200k_base` | 5 | 5 | 4 | -1 | -20% |
+| `cl100k_base` | 5 | 5 | 4 | -1 | -20% |
 
 <!-- tq-manual-compare:end -->

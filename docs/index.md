@@ -19,12 +19,11 @@ Run `./scripts/docs-check.sh` from the repository root to validate the bundle.
 7. [Requirements traceability](requirements-traceability.md) - Requirements mapped to implementation and test evidence.
 8. [TOON event boundary](toon-event-boundary.md) - Decoder and event-boundary design.
 9. [YAML adapter spike](yaml-adapter-spike.md) - YAML adapter investigation.
-10. [jq compatibility disparities](jq-compatibility-disparities.md) - Measured safe-library limitations and post-implementation reconsideration.
-11. [jq parity migration and security notes](jq-parity-migration.md) - Unreleased output, numeric, and ambient-access changes.
-12. [Test reviews](tests/index.md) - Section reviews and generated jq/tq token comparisons.
-13. [Native format architecture](adr/0001-compose-native-formats.md) - Document codecs, framing, and directional profiles.
-14. [Changelog policy](changelog-policy.md) - New entries and historical releases.
-15. [Contributor checks](contributor-checks.md) - Local validation and PR completion.
-16. [Contributing](contributing.md) - Setup and development requirements.
-17. [Releasing](releasing.md) - Candidate archives and coordinated publication.
-18. [Event-stream microbenchmarks](tests/event-stream-microbenchmarks.md) - In-process attribution and baseline comparisons.
+10. [jq parity migration and security notes](jq-parity-migration.md) - Unreleased output, numeric, and ambient-access changes.
+11. [Test reviews](tests/index.md) - Section reviews and generated jq/tq token comparisons.
+12. [Native format architecture](adr/0001-compose-native-formats.md) - Document codecs, framing, and directional profiles.
+13. [Changelog policy](changelog-policy.md) - New entries and historical releases.
+14. [Contributor checks](contributor-checks.md) - Local validation and PR completion.
+15. [Contributing](contributing.md) - Setup and development requirements.
+16. [Releasing](releasing.md) - Candidate archives and coordinated publication.
+17. [Event-stream microbenchmarks](tests/event-stream-microbenchmarks.md) - In-process attribution and baseline comparisons.

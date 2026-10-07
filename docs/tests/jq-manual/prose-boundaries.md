@@ -15,18 +15,18 @@ generated: { by: "tq-manual-compare/0.1.0", at: "2026-09-10T20:22:34.585009Z" }
 
 | Verdict | Cases |
 | --- | ---: |
-| match | 41 |
+| Exact match | 41 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
 | compact_json | 41 | 41 |
 | toon | 41 | 41 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
@@ -41,10 +41,9 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+No differences.
 
 ### Cases
 
@@ -559,8 +558,8 @@ tq: Json input rejected: invalid JSON at byte 7, line 2, column 6: expected JSON
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
-| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.streaming.malformed-trailing-comma-stream-error
 
@@ -868,8 +867,8 @@ tq: Toon input rejected: invalid TOON at SourcePosition { byte: 2, line: 1, colu
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.json-lone-low-surrogate
 
@@ -961,8 +960,8 @@ tq: runtime error: invalid JSON: invalid JSON at byte 6, line 1, column 7: inval
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.nonfinite-fromjson-predicates
 
@@ -1187,8 +1186,8 @@ tq: Json input rejected: invalid JSON at byte 8, line 2, column 7: invalid numer
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 2 | 0 | +0% |
-| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.nonfinite-json-nested
 
@@ -1718,8 +1717,8 @@ tq: runtime error: tonumber cannot be applied to array
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.tonumber-invalid-hex
 
@@ -1748,8 +1747,8 @@ tq: runtime error: invalid finite JSON number
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.tonumber-invalid-null
 
@@ -1778,8 +1777,8 @@ tq: runtime error: tonumber cannot be applied to null
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.tonumber-invalid-trailing
 
@@ -1808,8 +1807,8 @@ tq: runtime error: invalid finite JSON number
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.tonumber-invalid-whitespace
 
@@ -1838,8 +1837,8 @@ tq: runtime error: invalid finite JSON number
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.audit.types.tonumber-nonfinite-and-relaxed-accepted
 

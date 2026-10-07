@@ -1,7 +1,6 @@
-#![cfg(any(target_os = "macos", target_os = "linux"))]
-
 //! End-to-end quick guard behavior with real sleeping processes.
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::{
     env, fs,
     os::unix::process::CommandExt as _,
@@ -10,10 +9,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn quick() -> &'static str {
     env!("CARGO_BIN_EXE_tq-quick")
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn run_quick(seconds: &str, program: &str, args: &[&str]) -> (std::process::Output, Duration) {
     let started = Instant::now();
     let output = Command::new(quick())
@@ -25,6 +26,7 @@ fn run_quick(seconds: &str, program: &str, args: &[&str]) -> (std::process::Outp
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn blocked_preparation_expires_without_waiting_for_the_child() {
     let (output, elapsed) = run_quick("1", "/bin/sh", &["-c", "sleep 10"]);
     assert_eq!(output.status.code(), Some(124));
@@ -32,6 +34,7 @@ fn blocked_preparation_expires_without_waiting_for_the_child() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn coordinator_in_supervisor_group_is_killed_before_guard_returns() {
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("coordinator.pid");
@@ -53,6 +56,7 @@ fn coordinator_in_supervisor_group_is_killed_before_guard_returns() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn joined_supervisor_group_helper() {
     use nix::unistd::{Pid, getpgid, getppid, setpgid};
     let Ok(pid_file) = env::var("TQ_QUICK_TEST_JOINED_GROUP_PID") else {
@@ -65,6 +69,7 @@ fn joined_supervisor_group_helper() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn benchmark_tool_discovery_is_bounded_before_options_run() {
     use std::os::unix::fs::PermissionsExt as _;
 
@@ -101,6 +106,7 @@ fn benchmark_tool_discovery_is_bounded_before_options_run() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn effective_last_budget_controls_guard_after_duplicate_options() {
     use std::os::unix::fs::PermissionsExt as _;
     let temp = tempfile::tempdir().unwrap();
@@ -134,6 +140,7 @@ fn effective_last_budget_controls_guard_after_duplicate_options() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn overridden_quick_profile_is_not_supervised_as_quick() {
     use std::os::unix::fs::PermissionsExt as _;
     let temp = tempfile::tempdir().unwrap();
@@ -166,6 +173,7 @@ fn overridden_quick_profile_is_not_supervised_as_quick() {
     assert_eq!(output.status.code(), Some(2), "{output:?}");
 }
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn normal_exit_code_and_stdio_are_preserved() {
     let (output, elapsed) = run_quick("1", "/bin/sh", &["-c", "printf 'ready\\n'; exit 7"]);
     assert_eq!(output.status.code(), Some(7));
@@ -174,6 +182,7 @@ fn normal_exit_code_and_stdio_are_preserved() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn nested_stage_cannot_reset_the_shared_budget() {
     let (output, elapsed) = run_quick(
         "1",
@@ -185,6 +194,7 @@ fn nested_stage_cannot_reset_the_shared_budget() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn cooperative_exit_at_inherited_deadline_is_still_incomplete() {
     let started = Instant::now();
     let output = Command::new(quick())
@@ -199,6 +209,7 @@ fn cooperative_exit_at_inherited_deadline_is_still_incomplete() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn cooperative_deadline_helper() {
     if env::var_os("TQ_QUICK_TEST_COOPERATIVE_EXIT").is_none() {
         return;
@@ -211,6 +222,7 @@ fn cooperative_deadline_helper() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn guard_rejects_a_budget_above_the_quick_ceiling() {
     let (output, elapsed) = run_quick("51", "/bin/sh", &["-c", "exit 0"]);
     assert_eq!(output.status.code(), Some(2));
@@ -221,6 +233,7 @@ fn guard_rejects_a_budget_above_the_quick_ceiling() {
 // executable. Its child intentionally creates its own process group, just like
 // the benchmark's native worker; killing the outer group alone is insufficient.
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn detached_group_helper() {
     let Ok(pid_file) = env::var("TQ_QUICK_TEST_DESCENDANT_PID") else {
         return;
@@ -236,6 +249,7 @@ fn detached_group_helper() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn descendant_in_a_separate_process_group_is_cleaned_up() {
     let temp = tempfile::tempdir().unwrap();
     let pid_file = temp.path().join("descendant.pid");
@@ -260,6 +274,7 @@ fn descendant_in_a_separate_process_group_is_cleaned_up() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn joining_an_unrelated_group_does_not_kill_its_members() {
     use nix::unistd::{Pid, getpgid, getpgrp};
 
@@ -319,6 +334,7 @@ fn joining_an_unrelated_group_does_not_kill_its_members() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn join_unrelated_group_helper() {
     use nix::unistd::{Pid, getpgid, getpgrp};
 
@@ -348,6 +364,7 @@ fn join_unrelated_group_helper() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn interrupt_and_terminate_cancel_the_separately_grouped_coordinator() {
     for (signal, expected) in [
         (nix::sys::signal::Signal::SIGINT, 130),
@@ -384,6 +401,7 @@ fn interrupt_and_terminate_cancel_the_separately_grouped_coordinator() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn blocked_stdout_never_publishes_a_staged_completed_report() {
     let temp = tempfile::tempdir().unwrap();
     let report = temp.path().join("report.json");
@@ -404,6 +422,7 @@ fn blocked_stdout_never_publishes_a_staged_completed_report() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn signalled_coordinator_cannot_publish_a_staged_completed_report() {
     let temp = tempfile::tempdir().unwrap();
     let report = temp.path().join("report.json");
@@ -411,7 +430,7 @@ fn signalled_coordinator_cannot_publish_a_staged_completed_report() {
         .args(["--budget-seconds", "2", "--", "/bin/sh", "-c"])
         .arg(
             "printf incomplete > \"$TQ_QUICK_REPORT_PATH\"; \
-             printf complete > \"$TQ_QUICK_COMPLETION_STAGE\"; kill -KILL $$",
+         printf complete > \"$TQ_QUICK_COMPLETION_STAGE\"; kill -KILL $$",
         )
         .env("TQ_QUICK_REPORT_PATH", &report)
         .output()
@@ -421,6 +440,7 @@ fn signalled_coordinator_cannot_publish_a_staged_completed_report() {
 }
 
 #[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn blocked_report_helper() {
     use std::io::Write as _;
     let Ok(report) = env::var("TQ_QUICK_TEST_REPORT_PATH") else {
@@ -435,6 +455,7 @@ fn blocked_report_helper() {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn process_is_running(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {

@@ -14,10 +14,10 @@ include = ["src/**", "tests/**", "LICENSE", "../../README.md"]
 
 [dependencies]
 base64 = "0.23.1"
-fancy-regex = "0.19.1"
+fancy-regex = "0.19.2"
 indexmap = { version = "2.14.2", features = ["serde"] }
 itoa = "1.0.18"
-jiff = "0.2.35"
+jiff = "0.2.37"
 libm = "0.2.16"
 num-bigint = "0.5.1"
 num-traits = "0.2.19"
@@ -26,8 +26,8 @@ rayon = "1.12.0"
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order", "raw_value"] }
 sha2 = "0.11.0"
-smallvec = "1.16.0"
-thiserror = "2.0.20"
+smallvec = "1.16.2"
+thiserror = "2.0.21"
 
 [lints]
 workspace = true

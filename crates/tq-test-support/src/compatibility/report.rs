@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tq_formats::NativeFormat;
 
-use super::{ErrorClass, FixtureFormat, ProcessStatus, ToolIdentity, ToolKind, TqContract};
+use super::{
+    ErrorClass, ExecutionMode, FixtureFormat, ProcessStatus, ToolIdentity, ToolKind, TqContract,
+};
 use crate::corpus::ArtifactIdentity;
 
 /// Report schema version.
@@ -23,6 +25,9 @@ pub struct CompatibilityReport {
     pub corpus: ArtifactIdentity,
     /// Discovered executable identities.
     pub tools: Vec<ToolIdentity>,
+    /// Reference stream configuration; absent in historical reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_execution: Option<ReferenceExecution>,
     /// Per-case observations.
     pub cases: Vec<CaseReport>,
     /// Aggregate capability coverage.
@@ -37,6 +42,30 @@ pub struct CompatibilityReport {
     pub final_status: FinalStatus,
 }
 
+/// Platform-specific jq invocation configuration, separate from binary identity.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReferenceExecution {
+    /// Host architecture and OS.
+    pub target: String,
+    /// Options prepended only to structured-input semantic/error and compact
+    /// program invocations. Raw-input programs and raw/exit-status CLI contracts
+    /// retain authored arguments; all captured bytes remain verbatim.
+    pub jq_structured_program_prefix_args: Vec<String>,
+}
+
+impl ReferenceExecution {
+    pub(crate) fn for_host() -> Self {
+        Self {
+            target: super::manual_host_target(),
+            jq_structured_program_prefix_args: if cfg!(windows) {
+                vec!["--binary".to_owned()]
+            } else {
+                Vec::new()
+            },
+        }
+    }
+}
+
 /// tq implementation disposition for a capability tag.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -45,7 +74,7 @@ pub enum CapabilityDisposition {
     Supported,
     /// Some applicable MVP cases execute while others remain unsupported.
     Partial,
-    /// An executed tq case has a reviewed semantic difference from jq.
+    /// An executed tq case differs from jq or violates its declared error contract.
     Divergent,
     /// MVP cases exist but none are supported by tq.
     Unsupported,
@@ -96,6 +125,33 @@ pub struct CaseReport {
     pub observations: Vec<ToolObservation>,
     /// Pairwise semantic differences.
     pub semantic_diffs: Vec<SemanticDiff>,
+    /// Declared error-contract failures, independent of reference applicability.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contract_failures: Vec<ContractFailure>,
+    /// Embedded tq observations use this host identity, not the process CLI in `tools`.
+    /// Absent for process observations and historical reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tq_execution: Option<TqExecutionProvenance>,
+}
+
+/// Explicit embedded interface and the executable actually hosting it.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TqExecutionProvenance {
+    /// Selected embedded capability-denial mode.
+    pub mode: ExecutionMode,
+    /// Exact canonical path, executable hash, byte count, and version.
+    pub host: ToolIdentity,
+}
+
+/// One observed execution that did not satisfy its declared error contract.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ContractFailure {
+    /// Tool whose observation violated the contract.
+    pub tool: ToolKind,
+    /// Physical input representation.
+    pub input_format: Option<FixtureFormat>,
+    /// Stable explanation, without captured input or ambient data.
+    pub summary: String,
 }
 
 /// Execution, skip, or harness failure for one tool.
@@ -180,7 +236,7 @@ pub enum FinalStatus {
     Passed,
     /// Campaign ran successfully and recorded reference differences.
     ObservedDifferences,
-    /// Harness failures made results incomplete.
+    /// Harness failures or declared-error-contract violations prevent acceptance.
     Failed,
 }
 
@@ -207,8 +263,13 @@ impl CompatibilityReport {
             executed,
             differences
         );
+        if let Some(reference) = &self.reference_execution {
+            writeln!(output, "jq reference ({}): structured-program prefix args {:?}; raw input and raw CLI arguments unchanged; captured bytes verbatim", reference.target, reference.jq_structured_program_prefix_args)
+                .expect("write reference execution configuration");
+        }
         for case in self.cases.iter().filter(|case| {
             !case.semantic_diffs.is_empty()
+                || !case.contract_failures.is_empty()
                 || case
                     .observations
                     .iter()
@@ -226,6 +287,16 @@ impl CompatibilityReport {
                     difference.summary
                 )
                 .expect("write report to string");
+            }
+            for failure in &case.contract_failures {
+                writeln!(
+                    output,
+                    "  {:?}/{}: {}",
+                    failure.tool,
+                    format_name(failure.input_format),
+                    failure.summary
+                )
+                .expect("write contract failure");
             }
             for observation in case
                 .observations

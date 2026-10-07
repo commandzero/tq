@@ -653,6 +653,8 @@ fn run_worker(
         use std::os::unix::process::CommandExt as _;
         command.process_group(0);
     }
+    #[cfg(test)]
+    pause_before_worker_spawn(worker_path).map_err(|error| io_failure(error.to_string()))?;
     let child = {
         let _admission = lock_worker_admission();
         if pending_cleanup_active() {
@@ -1339,6 +1341,39 @@ fn path_from_bytes(bytes: Vec<u8>) -> PathBuf {
 }
 
 #[cfg(test)]
+struct LaunchPause {
+    worker_path: PathBuf,
+    reached: std::sync::mpsc::SyncSender<()>,
+    release: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+static LAUNCH_PAUSE: Mutex<Option<LaunchPause>> = Mutex::new(None);
+
+#[cfg(test)]
+fn pause_before_worker_spawn(worker_path: &Path) -> io::Result<()> {
+    let pause = {
+        let mut slot = LAUNCH_PAUSE.lock().unwrap();
+        if slot
+            .as_ref()
+            .is_some_and(|pause| pause.worker_path == worker_path)
+        {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    if let Some(pause) = pause {
+        pause.reached.send(()).map_err(io::Error::other)?;
+        pause
+            .release
+            .recv_timeout(WORKER_STARTUP_TIMEOUT)
+            .map_err(io::Error::other)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 mod tests {
     use std::{
         os::unix::{fs::PermissionsExt as _, process::CommandExt as _},
@@ -1596,14 +1631,9 @@ mod tests {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&worker, permissions).expect("make worker executable");
 
-        // The reservation is deliberately acquired first. A pending handoff
-        // can then win the race between a second invocation's preflight and
-        // its actual spawn; the launch admission check must reject it.
-        let blocker = super::reserve_pending_slot().expect("reserve cleanup slot");
-        blocker
-            .slot
-            .phase
-            .store(super::CLEANUP_PENDING, Ordering::Release);
+        let mut blocker = super::reserve_pending_slot().expect("reserve A cleanup slot");
+        let caller_slot = super::reserve_pending_slot().expect("reserve B before A handoff");
+        let slot = std::sync::Arc::clone(&blocker.slot);
         let invocation = BenchmarkInvocation {
             cancellation: None,
             executable: "/bin/true".into(),
@@ -1615,15 +1645,67 @@ mod tests {
             rss_limit: None,
             retain_output: false,
         };
-        let captures = super::prepare_capture_files(&invocation).expect("prepare captures");
+        let captures = super::prepare_capture_files(&invocation).expect("prepare A captures");
         let paths = captures.paths();
-        let failure = super::run_worker(&invocation, false, &paths, &worker)
-            .expect_err("pending cleanup must reject the launch");
-        assert!(failure.pending.is_none(), "rejected launch owns no child");
-        assert!(!marker.exists(), "worker launched despite pending handoff");
+        let (reached, barrier) = std::sync::mpsc::sync_channel(1);
+        let (release_spawn, wait) = std::sync::mpsc::channel();
+        *super::LAUNCH_PAUSE.lock().unwrap() = Some(super::LaunchPause {
+            worker_path: worker.clone(),
+            reached,
+            release: wait,
+        });
+        let caller = thread::spawn(move || {
+            let captures = super::prepare_capture_files(&invocation).expect("prepare B captures");
+            super::run_worker(&invocation, false, &captures.paths(), &worker).map_err(Box::new)
+        });
+        barrier
+            .recv_timeout(Duration::from_secs(5))
+            .expect("B reached final pre-spawn barrier");
 
-        drop(captures);
+        let release = directory.path().join("release-cleanup");
+        let _release_guard = ReleaseOnDrop(release.clone());
+        let child = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "while [ ! -f \"$1\" ]; do sleep 0.01; done",
+                "held-worker",
+                release.to_str().unwrap(),
+            ])
+            .process_group(0)
+            .spawn()
+            .expect("spawn A held cleanup owner");
+        let mut pending = Some(super::PendingWorker {
+            owner: super::NativeChild::new(child),
+            captures: Some(captures),
+        });
+        blocker
+            .handoff(&mut pending)
+            .expect("real A handoff wins before B spawn");
+        assert!(pending.is_none());
+        release_spawn.send(()).unwrap();
+        let failure = caller
+            .join()
+            .expect("B launch thread finished")
+            .expect_err("pending cleanup must reject the launch");
+
+        std::fs::write(&release, b"release").expect("finish owned A cleanup");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while slot.phase.load(Ordering::Acquire) != super::CLEANUP_DONE {
+            assert!(Instant::now() < deadline, "A cleanup did not complete");
+            thread::sleep(Duration::from_millis(5));
+        }
+        std::fs::remove_file(paths.stdout).unwrap();
+        std::fs::remove_file(paths.stderr).unwrap();
+        drop(caller_slot);
         drop(blocker);
+        drop(super::reserve_pending_slot().expect("reclaim completed cleanup slot"));
+        assert!(failure.pending.is_none(), "rejected launch owns no child");
+        assert!(
+            failure
+                .message
+                .contains("cleanup became pending before worker launch")
+        );
+        assert!(!marker.exists(), "worker launched despite pending handoff");
     }
 
     #[test]

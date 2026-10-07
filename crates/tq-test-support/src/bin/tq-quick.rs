@@ -105,6 +105,7 @@ fn run() -> io::Result<i32> {
         }
         #[cfg(not(unix))]
         {
+            drop(root);
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
                 "installation cleanup requires Unix",

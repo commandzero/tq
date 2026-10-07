@@ -116,8 +116,8 @@ The standard command returns status 1 because these resource-limit observations
 remain visible. Its report contains no incorrect rows, but it does not claim
 every row passed.
 
-The file `comparison-x86-64-linux.md` is a historical jq manual compatibility
-report. It is not a performance report and is outside this renderer.
+The [jq manual report](jq-manual/index.md) covers compatibility, not performance.
+It is outside this renderer.
 
 Targeted renderer and harness tests cover output contracts, failed rows, missing
 RSS, captured summary metrics, and authored-text preservation. The accepted

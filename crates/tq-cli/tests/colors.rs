@@ -3,13 +3,27 @@
 use std::process::{Command, Output, Stdio};
 
 fn run(args: &[&str], colors: Option<&str>, no_color: bool) -> Output {
+    run_with_palettes(args, None, colors, no_color)
+}
+
+fn run_with_palettes(
+    args: &[&str],
+    tq_colors: Option<&str>,
+    jq_colors: Option<&str>,
+    no_color: bool,
+) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_tq"));
     command
         .args(args)
         .env("NO_COLOR", if no_color { "1" } else { "" })
         .env_remove("HOME")
         .env_remove("JQ_LIBRARY_PATH");
-    if let Some(colors) = colors {
+    if let Some(colors) = tq_colors {
+        command.env("TQ_COLORS", colors);
+    } else {
+        command.env_remove("TQ_COLORS");
+    }
+    if let Some(colors) = jq_colors {
         command.env("JQ_COLORS", colors);
     } else {
         command.env_remove("JQ_COLORS");
@@ -51,6 +65,51 @@ fn jq_colors_controls_each_json_value_style() {
     );
     assert!(output.status.success());
     assert_eq!(output.stdout, b"\x1b[1;31m1\x1b[0m\n");
+}
+
+#[test]
+fn tq_colors_overrides_jq_colors_across_output_formats() {
+    let tq_colors = "1;32:1;32:1;32:1;32:1;32:1;32:1;32";
+    let jq_colors = "1;31:1;31:1;31:1;31:1;31:1;31:1;31:1;31";
+    for format in ["json", "toon", "yaml", "jsonl", "toon-seq"] {
+        let args = ["-n", "-C", "-o", format, "1"];
+        let expected = run(&args, Some(tq_colors), false);
+        for fallback in [None, Some(jq_colors)] {
+            let output = run_with_palettes(&args, Some(tq_colors), fallback, false);
+            assert!(output.status.success(), "format {format}");
+            assert!(output.stderr.is_empty(), "format {format}");
+            assert_eq!(output.stdout, expected.stdout, "format {format}");
+            assert!(output.stdout.windows(7).any(|bytes| bytes == b"\x1b[1;32m"));
+        }
+    }
+}
+
+#[test]
+fn invalid_tq_colors_selects_defaults_without_using_jq_colors() {
+    let jq_colors = "1;31:1;31:1;31:1;31:1;31:1;31:1;31:1;31";
+    for tq_colors in ["", "invalid", "31:32"] {
+        let output = run_with_palettes(
+            &["-n", "-C", "-o", "json", "1"],
+            Some(tq_colors),
+            Some(jq_colors),
+            false,
+        );
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"\x1b[0;35m1\x1b[0m\n");
+    }
+}
+
+#[test]
+fn tq_colors_does_not_enable_color_or_override_monochrome() {
+    let colors = "1;32:1;32:1;32:1;32:1;32:1;32:1;32:1;32";
+    for args in [
+        vec!["-n", "-o", "json", "1"],
+        vec!["-n", "-C", "-M", "-o", "json", "1"],
+    ] {
+        let output = run_with_palettes(&args, Some(colors), None, false);
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"1\n");
+    }
 }
 
 #[test]
@@ -110,6 +169,7 @@ fn auto_color_uses_a_posix_pty_when_stdout_is_a_terminal() {
         .arg("-q")
         .env_remove("NO_COLOR")
         .env_remove("JQ_COLORS")
+        .env_remove("TQ_COLORS")
         .env("TERM", "xterm")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

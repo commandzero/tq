@@ -1,11 +1,14 @@
 //! Public CLI contracts for composed input, effects, regex callbacks, and termination.
 
 use std::{
-    io::{BufRead, BufReader, Read, Write},
+    io::Write,
     process::{Child, Command, Output, Stdio},
     thread,
     time::{Duration, Instant},
 };
+
+#[cfg(unix)]
+use std::io::{BufRead, BufReader, Read};
 
 use tempfile::tempdir;
 
@@ -41,6 +44,7 @@ fn wait_output_with_deadline(mut child: Child, timeout: Duration) -> Output {
     }
 }
 
+#[cfg(unix)]
 fn wait_status_with_deadline(child: &mut Child, timeout: Duration) -> std::process::ExitStatus {
     let deadline = Instant::now() + timeout;
     loop {

@@ -394,13 +394,13 @@ fn release_workflow_has_checked_in_official_reference_defaults() {
     for (target, url, sha256) in [
         (
             "x86_64-linux",
-            "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64",
-            "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d",
+            "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-linux-amd64",
+            "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f",
         ),
         (
             "aarch64-macos",
-            "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-macos-arm64",
-            "a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603",
+            "https://github.com/jqlang/jq/releases/download/jq-1.8.2/jq-macos-arm64",
+            "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e",
         ),
     ] {
         assert!(workflow.contains(&format!("reference_target: {target}")));

@@ -2,7 +2,7 @@
 type: Report
 title: jq regex, date, and platform compatibility
 description: Safe-library behavior, resource limits, and ambient capability controls.
-generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:46:06Z }
+
 ---
 
 # jq regex, date, and platform compatibility
@@ -12,13 +12,15 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-15T18:46:06Z }
 The cases cover syntax, Unicode scalar offsets, optional captures, match order,
 flags, splitting and substitution, UTC arrays, epoch ranges, environment shape,
 and input metadata. The exploratory run used jq 1.7.1. The full campaign uses
-the repository's pinned jq 1.8.x binary and records its exact identity in
-the generated campaign report.
+pinned jq 1.8.2 reference binaries and records each executable, build, runtime,
+and target identity in the generated campaign report. Earlier jq 1.8.1
+checkpoints remain historical; they do not renew current acceptance or
+identity-bound disparity approvals.
 
 ## Selected dependencies and limits
 
-`tq` uses `fancy-regex` 0.19.1 for the jq-compatible regex surface and Jiff
-0.2.35 for UTC-first date/time conversion. `fancy-regex` is a safe Rust
+`tq` uses `fancy-regex` 0.19.2 for the jq-compatible regex surface and Jiff
+0.2.37 for UTC-first date/time conversion. `fancy-regex` is a safe Rust
 backtracking engine, so every compiled pattern receives an explicit
 backtracking limit plus compiled/delegated-size limits. The VM also checks
 input/pattern bytes, match and replacement counts, retained output, and
@@ -27,25 +29,30 @@ cancellation between bounded engine calls. The CLI maps
 searched-input limit; these are resource envelopes, not wall-clock
 guarantees.
 
-Supported regex built-ins are `test`, `match`, `capture`, `scan`, `split`,
-`splits`, `sub`, and `gsub`. Supported flags are `g`, `i`, `m`, `s`, `p`, `x`,
-and `n`; array pattern/flag forms are accepted only by the jq operations that
-document them. The `l` longest-match flag returns a stable unsupported
-diagnostic. Other patterns are parsed by the selected Rust engine; rejected
-syntax produces a pattern error. `m` matches jq's dot-newline behavior; `s` retains single-line
-anchors; `p` combines those modes. Offsets and lengths count Unicode scalar
-values, matching jq's reviewed UTF-8 behavior. The `l` mode remains an
-explicit safe-engine limitation and is not silently approximated.
+- Supported built-ins: `test`, `match`, `capture`, `scan`, `split`, `splits`, `sub`, and `gsub`.
+- Supported flags: `g`, `i`, `m`, `s`, `p`, `x`, `n`, and `l`.
+- Array pattern/flag forms are accepted only by operations that document them.
+- `l` selects the longest match using bounded endpoint searches.
+- Finite pattern-consumption bounds reduce the search; unknown or unbounded patterns retain the bounded fallback.
+- The initial presence scan is bounded by input size and engine limits.
+- Repeated candidate searches also spend a cumulative work budget; large inputs can exhaust it even within the input-byte limit.
+- Whole-pattern recursion with `l` remains unsupported.
+- Other syntax is parsed by the Rust engine; rejected syntax produces a pattern error.
+- `m` matches jq's dot-newline behavior; `s` retains single-line anchors; `p` combines both.
+- Offsets and lengths count Unicode scalar values.
 
-Compatibility reports classify the rejected longest-match flag as
-`unsupported-capability`, configured regex envelopes as `resource`, portable
-date bounds as `runtime-range`, and denied ambient effects as `runtime-policy`.
+Compatibility reports distinguish these error classes:
+
+- `unsupported-capability`: whole-pattern recursion with longest-match mode.
+- `resource`: configured regex limits, including longest-match search work.
+- `runtime-range`: portable date bounds.
+- `runtime-policy`: denied ambient effects.
 
 ## Date and time policy
 
-The ambient-access defaults below describe the current implementation of the
-active `achieve-jq-manual-parity` change. The main CLI spec still specifies
-default-denied access; its verification and synchronization remain pending.
+The ambient-access defaults below match the implementation and synchronized
+main CLI spec: process invocations admit these effects by default; embedded
+callers retain explicit capability controls.
 
 UTC behavior does not depend on the host. `fromdate`, `fromdateiso8601`, `todate`,
 `todateiso8601`, `gmtime`, `mktime`, `strptime`, and `strftime` use a reviewed
@@ -69,11 +76,30 @@ cargo test -p tq-core regex_date_platform_release_host_contract
 cargo test -p tq-cli ambient
 ```
 
-The same checks run on Linux and macOS before release publication through the
-reusable `.github/workflows/regex-date-platform.yml` workflow. It also supports
-manual runs. Native Windows execution is deferred
-until a runner is available. Windows test definitions remain in the repository;
-their presence does not establish Windows compatibility.
+The reusable `.github/workflows/regex-date-platform.yml` workflow runs the
+Linux/macOS checks and supports manual runs. Workflow coverage alone does not
+establish final acceptance. The user superseded the earlier Windows deferral:
+the active change requires fresh native jq 1.8.2 evidence on local macOS,
+ironhide Linux x86_64, and smokescreen Windows 11 Pro
+`x86_64-pc-windows-msvc`. Windows acceptance must execute native Windows jq/tq
+binaries in native PowerShell, including applicable shell, binary/newline,
+date/environment, and metadata witnesses. SSH into WSL, cross-compilation,
+and non-Windows PowerShell do not count. Missing evidence blocks completion;
+Windows test definitions alone do not establish compatibility.
+
+Native Windows compatibility capture is implemented with overlapped named
+pipes and JobObjects. Native CPU/RSS accounting uses a retained exact-child
+handle for `GetProcessTimes` and `PeakWorkingSetSize`, with a surviving
+isolated worker. Validation remains incomplete: separate control executions
+vary in 15.625 ms CPU quanta, with differences up to 62.5 ms exceeding the
+unchanged 20 ms check. Issue #31 remains open and no performance acceptance is
+claimed. WSL results, wall time, or placeholder zeros cannot replace native
+resource validation. Strict-report differences remain differences, not exact
+matches; no new math disparity or renewed approval is authorized.
+
+The user disabled Smart App Control on development-only smokescreen and
+reported native launch verified with state `0`. No further security changes
+are needed; this launch prerequisite does not establish acceptance.
 
 ## Environment and input metadata
 

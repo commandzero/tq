@@ -973,6 +973,7 @@ fn rss_source(row: &BenchmarkRow) -> &'static str {
     match first {
         RssProvenance::DarwinWait4 => "darwin-wait4",
         RssProvenance::LinuxWait4 => "linux-wait4",
+        RssProvenance::WindowsPeakWorkingSet => "windows-peak-working-set",
         RssProvenance::GnuTimeV => "gnu-time-v",
         RssProvenance::BsdTimeL => "bsd-time-l",
     }

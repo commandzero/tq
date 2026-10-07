@@ -164,12 +164,14 @@ fn import_with_long_definition_body_preserves_module_resolution() {
     };
     assert_eq!(
         location.as_ref(),
-        format!(
-            r#"{{"file":"{}","line":1}}"#,
-            fs::canonicalize(root.join("long_body.jq"))
+        serde_json::to_string(&serde_json::json!({
+            "file": fs::canonicalize(root.join("long_body.jq"))
                 .expect("module path canonicalizes")
-                .display()
-        )
+                .to_str()
+                .expect("module path is UTF-8"),
+            "line": 1,
+        }))
+        .expect("module location serializes")
     );
     assert_eq!(vm.next_result().expect("import query drains"), None);
     fs::remove_dir_all(root).expect("module root removes");

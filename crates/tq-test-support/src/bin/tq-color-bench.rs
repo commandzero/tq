@@ -34,8 +34,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             "color measurements require a release build; render-only works in debug builds".into(),
         );
     }
-    if env::var_os("JQ_COLORS").is_some() || env::var_os("NO_COLOR").is_some() {
-        return Err("unset JQ_COLORS and NO_COLOR before measuring the built-in palette".into());
+    if ["TQ_COLORS", "JQ_COLORS", "NO_COLOR"]
+        .iter()
+        .any(|name| env::var_os(name).is_some())
+    {
+        return Err(
+            "unset TQ_COLORS, JQ_COLORS and NO_COLOR before measuring the built-in palette".into(),
+        );
     }
     let binary = fs::canonicalize(&args[1])?;
     let archive = PathBuf::from(&args[4]);

@@ -1,17 +1,28 @@
 //! Correctness-gated process benchmark support.
 
+#[cfg(windows)]
+mod capture_windows;
 mod correctness;
 mod environment;
 mod manifest;
 mod markdown;
 mod measure;
+#[cfg(windows)]
+mod measure_windows;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod native_process;
+#[cfg(windows)]
+mod native_process_windows;
+#[cfg(windows)]
+mod pipe_windows;
 mod probe;
 pub mod quick;
 mod report;
 mod runner;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
+pub mod worker;
+#[cfg(windows)]
+#[path = "benchmark/worker_windows.rs"]
 pub mod worker;
 
 pub use probe::{AllocationProbeError, run_allocation_probe};

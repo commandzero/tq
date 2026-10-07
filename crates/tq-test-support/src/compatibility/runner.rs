@@ -56,6 +56,9 @@ pub enum RunnerError {
     /// Executable discovery failed.
     #[error(transparent)]
     Discovery(#[from] super::ToolDiscoveryError),
+    /// Invalid interface selection, including programmatically constructed catalogs.
+    #[error(transparent)]
+    Catalog(#[from] super::CatalogError),
     /// Fixture or temporary-file I/O failed.
     #[error("compatibility fixture I/O failed: {0}")]
     Io(#[from] io::Error),
@@ -74,17 +77,39 @@ pub fn run_campaign(
     repository_root: &Path,
     timeout: Duration,
 ) -> Result<CompatibilityReport, RunnerError> {
+    for case in catalog.cases.iter().filter(|case| profile.includes(case)) {
+        if !case.has_valid_execution_mode() {
+            return Err(super::CatalogError::ExecutionMode(case.id.clone()).into());
+        }
+    }
     let mut tools = Vec::new();
     for kind in [ToolKind::Jq, ToolKind::Yq, ToolKind::Tq] {
         if let Some(identity) = discover_tool(kind, config, repository_root)? {
             tools.push(identity);
         }
     }
+    let needs_embedded_host = catalog
+        .cases
+        .iter()
+        .any(|case| profile.includes(case) && !case.adapters.tq.execution_mode.is_process());
+    let embedded_host = if needs_embedded_host {
+        super::discover_embedded_host(config, repository_root)?
+    } else {
+        None
+    };
     let reports = catalog
         .cases
         .iter()
         .filter(|case| profile.includes(case))
-        .map(|case| run_case(case, &tools, repository_root, timeout))
+        .map(|case| {
+            run_case(
+                case,
+                &tools,
+                embedded_host.as_ref(),
+                repository_root,
+                timeout,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let coverage = coverage(&reports);
     let (capability_matrix, capability_counts) = capability_matrix(catalog, &reports);
@@ -94,7 +119,10 @@ pub fn run_campaign(
             .any(|observation| observation.state == ObservationState::HarnessError)
     });
     let has_differences = reports.iter().any(|case| !case.semantic_diffs.is_empty());
-    let final_status = if has_harness_error {
+    let has_contract_failure = reports
+        .iter()
+        .any(|case| !case.contract_failures.is_empty());
+    let final_status = if has_harness_error || has_contract_failure {
         FinalStatus::Failed
     } else if has_differences {
         FinalStatus::ObservedDifferences
@@ -106,6 +134,7 @@ pub fn run_campaign(
         profile: profile.name().to_owned(),
         corpus: catalog.identity.clone(),
         tools,
+        reference_execution: Some(super::ReferenceExecution::for_host()),
         cases: reports,
         coverage,
         capability_matrix,
@@ -160,6 +189,10 @@ fn capability_matrix(
                     ObservationState::Unavailable => unavailable += 1,
                     ObservationState::Unsupported | ObservationState::HarnessError => skipped += 1,
                 }
+                divergent |= report
+                    .contract_failures
+                    .iter()
+                    .any(|failure| failure.tool == ToolKind::Tq);
                 divergent |= report.semantic_diffs.iter().any(|difference| {
                     matches!(
                         (difference.left, difference.right),
@@ -188,10 +221,12 @@ fn capability_matrix(
 fn run_case(
     case: &CompatibilityCase,
     identities: &[ToolIdentity],
+    embedded_host: Option<&ToolIdentity>,
     repository_root: &Path,
     timeout: Duration,
 ) -> Result<CaseReport, io::Error> {
     let mut observations = Vec::new();
+    let mut contract_failures = Vec::new();
     let source = fixture_bytes(case, repository_root)?;
     let variants = cross_format_variants(case, &source);
     for tool in [ToolKind::Jq, ToolKind::Yq, ToolKind::Tq] {
@@ -199,7 +234,22 @@ fn run_case(
         let formats = formats_for(tool, case.fixture.format, &source, variants.as_ref());
         for fixture in formats {
             let format = fixture.format;
-            let Some(identity) = identities.iter().find(|identity| identity.tool == tool) else {
+            let embedded = tool == ToolKind::Tq && !adapter.execution_mode.is_process();
+            let identity = if embedded {
+                embedded_host
+            } else {
+                identities.iter().find(|identity| identity.tool == tool)
+            };
+            if embedded && identity.is_none() {
+                observations.push(skipped(
+                    tool,
+                    Some(format),
+                    ObservationState::HarnessError,
+                    "embedded host executable not found; process CLI fallback is forbidden",
+                ));
+                continue;
+            }
+            let Some(identity) = identity else {
                 observations.push(skipped(
                     tool,
                     Some(format),
@@ -238,6 +288,7 @@ fn run_case(
                     timeout,
                     fixture,
                     output_mode,
+                    &mut contract_failures,
                 )?
             } else {
                 execute(
@@ -254,11 +305,21 @@ fn run_case(
         }
     }
     let semantic_diffs = semantic_diffs(&observations, case.expected.compare_stderr);
+    contract_failures.extend(error_contract_failures(case, &observations));
     Ok(CaseReport {
         id: case.id.clone(),
         capabilities: case.capabilities.clone(),
         observations,
         semantic_diffs,
+        contract_failures,
+        tq_execution: (!case.adapters.tq.execution_mode.is_process())
+            .then(|| {
+                embedded_host.map(|host| super::TqExecutionProvenance {
+                    mode: case.adapters.tq.execution_mode,
+                    host: host.clone(),
+                })
+            })
+            .flatten(),
     })
 }
 
@@ -309,7 +370,13 @@ fn execute_with_resources(
         bytes,
         pin_format: pin_input_format,
     } = fixture;
-    let mut args = adapter.args.clone();
+    let mut args = reference_program_args(
+        identity.tool,
+        case.expected.contract,
+        input_format,
+        &adapter.args,
+        cfg!(windows),
+    );
     rewrite_json_module_args(resources.module_directory.as_ref(), &mut args);
     if pin_input_format {
         match identity.tool {
@@ -351,6 +418,16 @@ fn execute_with_resources(
             Vec::new()
         }
     };
+    if let Some(mode) = adapter.execution_mode.host_argument() {
+        args.splice(
+            0..0,
+            [
+                "--execution-mode".to_owned(),
+                mode.to_owned(),
+                "--".to_owned(),
+            ],
+        );
+    }
     let process = run_process_with_environment(
         &Invocation {
             executable: identity.path.clone(),
@@ -442,6 +519,7 @@ fn execute_toon_with_json_companion(
     timeout: Duration,
     fixture: ExecutionFixture,
     output_mode: OutputMode,
+    contract_failures: &mut Vec<super::ContractFailure>,
 ) -> Result<ToolObservation, io::Error> {
     let resources = ExecutionResources::new(case, adapter, repository_root, &fixture)?;
     let toon_result = execute_with_resources(
@@ -481,6 +559,17 @@ fn execute_toon_with_json_companion(
         ));
     };
     let json = json_result.observation;
+    if !adapter.execution_mode.is_process()
+        && json.state == ObservationState::Executed
+        && !embedded_denial_matches(case, &json)
+    {
+        contract_failures.push(super::ContractFailure {
+            tool: ToolKind::Tq,
+            input_format: json.input_format,
+            summary: "JSON companion declared error contract requires runtime-policy exit 5, empty stdout/results, and an exact authority-specific denial diagnostic".to_owned(),
+        });
+        return Ok(toon);
+    }
     let process_contract_matches = json.state == ObservationState::Executed
         && json_outcome.status == super::ProcessStatus::Exited
         && json_outcome.status == toon_outcome.status
@@ -569,6 +658,44 @@ fn fixture_environment(
         );
     }
     Ok(environment)
+}
+
+fn reference_program_args(
+    tool: ToolKind,
+    contract: ContractKind,
+    input_format: FixtureFormat,
+    authored: &[String],
+    windows: bool,
+) -> Vec<String> {
+    let mut args = authored.to_vec();
+    if windows
+        && tool == ToolKind::Jq
+        && matches!(contract, ContractKind::ResultSequence | ContractKind::Error)
+        && input_format != FixtureFormat::Raw
+        && !raw_input_for_args(authored)
+    {
+        // Select jq's native byte-stream mode before any authored `--` boundary.
+        // Raw-input and CLI byte contracts must keep jq's original text mode.
+        args.insert(0, "--binary".to_owned());
+    }
+    args
+}
+
+fn raw_input_for_args(args: &[String]) -> bool {
+    let expanded = comparison::expand_short_comparison_options(args);
+    let mut arguments = expanded.iter();
+    while let Some(argument) = arguments.next() {
+        if argument == "--" || !argument.starts_with('-') {
+            break;
+        }
+        if matches!(argument.as_str(), "-R" | "--raw-input") {
+            return true;
+        }
+        for _ in 0..option_value_count(argument) {
+            arguments.next();
+        }
+    }
+    false
 }
 
 struct ExecutionResources {
@@ -712,6 +839,55 @@ fn normalization_error(
         wall_time_micros: Some(outcome.wall_time_micros),
         note: Some(error.to_string()),
     }
+}
+
+fn error_contract_failures(
+    case: &CompatibilityCase,
+    observations: &[ToolObservation],
+) -> Vec<super::ContractFailure> {
+    if case.expected.contract != ContractKind::Error {
+        return Vec::new();
+    }
+    observations.iter().filter(|observation| {
+        observation.tool == ToolKind::Tq
+            && observation.state == ObservationState::Executed
+            && !(observation.process_status == Some(super::ProcessStatus::Exited)
+                && observation.exit_code.is_some_and(|code| code != 0)
+                && comparison::expected_error(case.expected.error_class.as_deref(), observation.error_class)
+                && (case.adapters.tq.execution_mode.is_process()
+                    || embedded_denial_matches(case, observation)))
+    }).map(|observation| super::ContractFailure {
+        tool: observation.tool,
+        input_format: observation.input_format,
+        summary: if case.adapters.tq.execution_mode.is_process() {
+            "declared error contract requires a completed nonzero exit and the expected error class"
+        } else {
+            "declared error contract requires runtime-policy exit 5, empty stdout/results, and a redacted authority-specific denial diagnostic"
+        }.to_owned(),
+    }).collect()
+}
+
+fn embedded_denial_matches(case: &CompatibilityCase, observation: &ToolObservation) -> bool {
+    let (operations, authority): (&[&str], &str) = match case.adapters.tq.execution_mode {
+        super::ExecutionMode::Process => return true,
+        super::ExecutionMode::EmbeddedDenyEnvironment => (&["env", "$ENV"], "environment"),
+        super::ExecutionMode::EmbeddedDenyPlatform => (
+            &["now", "localtime", "strflocaltime", "input_filename"],
+            "platform",
+        ),
+    };
+    observation.state == ObservationState::Executed
+        && observation.process_status == Some(super::ProcessStatus::Exited)
+        && observation.error_class == Some(super::ErrorClass::RuntimePolicy)
+        && observation.exit_code == Some(5)
+        && observation.results.is_empty()
+        && observation.stdout_hex.as_deref() == Some("")
+        && operations.iter().any(|operation| {
+            let diagnostic = format!(
+                "tq: runtime error: {operation} requires {authority} access permitted by capability policy\n"
+            );
+            observation.stderr_hex.as_deref() == Some(encode_hex(diagnostic.as_bytes()).as_str())
+        })
 }
 
 fn semantic_diffs(observations: &[ToolObservation], compare_stderr: bool) -> Vec<SemanticDiff> {
@@ -1093,6 +1269,97 @@ mod tests {
 
     #[cfg(unix)]
     use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, time::Duration};
+
+    #[test]
+    fn windows_binary_reference_selection_preserves_raw_contracts_and_option_values() {
+        use super::reference_program_args;
+        use crate::compatibility::ContractKind;
+        let authored = vec![
+            "--arg".to_owned(),
+            "value".to_owned(),
+            "-R".to_owned(),
+            "--".to_owned(),
+        ];
+        let selected = reference_program_args(
+            ToolKind::Jq,
+            ContractKind::ResultSequence,
+            FixtureFormat::Json,
+            &authored,
+            true,
+        );
+        assert_eq!(
+            selected,
+            [vec!["--binary".to_owned()], authored.clone()].concat()
+        );
+        for (tool, contract, format, windows) in [
+            (
+                ToolKind::Jq,
+                ContractKind::RawBytes,
+                FixtureFormat::Json,
+                true,
+            ),
+            (
+                ToolKind::Jq,
+                ContractKind::ExitStatus,
+                FixtureFormat::Json,
+                true,
+            ),
+            (
+                ToolKind::Jq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Raw,
+                true,
+            ),
+            (ToolKind::Jq, ContractKind::Error, FixtureFormat::Raw, true),
+            (
+                ToolKind::Jq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Json,
+                false,
+            ),
+            (
+                ToolKind::Tq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Json,
+                true,
+            ),
+            (
+                ToolKind::Yq,
+                ContractKind::ResultSequence,
+                FixtureFormat::Json,
+                true,
+            ),
+        ] {
+            assert_eq!(
+                reference_program_args(tool, contract, format, &authored, windows),
+                authored
+            );
+        }
+        for raw_flag in ["-R", "--raw-input", "-Rs", "-nRc"] {
+            let args = vec![raw_flag.to_owned()];
+            assert_eq!(
+                reference_program_args(
+                    ToolKind::Jq,
+                    ContractKind::ResultSequence,
+                    FixtureFormat::Json,
+                    &args,
+                    true
+                ),
+                args
+            );
+        }
+        let from_file = vec!["-f".to_owned(), "program.jq".to_owned()];
+        assert_eq!(
+            reference_program_args(
+                ToolKind::Jq,
+                ContractKind::Error,
+                FixtureFormat::None,
+                &from_file,
+                true
+            ),
+            [vec!["--binary".to_owned()], from_file].concat()
+        );
+    }
 
     #[test]
     fn logical_json_case_expands_to_the_complete_native_input_matrix() {
@@ -1477,6 +1744,7 @@ mod tests {
         let report = super::run_case(
             &case,
             &[jq_identity, tq_identity],
+            None,
             directory.path(),
             Duration::from_secs(2),
         )
@@ -1556,8 +1824,14 @@ mod tests {
             runtime_libraries: Vec::new(),
         };
 
-        let report = super::run_case(&case, &[identity], directory.path(), Duration::from_secs(2))
-            .expect("runner case");
+        let report = super::run_case(
+            &case,
+            &[identity],
+            None,
+            directory.path(),
+            Duration::from_secs(2),
+        )
+        .expect("runner case");
         let observation = report
             .observations
             .iter()
@@ -1638,8 +1912,14 @@ mod tests {
             runtime_libraries: Vec::new(),
         };
 
-        let report = super::run_case(&case, &[identity], directory.path(), Duration::from_secs(2))
-            .expect("runner case");
+        let report = super::run_case(
+            &case,
+            &[identity],
+            None,
+            directory.path(),
+            Duration::from_secs(2),
+        )
+        .expect("runner case");
         let observation = report
             .observations
             .iter()

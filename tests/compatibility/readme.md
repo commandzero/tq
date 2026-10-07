@@ -18,12 +18,14 @@ eight [math boundary witnesses](reviews/jq-manual/math-boundaries.toon), eight
 [path boundary witnesses](reviews/jq-manual/path-boundaries.toon), and one
 [regex boundary witness](reviews/jq-manual/regex-boundaries.toon), for
 554 required cases before subsequent semantic and composition witnesses. The
-expanded execution campaign now contains 905 cases; this is a separate denominator
+expanded manual execution campaign now contains 952 cases; this is a separate denominator
 from the source examples and callable signatures. The arity case checks advertised availability, not function
 semantics. New witnesses supplement the original 518 cases; they cannot replace
-them or relax the 303 original exact-match requirements. The active
-[behavior audit](../../openspec/changes/achieve-jq-manual-parity/source-behavior-audit.md)
-tracks evidence still needed beyond the published examples.
+them or relax the strict gate's 303 original exact-match requirements. The archived
+[behavior audit](../../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/source-behavior-audit.md)
+preserves the source audit beyond published examples. The
+[closeout evidence](reviews/parity-closeout.toon) distinguishes completed implementation
+coverage from unresolved platform contracts transferred to #69/#70.
 The source-linked [semantic completeness index](reviews/jq-manual/completeness.toon)
 maps all 220 callable signatures to a bounded public-VM execution witness and
 keeps exact value/error/empty/flag/process verdicts in their owning ledgers.
@@ -42,7 +44,7 @@ cargo test -p tq-test-support --test compatibility_manual
 ```
 
 The separate reference check compares jq with the published manual outputs.
-It requires a jq 1.8 reference executable. Two imported output strings lose a
+It requires the pinned jq 1.8.2 reference executable. Two imported output strings lose a
 space; the inventory preserves the published text and records the verified
 reference output separately. The check sets `PAGER=less` for environment examples.
 
@@ -56,7 +58,8 @@ Execute the cases against jq and the current tq build:
 ```sh
 cargo build -p tq-cli -p tq-test-support --bins
 TQ_JQ=target/reference-build/jq/jq TQ_BIN=target/debug/tq \
-  target/debug/tq-compat run --profile full --json target/manual-compatibility.json | tq -x
+TQ_EMBEDDED_HOST=target/debug/tq-compat-embedded \
+  target/debug/tq-compat run --profile full --json target/manual-compatibility.json
 ```
 
 Use the full profile; smoke excludes jq-target cases. A covered example can
@@ -68,11 +71,116 @@ the query, and set `omit_query` for commands such as `--from-file` or `--help`.
 Set `expected.compare_stderr` for examples whose diagnostic bytes are observable
 results, such as `debug` and `stderr`.
 
+### Embedded capability-denial observations
+
+The shared full campaign keeps process CLI admission separate from embedded
+policy denial. `adapters.tq.execution_mode` is a closed enum: `process` (the
+omitted-field default), `embedded-deny-environment`, or
+`embedded-deny-platform`. Embedded modes are tq-only error contracts with
+`runtime-policy`, stdin input, and the original query; they cannot override the
+query, omit it, or supply authored CLI/trailing arguments. JSON/YAML/TOON input
+expansion and strict TOON/JSON companion matching remain unchanged.
+
+Build `tq-compat-embedded` together with the campaign binaries using `--bins`.
+It is a test-support subprocess host, not a new public tq option. It calls
+`parse_args_with_policy` and `run_with_io` with the selected authority explicitly
+false, admitting the other authority. The parent retains normal subprocess
+isolation, environment overrides, deadlines, and byte capture. Use
+`TQ_EMBEDDED_HOST` to select an immutable host explicitly; otherwise discovery
+checks beside `TQ_BIN`, then the repository's release/debug build directories.
+It never substitutes the process CLI or searches PATH for an embedded host.
+An invalid explicit override or missing required host fails the campaign.
+
+Each embedded case's `tq_execution` records its mode and actual host canonical
+path, version, byte count, and SHA-256. This identity replaces the top-level
+`tools` tq CLI identity **for that case's tq observations only**. Keep host,
+runner, and CLI builds together; do not claim that an embedded host tests an
+arbitrarily supplied `TQ_BIN` executable. Capture immutable executable hashes
+before/after release evidence runs.
+
+The shared runner enforces tq's declared error class even when no reference
+adapter applies. Embedded denial additionally requires runtime exit 5, empty
+stdout/results, and a single redacted authority-specific diagnostic without
+internal ambient names or the campaign sentinel. Semantic contract violations
+are recorded in per-case `contract_failures`, preserving actual bytes/statuses
+rather than recategorizing them as malformed output. They fail the command and
+cannot be counted as supported capabilities. These report fields default to
+absent/empty when reading historical schema-v1 reports; existing observation
+fields are unchanged. Consumers must inspect `contract_failures` as well as
+`semantic_diffs` and harness errors.
+
+A shared campaign can still exit zero with `observed-differences`; it is not the
+strict manual acceptance gate. Native-platform differences and calibrated
+performance acceptance remain separate evidence, not waived by this repair.
+Do not print ambient environment objects when reproducing denial failures;
+retain raw evidence only in ignored campaign storage.
+
+The macOS repair run on base `3e0dedb` plus the harness changes is retained at
+`target/compatibility/embedded-denial-closeout-3e0dedb/`: `full.json`, `full.log`,
+and before/after executable hash manifests. It used the reviewed jq 1.8.2
+reference and hash-checked yq 4.53.2. Both denial cases passed all three input
+representations with zero output, runtime-policy exit 5, and the embedded host
+identity. The 1,220-case campaign had 4,804 executed observations and no harness
+errors, but still failed: 93 cases had pairwise differences and four cases had
+12 declared-error-contract violations. At that point, the four stale contracts were
+`fold.foreach.partial-error` and `interpolation.partial-error` (declared
+`runtime-explicit`, observed `runtime-type-path`), `regex.unsupported-lookaround`
+(declared unsupported error, observed success), and `update.invalid-lvalue`
+(declared compile error, observed runtime error). This is repair evidence, not
+strict all-cases acceptance or a renewal of historical approvals.
+
+#### Independently verified catalog contract corrections
+
+The subsequent catalog closeout retains all four filters, inputs, and stable
+IDs. Pinned jq 1.8.2 and real tq executions independently establish:
+
+| Case | Required behavior |
+| --- | --- |
+| `fold.foreach.partial-error` | Emit `1`, then `3`, then raise `"boom"`; runtime exit 5 |
+| `interpolation.partial-error` | Emit `"before=1"`, then raise `"boom"`; runtime exit 5 |
+| `regex.unsupported-lookaround` | `test("(?=a)")` returns `true` on `"a"` and `"ba"`, `false` on `"b"`; successful result-sequence contract |
+| `update.invalid-lvalue` | `(1 + 2) = 3` fails at runtime with exit 5 and no stdout; the error is catchable |
+
+The three failures use the existing `runtime-type-path` normalized family.
+That family includes explicit `error(value)` as well as type/path failures;
+these two `error("boom")` filters are not reinterpreted as literal type errors.
+Regression tests require their exact output prefixes, diagnostics, and caught
+`"boom"` values, not just an arbitrary nonzero exit. The invalid-path regression
+also distinguishes runtime catchability from compile failure. jq and tq retain
+their different invalid-path diagnostic text; no byte-comparison relaxation or
+new disparity approval follows from correcting the error class.
+
+The historical `regex.unsupported-lookaround` ID stays unchanged for evidence
+provenance, but its title, capability tags, and adapter note now describe
+supported positive lookahead. Its baseline becomes **required**, not
+informative. Positive, negative, and non-anchored search witnesses guard against
+a constant boolean or a silently removed check. Historical review summaries
+remain historical and are not rewritten.
+
+Closeout evidence belongs under
+`target/compatibility/catalog-contract-closeout-3e0dedb/`, separate from the
+original failing run. It contains independent jq/tq probes, frozen-executable
+identities, a hashed current-source snapshot, full campaign observations, and a
+redacted summary. Pairwise differences remain observable even after declared
+contract and harness failures are eliminated; this does not grant strict
+manual or calibrated performance acceptance.
+
+Focused regression checks:
+
+```sh
+cargo test --locked -p tq-test-support --test compatibility_embedded \
+  --test compatibility_catalog_contracts --test compatibility_cases \
+  --test compatibility_fake_executables --test compatibility_schema \
+  --test compatibility_discovery --test compatibility_reporting
+TQ_JQ=target/reference-build/jq/jq cargo test --locked -p tq-test-support \
+  --test compatibility_catalog_contracts jq_reference -- --ignored
+```
+
 ### JSON equivalence and output size
 
-The [jq manual report](../../docs/tests/jq-manual/index.md) preserves a historical
-capture of compatibility verdicts, per-example outputs, and tokenizer counts.
-It is not a current-head completion report. Generate fresh full
+The [jq manual report](../../docs/tests/jq-manual/index.md) records the latest
+macOS comparison against pinned jq 1.8.2, including compatibility verdicts,
+per-example outputs, and tokenizer counts. It is not an all-platform completion report. Generate fresh full
 TOON evidence under ignored `target/` storage to retain executable identities,
 actual stdout, process outcomes, and reasons without committing campaign dumps.
 
@@ -125,7 +233,7 @@ rejects changed or unverified reference builds before executing cases. Reference
 installation paths are not pinned. Passing this gate alone
 does not establish complete manual compatibility.
 
-Release jobs use the official jq 1.8.1 `jq-linux-amd64` and
+Release jobs use the official jq 1.8.2 `jq-linux-amd64` and
 `jq-macos-arm64` artifacts with checked-in SHA-256 pins. The Linux artifact
 is statically linked, so it does not require the former Red Hat runtime
 libraries on the hosted Ubuntu runner. Explicit artifact overrides must still
@@ -174,20 +282,16 @@ Each approval must match the case fingerprint, executable identities, contract,
 and observed outputs. Unknown, stale, duplicate, and unlisted approvals fail.
 Approvals cannot excuse regressions outside the frozen gap inventory. Exact
 matches and disparities are counted separately; the default exact gate still
-rejects every disparity. See the [disparity policy](../../docs/jq-compatibility-disparities.md)
-for evidence and reconsideration requirements.
+rejects every disparity. See the [numbered difference list](../../docs/tests/jq-manual/coverage.md#differences-by-test)
+for current observations and their practical impact.
 
-The [macOS registry](reviews/disparities-aarch64-macos.toon) contains five
-reviewed observations renewed against the final macOS completion executable.
-It is tied to that recorded executable build, not a standing waiver for future
-builds or other targets. Revalidate observations before replacing their
-identities; never copy an old approval onto an unexamined mismatch. The [Linux
-completion report](../../docs/tests/comparison-x86-64-linux.md) records 896 exact
-results and nine reviewed observations across the same 905-case inventory, with
-compact JSON 867/876 and TOON 876/876. This is a completion-campaign
-checkpoint, not a claim that every remaining parity or release gate is complete.
-Its nine target-scoped approvals are bound to the recorded x86_64 executable;
-they do not waive another build or platform.
+The [macOS registry](reviews/disparities-aarch64-macos.toon) and
+[Linux registry](reviews/disparities-x86_64-linux.toon) retain target-scoped
+approval records. Each record is tied to its recorded executable build, not a
+standing waiver for future builds or other targets.
+
+Revalidate observations before replacing their identities.
+Never copy an old approval onto an unexamined mismatch.
 
 Token counts use the `o200k_base` and `cl100k_base` encodings over complete stdout,
 including trailing newlines. The token report's `Diff` value is TOON tokens minus

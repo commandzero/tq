@@ -73,13 +73,17 @@ pub fn compare_manual_with_disparities(
             .iter()
             .find(|case| case.id == id)
             .ok_or("unknown case ID")?;
+        if !case.has_valid_execution_mode() || !case.adapters.tq.execution_mode.is_process() {
+            return Err("manual comparison requires process adapters; embedded denial belongs to the shared campaign".into());
+        }
         rows.push(compare_case(case, &jq, &tq, root, timeout, &tokenizers)?);
     }
     let mut report = json!({
         "schema_version": 1,
         "corpus": catalog.identity,
         "tools": [jq, tq],
-        "method": "Original input fixture; structured cases independently compare jq with tq -o json, tq -o toon, and compact jq -c with tq -o json -c. Semantic JSON ignores presentation whitespace and object key order while preserving ordered results and exact decimal values. The compact campaign compares stdout bytes exactly; the TOON campaign uses LF-terminated TOON values by default and explicit --seq framing only for original sequence adapters; independently captured JSON results resolve TOON value boundaries, and decoding must consume the complete TOON stdout. Raw CLI cases retain their arguments and are assessed separately. Token totals use the o200k_base and cl100k_base encodings over successful default TOON output; explicit sequence output is excluded from size totals. Size totals include only successful jq/JSON/TOON-equivalent cases using default JSON encoder layouts, not compact JSON.",
+        "reference_execution": super::super::ReferenceExecution::for_host(),
+        "method": "Original input fixture; structured cases independently compare jq with tq -o json, tq -o toon, and compact jq -c with tq -o json -c. Semantic JSON ignores presentation whitespace and object key order while preserving ordered results and exact decimal values. The compact campaign compares stdout bytes exactly; the TOON campaign uses LF-terminated TOON values by default and explicit --seq framing only for original sequence adapters; independently captured JSON results resolve TOON value boundaries, and decoding must consume the complete TOON stdout. On Windows, jq --binary is prepended only to structured-input semantic/error programs and their compact JSON executions, selecting binary stdin/stdout/stderr without modifying captured bytes; raw-input programs and raw/exit-status CLI cases retain authored arguments and native text-mode CRLF, so their differences remain observable. The reference_execution field records the host and exact prefix arguments. Raw CLI cases retain their arguments and are assessed separately. Token totals use the o200k_base and cl100k_base encodings over successful default TOON output; explicit sequence output is excluded from size totals. Size totals include only successful jq/JSON/TOON-equivalent cases using default JSON encoder layouts, not compact JSON.",
         "cases": rows,
     });
     apply_reviewed_disparities(&mut report, approvals)?;
@@ -201,6 +205,7 @@ fn compare_case(
     let successful = successful_observation(&reference) && successful_observation(&actual);
     let json_equivalent = (structured && successful).then_some(reference.results == actual.results);
     let (verdict, reason) = case_verdict(case, &reference, &actual, &differences);
+    let presentation_note = presentation_note(case, &reference, &actual);
     let toon_equivalent = toon
         .as_ref()
         .filter(|_| successful_observation(&actual))
@@ -243,7 +248,71 @@ fn compare_case(
     if let Some(tokens) = tokens {
         row["tokens"] = tokens;
     }
+    if let Some(note) = presentation_note {
+        row["presentation_note"] = json!(note);
+    }
     Ok(row)
+}
+
+// Reporting only: catalog intent is insufficient without matching execution evidence.
+fn presentation_note(
+    case: &CompatibilityCase,
+    reference: &ToolObservation,
+    actual: &ToolObservation,
+) -> Option<String> {
+    if case.expected.contract != ContractKind::RawBytes
+        || !case
+            .capabilities
+            .iter()
+            .any(|capability| capability == "presentation-difference")
+        || !successful_observation(reference)
+        || !successful_observation(actual)
+        || reference.stderr_hex != actual.stderr_hex
+        || reference.error_class != actual.error_class
+    {
+        return None;
+    }
+    let rationale = case
+        .adapters
+        .tq
+        .note
+        .as_deref()
+        .filter(|note| !note.trim().is_empty())?;
+    let reference = decode_hex(reference.raw_stdout_hex.as_deref()?)?;
+    let actual = decode_hex(actual.raw_stdout_hex.as_deref()?)?;
+    if reference == actual || strip_sgr(&reference)? != strip_sgr(&actual)? {
+        return None;
+    }
+    Some(format!(
+        "Expected presentation difference: {rationale} JSON data and process behavior agree; ANSI styling differs"
+    ))
+}
+
+fn strip_sgr(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut stripped = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != 0x1b {
+            stripped.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+        if bytes.get(index + 1) != Some(&b'[') {
+            return None;
+        }
+        let mut end = index + 2;
+        while bytes
+            .get(end)
+            .is_some_and(|byte| byte.is_ascii_digit() || *byte == b';')
+        {
+            end += 1;
+        }
+        if bytes.get(end) != Some(&b'm') {
+            return None;
+        }
+        index = end + 1;
+    }
+    Some(stripped)
 }
 
 // The JSON execution provides ordered value boundaries without changing input
@@ -632,7 +701,10 @@ fn successful_observation(value: &ToolObservation) -> bool {
         && value.process_status == Some(super::super::ProcessStatus::Exited)
 }
 
-fn expected_error(expected: Option<&str>, actual: Option<super::super::ErrorClass>) -> bool {
+pub(super) fn expected_error(
+    expected: Option<&str>,
+    actual: Option<super::super::ErrorClass>,
+) -> bool {
     expected.is_none_or(|expected| {
         let expected = if expected == "compile" {
             "query-compile"

@@ -1,9 +1,14 @@
 //! Timeout-safe subprocess execution and capture.
 
+#[cfg(windows)]
+#[path = "process_windows.rs"]
+pub(crate) mod windows;
+
+use std::{collections::BTreeMap, io, path::PathBuf, time::Duration};
+
+#[cfg(not(windows))]
 use std::{
-    collections::BTreeMap,
-    io::{self, Read, Write},
-    path::PathBuf,
+    io::{Read, Write},
     process::{Command, Stdio},
     sync::{
         Arc,
@@ -11,7 +16,7 @@ use std::{
         mpsc::{self, Receiver},
     },
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use serde::{Deserialize, Serialize};
@@ -31,8 +36,16 @@ use nix::{
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use rustix::process::{Pid as RustixPid, WaitId, WaitIdOptions, waitid};
 
+// macOS std creates capture pipes with pipe(), then sets FD_CLOEXEC in
+// separate calls. Another compatibility spawn in that gap can inherit an
+// unrelated endpoint, including into a descendant outside our owned group.
+// Protect only pipe creation/spawn, not child execution or capture draining.
+#[cfg(target_os = "macos")]
+static CAPTURE_SPAWN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(unix)]
 const CAPTURE_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
+#[cfg(not(windows))]
 const CAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 /// Complete isolated subprocess request.
@@ -118,7 +131,7 @@ pub struct BoundedProcessOutcome {
 /// Stable harness process failures.
 #[derive(Debug, Error)]
 pub enum ProcessError {
-    /// Subprocess capture requires macOS/Linux non-consuming child observation.
+    /// Subprocess capture requires a supported process-tree isolation backend.
     #[error("subprocess capture is unsupported on this platform")]
     Unsupported,
     /// Process creation or lifecycle I/O failed.
@@ -127,13 +140,41 @@ pub enum ProcessError {
     /// A capture worker panicked.
     #[error("subprocess capture worker panicked")]
     CaptureWorker,
-    /// A Unix capture pipe remained open after the bounded drain interval.
+    /// A capture pipe remained open after the bounded drain interval.
     #[error("subprocess capture drain exceeded the bounded interval")]
     CaptureTimeout,
 }
 
+/// Runs a subprocess with child-local environment overrides on Windows.
+///
+/// # Errors
+///
+/// Returns the same process and capture errors as [`run_process`].
+#[cfg(windows)]
+pub fn run_process_with_environment(
+    invocation: &Invocation,
+    environment: &BTreeMap<String, String>,
+) -> Result<ProcessOutcome, ProcessError> {
+    windows::run(invocation, environment, None).map(|result| result.outcome)
+}
+
+/// Runs a Windows subprocess with an explicit per-stream output bound.
+///
+/// # Errors
+///
+/// Returns the same process and capture errors as [`run_process`].
+#[cfg(windows)]
+pub fn run_process_with_environment_bounded(
+    invocation: &Invocation,
+    environment: &BTreeMap<String, String>,
+    output_limit: u64,
+) -> Result<BoundedProcessOutcome, ProcessError> {
+    windows::run(invocation, environment, Some(output_limit))
+}
+
+#[cfg(not(windows))]
 const fn capture_platform_supported() -> bool {
-    cfg!(any(target_os = "macos", target_os = "linux"))
+    cfg!(any(target_os = "macos", target_os = "linux", windows))
 }
 
 /// Runs one subprocess with isolated streams and a hard wall-time limit.
@@ -148,6 +189,7 @@ const fn capture_platform_supported() -> bool {
 /// On macOS and Linux, ordinary descendants are placed in a dedicated process
 /// group so inherited capture pipes are closed during cleanup; descendants that
 /// create a new session are outside that cleanup boundary.
+/// Windows uses a Job Object to contain and clean up descendants.
 /// Other platforms return [`ProcessError::Unsupported`] before spawning.
 pub fn run_process(invocation: &Invocation) -> Result<ProcessOutcome, ProcessError> {
     run_process_with_environment(invocation, &BTreeMap::new())
@@ -158,8 +200,10 @@ pub fn run_process(invocation: &Invocation) -> Result<ProcessOutcome, ProcessErr
 /// # Errors
 ///
 /// Returns the same process and capture errors as [`run_process`].
-/// On platforms other than macOS and Linux it returns
+/// Windows uses cancellable asynchronous pipes and Job Object isolation.
+/// Platforms other than macOS, Linux, and Windows return
 /// [`ProcessError::Unsupported`] before spawning.
+#[cfg(not(windows))]
 pub fn run_process_with_environment(
     invocation: &Invocation,
     environment: &BTreeMap<String, String>,
@@ -266,6 +310,7 @@ pub fn run_process_with_environment(
     })
 }
 
+#[cfg(not(windows))]
 fn wait_for_child(
     child: &mut std::process::Child,
     timeout: Duration,
@@ -282,6 +327,7 @@ fn wait_for_child(
     }
 }
 
+#[cfg(not(windows))]
 fn wait_for_bounded_child(
     child: &mut std::process::Child,
     started: Instant,
@@ -305,10 +351,12 @@ fn wait_for_bounded_child(
     }
 }
 
+#[cfg(not(windows))]
 fn reap_exited_child(child: &mut std::process::Child) -> io::Result<std::process::ExitStatus> {
     reap_exited_child_with_cleanup(child, cleanup_process_group)
 }
 
+#[cfg(not(windows))]
 fn reap_exited_child_with_cleanup<F>(
     child: &mut std::process::Child,
     cleanup: F,
@@ -321,6 +369,7 @@ where
     preserve_cleanup_error(cleanup_error, exit)
 }
 
+#[cfg(not(windows))]
 fn preserve_cleanup_error<T>(
     cleanup_error: Option<io::Error>,
     result: io::Result<T>,
@@ -336,6 +385,7 @@ fn preserve_cleanup_error<T>(
     }
 }
 
+#[cfg(not(windows))]
 fn merge_cleanup_errors(first: Option<io::Error>, second: Option<io::Error>) -> Option<io::Error> {
     match (first, second) {
         (None, error) | (error, None) => error,
@@ -349,6 +399,7 @@ fn merge_cleanup_errors(first: Option<io::Error>, second: Option<io::Error>) -> 
     }
 }
 
+#[cfg(not(windows))]
 fn spawn_pipe_error(child: &mut std::process::Child, pipe: &str) -> ProcessError {
     let stop_capture = AtomicBool::new(false);
     let mut child_reaped = false;
@@ -360,6 +411,7 @@ fn spawn_pipe_error(child: &mut std::process::Child, pipe: &str) -> ProcessError
     )
 }
 
+#[cfg(not(windows))]
 fn process_error_after_spawn(
     primary: ProcessError,
     child: &mut std::process::Child,
@@ -375,6 +427,7 @@ fn process_error_after_spawn(
     )
 }
 
+#[cfg(not(windows))]
 fn process_error_after_spawn_with_cleanup<F>(
     primary: ProcessError,
     child: &mut std::process::Child,
@@ -403,6 +456,7 @@ where
 /// an ECHILD result means the child was reaped elsewhere and is therefore
 /// treated as complete. All other observation failures still attempt bounded
 /// cleanup, with both errors retained for the caller.
+#[cfg(not(windows))]
 fn cleanup_owned_child_after_error_with<F>(
     child: &mut std::process::Child,
     child_reaped: &mut bool,
@@ -448,6 +502,7 @@ where
     }
 }
 
+#[cfg(not(windows))]
 fn cleanup_live_child<F>(
     child: &mut std::process::Child,
     child_reaped: &mut bool,
@@ -497,11 +552,12 @@ fn is_child_reaped_error(error: &io::Error) -> bool {
     error.raw_os_error() == Some(Errno::ECHILD as i32)
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn is_child_reaped_error(_error: &io::Error) -> bool {
     false
 }
 
+#[cfg(not(windows))]
 fn child_has_exited(child: &mut std::process::Child) -> io::Result<bool> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
@@ -533,6 +589,7 @@ fn child_has_exited(child: &mut std::process::Child) -> io::Result<bool> {
     }
 }
 
+#[cfg(not(windows))]
 struct SpawnedProcess {
     child: std::process::Child,
     stdin: std::process::ChildStdin,
@@ -540,6 +597,7 @@ struct SpawnedProcess {
     stderr: std::process::ChildStderr,
 }
 
+#[cfg(not(windows))]
 fn spawn_process(
     invocation: &Invocation,
     environment: &BTreeMap<String, String>,
@@ -560,7 +618,13 @@ fn spawn_process(
     if let Some(current_dir) = &invocation.current_dir {
         command.current_dir(current_dir);
     }
-    let mut child = command.spawn()?;
+    let mut child = {
+        #[cfg(target_os = "macos")]
+        let _spawn_guard = CAPTURE_SPAWN_LOCK
+            .lock()
+            .map_err(|_| io::Error::other("compatibility capture spawn lock poisoned"))?;
+        command.spawn()?
+    };
     let Some(stdin) = child.stdin.take() else {
         return Err(spawn_pipe_error(&mut child, "stdin"));
     };
@@ -593,7 +657,9 @@ fn spawn_process(
 /// On macOS and Linux, ordinary descendants are placed in a dedicated process
 /// group so inherited capture pipes are closed during cleanup; descendants that
 /// create a new session are outside that cleanup boundary.
+/// Windows uses a Job Object to contain and clean up descendants.
 /// Other platforms return [`ProcessError::Unsupported`] before spawning.
+#[cfg(not(windows))]
 pub fn run_process_with_environment_bounded(
     invocation: &Invocation,
     environment: &BTreeMap<String, String>,
@@ -671,6 +737,7 @@ pub fn run_process_with_environment_bounded(
     })
 }
 
+#[cfg(not(windows))]
 fn spawn_capture<T, F>(capture: F) -> (thread::JoinHandle<io::Result<T>>, Receiver<()>)
 where
     F: FnOnce() -> io::Result<T> + Send + 'static,
@@ -691,22 +758,26 @@ where
 /// any later lifecycle step can otherwise detach a worker that is still
 /// waiting on a pipe retained by a descendant. Setting the shared flag during
 /// unwinding lets that worker leave its bounded poll loop.
+#[cfg(not(windows))]
 struct CaptureStopGuard {
     stop_capture: Arc<AtomicBool>,
 }
 
+#[cfg(not(windows))]
 impl CaptureStopGuard {
     fn new(stop_capture: Arc<AtomicBool>) -> Self {
         Self { stop_capture }
     }
 }
 
+#[cfg(not(windows))]
 impl Drop for CaptureStopGuard {
     fn drop(&mut self) {
         self.stop_capture.store(true, Ordering::Release);
     }
 }
 
+#[cfg(not(windows))]
 fn finish_capture<T>(
     worker: thread::JoinHandle<io::Result<T>>,
     done: &Receiver<()>,
@@ -738,8 +809,10 @@ where
     Ok((result, stopped))
 }
 
+#[cfg(not(windows))]
 type FinishedCaptures<A, B, C> = ((A, bool), (B, bool), (C, bool));
 
+#[cfg(not(windows))]
 fn finish_captures<A, B, C>(
     stdin_worker: thread::JoinHandle<io::Result<A>>,
     stdin_done: &Receiver<()>,
@@ -770,6 +843,7 @@ where
     }
 }
 
+#[cfg(not(windows))]
 fn combine_process_errors(primary: ProcessError, additional: Option<ProcessError>) -> ProcessError {
     match additional {
         None => primary,
@@ -779,6 +853,7 @@ fn combine_process_errors(primary: ProcessError, additional: Option<ProcessError
     }
 }
 
+#[cfg(not(windows))]
 fn read_all<R: CaptureReader>(reader: &mut R, stop_capture: &AtomicBool) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut buffer = [0; 8192];
@@ -791,11 +866,13 @@ fn read_all<R: CaptureReader>(reader: &mut R, stop_capture: &AtomicBool) -> io::
     }
 }
 
+#[cfg(not(windows))]
 struct BoundedRead {
     bytes: Vec<u8>,
     limit: Option<OutputLimit>,
 }
 
+#[cfg(not(windows))]
 struct BoundedCaptureWorkers {
     stop_capture: Arc<AtomicBool>,
     stdout_limited: Arc<AtomicBool>,
@@ -808,6 +885,7 @@ struct BoundedCaptureWorkers {
     stderr_done: Receiver<()>,
 }
 
+#[cfg(not(windows))]
 impl BoundedCaptureWorkers {
     fn finish(self) -> Result<FinishedCaptures<(), BoundedRead, BoundedRead>, ProcessError> {
         let Self {
@@ -832,6 +910,7 @@ impl BoundedCaptureWorkers {
     }
 }
 
+#[cfg(not(windows))]
 fn spawn_bounded_capture_workers(
     mut stdin: std::process::ChildStdin,
     mut stdout: std::process::ChildStdout,
@@ -885,6 +964,7 @@ fn spawn_bounded_capture_workers(
     }
 }
 
+#[cfg(not(windows))]
 fn finish_bounded_captures(
     workers: BoundedCaptureWorkers,
     child: &mut std::process::Child,
@@ -920,6 +1000,7 @@ fn finish_bounded_captures(
     ))
 }
 
+#[cfg(not(windows))]
 fn read_limited<R: CaptureReader>(
     reader: &mut R,
     stream: OutputStream,
@@ -957,6 +1038,7 @@ fn read_limited<R: CaptureReader>(
     }
 }
 
+#[cfg(not(windows))]
 trait CaptureReader: Read {
     fn read_with_stop(&mut self, buffer: &mut [u8], stop_capture: &AtomicBool)
     -> io::Result<usize>;
@@ -973,7 +1055,7 @@ impl<R: Read + AsFd> CaptureReader for R {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 impl<R: Read> CaptureReader for R {
     fn read_with_stop(
         &mut self,
@@ -1067,7 +1149,7 @@ fn poll_until_ready(
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn write_all_until_stopped<W: Write>(
     writer: &mut W,
     bytes: &[u8],
@@ -1080,6 +1162,7 @@ fn write_all_until_stopped<W: Write>(
     }
 }
 
+#[cfg(not(windows))]
 fn terminate_child(child: &mut std::process::Child) -> io::Result<std::process::ExitStatus> {
     #[cfg(unix)]
     {
@@ -1097,6 +1180,7 @@ fn terminate_child(child: &mut std::process::Child) -> io::Result<std::process::
     }
 }
 
+#[cfg(not(windows))]
 const CHILD_REAP_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[cfg(unix)]
@@ -1135,6 +1219,7 @@ where
     preserve_cleanup_error(cleanup_error, exit)
 }
 
+#[cfg(not(windows))]
 fn reap_child_after_termination(
     child: &mut std::process::Child,
 ) -> io::Result<std::process::ExitStatus> {
@@ -1164,6 +1249,7 @@ fn signal_error(pid: Pid, error: Errno) -> io::Error {
 /// Kill the dedicated child process group so ordinary descendants release the
 /// inherited capture pipes before the reader workers are joined. A descendant
 /// that creates a new session is outside this cleanup boundary.
+#[cfg(not(windows))]
 fn cleanup_process_group(child: &mut std::process::Child) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -1262,6 +1348,7 @@ fn macos_live_members_error(pid: Pid, members: &[u32]) -> io::Error {
     ))
 }
 
+#[cfg(not(windows))]
 fn read_retry(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<usize> {
     loop {
         match reader.read(buffer) {
@@ -1298,7 +1385,7 @@ fn signal(status: std::process::ExitStatus) -> Option<i32> {
     status.signal()
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn signal(_status: std::process::ExitStatus) -> Option<i32> {
     None
 }
@@ -1547,7 +1634,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(any(target_os = "macos", target_os = "linux"))))]
+#[cfg(all(test, not(any(target_os = "macos", target_os = "linux", windows))))]
 mod unsupported_platform_tests {
     use super::*;
 

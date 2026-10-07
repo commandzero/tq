@@ -230,7 +230,7 @@ clauses[17]{id,source,source_line,behavior,evidence_ref,status}:
   builtin-consumers,jq-manual/advanced-features.md,289-307,first-last-nth-one-and-two-arity-empty-and-error,crates/tq-core/tests/manual_grammar.rs::pull_consumer_arities_preserve_direct_index_and_empty_behavior,focused-test
   builtin-recursive,jq-manual/builtin-operators-and-functions.md,1144-1200,repeat-until-while-recurse-walk-cardinality-and-bounds,crates/tq-core/tests/recursive_compat.rs::recursive_conditions_preserve_empty_and_multi_result_predicates,focused-test
   regex-flags,jq-manual/regular-expressions.md,41-56,m-p-s-x-i-and-inline-flags,manual.regex.flag-m,cases
-  regex-longest,jq-manual/regular-expressions.md,45,longest-l-is-explicitly-bounded,crates/tq-core/tests/regex_compat.rs::longest_match_remains_an_explicit_safe_engine_limitation,focused-test
+  regex-longest,jq-manual/regular-expressions.md,45,longest-l-is-explicitly-bounded,crates/tq-core/tests/regex_compat.rs::regex_longest_match_bounds_candidate_searches,focused-test
   regex-array-forms,jq-manual/regular-expressions.md,22,pattern-and-flag-array-overloads,manual.regex.array-test,cases
   regex-empty-capture,jq-manual/regular-expressions.md,117-219,empty-no-match-capture-and-replacement-cardinality,manual.audit.regex.scan-single-capture,cases-and-test
   math-boundaries,jq-manual/math.md,16-28,domain-nonfinite-signed-zero-and-decomposition,crates/tq-core/tests/math_compat.rs::finite_and_normal_selectors_match_jq_nonfinite_contract,cases-and-test
@@ -241,7 +241,7 @@ clauses[17]{id,source,source_line,behavior,evidence_ref,status}:
   cli-colors,jq-manual/invoking-jq.md,all,option-process-and-color-palette-contracts,crates/tq-cli/tests/colors.rs::explicit_color_overrides_no_color_and_last_flag_wins,focused-tests
   builtin-path-composition,jq-manual/builtin-operators-and-functions.md,292-370,called path/getpath/setpath/delpaths composition preserves path ordering and cardinality,crates/tq-core/tests/user_path_builtin_composition.rs::getpath_and_setpath_work_through_called_defs_and_captured_values,focused-tests
   builtin-sql-composition,jq-manual/builtin-operators-and-functions.md,1480-1496,IN/INDEX/JOIN argument ordering typed keys and streaming cardinality,crates/tq-core/tests/user_relational_composition.rs::join_two_three_and_four_argument_forms_cross_called_boundaries,focused-tests
-clause_evidence[71]{clause_id,evidence_kind,evidence_ref}:
+clause_evidence[73]{clause_id,evidence_kind,evidence_ref}:
   builtin-empty,focused-public-test,crates/tq-core/tests/manual_grammar.rs::pull_consumers_match_manual_generator_examples
   builtin-error,catalog-case,manual-bof-prose-halt-error
   builtin-error,catalog-case,manual.invoking.halt-error
@@ -261,7 +261,9 @@ clause_evidence[71]{clause_id,evidence_kind,evidence_ref}:
   regex-flags,catalog-case,manual.regex.flag-s
   regex-flags,catalog-case,manual.regex.fence-whitespace-extended
   regex-flags,catalog-case,manual.regex.fence-inline-flags
-  regex-longest,focused-public-test,crates/tq-core/tests/regex_compat.rs::longest_match_remains_an_explicit_safe_engine_limitation
+  regex-longest,focused-public-test,crates/tq-core/tests/regex_compat.rs::regex_longest_match_bounds_candidate_searches
+  regex-longest,focused-public-test,crates/tq-core/tests/regex_compat.rs::regex_longest_match_selects_longer_alternative
+  regex-longest,focused-public-test,crates/tq-core/tests/regex_compat.rs::regex_longest_match_rejects_whole_pattern_recursion_without_changing_normal_mode
   regex-array-forms,catalog-case,manual.regex.array-test
   regex-array-forms,catalog-case,manual.regex.array-match
   regex-array-forms,catalog-case,manual.regex.array-capture

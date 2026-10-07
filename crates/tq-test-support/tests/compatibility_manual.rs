@@ -23,7 +23,12 @@ fn jq_reference_matches_the_published_manual_results() {
     .expect("manual source inventory");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let executable = std::env::var_os("TQ_JQ").map_or_else(
-        || root.join("target/reference-build/jq/jq"),
+        || {
+            root.join(format!(
+                "target/reference-build/jq/jq{}",
+                std::env::consts::EXE_SUFFIX
+            ))
+        },
         |path| root.join(path),
     );
     let pin = tq_test_support::fixture_data::read(
@@ -74,7 +79,14 @@ fn jq_reference_matches_the_published_manual_results() {
             let actual = run_process_with_environment(
                 &Invocation {
                     executable: executable.clone(),
-                    args: vec![example["query"].as_str().expect("query").to_owned()],
+                    args: if cfg!(windows) {
+                        vec![
+                            "--binary".to_owned(),
+                            example["query"].as_str().expect("query").to_owned(),
+                        ]
+                    } else {
+                        vec![example["query"].as_str().expect("query").to_owned()]
+                    },
                     stdin: example["input"]
                         .as_str()
                         .expect("input")

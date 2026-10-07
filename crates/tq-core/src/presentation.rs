@@ -277,7 +277,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "output limit");
-        assert!(output.output.is_empty());
+        assert_eq!(output.output, [] as [u8; 0]);
         output.remaining = CHUNK + 1;
         assert!(
             write_span(

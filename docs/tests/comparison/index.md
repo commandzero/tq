@@ -16,9 +16,67 @@ native accounting path separately. They are helper controls, not jq/yq/tq
 workload measurements. Every workload table below comes from the full native
 rerun; no wrapper-based measurements are included.
 
+## Native jq compatibility closeout evidence
+
+The [jq manual platform results](../jq-manual/coverage.md#native-platform-results)
+and [durable closeout record](../../../tests/compatibility/reviews/parity-closeout.toon)
+identify the latest 2026-10-06 macOS **newhelp-final** and Linux **help-final**
+source-bound release runs (884-file snapshots, base `3e0dedb` plus uncommitted
+fixes; pinned jq 1.8.2). Final `args.rs` help wording/regression clarifies CLI
+ambient access versus embedded admission without changing policy logic.
+Earlier artifacts remain checkpoints, not same-source/binary proof.
+macOS records 943/952 primary, 919/921 compact, and
+921/921 TOON matches; Linux records 937/952, 913/921, and 921/921. Both preserve
+518 original cases and 303 protected exact contracts; strict manual exit 1
+remains. Corrected full campaigns cover 1,220 cases and 4,804 executed
+observations with zero harness errors/declared-contract failures, but remain
+`observed-differences`, not exact acceptance. macOS reuses an independently
+source-bound `embedded-denial-p2-closeout-3e0dedb` campaign that predates the help
+fix: equal source applied only to late-p2, not final-help. The only crate-source
+delta is help wording/test; diagnostic relevance is not execution of final-help
+binaries, whose CLI/helper/embedded hashes differ. Linux reruns the full campaign
+with final-help binaries. P2 fakehost regressions independently enforce denial
+and JSON companion contracts without disclosure. Linux's final workspace records
+1,891 passed, 0 failed and 11 ignored; four reference/relocation entries explicitly
+pass separately. macOS final full preflight/all-feature workspace pass. Ignored
+accounting tests and these correctness runs establish no calibration.
+
+Windows now has native release/default renewal in
+`target/closeout/windows/final-286b5f6/native`: **912/952** primary,
+**879/921** compact, **921/921** TOON and **60 unique differences** under #69.
+All 303 protected IDs are present, but only **291 primary** and **289
+primary-plus-compact** match—not 303 exact as on macOS/Linux. Its full campaign
+covers 1,220 cases/4,804 executed observations with zero harness/contract failures
+and **146 difference cases**. All 297 CLI composition cases execute, retaining
+8 math/reference-availability differences; 297 embedded/resource witnesses pass.
+Final all-feature workspace, strict Clippy and formatting pass; 10 entries remain
+ignored, with five reference tests explicitly passed separately. No unknown
+workspace pass total or calibrated performance result is implied.
+
+Windows source is `286b5f6` plus one test-only catalog-reference overlay, with
+exact source/profile/frozen binary mapping—not a full release rebuild or campaign
+rerun after the test fix. Product/helper code remains unchanged, including relative
+to macOS/Linux final-help sources. Actual system SSH/SCP succeeded and execution
+was native PowerShell; earlier macOS-client failures are historical. No security
+changes. Windows v6 raw evidence remains retained and separately hash-scoped.
+Live #69/#70/#31 scope-transfer bodies were verified at the preceding 2026-10-06
+checkpoint. The user-approved
+scope transfer leaves the enumerated Windows 60 under [#69](https://github.com/commandzero/tq/issues/69)
+and Linux 15 under [#70](https://github.com/commandzero/tq/issues/70), unresolved,
+with exact witnesses retained for reconsideration after platform/reference fixes.
+It does not renew approvals or establish an all-platform pass.
+
+Calibration and calibrated performance acceptance remain deferred under
+[#31](https://github.com/commandzero/tq/issues/31) and platform follow-ups.
+No fresh calibration is established on any platform; Windows same-child
+accounting checks are not calibration or macOS proof. Unfinished macOS
+calibration and affected benchmark comparisons remain unpublished as accepted
+performance evidence. These correctness runs do not replace the historical
+workload timing tables below.
+
 ## Current allocator diagnostic
 
-The [mimalloc versus system allocator summary](mimalloc-vs-devault.md) records
+The [mimalloc versus system allocator summary](mimalloc-vs-default.md) records
 the 2026-09-26 extended comparison with jq 1.8.1 and the default mimalloc
 build of tq 0.4.0. Its timing and memory measurements are diagnostic: the
 campaigns lack linked native timing-calibration and launch-isolation evidence.

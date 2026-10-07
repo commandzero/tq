@@ -225,10 +225,480 @@ fn empty_replacement_stream_preserves_the_original_input() {
 }
 
 #[test]
-fn longest_match_remains_an_explicit_safe_engine_limitation() {
-    let error = evaluate_with_limits(r#"match("a|ab"; "l")"#, r#""ab""#, VmLimits::default())
-        .expect_err("longest-match mode is not available in fancy-regex");
-    assert!(matches!(error, VmError::Unsupported { operation } if operation.contains("flag 'l'")));
+fn regex_longest_match_selects_longer_alternative() {
+    assert_eq!(
+        evaluate(r#"match("a|ab"; "l")"#, r#""ab""#)[0].to_string(),
+        r#"{"offset":0,"length":2,"string":"ab","captures":[]}"#
+    );
+}
+
+#[test]
+fn regex_longest_match_uses_consumed_bytes_across_start_positions() {
+    for (input, pattern, expected) in [
+        (
+            r#""abXYZ""#,
+            "a|XYZ",
+            r#"{"offset":2,"length":3,"string":"XYZ","captures":[]}"#,
+        ),
+        (
+            r#""éaa""#,
+            "é|aa",
+            r#"{"offset":0,"length":1,"string":"é","captures":[]}"#,
+        ),
+        (
+            r#""aé""#,
+            "a|é",
+            r#"{"offset":1,"length":1,"string":"é","captures":[]}"#,
+        ),
+        (
+            r#""ab""#,
+            r"a\Kb|ab",
+            r#"{"offset":1,"length":1,"string":"b","captures":[]}"#,
+        ),
+    ] {
+        let query = format!("match({}; \"l\")", serde_json::to_string(pattern).unwrap());
+        assert_eq!(evaluate(&query, input)[0].to_string(), expected);
+    }
+}
+
+#[test]
+fn regex_longest_match_preserves_engine_paths_and_full_input_context() {
+    for (pattern, expected) in [
+        ("a.*?", "ab"),
+        ("(?>a|ab)", "a"),
+        ("a(?=b)|ab", "ab"),
+        ("a(?!b)|b", "b"),
+        ("a$|b", "b"),
+        ("(?<=a)b|a", "a"),
+    ] {
+        let query = format!(
+            "match({}; \"l\").string",
+            serde_json::to_string(pattern).unwrap()
+        );
+        assert_eq!(evaluate(&query, r#""ab""#), [Value::string(expected)]);
+    }
+    assert_eq!(
+        evaluate(r#"match("(a|ab)(b?)"; "l")"#, r#""ab""#)[0].to_string(),
+        r#"{"offset":0,"length":2,"string":"ab","captures":[{"offset":0,"length":1,"string":"a","name":null},{"offset":1,"length":1,"string":"b","name":null}]}"#
+    );
+}
+
+#[test]
+fn regex_longest_match_is_shared_by_all_builtins_and_user_calls() {
+    assert_eq!(
+        evaluate(
+            r#"def call: match(["a|ab", "l"]); [call.string, test("a|ab"; "l"), capture("(?<x>a|ab)"; "l"), scan("a|ab"; "l"), split("a|ab"; "l"), splits("a|ab"; "l"), sub("a|ab"; "X"; "l"), gsub("a|ab"; "X"; "l")]"#,
+            r#""ab""#,
+        )[0].to_string(),
+        r#"["ab",true,{"x":"ab"},"ab",["",""],"","","X","X"]"#
+    );
+}
+
+#[test]
+fn regex_longest_match_composes_with_flags_and_global_empty_matches() {
+    for query in [
+        r#"match("a|ab # trailing comment"; "lx").string"#,
+        r#"match("(?x)a|ab # trailing comment"; "l").string"#,
+        r#"match("A|AB"; "li").string"#,
+    ] {
+        assert_eq!(evaluate(query, r#""ab""#), [Value::string("ab")]);
+    }
+    for flag in ["m", "p"] {
+        let query = format!("match(\"a.*?\"; \"l{flag}\").string");
+        assert_eq!(evaluate(&query, r#""a\nb""#), [Value::string("a\nb")]);
+    }
+    assert_eq!(
+        evaluate(
+            r#"[match("a|ab|XYZ"; "lg") | [.offset, .string]]"#,
+            r#""abXYZab""#
+        )[0]
+        .to_string(),
+        r#"[[2,"XYZ"],[5,"ab"]]"#
+    );
+    assert_eq!(
+        evaluate(r#"[match(""; "lg") | .offset]"#, r#""ab""#)[0].to_string(),
+        "[0,1,2]"
+    );
+    assert_eq!(
+        evaluate(r#"[match(""; "lgn")]"#, r#""ab""#)[0].to_string(),
+        "[]"
+    );
+    assert_eq!(
+        evaluate(r#"[match("|ab"; "lgn") | .string]"#, r#""ab""#)[0].to_string(),
+        r#"["ab"]"#
+    );
+    assert_eq!(
+        evaluate(r#"[match("z"; "l")]"#, r#""ab""#)[0].to_string(),
+        "[]"
+    );
+}
+
+#[test]
+fn regex_longest_match_global_keeps_empty_match_after_nonempty_match() {
+    assert_eq!(
+        evaluate(r#"[match("|ab"; "lg") | [.offset, .string]]"#, r#""abb""#)[0].to_string(),
+        r#"[[0,"ab"],[2,""],[3,""]]"#
+    );
+}
+
+#[test]
+fn regex_longest_match_empty_capture_keeps_jq_compact_field_order() {
+    assert_eq!(
+        evaluate(r#"match("(a|ab)(b?)"; "l")"#, r#""a""#)[0].to_string(),
+        r#"{"offset":0,"length":1,"string":"a","captures":[{"offset":0,"length":1,"string":"a","name":null},{"offset":1,"string":"","length":0,"name":null}]}"#
+    );
+}
+
+#[test]
+fn regex_longest_match_nonempty_flag_counts_consumption_before_keep_reset() {
+    assert_eq!(
+        evaluate(r#"match("a\\K"; "ln")"#, r#""a""#)[0].to_string(),
+        r#"{"offset":1,"length":0,"string":"","captures":[]}"#
+    );
+}
+
+#[test]
+fn regex_longest_match_bounded_patterns_fit_small_work_budget() {
+    let input = serde_json::to_string(&format!("a{}", "b".repeat(500))).unwrap();
+    for (pattern, expected) in [("a", "a"), ("a|ab", "ab")] {
+        let query = format!(
+            "match({}; \"l\").string",
+            serde_json::to_string(pattern).unwrap()
+        );
+        assert_eq!(
+            evaluate_with_limits(
+                &query,
+                &input,
+                VmLimits {
+                    regex_backtrack_limit: 4_000,
+                    ..VmLimits::default()
+                }
+            )
+            .expect("bounded matches must not spend the budget probing haystack-sized endpoints"),
+            [Value::string(expected)]
+        );
+    }
+}
+
+#[test]
+fn regex_longest_match_bounds_preserve_unicode_flags_and_context() {
+    for (pattern, flags, input, expected) in [
+        (r"\x61{1,2}|abc", "l", "abc", r#"[0,"abc"]"#),
+        ("a{1,3}?", "l", "aaaa", r#"[0,"aaa"]"#),
+        ("(?:a|ab){1,2}", "l", "abab", r#"[0,"abab"]"#),
+        // Keep the Kelvin sign distinct from its NFC-normalized ASCII K.
+        ("(?i:k)|aa", "l", "aa\u{212a}", "[2,\"\u{212a}\"]"),
+        ("K|aa", "li", "aa\u{212a}", "[2,\"\u{212a}\"]"),
+        (
+            "(?i:k)(?-i:a)|aaa",
+            "l",
+            "aaa\u{212a}a",
+            "[3,\"\u{212a}a\"]",
+        ),
+        ("a|é|aa", "l", "aéaa", r#"[1,"é"]"#),
+        (".|ab", "l", "ab😀", r#"[2,"😀"]"#),
+        ("[a😀]|ab", "l", "ab😀", r#"[2,"😀"]"#),
+        (r"\R|a", "l", "a\r\n", r#"[1,"\r\n"]"#),
+        (r"\R|aa", "l", "aa\u{2028}", "[2,\"\u{2028}\"]"),
+        ("a . # comment", "lxm", "a\nb", r#"[0,"a\n"]"#),
+        ("a.", "lm", "a\nb", r#"[0,"a\n"]"#),
+        ("(?s:a.)", "l", "a\nb", r#"[0,"a\n"]"#),
+        ("(?>a|ab)|bb", "l", "abb", r#"[1,"bb"]"#),
+        ("a(?=bb)|bb", "l", "abb", r#"[1,"bb"]"#),
+        ("(?<=a)bb|a", "l", "abb", r#"[1,"bb"]"#),
+        (r"a\Kbb|bbb", "l", "abbbbb", r#"[1,"bb"]"#),
+        (r"a|(?<=\Ga)bb", "l", "abb", r#"[1,"bb"]"#),
+    ] {
+        let query = format!(
+            "match({}; {}) | [.offset, .string]",
+            serde_json::to_string(pattern).unwrap(),
+            serde_json::to_string(flags).unwrap(),
+        );
+        let input = serde_json::to_string(input).unwrap();
+        assert_eq!(evaluate(&query, &input)[0].to_string(), expected, "{query}");
+    }
+}
+
+#[test]
+fn regex_longest_match_late_literal_fits_default_work_budget() {
+    let input = serde_json::to_string(&format!("{}a{}", "b".repeat(900), "b".repeat(99))).unwrap();
+    assert_eq!(
+        evaluate(r#"match("a"; "l")"#, &input)[0].to_string(),
+        r#"{"offset":900,"length":1,"string":"a","captures":[]}"#
+    );
+}
+
+#[test]
+fn regex_longest_match_presence_jumps_preserve_global_ranking_and_context() {
+    for (pattern, input, expected) in [
+        (
+            "a|abc",
+            format!(
+                "{}a{}abc{}",
+                "b".repeat(900),
+                "b".repeat(49),
+                "b".repeat(47)
+            ),
+            r#"[950,"abc"]"#,
+        ),
+        (
+            "a|(?<=b)é(?=b)",
+            format!("a{}é{}", "b".repeat(99), "b".repeat(99)),
+            r#"[100,"é"]"#,
+        ),
+        (r"abc\Kx|xx", "abcxx".to_owned(), r#"[3,"x"]"#),
+        (r"a+\Kb|bb", "aabbb".to_owned(), r#"[2,"b"]"#),
+        (r"(?<=\Gb)aa|a", "baa".to_owned(), r#"[1,"aa"]"#),
+    ] {
+        let query = format!(
+            "match({}; \"l\") | [.offset, .string]",
+            serde_json::to_string(pattern).unwrap()
+        );
+        let input = serde_json::to_string(&input).unwrap();
+        let values = evaluate_with_limits(&query, &input, VmLimits::default())
+            .unwrap_or_else(|error| panic!("{query}: {error:?}"));
+        assert_eq!(values[0].to_string(), expected, "{query}");
+    }
+    let input = serde_json::to_string(&format!(
+        "{}a{}a{}",
+        "b".repeat(900),
+        "b".repeat(89),
+        "b".repeat(9)
+    ))
+    .unwrap();
+    assert_eq!(
+        evaluate(r#"[match("a"; "lg") | [.offset, .string]]"#, &input)[0].to_string(),
+        r#"[[900,"a"],[990,"a"]]"#
+    );
+}
+
+#[test]
+fn regex_longest_match_absent_literal_accepts_large_input() {
+    for size in [1_000_000, 1_048_576] {
+        let input = serde_json::to_string(&"b".repeat(size)).unwrap();
+        assert_eq!(evaluate(r#"test("a")"#, &input), [Value::Bool(false)]);
+        assert_eq!(evaluate(r#"test("a"; "l")"#, &input), [Value::Bool(false)]);
+        assert_eq!(evaluate(r#"match("a")"#, &input), [] as [Value; 0]);
+        assert_eq!(evaluate(r#"match("a"; "l")"#, &input), [] as [Value; 0]);
+    }
+}
+
+#[test]
+fn regex_longest_match_presence_scan_keeps_work_limits() {
+    let input = serde_json::to_string(&"b".repeat(1_048_576)).unwrap();
+    assert_eq!(
+        evaluate_with_limits(
+            r#"match("a"; "l")"#,
+            &input,
+            VmLimits {
+                regex_backtrack_limit: 512,
+                ..VmLimits::default()
+            }
+        ),
+        Ok(Vec::new())
+    );
+    for limit in [1, 256] {
+        assert_eq!(
+            evaluate_with_limits(
+                r#"match("a"; "l")"#,
+                &input,
+                VmLimits {
+                    regex_backtrack_limit: limit,
+                    ..VmLimits::default()
+                }
+            ),
+            Err(VmError::Resource {
+                resource: "regex-backtrack"
+            })
+        );
+    }
+    let input = serde_json::to_string(&format!("a{}", "b".repeat(1_048_575))).unwrap();
+    assert_eq!(
+        evaluate_with_limits(
+            r#"match("a"; "l")"#,
+            &input,
+            VmLimits {
+                regex_backtrack_limit: 512,
+                ..VmLimits::default()
+            }
+        ),
+        Err(VmError::Resource {
+            resource: "regex-backtrack"
+        })
+    );
+}
+
+#[test]
+fn regex_longest_match_hostile_presence_scan_keeps_engine_limit() {
+    assert_eq!(
+        evaluate_with_limits(
+            r#"match("^(?:(a|aa)+)\\1$"; "l")"#,
+            r#""aaaaaaaaaaaaaaaaaaaab""#,
+            VmLimits {
+                regex_backtrack_limit: 1_000,
+                ..VmLimits::default()
+            }
+        ),
+        Err(VmError::Resource {
+            resource: "regex-backtrack"
+        })
+    );
+}
+
+#[test]
+fn regex_longest_match_moderate_input_skips_nonmatching_starts() {
+    let input = serde_json::to_string(&format!("a{}", "b".repeat(500))).unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(
+        evaluate(r#"match("a"; "l").string"#, &input),
+        [Value::string("a")]
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "a single short match must not probe every endpoint at nonmatching starts"
+    );
+}
+
+#[test]
+fn regex_longest_match_rejects_whole_pattern_recursion_without_changing_normal_mode() {
+    assert_eq!(
+        evaluate(r#"match("a(?:\\g<0>)?").string"#, r#""aaa""#),
+        [Value::string("aaa")]
+    );
+    let error = evaluate_with_limits(
+        r#"match("a(?:\\g<0>)?"; "l")"#,
+        r#""aaa""#,
+        VmLimits::default(),
+    )
+    .expect_err("longest mode must not silently change whole-pattern recursion");
+    assert!(
+        matches!(error, VmError::Unsupported { operation } if operation.contains("whole-pattern recursion"))
+    );
+}
+
+#[test]
+fn regex_longest_match_recursion_detection_uses_parsed_syntax() {
+    for (query, input, expected) in [
+        (r#"match("a # \\g<0>"; "lx").string"#, r#""a""#, "a"),
+        (r#"match("\\\\g<0>"; "l").string"#, r#""\\g<0>""#, r"\g<0>"),
+        (r#"match("(?<x>a)\\g<x>"; "l").string"#, r#""aa""#, "aa"),
+    ] {
+        assert_eq!(evaluate(query, input), [Value::string(expected)]);
+    }
+    let error = evaluate_with_limits(
+        r#"match("(?x)a (?: \\g<0> )?"; "l")"#,
+        r#""aaa""#,
+        VmLimits::default(),
+    )
+    .expect_err("inline flags must not hide whole-pattern recursion");
+    assert!(matches!(error, VmError::Unsupported { .. }));
+}
+
+#[test]
+fn regex_longest_match_cumulative_budget_is_shared_across_global_pulls() {
+    let limits = VmLimits {
+        regex_backtrack_limit: 1_500,
+        ..VmLimits::default()
+    };
+    assert_eq!(
+        evaluate_with_limits(r#"first(match("a"; "lg") | .string)"#, r#""aa""#, limits).unwrap(),
+        [Value::string("a")]
+    );
+    assert_eq!(
+        evaluate_with_limits(r#"[match("a"; "lg")]"#, r#""aa""#, limits),
+        Err(VmError::Resource {
+            resource: "regex-backtrack"
+        })
+    );
+}
+
+#[test]
+fn regex_longest_match_unknown_bounds_exhaust_small_weighted_budget_promptly() {
+    let input = serde_json::to_string(&"a".repeat(100)).unwrap();
+    let started = std::time::Instant::now();
+    for pattern in [r"(a)\1?", r"(?<x>a)\g<x>?", "(a)(?(1)a|b)", "a(?=a*)"] {
+        let query = format!("match({}; \"l\")", serde_json::to_string(pattern).unwrap());
+        assert_eq!(
+            evaluate_with_limits(
+                &query,
+                &input,
+                VmLimits {
+                    regex_backtrack_limit: 10_000,
+                    ..VmLimits::default()
+                }
+            ),
+            Err(VmError::Resource {
+                resource: "regex-backtrack"
+            }),
+            "{query} must retain the exhaustive fallback"
+        );
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+}
+
+#[test]
+fn regex_longest_match_preserves_search_anchor_origin_when_checking_later_starts() {
+    assert_eq!(
+        evaluate(r#"match("a|(?<=\\Ga)bb"; "l").string"#, r#""abb""#),
+        [Value::string("bb")]
+    );
+}
+
+#[test]
+fn regex_longest_match_bounds_candidate_searches() {
+    let error = evaluate_with_limits(
+        r#"match("a"; "l")"#,
+        r#""abcdef""#,
+        VmLimits {
+            regex_backtrack_limit: 1,
+            ..VmLimits::default()
+        },
+    )
+    .expect_err("candidate searches must not reset an unlimited work budget");
+    assert_eq!(
+        error,
+        VmError::Resource {
+            resource: "regex-backtrack"
+        }
+    );
+}
+
+#[test]
+fn regex_longest_match_preserves_input_pattern_and_match_resource_limits() {
+    for (limits, query, input, resource) in [
+        (
+            VmLimits {
+                regex_input_bytes: 1,
+                ..VmLimits::default()
+            },
+            r#"match("a"; "l")"#,
+            r#""ab""#,
+            "regex-input-bytes",
+        ),
+        (
+            VmLimits {
+                regex_pattern_bytes: 1,
+                ..VmLimits::default()
+            },
+            r#"match("a|ab"; "l")"#,
+            r#""ab""#,
+            "regex-pattern-bytes",
+        ),
+        (
+            VmLimits {
+                regex_match_limit: 1,
+                ..VmLimits::default()
+            },
+            r#"[match("a"; "lg")]"#,
+            r#""aa""#,
+            "regex-match-count",
+        ),
+    ] {
+        assert_eq!(
+            evaluate_with_limits(query, input, limits),
+            Err(VmError::Resource { resource })
+        );
+    }
 }
 
 #[test]

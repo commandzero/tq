@@ -261,8 +261,8 @@ and does not assert that a parallel decoding plan is active.
    findings, not an inventory of all available suites.
 3. [Benchmark harness review](benchmark-harness.md): correctness/accounting repair
    history and acceptance evidence, not the primary launch guide.
-4. [Recorded Linux comparison](comparison-x86-64-linux.md): platform-specific
-   findings, not portable performance guarantees.
+4. [jq manual coverage](jq-manual/coverage.md): compatibility results and
+   expected differences, not a performance campaign.
 5. [Test reviews index](index.md): performance reviews plus adjacent correctness
    reviews such as the jq manual comparison.
 

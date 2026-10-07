@@ -1,231 +1,229 @@
 ---
 type: Report
 title: jq compatibility
-description: Supported jq behavior and the manual compatibility evidence policy.
-generated: { by: codex/gpt-6-astra, at: 2026-09-21T23:30:13Z }
+description: Supported jq behavior, intentional differences, and compatibility evidence.
 ---
 
 # jq compatibility
 
-`tq` follows jq 1.8.x semantics for the features it supports. That includes
-navigation, pipes and comma generators, arrays and ordered objects, variables,
-conditionals, operators, common built-ins, optional access, `try/catch`, path
-updates, user filters, and modules. Stateful `reduce` and
-`foreach` folds preserve jq's generator order, accumulator scope, update count,
-intermediate results, and output produced before a later error.
+`tq` follows jq 1.8.x semantics for supported queries. The manual comparison uses pinned jq 1.8.2.
 
-Collection and utility compatibility includes `to_entries`, `with_entries`,
-`group_by`, `min_by`, `max_by`, `limit`, `paths`, `path`, `getpath`, `setpath`,
-`tostream`, `tojson`, `fromjson`, `inputs`, two-argument `any` and `all`,
-`ltrimstr`, `ascii_downcase`, `explode`, `implode`, `floor`, `ceil`, and `fabs`.
-`inputs` advances the same ordered source cursor as top-level evaluation, so a
-value it consumes is not evaluated again as a later top-level input.
+## Main differences from jq
 
-Run `tq --help` for the current switches. Run `tq --explain-json FILTER` to see
-the plan and what it retains in memory.
+- Default output is TOON, not JSON.
+- Default colors and quote styling differ from jq.
+- Some math results differ by 1–2 binary64 ULP (steps between representable numbers).
+- Bessel functions `jn` and `yn` require a finite order with absolute value at most 1,024.
+- Regex and platform behavior have documented limits.
+- Compatibility is tested, not a claim of complete jq parity.
 
-Identity JSON or strict TOON input written as canonical TOON may select the
-`transcode` plan. This is an execution optimization, not a language extension:
-bytes must match forced document execution for inputs without duplicate object
-names. Streaming JSON cannot apply jq's last-value/first-position normalization
-after publishing an earlier member. A duplicate therefore rejects the current
-record. Sequence framing discards that final record before publication; unframed
-output publishes nothing. Strict TOON also rejects duplicate paths. Safe key folding,
-sorted-key output, explicit jq stream input, slurp, raw/joined output,
-proxy-on-error, non-TOON output, and non-identity filters use the existing plans.
+See the [current results and numbered differences](tests/jq-manual/coverage.md#differences-by-test).
+
+## Supported queries
+
+- Navigation, pipes, and comma generators.
+- Arrays, ordered objects, and variables.
+- Conditionals, operators, and common built-ins.
+- Optional access and `try/catch`.
+- Path queries and updates.
+- `reduce` and `foreach`, preserving generator order and results emitted before later errors.
+- User-defined filters with lexical scope, recursion, and bounded VM execution.
+- Modules with explicit or default lookup roots and bounded filesystem access.
+
+`input` and `inputs` share the top-level input cursor. Consumed values are not evaluated again as later top-level inputs.
+
+- The CLI enables environment, clock, timezone, and input-metadata access.
+- Embedded callers retain capability controls.
+- Call resolution checks names and arities before reading input.
+
+See [migration and security notes](jq-parity-migration.md) and [regex, date, and platform limits](jq-regex-date-platform.md).
 
 ## Input and output
 
-The format detector reads a bounded prefix. It prefers canonical TOON. A JSON
-object or array opener selects JSON before YAML, while YAML document,
-directive, and root-sequence markers select YAML. `.jsonl` and `.ndjson` files
-select strict one-value-per-line JSON Lines input. A `.json5` extension selects
-document-at-a-time JSON5 input. Use
-`--input-format toon|yaml|json|json5|jsonl|json-seq|toon-seq|csv|tsv` to select exactly one parser;
-`ndjson` is an alias for `jsonl`. JSON5 is input-only and is never selected by
-content detection. See the [format compatibility matrix](formats.md) for the
-native formats supported by jq, yq, and tq, and the
-[native-format campaign review](../tests/compatibility/reviews/native-formats-v1.md)
-for jq sequence agreement and deliberate yq row-profile differences.
+### Choosing a format
 
-`-x/--proxy-on-error` retains each bounded structured source before evaluation.
-If its parser rejects the source, `tq` writes the original bytes unchanged and
-treats that source as successful. It does not mask resource, I/O, query,
-runtime, or output failures. Sources are independent except under `--slurp`,
-where any parse rejection proxies the complete ordered source set.
-`input` and `inputs` use the same per-source rule. A rejected source is written
-when the cursor reaches it and is not supplied to the filter as a value.
-Valid sources still run through the filter. For a collecting filter such as
-`-n '[inputs]'`, passthrough bytes therefore precede the eventual array;
-already emitted results keep their position before those bytes.
-`--stream-errors` is incompatible because it assigns a different meaning to
-parse failures.
+- Use `--input-format` to select a parser explicitly.
+- Content detection prefers canonical TOON and distinguishes JSON from YAML using a bounded prefix.
+- `.jsonl` and `.ndjson` files select strict JSON Lines input.
+- `.json5` files select JSON5 input; content detection never selects JSON5.
+- JSON5 is input-only.
 
-Default structured TOON output writes each result as canonical TOON followed by
-LF, without RS. Zero results produce empty stdout; multiple results and late
-errors do not require another mode. Completed results survive later errors.
-Use `-o toon-seq` for explicit RS-framed TOON records without changing the input parser.
-Select `-c` or
-`--compact-output` for compact JSON, `--output-format json` for pretty JSON,
-`--output-format jsonl` for compact LF-terminated JSON Lines,
-`--output-format yaml` for exact-number-preserving YAML 1.2 output, `-r` for raw
-strings, or `-j` to join raw outputs. `--unframed` explicitly requires one standalone TOON document and rejects zero
-or multiple results before publishing output.
+See the [format matrix](formats.md) for supported formats.
 
-`-c` does not require `-o json` and does not change the input parser. Combining
-it with an explicit `-o toon` is an error in either argument order. `--seq`
-selects JSON Text Sequence input, JSON record framing when JSON output is
-selected, and TOON Text Sequence framing when TOON output is selected. Use
-`-i toon-seq` for TOON sequence input. Thus `jq --seq` corresponds to
-`tq --seq -o json`, while `tq --seq` keeps TOON output. JSON sequence recovery and stream-error
-details remain part of the manual conformance gate, not a claim implied by
-format support.
+### Choosing output
 
-The extended jq-shaped CLI supports short clusters plus `--raw-output0`,
-`-a/--ascii-output`, `-S/--sort-keys`, explicit color/monochrome output,
-`--tab`, reviewed `--indent`, and `--unbuffered`. JSON Lines output is always
-compact and rejects pretty, indentation, tab, raw, and joined output.
-`--arg`, `--argjson`, and `--argtoon` populate both direct
-variables and `$ARGS.named`; `--args`/`--jsonargs` populate `$ARGS.positional`;
-and `--rawfile`/`--slurpfile` use the configured per-source byte limit. See
-`docs/jq-1.8-cli-options.md` for the complete classification.
+- Default TOON output ends each result with LF; 0 results produce empty stdout.
+- Completed results remain available if a later result fails.
+- `-c` selects compact JSON without needing `-o json`.
+- `-o json` selects pretty JSON.
+- `-o jsonl` selects compact JSON Lines.
+- `-o yaml` selects exact-number-preserving YAML 1.2.
+- `-r` writes strings raw; `-j` also omits their output separators.
+- `-o toon-seq` selects RS-framed TOON output.
+- `--unframed` requires exactly 1 standalone TOON result before publishing it.
+- `-c` cannot be combined with explicit `-o toon`.
 
-`def` uses jq lexical scope and supports both lazy filter parameters (`f`) and
-eager value parameters (`$value`), including recursive references. Calls are
-resolved by name and arity before input is read and execute through bounded VM
-frames. Repeated `-L DIR` options set explicit module lookup order. Without
-them, the process CLI searches its default roots and loads a `~/.jq` startup
-file when present. Prefix substitutions support `~/` and `$ORIGIN/`.
-`include "name"` imports definitions in place, while `import "name" as alias`
-exposes `alias::filter`. JSON data imports use the variable namespace, such as
-`import "data" as $d; $d::d`.
+### Sequence input
 
-Canonical paths must remain within configured roots. Module reads, counts, and
-dependency cycles are bounded. `modulemeta` also accepts runtime-derived module
-names and shares a bounded metadata cache. Embedded callers that deny filesystem
-access cannot load implicit modules or startup files.
+- `--seq` selects JSON Text Sequence input and sequence-framed output.
+- `tq --seq` keeps TOON output.
+- `tq --seq -o json` corresponds to `jq --seq`.
+- `-i toon-seq` selects TOON sequence input.
 
-### Color presentation
+### Parse-error passthrough
 
-Every output format supports automatic terminal color, `-C`, and `-M`.
-Automatic redirected output stays plain. A nonempty `NO_COLOR` disables
-automatic color; the last explicit `-C`/`-M` wins. Embedded writers default to
-plain output and do not inspect the environment or terminal. Denied terminal
-access rejects forced color before consuming input; denied environment access
-prevents reading both `NO_COLOR` and `JQ_COLORS`.
+- `-x/--proxy-on-error` writes original source bytes only when parsing rejects them.
+- Valid sources still run through the filter.
+- Query, runtime, resource, I/O, and output errors are not hidden.
+- Under `--slurp`, a parse rejection proxies the complete ordered source set.
+- `input` and `inputs` use the same rule; rejected sources are not supplied as values.
+- `--stream-errors` cannot be combined with passthrough.
 
-The built-in eight-slot palette is
-`0;39:0;94:0;94:0;35:0;32:0;90:0;90:0;36`. `JQ_COLORS` retains its supported
-seven/eight-entry syntax and applies across formats. Seven entries use the
-number style for keys; invalid or missing values select the complete tq
-default. Customization does not enable color by itself.
+Use `tq --help` or the [CLI option inventory](jq-1.8-cli-options.md) for flags and argument binding.
 
-tq intentionally differs from jq's default colors and styles enclosing quotes
-with their enclosing container's delimiters/separators, not string/key content.
-Root scalar quotes use the object style. YAML/TOON mappings use the object
-style and sequences use the array style; table field quotes and separators
-use the object style. TOON colon separators remain unstyled in every output
-path; colons inside string content retain the string style.
-Escaped content keeps its scalar/key style. These are
-non-breaking presentation differences, not query or data-format differences.
+## Color presentation
 
-Removing tq-generated SGR recovers the exact plain serialization. RS, LF, and
-CR boundaries remain outside active styles. Raw strings and proxy bytes remain
-verbatim, including any escapes they already contain. Non-string results in raw
-mode keep their existing compact JSON fallback and separators, with the shared
-palette when color is enabled. Forced-color output is
-a terminal stream, so use `-M` for directly parseable format bytes. Color adds
-no whole-result buffering; generated bytes count toward output and applicable
-spool limits.
+- `-C` forces color; `-M` disables it.
+- Automatic color stays off when output is redirected.
+- Nonempty `NO_COLOR` disables automatic color; the last explicit `-C` or `-M` wins.
+- `TQ_COLORS` takes priority over `JQ_COLORS`; both accept 7 or 8 entries.
+- An empty or invalid selected palette uses tq's defaults.
+- Setting a palette does not enable color by itself.
+- tq styles enclosing quotes as structure rather than string or key content.
+- Matching jq's palette does not make ANSI bytes identical: quote styling and reset boundaries still differ.
+- These are expected presentation differences, not changes to JSON data or process behavior.
+- Removing tq-generated ANSI styles recovers the plain serialization.
+- Raw strings and proxy bytes remain verbatim.
+- Use `-M` when output must be directly parseable.
+- Embedded writers default to plain output and respect environment and terminal capability controls.
 
 ## Memory and limits
 
-Ordinary document filters retain one decoded document. `--slurp` retains every
-input document. Sorting, uniqueness, final reductions, and output-heavy
-construction are blocking. A fold retains one immutable accumulator plus
-bounded managed evaluation state; `foreach` can release extracted results as
-each update completes. `--stream` is jq-compatible input projection for JSON,
-JSON Lines, JSON sequences, and TOON. It turns decoder events into path/value
-records that ordinary queries can transform or consume through `input` and
-`inputs`. Eligible filters may use an event plan; other filters use ordinary
-evaluation over the projected records.
-Projection retains bounded decoder state, but a query such as `[inputs]` can
-still collect every projected record. YAML remains document-at-a-time.
+- Ordinary queries retain 1 decoded document.
+- `--slurp` retains all input documents.
+- Sorting, uniqueness, collection, and output construction can retain much more data.
+- `--stream` projects supported input into jq-style path/value records.
+- Streaming does not bound a collecting query such as `[inputs]`.
+- YAML remains document-at-a-time.
+- `tq --explain-json FILTER` shows the selected plan and its memory behavior.
 
-The CLI samples available memory once when initializing its resource limits:
+The CLI derives these ceilings from available memory at startup:
 
-| Control | Default share of available memory | Fallback when discovery fails |
-| --- | --- | --- |
+| Control | Share | Fallback |
+| --- | ---: | ---: |
 | `--prepare-memory-bytes` | 1/8 | 8 MiB |
 | `--hybrid-in-flight-bytes` | 1/32 | 8 MiB |
 | `--decode-in-flight-bytes` | 1/32 | 64 MiB |
 
-These are ceilings, not reservations. They scale down on constrained systems
-and have no fixed upper cap beyond the platform's addressable integer range.
-The available-memory snapshot comes from the operating system. On Linux,
-readable cgroup v1/v2 limits at standard mount points further restrict it to
-the remaining memory in the current cgroup and its ancestors. Unavailable
-cgroup data leaves the host-memory result in use. An observed zero available
-memory is not a discovery failure. Explicit flags override the corresponding
-defaults; library `ResourceLimits::default()` remains deterministic. Input,
-output, spool, worker-count, and batch-size limits are unchanged. These three
-ceilings do not bound total process RSS or ordinary document materialization.
+- Explicit flags override these defaults.
+- These are ceilings, not reservations or bounds on total process memory.
+- Array preparation can spill completed elements to private temporary storage.
+- A single value that cannot fit still fails with a resource diagnostic.
+- Input, evaluation, output, and spool limits are explicit; exceeding them is not successful execution.
+- SIGINT is cooperative; a closed downstream pipe is treated as successful.
 
-Array preparation, including object and nested-array elements, stays in memory
-while the shared preparation budget permits it. Under pressure, completed
-array elements spill to private temporary storage, including when decoding the
-next element needs their memory. A single nested value that cannot fit still
-fails with a resource diagnostic; spilling does not bypass the memory limit.
+Identity JSON or strict TOON conversion may use the optimized `transcode` plan:
 
-Identity transcode batches publication writes through a fixed 64 KiB I/O buffer,
-separate from the dynamic `--prepare-memory-bytes` budget. This avoids
-token-sized disk writes after preparation spills. Default and RS-framed TOON
-output flush this buffer before publishing each complete record; preparation
-failures discard that record without removing earlier results. Unframed output
-retains its exactly-one-result publication check.
+- It is an optimization, not a query-language extension.
+- Duplicate JSON keys or TOON paths are rejected in this path.
+- Completed records survive later errors; a rejected record is not published.
 
-Limits are explicit: input/depth/token/line/lookahead bounds, VM steps and
-result count, output bytes, and TOON preparation/spool ceilings. A resource
-limit produces a classified diagnostic; it is never reported as a successful
-query. SIGINT is cooperative and a closed downstream pipe is successful.
+## Compatibility evidence
 
-## Compatibility evidence and disparities
+- [Coverage summary](tests/jq-manual/coverage.md): current results and the practical impact of each difference.
+- [Manual comparison](tests/jq-manual/index.md): per-test outputs and tokenizer measurements.
+- [Campaign instructions](../tests/compatibility/readme.md): reference setup and reproduction commands.
+- [Native-format review](../tests/compatibility/reviews/native-formats-v1.md): format-specific comparison evidence.
 
-The manual campaign pins jq 1.8.1, the imported source documents, and the
-original 518 cases, including 303 protected matches. It compares ordered JSON
-results and process behavior, exact compact JSON bytes, and whether TOON
-preserves the JSON execution contract. See the
-[campaign instructions and review inventories](../tests/compatibility/readme.md).
-The [selected historical assertions](../tests/compatibility/reviews/coverage-summary.toon)
-retain reviewed baseline classifications from the older campaign. The raw
-campaign dump is not tracked, and this summary is not approval for the current
-implementation.
+The latest 2026-10-06 macOS **newhelp-final** and Linux **help-final**
+[closeout evidence](../tests/compatibility/reviews/parity-closeout.toon) is bound
+to 884-file snapshots at base `3e0dedb` plus uncommitted fixes, not clean-commit
+releases or claims about later edits. Final `crates/tq-cli/src/args.rs` help and
+its regression distinguish CLI ambient access from embedded admission, removing
+the false redaction wording without changing runtime policy. Earlier evidence
+remains checkpoint-only; final product/helper hashes differ. Frozen release
+runs against jq 1.8.2 record macOS ARM64 **943/952**
+primary, **919/921** compact, **921/921** TOON matches and Linux x86_64
+**937/952**, **913/921**, **921/921**. Both preserve all 518 original cases and
+303 protected exact contracts. Strict manual exit 1 remains on both.
 
-The [published macOS checkpoint](tests/jq-manual/index.md) records 952 cases:
-949 matches and three recorded failures. Compact JSON matches 918 of 921
-applicable cases; TOON preserves all 921 JSON execution contracts. These are
-recorded checkpoint results, not a fresh campaign for the current tree. They
-are macOS evidence only and do not establish native Linux or Windows
-compatibility. The [final Linux report](tests/comparison-x86-64-linux.md)
-records 896 exact results and nine reviewed observations against an older,
-separate 905-case inventory, with zero unreviewed failures. Compact JSON
-matches 867 of 876 applicable cases and TOON preserves all 876 JSON execution
-contracts. The Linux completion report is green for the recorded x86_64
-executable; these campaign reports are checkpoints, not a claim that every
-remaining parity requirement or release gate is complete. Its target-scoped
-approvals are not waivers for other builds or platforms. Native
-Windows execution is explicitly deferred until a runner is available, with
-its tests retained and no passing claim.
+macOS retains the existing user-accepted scoped `erfc(2)` 2-ULP and
+`tgamma(0.5)` 1-ULP differences, 6 intentional ANSI presentations governed by
+the main `output-colors` contract, and jq's internal `--run-tests` diagnostic
+suffix (both supplied programs pass and exit 0). These are not exact matches
+or fresh executable approvals; current strict reports apply no reviewed disparities.
+Safe Rust `libm` and pinned jq round the two math inputs differently; the exact
+regression witnesses are in `tests/compatibility/cases/manual-math-boundaries.jsonl`.
+Color regressions are in `crates/tq-cli/tests/output_colors.rs`; supplied-test
+runner regressions are in `crates/tq-cli/tests/extended_cli.rs`. The closeout
+record maps cases, causes, regression paths and reconsideration conditions;
+library/reference or presentation/runner changes require exact witness reruns.
 
-Manual parity remains under implementation and review. Missing behavior,
-timeouts, skips, crashes, and unexplained mismatches fail the gate. A specifically
-reviewed safe-library disparity can satisfy the separate completion gate but
-never becomes an exact match. The
-[disparity register](jq-compatibility-disparities.md) records measured math,
-regex, and platform restrictions and their reconsideration criteria.
+Windows now has native release/default evidence in
+`target/closeout/windows/final-286b5f6/native`: **912/952 primary, 879/921 compact,
+921/921 TOON**, with **60 unique differences** and strict exit 1. All **303
+protected IDs** are present, but only **291 primary** and **289 primary-plus-compact**
+match—not 303 exact. macOS/Linux retain 303 exact. The Windows full campaign
+covers 1,220 cases/4,804 executed observations, zero harness/contract failures and
+146 difference cases. All 297 CLI composition cases execute, retaining 8 deferred
+math/reference-availability differences; 297 embedded witnesses and resource/
+recursion/cancellation checks pass. Final all-feature workspace, strict Clippy
+and formatting pass; 10 ignored entries and five explicitly passed reference
+tests are recorded separately, without inventing a workspace pass total.
 
-Labels and breaks are implemented. The process CLI permits environment, clock,
-local-timezone, and input-metadata access without extra allow flags; embedded
-callers retain capability controls. See
-[migration and security notes](jq-parity-migration.md) and
-[regex, date, and platform compatibility](jq-regex-date-platform.md).
+Windows source is base `286b5f6` plus one integration-test-only overlay in
+`crates/tq-test-support/tests/compatibility_catalog_contracts.rs`, SHA-256
+`a86772509c2e279b823e6f02529e976c73b8c75ed30d23bea1620acf828a6c30`.
+The patch keeps exact assertions and adds structured Windows `--binary` reference
+arguments; final extraction resolves a test lint, not runtime behavior. Product/
+helper source and frozen binary hashes are unchanged across the overlay, so
+release campaigns are mapped—not claimed rebuilt/rerun after the test fix.
+macOS/Linux final-help product/helper sources remain unchanged with this test-only
+delta. System `/usr/bin/ssh`/`scp` succeeded, and native PowerShell executes the
+campaigns; earlier macOS-client failures are historical, WSL is transport only,
+and no security changes were made. Older Windows v6 raw evidence remains retained
+and hash-scoped, not conflated with the renewed release.
+
+Live #69/#70/#31 bodies were verified at the preceding 2026-10-06 checkpoint.
+The user-approved scope transfer assigns only the enumerated
+Windows 60 to [#69](https://github.com/commandzero/tq/issues/69) and Linux 15 to
+[#70](https://github.com/commandzero/tq/issues/70); they remain unresolved, with
+target/case ownership, practical impact, and reconsideration criteria in the
+closeout record. Recheck exact witnesses and protected contracts after
+implementation or reference/library/platform changes before changing verdicts.
+
+Corrected shared full campaigns cover 1,220 cases and 4,804 executed observations
+with zero harness errors or declared-contract failures, retaining pairwise
+mismatches and unsupported observations as `observed-differences`, not strict
+acceptance. macOS retains the separately hashed P2 campaign that **predates the
+help fix**, not a final-help full rerun: only diagnostic help strings/test differ
+among crate sources, but final CLI/helper/embedded hashes are not equal. Linux
+reruns the full campaign with final-help binaries. Its workspace records **1,891
+passed, 0 failed, 11 ignored**, with four reference/relocation entries explicitly
+passed separately; remaining ignored accounting/worker/helper entries are not
+acceptance or calibration proof. macOS final full preflight/all-feature tests
+pass. P2 adversarial denial and companion contracts remain tested.
+
+The parent rendered the newest macOS report into all 21 generated Results blocks
+and updated index provenance; only the help capture changes. Help regression
+`args::tests::help_distinguishes_cli_ambient_access_from_embedded_admission`
+passes on both platforms; parser/capability/help changes require rechecking it,
+release `--help` and embedded guards. No fresh disparity approvals follow.
+
+Calibration/performance acceptance remains deferred under
+[#31](https://github.com/commandzero/tq/issues/31) and platform follow-ups. No fresh
+calibration is established on any platform; Windows accounting checks do not
+prove macOS calibration. Unfinished macOS calibration and affected benchmark
+comparisons remain unpublished as accepted performance evidence. Native Windows
+renewal is complete; strict differences are not resolved by execution success.
+Linux full validator preflight remains a #70 follow-up. The implementation/evidence
+change is verified, synchronized into the main specs, and
+[archived](../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/tasks.md)
+with all 69 tasks complete under the approved scope. That closeout does not
+establish exact compatibility or calibrated performance acceptance.
+
+- Ordered JSON results and process behavior are compared.
+- Compact JSON also requires exact stdout bytes.
+- TOON must preserve the JSON execution contract.
+- Expected differences remain differences, never exact matches.
+- Missing behavior, timeouts, skips, crashes, and unexplained mismatches do not pass the gate.

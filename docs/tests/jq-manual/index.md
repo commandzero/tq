@@ -25,49 +25,75 @@
 23. [streaming](streaming.md)
 24. [types and values](types-and-values.md)
 
-The generated Results block below is a historical 952-case capture. Its
-verdicts, output-campaign counts, tokenizer measurements, and captured help
-text are preserved from that run. The source build, host, and run timestamp
-for this capture are not retained alongside the Results block. It is not a
-current tq CLI or release claim; use the [current jq/tq option inventory](../../jq-1.8-cli-options.md)
-for the current contract.
+The Results below use the 2026-10-06 newhelp-final macOS ARM64 final-candidate observations:
+tq 0.4.1, release/default, compared with pinned jq 1.8.2. The source is base
+`3e0dedb` plus uncommitted implementation, reconciled catalog, runner P2, and
+CLI help fixes, not a clean-commit build or the historical bench-profile capture. The run covers
+952 cases; 9 exact-contract differences remain and the strict command exits 1.
+
+See the [numbered difference list](coverage.md#differences-by-test) for each
+test's practical impact. [Current closeout metadata](../../../tests/compatibility/reviews/parity-closeout.toon)
+records source manifests, profiles, executable/report hashes, and retained raw
+evidence for all three hosts. The newhelp-final snapshot adds corrected CLI help
+and its regression test; fresh product/helper binaries were frozen after the
+final release/default build. Current hashes and validation provenance are retained
+in `target/closeout/macos/newhelp-final/summary.json`. Full observations are
+retained locally in ignored
+`target/closeout/macos/newhelp-final/manual-full-final.json`.
+
+Native Windows release evidence was renewed on smokescreen for `286b5f6`,
+with a test-only binary-reference fix; product/helper source and frozen binary
+hashes are unchanged by that fix. Windows retains 60 differences under #69;
+Linux retains 15 under #70. The [coverage summary](coverage.md#native-platform-results)
+records their counts and limitations separately from these macOS Results.
+[Historical platform metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
+retains the earlier v6 checkpoint. No exact all-platform or calibrated
+performance acceptance is claimed.
+See the [jq/tq option inventory](../../jq-1.8-cli-options.md) for the CLI contract.
 
 <!-- tq-manual-compare:begin section=index -->
 ## Results
 
 | Verdict | Cases |
 | --- | ---: |
-| failure | 3 |
-| match | 949 |
+| Differences | 9 |
+| Exact match | 943 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
-| compact_json | 918 | 921 |
+| compact_json | 919 | 921 |
 | toon | 921 | 921 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
 ### Output size
 
-876 eligible examples. Counts use the `o200k_base` and `cl100k_base` tokenizers over complete stdout, including trailing newlines. The totals compare default `-o json` output with default LF-terminated `-o toon` results; TOON sequence captures, when available, are shown in the cases but excluded from size totals. Diff is TOON tokens minus JSON tokens. % is the signed percent difference `(TOON - JSON) / JSON`, so savings are negative and growth is positive.
+877 eligible examples. Counts use the `o200k_base` and `cl100k_base` tokenizers over complete stdout, including trailing newlines. The totals compare default `-o json` output with default LF-terminated `-o toon` results; TOON sequence captures, when available, are shown in the cases but excluded from size totals. Diff is TOON tokens minus JSON tokens. % is the signed percent difference `(TOON - JSON) / JSON`, so savings are negative and growth is positive.
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 11363 | 8187 | -3176 | -27.95% |
-| `cl100k_base` | 11337 | 8197 | -3140 | -27.7% |
+| `o200k_base` | 11391 | 8204 | -3187 | -27.98% |
+| `cl100k_base` | 11365 | 8214 | -3151 | -27.73% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+1. `manual.audit.math.erfc-ulp`: Expected rounding difference: tq is 2 ULP higher for erfc(2).
+2. `manual.audit.math.tgamma-ulp`: Expected rounding difference: tq is 1 ULP lower for tgamma(0.5).
+3. `manual.colors.ansi-values`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+4. `manual.colors.custom-1-31`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+5. `manual.colors.default-palette`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+6. `manual.invoking.color-output`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+7. `manual.invoking.jq-colors`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+8. `manual.invoking.no-color-forced`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+9. `manual.invoking.run-tests`: jq prints extra internal self-test messages; both tools pass the supplied test and exit 0.
 
 ### Sections
 

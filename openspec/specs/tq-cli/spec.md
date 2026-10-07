@@ -231,15 +231,33 @@ The CLI SHALL apply the existing environment capability contract to `$ENV` as we
 - **THEN** it does not replace the corresponding jq special variable reference
 
 ### Requirement: Output formatting controls
-TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. JSON output SHALL support pretty and compact formatting options. JSON Lines output SHALL always be compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, forced color, and raw or joined output modes. `--compact-output`, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible option and format combinations MUST fail before input is consumed.
+For implementation/evidence closeout only, the 32 native Windows newline target/case contracts and the Linux/Windows presentation and test-runner contracts in the `cross-tool-compatibility` follow-up map remain unresolved under #69/#70. This qualification applies only to those enumerated observations, including compact/raw/sequence/stream bytes where mapped; no other option, process-effect, framing, input, or default-output behavior is deferred. Captured bytes and both manual gate policies SHALL remain unchanged, without blanket CRLF/ANSI normalization or deferred-as-pass counting.
+
+TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and safe key folding options. When no output-format selector is supplied and none of `-c`/`--compact-output`, `--seq`, or `--unframed` is supplied, structured output SHALL emit zero or more canonical TOON values, each followed by LF without RS. `--seq` SHALL select JSON Text Sequence input. With default TOON output or explicit TOON output (`-o toon`/`--output-format toon`), it SHALL select RS-framed TOON Text Sequence output; with JSON output (`-o json`/`--output-format json` or `-c`), it SHALL select RS-framed JSON Text Sequence output. Other explicit native structured outputs SHALL retain their native framing. `-o toon-seq`/`--output-format toon-seq` SHALL select TOON sequence output without changing input selection. `-o json` SHALL select JSON, pretty by default. `-c` and `--compact-output`, including bundled short options, SHALL select compact JSON without requiring `-o json`. An explicit TOON output selection combined with compact JSON SHALL fail before input consumption regardless of argument order. Explicit JSON selection with `-c` SHALL be valid in either order. JSON Lines output SHALL remain compact and SHALL reject `--pretty-output`, `--indent`, `--tab`, and raw or joined output modes. JSON Lines and its NDJSON alias SHALL accept color under the archived `output-colors` main spec, including automatic terminal color and forced `-C`; removing tq-generated SGR SHALL preserve the plain compact LF-terminated bytes. Consumers requiring directly parseable JSON Lines SHALL use redirected automatic output or `-M`. Compact output, ASCII escaping, and recursive key sorting MAY be combined with JSON Lines output. Incompatible options MUST fail before input is consumed. An output-format selector MUST NOT silently select an input parser; `--seq` explicitly selects JSON sequence input and framing only for TOON or JSON output.
+
+#### Scenario: Default TOON
+- **WHEN** `tq '.'` runs without output options
+- **THEN** it emits each canonical TOON value followed by LF without RS; zero results produce empty stdout and multiple results succeed
+
+#### Scenario: Explicit TOON sequence output
+- **WHEN** `tq --seq '.'` runs with default TOON output
+- **THEN** it emits one RS-framed canonical TOON record for each result and preserves completed records before a later error
+
+#### Scenario: Compact JSON selector
+- **WHEN** `tq -c '.'` or `tq --compact-output '.'` processes structured input
+- **THEN** it emits jq-compatible compact JSON with LF-separated records and no TOON framing
+
+#### Scenario: Compact option combinations
+- **WHEN** compact output is combined with `-o json`, `-r`, `-j`, `-S`, or a bundled option such as `-cr`
+- **THEN** JSON and raw output behavior matches the corresponding jq flags
+
+#### Scenario: JSON-only compact option
+- **WHEN** `-c -o toon` or `-o toon -c` is supplied
+- **THEN** the CLI reports an incompatible-option usage error before reading input
 
 #### Scenario: Pipe delimiter
 - **WHEN** TOON output selects the pipe delimiter
 - **THEN** eligible arrays use valid TOON pipe-delimited syntax with correct quoting
-
-#### Scenario: JSON-only compact option
-- **WHEN** a JSON-only compact option is applied to TOON output
-- **THEN** the CLI reports an incompatible-option usage error
 
 #### Scenario: JSON Lines aliases
 - **WHEN** `--output-format jsonl` or `--output-format ndjson` is selected
@@ -250,8 +268,13 @@ TOON output SHALL support indentation, comma/tab/pipe delimiter selection, and s
 - **THEN** the CLI reports an incompatible-option usage error before reading input
 
 #### Scenario: Raw JSON Lines conflict
-- **WHEN** JSON Lines output is combined with raw, joined, or forced-color output
+- **WHEN** JSON Lines output is combined with raw or joined output
 - **THEN** the CLI reports an incompatible-option usage error before reading input
+
+#### Scenario: Colored JSON Lines
+- **WHEN** JSON Lines output is combined with forced color
+- **THEN** tq accepts the option and styles compact JSON tokens while preserving the underlying LF-terminated serialization
+- **AND** with terminal capability permitted, JSON Lines and its NDJSON alias use the shared tq palette, and removing generated SGR yields exactly the corresponding plain compact records and LF framing
 
 ### Requirement: Strictness
 TOON input SHALL use strict validation by default. A documented non-strict option MAY relax only the TOON rules permitted by the underlying spec and MUST NOT disable resource limits or UTF-8 validation.
@@ -309,34 +332,38 @@ The CLI SHALL provide stable help, version, and compatibility-report commands. V
 - **THEN** it displays machine-readable or human-readable supported, partial, deferred, and unsupported capabilities derived from the test manifest
 
 ### Requirement: Deferred jq CLI options are rejected clearly
-MVP-unimplemented jq options such as modules/library paths, slurp/raw files, positional argument modes, color configuration, and platform-specific options SHALL fail as unsupported if recognized. They MUST NOT be silently ignored.
+Every option documented in the pinned jq manual SHALL implement its documented contract, subject to the explicit TOON default-output, product-identity, and archived `output-colors` presentation contracts. Such options MUST NOT be reported as deferred. Unknown options and historical options absent from the reference SHALL fail with the reference usage contract and MUST NOT be silently ignored.
 
 #### Scenario: Deferred module path
-- **WHEN** a user supplies jq-compatible module path syntax in the MVP
-- **THEN** the CLI reports the deferred module capability and exits with a usage/unsupported status
+- **WHEN** a user supplies the documented jq library-path syntax
+- **THEN** the CLI applies jq-compatible module lookup rather than reporting a deferred capability
+
+#### Scenario: Unknown option
+- **WHEN** an unrecognized option is supplied
+- **THEN** the CLI emits a usage diagnostic and the reference-compatible exit status before consuming input
 
 ### Requirement: Remaining input consumption
-The `inputs` built-in SHALL pull and decode the remaining ordered documents from the active stdin or file source set. A document consumed by `inputs` MUST NOT later become a separate top-level evaluation input. Decoding, proxy, byte, depth, cancellation, and source-order behavior MUST remain the same as top-level CLI input processing.
+`input` and `inputs` SHALL share the top-level evaluator's ordered input cursor, including stdin and file arguments. `input` SHALL pull one value and report jq's end-of-input error when exhausted; `inputs` SHALL pull all remaining values and emit nothing at exhaustion. Consumed documents MUST NOT later become top-level evaluation inputs. `--null-input` SHALL suppress only the implicit initial read, not reads requested by these built-ins. Decoding, proxy, byte, depth, cancellation, and source-order behavior MUST remain the same as top-level CLI processing. Source filename and line metadata SHALL reflect the active consumed input.
 
 #### Scenario: Consume remaining stdin values
-- **WHEN** three JSON values are supplied on stdin and the first evaluation runs `[., inputs]`
-- **THEN** one result containing all three values is emitted and tq does not run the filter again for the second or third value
+- **WHEN** three JSON values are supplied and the first evaluation runs `[., inputs]`
+- **THEN** one result contains all three values and the remaining values are not evaluated again
 
 #### Scenario: Consume remaining files
-- **WHEN** the filter calls `inputs` while tq is processing the first of several input files
-- **THEN** it emits documents from the remaining files in command-line order
+- **WHEN** a filter calls `inputs` while processing the first of several files
+- **THEN** it emits remaining documents in command-line order
 
 #### Scenario: No remaining input
-- **WHEN** `inputs` is evaluated after the active source set is exhausted
-- **THEN** it emits zero results rather than `null`
+- **WHEN** the source set is exhausted
+- **THEN** `inputs` emits nothing and `input` reports the reference end-of-input error
 
 #### Scenario: Remaining input fails to decode
 - **WHEN** `inputs` reaches malformed structured input without proxy-on-error
-- **THEN** evaluation stops with the same classified input failure used by top-level processing
+- **THEN** evaluation stops with the same classified input failure used by top-level processing and preserves already committed output
 
 #### Scenario: Null input mode
-- **WHEN** `inputs` is evaluated under `--null-input` with no file sources
-- **THEN** it emits zero results
+- **WHEN** `-n '[inputs]'` receives values on stdin
+- **THEN** it reads those values into one array despite suppressing the implicit top-level read
 
 ### Requirement: Native output lifecycle and command budget
 The CLI SHALL maintain one native output sequence across all structured Results for a command. Raw and proxy bytes SHALL bypass native encoding without resetting sequence context. Command output SHALL apply one shared output-byte budget and flushing policy to native, raw, and proxy bytes. Native output SHALL validate each complete Result against its output profile and sequence context before committing that Document's bytes. Any native output write failure SHALL terminate the sequence; later writes MUST be rejected. I/O or resource failures after commitment MAY leave partial bytes.
@@ -388,7 +415,7 @@ Default native-format conversion SHALL permit every normalization declared by th
 - **THEN** the earlier frames remain valid on stdout and tq exits with a profile-rejection diagnostic
 
 ### Requirement: Native format option compatibility
-The CLI SHALL validate format-specific controls before consuming semantic input. JSON sequence output SHALL accept the JSON formatting controls that preserve valid RFC 7464 framing. CSV and TSV output MUST reject JSON-only, TOON-only, raw-output, joined-output, and color controls unless a control has an explicitly documented delimited-text meaning.
+The CLI SHALL validate format-specific controls before consuming semantic input. All supported native output formats SHALL accept color and monochrome controls as presentation options under the output-colors policy. JSON sequence color SHALL decorate only the document payload and preserve unstyled RS/LF boundaries. JSON sequence output SHALL accept the JSON formatting controls that preserve valid RFC 7464 framing. CSV and TSV output MUST reject JSON-only, TOON-only, raw-output, and joined-output controls unless a control has an explicitly documented delimited-text meaning.
 
 #### Scenario: Pretty JSON sequence
 - **WHEN** JSON sequence output uses a compatible JSON indentation control
@@ -401,3 +428,45 @@ The CLI SHALL validate format-specific controls before consuming semantic input.
 #### Scenario: TOON option on TSV
 - **WHEN** TSV output is combined with a TOON folding or delimiter option
 - **THEN** tq reports an incompatible-option usage error before reading input
+
+#### Scenario: Colored delimited output
+- **WHEN** CSV or TSV output is combined with `-C`
+- **THEN** headers, scalar fields, delimiters, and quotes use the default theme without changing undecorated field or row bytes
+
+#### Scenario: Colored JSON sequence
+- **WHEN** JSON sequence output is combined with `-C`
+- **THEN** tq accepts forced color and stripping tq-generated SGR yields valid RFC 7464 output identical to monochrome output
+
+### Requirement: JSON sequence and stream parity
+JSON input SHALL accept jq's whitespace-separated value stream. Explicit strict JSON input SHALL disable native-format probing, including for malformed-input conformance cases. JSON `--seq` input and JSON output SHALL implement jq record framing, malformed-record diagnostics, and recovery. `--seq` SHALL select JSON Text Sequence input. If the selected structured output is default or explicit TOON (`-o toon`/`--output-format toon`), output SHALL use TOON Text Sequence framing. If output is JSON (`-o json`/`--output-format json` or `-c`), output SHALL use JSON Text Sequence framing. Other explicit native output formats SHALL retain their native framing. Explicit `-i json` SHALL be accepted with `--seq` and normalized to JSON sequence input. Explicit non-JSON input and `--unframed` SHALL conflict with `--seq` in either argument order. JSON `--stream` and `--stream-errors` SHALL preserve reference event order, container-end events, parse-error events, source positions, and partial output.
+
+#### Scenario: JSON sequence output
+- **WHEN** `--seq -o json` or `--seq -c` processes JSON sequence input
+- **THEN** record framing and recovery match the equivalent jq invocation
+
+#### Scenario: Native sequence output
+- **WHEN** JSON sequence input is processed with `--seq` and default or explicit TOON output
+- **THEN** output remains RS-framed TOON Text Sequence rather than implicitly becoming JSON
+
+#### Scenario: Recover after malformed record
+- **WHEN** a malformed JSON sequence record precedes a valid record
+- **THEN** diagnostics, recovery at the next record separator, results, and exit status match jq
+
+#### Scenario: Stream reconstruction
+- **WHEN** manual `tostream`, `fromstream`, or `truncate_stream` programs process nested and empty containers
+- **THEN** their ordered results and error behavior match jq
+
+### Requirement: Process effects and termination
+`debug`, `debug(msgs)`, and `stderr` SHALL emit jq-compatible stderr payloads while preserving their documented filter result streams. `halt` and `halt_error` SHALL terminate the process with jq-compatible status and stderr bytes. Termination MUST abandon pending evaluations, MUST NOT become an ordinary catchable runtime error, and MUST preserve output committed before termination. Unbuffered output SHALL become observable before the next input is requested.
+
+#### Scenario: Debug generator
+- **WHEN** `debug(msgs)` evaluates a message generator
+- **THEN** stderr message order and stdout values match the reference independently
+
+#### Scenario: Explicit halt error
+- **WHEN** a program emits a result then calls `halt_error(7)`
+- **THEN** it retains the emitted result, exits with status 7, and writes the reference stderr payload without an added diagnostic wrapper
+
+#### Scenario: Incremental pipe output
+- **WHEN** an unbuffered filter emits a result while its input pipe remains open
+- **THEN** a consumer observes that result without waiting for input EOF

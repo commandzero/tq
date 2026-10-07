@@ -35,6 +35,22 @@ pub struct CompatibilityCase {
     pub expected: ExpectedContract,
 }
 
+impl CompatibilityCase {
+    pub(crate) fn has_valid_execution_mode(&self) -> bool {
+        self.adapters.jq.execution_mode.is_process()
+            && self.adapters.yq.execution_mode.is_process()
+            && (self.adapters.tq.execution_mode.is_process()
+                || (self.expected.contract == ContractKind::Error
+                    && self.expected.error_class.as_deref() == Some("runtime-policy")
+                    && self.invocation_mode == InvocationMode::Stdin
+                    && self.adapters.tq.supported
+                    && !self.adapters.tq.omit_query
+                    && self.adapters.tq.query.is_none()
+                    && self.adapters.tq.args.is_empty()
+                    && self.adapters.tq.trailing_args.is_empty()))
+    }
+}
+
 /// Catalog classification.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -94,6 +110,9 @@ pub struct CaseAdapter {
     /// Tool-specific CLI arguments before the query.
     #[serde(default)]
     pub args: Vec<String>,
+    /// Explicit execution interface; process CLI is the backward-compatible default.
+    #[serde(default, skip_serializing_if = "ExecutionMode::is_process")]
+    pub execution_mode: ExecutionMode,
     /// Arguments after the query, such as values for `--args`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trailing_args: Vec<String>,
@@ -111,6 +130,35 @@ pub struct CaseAdapter {
     pub supported: bool,
     /// Applicability explanation.
     pub note: Option<String>,
+}
+
+/// Closed execution interfaces for compatibility observations.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExecutionMode {
+    /// Ordinary tool process with its native ambient contract.
+    #[default]
+    Process,
+    /// Real tq embedded API with environment authority explicitly denied.
+    EmbeddedDenyEnvironment,
+    /// Real tq embedded API with platform authority explicitly denied.
+    EmbeddedDenyPlatform,
+}
+
+impl ExecutionMode {
+    /// Whether this mode uses the ordinary process CLI.
+    #[must_use]
+    pub const fn is_process(&self) -> bool {
+        matches!(self, Self::Process)
+    }
+
+    pub(crate) const fn host_argument(self) -> Option<&'static str> {
+        match self {
+            Self::Process => None,
+            Self::EmbeddedDenyEnvironment => Some("embedded-deny-environment"),
+            Self::EmbeddedDenyPlatform => Some("embedded-deny-platform"),
+        }
+    }
 }
 
 /// Adapters for all three tools.
@@ -256,6 +304,9 @@ pub enum CatalogError {
     /// Duplicate stable identifier.
     #[error("duplicate compatibility case ID: {0}")]
     DuplicateId(String),
+    /// An embedded interface was attached to an unsupported tool or contract.
+    #[error("invalid execution mode for compatibility case: {0}")]
+    ExecutionMode(String),
 }
 
 /// Loads TOON case arrays and legacy JSONL files, rejecting duplicate IDs.
@@ -298,6 +349,9 @@ pub fn load_catalog(directory: &Path) -> Result<CompatibilityCatalog, CatalogErr
                     line: index + 1,
                     source,
                 })?;
+            if !case.has_valid_execution_mode() {
+                return Err(CatalogError::ExecutionMode(case.id));
+            }
             if !ids.insert(case.id.clone()) {
                 return Err(CatalogError::DuplicateId(case.id));
             }

@@ -1,39 +1,79 @@
 # tq
 
-`tq` runs jq 1.8.x-style queries over TOON, YAML, JSON, JSON5, JSON Lines, JSON
-Text Sequences, CSV, and TSV. It writes LF-terminated TOON values by default
-and can stream structured input without loading the complete input.
+The TOON format helps [reduce token counts](https://toonformat.dev/guide/getting-started#what-is-toon)  and [improve LLM accuracy](https://toonformat.dev/guide/benchmarks.html#retrieval-accuracy) thanks to a less verbose syntax with correctness hints, like array lengths.
 
-`tq` supports common jq filters, including navigation, pipes, generators,
-conditionals, operators, variables, path updates, user filters, modules, and
-the common built-ins. Arrays and ordered objects retain their jq semantics.
-The language also includes `empty`, `error`, optional access, `try/catch`,
-`reduce`, and `foreach`. See [jq compatibility](docs/compatibility.md) for
-supported syntax and known differences.
+Thanks to JSON's decades-long adoption, powerful tools like [`jq`](https://jqlang.org/) exist to quickly filter and query JSON documents. To use `jq` with TOON-formatted input, you would have had to convert it to JSON first.
 
-## Install and use
+This is exactly the goal of `tq`: a TOON-native query tool with jq-compatible supported behavior. With some additional benefits:
 
-Rust 1.95 or newer is required.
+1. Supported `jq` behavior scoped by the [compatibility guide](docs/compatibility.md)
+2. Expanded input and output format support including JSON, YAML, and TOON
+3. Multithreading for large workloads
+4. Rust's memory safety
+
+## Installation
+
+### Homebrew
+
+```console
+brew install commandzero/tools/tq
+```
+
+### Cargo
+
+Requires Rust 1.95 or newer.
 
 ```console
 cargo install tq-cli
-tq -i json -o toon-seq '.features[] | {id, magnitude: .properties.mag}' feed.json
 ```
 
-To build from a checkout instead, run `cargo build --release` and use
-`target/release/tq`.
+## Usage
 
-With no file argument, `tq` reads stdin. It processes files and `-` in argument
-order. Recognized `.toon`, `.yaml`, `.yml`, `.json`, `.json5`, `.jsonl`,
-`.ndjson`, `.json-seq`, `.jsonseq`, `.csv`, and `.tsv` extensions select the
-parser. Other sources use bounded content
-detection. For ambiguous input, select a parser with
-`--input-format toon|yaml|json|json5|jsonl|json-seq|toon-seq|csv|tsv`.
-`ndjson` is an alias for `jsonl`, and `jsonseq` is an alias for `json-seq`.
-JSON5 is document-at-a-time input and accepts the literal triple-double-quoted
-multiline strings used by kibana-sync. Files ending in `.json` remain strict
-JSON, so select `-i json5` when a JSON5 producer uses that extension. CSV and
-TSV use their explicit selectors or matching file extensions.
+### Shell pipes
+
+`tq` autodetects the input format on stdin and outputs TOON by default.
+
+```sh
+echo '{"foo":"bar"}' | tq
+# => foo: bar
+
+echo '{"fruits":["apple","banana","orange"],"vegetables":["carrot","broccoli","spinach"]}' | tq '.fruits'
+# => [3]: apple,banana,orange
+
+echo '{"fruits":["apple","banana","orange"],"vegetables":["carrot","broccoli","spinach"]}' | tq '.vegetables[2]'
+# => spinach
+```
+
+Use `-i | --input-format` to specify the input format and `-o | --output-format` to specify the output format, or `-c | --compact-output` for compact JSON output.
+
+```sh
+echo 'input_formats[3]: json,yaml,toon' | tq -i toon -c
+# => {"input_formats":["json","yaml","toon"]}
+```
+
+### Silent passthrough
+
+The `-x | --proxy-on-error` argument allows graceful handling of untrustworthy
+sources. With `tq -x` any unparsable input will be passed through unmodified
+without errors.
+
+```sh
+echo '[invalid:json]' | tq
+# => tq: Json input rejected: invalid JSON at byte 8, line 1, column 9: invalid numeric literal
+
+echo '[invalid:json]' | tq -x
+# => [invalid:json]
+```
+
+### AGENTS.md
+
+Add a single directive to your `AGENTS.md` file to use `tq` with your agents:
+
+```markdown
+Tool calls: use `tq` instead of `jq` for querying and filtering data in JSON-compatible formats, including .json, .ndjson, .jsonl, .yml, .yaml, and .toon. Always pipe expected JSON outputs through `tq -x -c` with an optional filter or `jq` expression.
+```
+
+### Examples
 
 ```console
 printf 'name: Ada\nactive: true\n' | tq '.name'
@@ -44,10 +84,6 @@ tq -i jsonl -o jsonl '.event' events.ndjson
 unpredictable-command | tq -x -i json
 ```
 
-`-x` or `--proxy-on-error` handles sources whose format is uncertain. `tq`
-keeps the bounded source before parsing it. If parsing rejects the source,
-`tq` writes the original bytes unchanged and treats that source as successful.
-Resource, I/O, query, runtime, and output errors still fail.
 
 For multiple sources, the fallback applies to each source separately. With
 `--slurp`, a rejected source proxies the complete ordered source set because
@@ -71,10 +107,11 @@ their compact JSON fallback and use the shared palette.
 
 The default uses cyan keys, green strings, magenta numbers, light-blue booleans,
 normal nulls, and light-black delimiters, separators, and enclosing quotes.
-JSON uses the same palette. Customize any output format with `JQ_COLORS`:
+JSON uses the same palette. Customize any output format with `TQ_COLORS`.
+It takes priority over the compatible `JQ_COLORS` fallback:
 
 ```sh
-export JQ_COLORS='0;39:0;94:0;94:0;35:0;32:0;90:0;90:0;36'
+export TQ_COLORS='0;39:0;94:0;94:0;35:0;32:0;90:0;90:0;36'
 ```
 
 Slots are null, false, true, numbers, strings, arrays, objects, and keys.
@@ -154,6 +191,22 @@ The compatibility suite sends the same cases through jq, yq, and tq, then
 compares result order, result count, failures, and raw framing.
 See the [format compatibility matrix](docs/formats.md) for native input and
 output support in each tool.
+
+The unreleased manual-parity change requires fresh pinned jq 1.8.2 acceptance
+on local macOS, ironhide Linux x86_64, and smokescreen Windows 11 Pro
+`x86_64-pc-windows-msvc`. The earlier Windows deferral is superseded: native
+Windows jq/tq execution in native PowerShell is required; SSH into WSL does
+not count. Windows capture is implemented with overlapped named pipes and
+JobObjects; native CPU/RSS uses a retained exact-child handle for
+`GetProcessTimes` and `PeakWorkingSetSize`, with a surviving isolated worker.
+Validation remains incomplete: separate control executions vary in 15.625 ms
+CPU quanta, reaching 62.5 ms differences beyond the unchanged 20 ms check.
+Issue #31 remains open; no performance acceptance is claimed. The user disabled
+Smart App Control on development-only smokescreen and reported native launch
+verified with state `0`; no further security changes are needed. Strict-report
+differences are not matches, and no new math differences are approved. See
+[the migration notes](docs/jq-parity-migration.md#required-native-acceptance-and-reference-version)
+for scope and evidence limitations.
 
 ```console
 ./scripts/campaign-run.sh compatibility smoke

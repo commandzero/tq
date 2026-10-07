@@ -436,11 +436,16 @@ fn fixture_identity(path: &Path) -> String {
             identity.push(component.as_os_str());
         }
     }
-    if found_tests {
-        identity.display().to_string()
+    let identity = if found_tests {
+        identity.as_path()
     } else {
-        path.display().to_string()
-    }
+        path
+    };
+    // Provenance is a portable report identity, not a native filesystem path.
+    // Replace only the platform separator: a backslash is a valid Unix filename byte.
+    identity
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 pub(crate) fn profile_args(mode: OutputMode, tool: BenchmarkTool, query: &str) -> Vec<String> {
@@ -986,6 +991,46 @@ mod tests {
     }
 
     #[test]
+    fn fixture_identities_use_portable_separators() {
+        let relative = PathBuf::from("tests")
+            .join("stack-overflow")
+            .join("01-case.toon");
+        let relocated = std::env::temp_dir().join("worktree").join(&relative);
+        for path in [&relative, &relocated] {
+            assert_eq!(fixture_identity(path), "tests/stack-overflow/01-case.toon");
+        }
+        let external = PathBuf::from("external").join("01-case.toon");
+        assert_eq!(fixture_identity(&external), "external/01-case.toon");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fixture_identity_preserves_literal_backslashes_in_unix_filenames() {
+        let path = Path::new(r"tests/stack-overflow/01-\case.toon");
+        assert_eq!(
+            fixture_identity(path),
+            r"tests/stack-overflow/01-\case.toon"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fixture_identity_normalizes_windows_roots_and_separators() {
+        assert_eq!(
+            fixture_identity(Path::new(r"C:\worktree\tests\stack-overflow\01-case.toon")),
+            "tests/stack-overflow/01-case.toon"
+        );
+        assert_eq!(
+            fixture_identity(Path::new(r"C:\external\01-case.toon")),
+            "C:/external/01-case.toon"
+        );
+        assert_eq!(
+            fixture_identity(Path::new(r"\\host\share\01-case.toon")),
+            "//host/share/01-case.toon"
+        );
+    }
+
+    #[test]
     fn profiled_capture_provenance_survives_roundtrip_and_worktree_move() {
         for mode in [OutputMode::Structured, OutputMode::Raw, OutputMode::Color] {
             let (campaign, mut scenario) = validation_campaign(mode);
@@ -994,6 +1039,32 @@ mod tests {
             assert!(validate(&restored, std::slice::from_ref(&scenario)).is_ok());
             scenario.path = PathBuf::from("/another/worktree").join(&scenario.path);
             assert!(validate(&restored, std::slice::from_ref(&scenario)).is_ok());
+        }
+    }
+
+    #[test]
+    fn portable_provenance_still_rejects_changed_identity_bytes_and_digest() {
+        for mode in [OutputMode::Structured, OutputMode::Raw, OutputMode::Color] {
+            for mutation in 0..3 {
+                let (mut campaign, scenario) = validation_campaign(mode);
+                let provenance = campaign
+                    .cases
+                    .get_mut("case")
+                    .expect("case")
+                    .provenance
+                    .as_mut()
+                    .expect("provenance");
+                match mutation {
+                    0 => provenance.fixture = "tests/stack-overflow/other.toon".to_owned(),
+                    1 => provenance.input_bytes += 1,
+                    _ => provenance.contract_sha256 = "stale".to_owned(),
+                }
+                assert!(
+                    validate(&campaign, std::slice::from_ref(&scenario))
+                        .expect_err("changed provenance")
+                        .contains("stale output provenance")
+                );
+            }
         }
     }
 

@@ -25,6 +25,9 @@ use crate::{
 use crate::diagnostic::SourceLineIndex;
 use crate::eval::AMBIENT_ENVIRONMENT;
 
+#[path = "resolve_work.rs"]
+mod work;
+
 /// One versioned built-in signature.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Builtin {
@@ -342,33 +345,6 @@ struct CachedData {
     info: ModuleInfo,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ExpandPairKind {
-    Comma,
-    Pipe,
-    Binary(crate::ast::BinaryOperator),
-    Assignment(crate::ast::AssignmentOperator),
-}
-
-impl ExpandPairKind {
-    fn build(self, left: Box<Expr>, right: Box<Expr>) -> ExprKind {
-        match self {
-            Self::Comma => ExprKind::Comma(left, right),
-            Self::Pipe => ExprKind::Pipe(left, right),
-            Self::Binary(operator) => ExprKind::Binary {
-                operator,
-                left,
-                right,
-            },
-            Self::Assignment(operator) => ExprKind::Assignment {
-                operator,
-                path: left,
-                value: right,
-            },
-        }
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct ModuleLoader {
     roots: Vec<PathBuf>,
@@ -457,17 +433,47 @@ impl ModuleLoader {
             .collect()
     }
 
-    fn expand(&mut self, mut expr: Expr) -> Result<Expr, Box<Diagnostic>> {
+    fn expand(&mut self, expr: Expr) -> Result<Expr, Box<Diagnostic>> {
+        let mut pending = vec![(expr, false)];
+        let mut output: Vec<Expr> = Vec::new();
+        while let Some((mut node, ready)) = pending.pop() {
+            if ready {
+                let slots = expansion_children(&mut node);
+                let offset = output.len() - slots.len();
+                for (slot, child) in slots.into_iter().zip(output.drain(offset..)) {
+                    *slot = child;
+                }
+                output.push(self.expand_node(node)?);
+            } else {
+                match &node.kind {
+                    ExprKind::Include { metadata, .. } | ExprKind::Import { metadata, .. } => {
+                        validate_metadata(metadata.as_deref(), node.span)?;
+                    }
+                    ExprKind::Module { metadata, .. } => {
+                        validate_metadata(Some(metadata), node.span)?;
+                    }
+                    _ => {}
+                }
+                let children = expansion_children(&mut node)
+                    .into_iter()
+                    .map(work::take)
+                    .collect::<Vec<_>>();
+                pending.push((node, true));
+                pending.extend(children.into_iter().rev().map(|child| (child, false)));
+            }
+        }
+        Ok(output.pop().expect("expanded root"))
+    }
+
+    fn expand_node(&mut self, expr: Expr) -> Result<Expr, Box<Diagnostic>> {
         match expr.kind {
             ExprKind::Include {
                 path,
                 metadata,
                 body,
             } => {
-                validate_metadata(metadata.as_deref(), expr.span)?;
-                let body = self.expand(*body)?;
                 let module = self.load(&path, metadata.as_deref(), expr.span)?;
-                splice_module(module.ast, body, expr.span)
+                splice_module(module.ast, *body, expr.span)
             }
             ExprKind::Import {
                 path,
@@ -475,8 +481,7 @@ impl ModuleLoader {
                 metadata,
                 body,
             } => {
-                validate_metadata(metadata.as_deref(), expr.span)?;
-                let mut body = self.expand(*body)?;
+                let mut body = *body;
                 if let Some(data_alias) = alias.strip_prefix('$') {
                     let data = self.load_data(&path, metadata.as_deref(), expr.span)?;
                     let qualified = format!("{data_alias}::{data_alias}");
@@ -488,216 +493,9 @@ impl ModuleLoader {
                     splice_module(module, body, expr.span)
                 }
             }
-            ExprKind::Module { metadata, body } => {
-                validate_metadata(Some(&metadata), expr.span)?;
-                self.expand(*body)
-            }
-            _ => {
-                self.expand_children(&mut expr)?;
-                Ok(expr)
-            }
+            ExprKind::Module { body, .. } => Ok(*body),
+            _ => Ok(expr),
         }
-    }
-
-    #[allow(
-        clippy::too_many_lines,
-        reason = "module expansion exhaustively preserves every AST child position"
-    )]
-    fn expand_children(&mut self, expr: &mut Expr) -> Result<(), Box<Diagnostic>> {
-        match &mut expr.kind {
-            ExprKind::Interpolation(segments) => {
-                for segment in segments {
-                    if let InterpolationSegment::Expression(expression) = segment {
-                        *expression = self.expand(expression.clone())?;
-                    }
-                }
-            }
-            ExprKind::Access { base, access } => {
-                **base = self.expand((**base).clone())?;
-                match access {
-                    Access::Index(index) => **index = self.expand((**index).clone())?,
-                    Access::Slice { start, end } => {
-                        if let Some(start) = start {
-                            **start = self.expand((**start).clone())?;
-                        }
-                        if let Some(end) = end {
-                            **end = self.expand((**end).clone())?;
-                        }
-                    }
-                    Access::Field(_) | Access::Iterate => {}
-                }
-            }
-            ExprKind::Optional(expression)
-            | ExprKind::Array(expression)
-            | ExprKind::Unary { expression, .. } => {
-                self.expand_child(expression)?;
-            }
-            ExprKind::Comma(left, right) => {
-                self.expand_pair_spine(left, right, ExpandPairKind::Comma)?;
-            }
-            ExprKind::Pipe(left, right) => {
-                self.expand_pair_spine(left, right, ExpandPairKind::Pipe)?;
-            }
-            ExprKind::Binary {
-                operator,
-                left,
-                right,
-            } => {
-                self.expand_pair_spine(left, right, ExpandPairKind::Binary(*operator))?;
-            }
-            ExprKind::Assignment {
-                operator,
-                path,
-                value,
-            } => {
-                self.expand_pair_spine(path, value, ExpandPairKind::Assignment(*operator))?;
-            }
-            ExprKind::Object(entries) => {
-                for entry in entries {
-                    if let ObjectKey::Computed(key) = &mut entry.key {
-                        *key = self.expand(key.clone())?;
-                    }
-                    entry.value = self.expand(entry.value.clone())?;
-                }
-            }
-            ExprKind::Conditional {
-                branches,
-                alternative,
-            } => {
-                for (condition, body) in branches {
-                    *condition = self.expand(condition.clone())?;
-                    *body = self.expand(body.clone())?;
-                }
-                **alternative = self.expand((**alternative).clone())?;
-            }
-            ExprKind::Bind { value, body, .. } | ExprKind::BindAlternatives { value, body, .. } => {
-                **value = self.expand((**value).clone())?;
-                **body = self.expand((**body).clone())?;
-            }
-            ExprKind::Reduce {
-                generator,
-                initial,
-                update,
-                ..
-            } => {
-                **generator = self.expand((**generator).clone())?;
-                **initial = self.expand((**initial).clone())?;
-                **update = self.expand((**update).clone())?;
-            }
-            ExprKind::Foreach {
-                generator,
-                initial,
-                update,
-                extract,
-                ..
-            } => {
-                **generator = self.expand((**generator).clone())?;
-                **initial = self.expand((**initial).clone())?;
-                **update = self.expand((**update).clone())?;
-                if let Some(extract) = extract {
-                    **extract = self.expand((**extract).clone())?;
-                }
-            }
-            ExprKind::Define { definition, body } => {
-                definition.body = self.expand(definition.body.clone())?;
-                **body = self.expand((**body).clone())?;
-            }
-            ExprKind::Call { arguments, .. } => {
-                for argument in arguments {
-                    *argument = self.expand(argument.clone())?;
-                }
-            }
-            ExprKind::TryCatch { expression, catch } => {
-                **expression = self.expand((**expression).clone())?;
-                if let Some(catch) = catch {
-                    **catch = self.expand((**catch).clone())?;
-                }
-            }
-            ExprKind::Label { body, .. } => {
-                **body = self.expand((**body).clone())?;
-            }
-            ExprKind::Identity
-            | ExprKind::Literal(_)
-            | ExprKind::Variable(_)
-            | ExprKind::Empty
-            | ExprKind::RecursiveDescent
-            | ExprKind::Break { .. } => {}
-            ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
-                unreachable!("module wrapper handled before child expansion")
-            }
-        }
-        Ok(())
-    }
-
-    fn expand_child(&mut self, child: &mut Box<Expr>) -> Result<(), Box<Diagnostic>> {
-        let span = child.span;
-        let owned = std::mem::replace(child, Box::new(Expr::new(ExprKind::Empty, span)));
-        **child = self.expand(*owned)?;
-        Ok(())
-    }
-
-    fn expand_pair_spine(
-        &mut self,
-        left: &mut Box<Expr>,
-        right: &mut Box<Expr>,
-        pair_kind: ExpandPairKind,
-    ) -> Result<(), Box<Diagnostic>> {
-        // The parser left-associates these paired forms. Peel only a
-        // contiguous same-kind left spine so precedence and parenthesized
-        // mixed operators retain their original tree shape and order.
-        let left_span = left.span;
-        let mut cursor = std::mem::replace(left, Box::new(Expr::new(ExprKind::Empty, left_span)));
-        let mut pending_rights = Vec::new();
-        loop {
-            let span = cursor.span;
-            match cursor.kind {
-                ExprKind::Comma(next_left, next_right)
-                    if matches!(pair_kind, ExpandPairKind::Comma) =>
-                {
-                    pending_rights.push((next_right, span));
-                    cursor = next_left;
-                }
-                ExprKind::Pipe(next_left, next_right)
-                    if matches!(pair_kind, ExpandPairKind::Pipe) =>
-                {
-                    pending_rights.push((next_right, span));
-                    cursor = next_left;
-                }
-                ExprKind::Binary {
-                    operator,
-                    left: next_left,
-                    right: next_right,
-                } if pair_kind == ExpandPairKind::Binary(operator) => {
-                    pending_rights.push((next_right, span));
-                    cursor = next_left;
-                }
-                ExprKind::Assignment {
-                    operator,
-                    path: next_left,
-                    value: next_right,
-                } if pair_kind == ExpandPairKind::Assignment(operator) => {
-                    pending_rights.push((next_right, span));
-                    cursor = next_left;
-                }
-                kind => {
-                    cursor = Box::new(self.expand(Expr::new(kind, span))?);
-                    break;
-                }
-            }
-        }
-
-        let mut rebuilt = cursor;
-        for (pending, span) in pending_rights.into_iter().rev() {
-            let pending = Box::new(self.expand(*pending)?);
-            rebuilt = Box::new(Expr::new(pair_kind.build(rebuilt, pending), span));
-        }
-        let right_span = right.span;
-        let right_child =
-            std::mem::replace(right, Box::new(Expr::new(ExprKind::Empty, right_span)));
-        let expanded_right = Box::new(self.expand(*right_child)?);
-        *left = rebuilt;
-        *right = expanded_right;
-        Ok(())
     }
 
     fn load(
@@ -720,7 +518,10 @@ impl ModuleLoader {
             ));
         }
         if let Some(module) = self.cache.get(&canonical) {
-            return Ok(module.clone());
+            return Ok(CachedModule {
+                ast: work::clone_expr(&module.ast),
+                info: module.info.clone(),
+            });
         }
         if self
             .cache
@@ -779,7 +580,13 @@ impl ModuleLoader {
         };
         let module = CachedModule { ast, info };
         self.order.push(canonical.clone());
-        self.cache.insert(canonical, module.clone());
+        self.cache.insert(
+            canonical,
+            CachedModule {
+                ast: work::clone_expr(&module.ast),
+                info: module.info.clone(),
+            },
+        );
         Ok(module)
     }
 
@@ -1143,39 +950,37 @@ fn substitute_metadata_root(value: &str, origin: Option<&Path>) -> PathBuf {
 }
 
 fn replace_data_binding(expr: &mut Expr, qualified: &str, value: &Value) {
-    if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == qualified) {
-        expr.kind = ExprKind::Literal(value.clone());
-        return;
-    }
-    walk_expr_mut(expr, |child| replace_data_binding(child, qualified, value));
+    work::visit_mut(expr, |expr| {
+        if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == qualified) {
+            expr.kind = ExprKind::Literal(value.clone());
+        }
+    });
 }
 
 pub(crate) fn replace_location_variables(expr: &mut Expr, source_name: &str, source_text: &str) {
-    if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == "__loc__") {
-        let offset = usize::try_from(expr.span.start)
-            .unwrap_or(source_text.len())
-            .min(source_text.len());
-        let line = source_text[..offset]
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count()
-            + 1;
-        let file = if source_name == "<command-line>" {
-            "<top-level>"
-        } else {
-            source_name
-        };
-        expr.kind = ExprKind::Literal(Value::object(crate::Object::from_iter([
-            (Arc::from("file"), Value::string(file)),
-            (
-                Arc::from("line"),
-                Value::Number(Number::parse(&line.to_string()).expect("line number is valid")),
-            ),
-        ])));
-        return;
-    }
-    walk_expr_mut(expr, |child| {
-        replace_location_variables(child, source_name, source_text);
+    work::visit_mut(expr, |expr| {
+        if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == "__loc__") {
+            let offset = usize::try_from(expr.span.start)
+                .unwrap_or(source_text.len())
+                .min(source_text.len());
+            let line = source_text[..offset]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+                + 1;
+            let file = if source_name == "<command-line>" {
+                "<top-level>"
+            } else {
+                source_name
+            };
+            expr.kind = ExprKind::Literal(Value::object(crate::Object::from_iter([
+                (Arc::from("file"), Value::string(file)),
+                (
+                    Arc::from("line"),
+                    Value::Number(Number::parse(&line.to_string()).expect("line number is valid")),
+                ),
+            ])));
+        }
     });
 }
 
@@ -1201,65 +1006,69 @@ fn enrich_module_metadata(metadata: Value, expr: &Expr) -> Value {
     Value::object(metadata)
 }
 
-fn collect_module_dependencies(expr: &Expr, dependencies: &mut Vec<Value>) {
-    match &expr.kind {
-        ExprKind::Import {
-            path,
-            alias,
-            metadata,
-            body,
-        } => {
-            let mut dependency = crate::Object::new();
-            if let Some(metadata) = metadata
-                && let Some(Value::Object(values)) = constant_value(metadata)
-                && let Some(search) = values.get("search")
-            {
-                dependency.insert(Arc::from("search"), search.clone());
+fn collect_module_dependencies(mut expr: &Expr, dependencies: &mut Vec<Value>) {
+    loop {
+        match &expr.kind {
+            ExprKind::Import {
+                path,
+                alias,
+                metadata,
+                body,
+            } => {
+                let mut dependency = crate::Object::new();
+                if let Some(metadata) = metadata
+                    && let Some(Value::Object(values)) = constant_value(metadata)
+                    && let Some(search) = values.get("search")
+                {
+                    dependency.insert(Arc::from("search"), search.clone());
+                }
+                if alias.starts_with('$') {
+                    dependency.insert(Arc::from("is_data"), Value::Bool(true));
+                } else {
+                    dependency.insert(Arc::from("as"), Value::string(alias.as_ref()));
+                    dependency.insert(Arc::from("is_data"), Value::Bool(false));
+                }
+                dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
+                dependencies.push(Value::object(dependency));
+                expr = body;
             }
-            if alias.starts_with('$') {
-                dependency.insert(Arc::from("is_data"), Value::Bool(true));
-            } else {
-                dependency.insert(Arc::from("as"), Value::string(alias.as_ref()));
+            ExprKind::Include {
+                path,
+                metadata,
+                body,
+            } => {
+                let mut dependency = crate::Object::new();
+                if let Some(metadata) = metadata
+                    && let Some(Value::Object(values)) = constant_value(metadata)
+                    && let Some(search) = values.get("search")
+                {
+                    dependency.insert(Arc::from("search"), search.clone());
+                }
                 dependency.insert(Arc::from("is_data"), Value::Bool(false));
+                dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
+                dependencies.push(Value::object(dependency));
+                expr = body;
             }
-            dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
-            dependencies.push(Value::object(dependency));
-            collect_module_dependencies(body, dependencies);
-        }
-        ExprKind::Include {
-            path,
-            metadata,
-            body,
-        } => {
-            let mut dependency = crate::Object::new();
-            if let Some(metadata) = metadata
-                && let Some(Value::Object(values)) = constant_value(metadata)
-                && let Some(search) = values.get("search")
-            {
-                dependency.insert(Arc::from("search"), search.clone());
+            ExprKind::Define { body, .. } | ExprKind::Module { body, .. } => {
+                expr = body;
             }
-            dependency.insert(Arc::from("is_data"), Value::Bool(false));
-            dependency.insert(Arc::from("relpath"), Value::string(path.as_ref()));
-            dependencies.push(Value::object(dependency));
-            collect_module_dependencies(body, dependencies);
+            _ => break,
         }
-        ExprKind::Define { body, .. } | ExprKind::Module { body, .. } => {
-            collect_module_dependencies(body, dependencies);
-        }
-        _ => {}
     }
 }
 
-fn collect_definition_names(expr: &Expr, definitions: &mut Vec<(Arc<str>, usize)>) {
-    match &expr.kind {
-        ExprKind::Define { definition, body } => {
-            definitions.push((Arc::clone(&definition.name), definition.parameters.len()));
-            collect_definition_names(body, definitions);
+fn collect_definition_names(mut expr: &Expr, definitions: &mut Vec<(Arc<str>, usize)>) {
+    loop {
+        match &expr.kind {
+            ExprKind::Define { definition, body } => {
+                definitions.push((Arc::clone(&definition.name), definition.parameters.len()));
+                expr = body;
+            }
+            ExprKind::Include { body, .. }
+            | ExprKind::Import { body, .. }
+            | ExprKind::Module { body, .. } => expr = body,
+            _ => break,
         }
-        ExprKind::Include { body, .. }
-        | ExprKind::Import { body, .. }
-        | ExprKind::Module { body, .. } => collect_definition_names(body, definitions),
-        _ => {}
     }
 }
 
@@ -1275,58 +1084,94 @@ fn validate_metadata(metadata: Option<&Expr>, span: Span) -> Result<(), Box<Diag
 }
 
 fn constant_value(expr: &Expr) -> Option<Value> {
-    match &expr.kind {
-        ExprKind::Literal(value) => Some(value.clone()),
-        ExprKind::Array(body) => {
-            let mut values = Vec::new();
-            constant_sequence(body, &mut values)?;
-            Some(Value::array(values))
-        }
-        ExprKind::Object(entries) => {
-            let mut object = crate::Object::new();
-            for entry in entries {
-                let ObjectKey::Static(key) = &entry.key else {
-                    return None;
-                };
-                object.insert(Arc::clone(key), constant_value(&entry.value)?);
+    enum Task<'a> {
+        Value(&'a Expr),
+        Sequence(&'a Expr),
+        Array(usize),
+        Object(Object, &'a [crate::ast::ObjectEntry]),
+        Insert(Object, &'a Arc<str>, &'a [crate::ast::ObjectEntry]),
+    }
+    let mut pending = vec![Task::Value(expr)];
+    let mut output = Vec::new();
+    while let Some(task) = pending.pop() {
+        match task {
+            Task::Value(expr) => match &expr.kind {
+                ExprKind::Literal(value) => output.push(value.clone()),
+                ExprKind::Array(body) => {
+                    pending.push(Task::Array(output.len()));
+                    pending.push(Task::Sequence(body));
+                }
+                ExprKind::Object(entries) => {
+                    pending.push(Task::Object(Object::new(), entries));
+                }
+                _ => return None,
+            },
+            // Commas concatenate only within an array constructor; empty is
+            // zero elements there, not a constant value at other positions.
+            Task::Sequence(expr) => match &expr.kind {
+                ExprKind::Comma(left, right) => {
+                    pending.push(Task::Sequence(right));
+                    pending.push(Task::Sequence(left));
+                }
+                ExprKind::Empty => {}
+                _ => pending.push(Task::Value(expr)),
+            },
+            Task::Array(offset) => {
+                let values = output.split_off(offset);
+                output.push(Value::array(values));
             }
-            Some(Value::object(object))
+            Task::Object(object, entries) => {
+                if let Some((entry, remaining)) = entries.split_first() {
+                    let ObjectKey::Static(key) = &entry.key else {
+                        return None;
+                    };
+                    pending.push(Task::Insert(object, key, remaining));
+                    pending.push(Task::Value(&entry.value));
+                } else {
+                    output.push(Value::object(object));
+                }
+            }
+            Task::Insert(mut object, key, remaining) => {
+                object.insert(Arc::clone(key), output.pop().expect("constant entry value"));
+                pending.push(Task::Object(object, remaining));
+            }
         }
-        _ => None,
     }
+    output.pop()
 }
 
-fn constant_sequence(expr: &Expr, output: &mut Vec<Value>) -> Option<()> {
-    if let ExprKind::Comma(left, right) = &expr.kind {
-        constant_sequence(left, output)?;
-        constant_sequence(right, output)
-    } else if matches!(expr.kind, ExprKind::Empty) {
-        Some(())
-    } else {
-        output.push(constant_value(expr)?);
-        Some(())
-    }
-}
-
-fn splice_module(module: Expr, body: Expr, span: Span) -> Result<Expr, Box<Diagnostic>> {
-    match module.kind {
-        ExprKind::Define {
-            definition,
-            body: module_body,
-        } => Ok(Expr::new(
+fn splice_module(mut module: Expr, mut body: Expr, span: Span) -> Result<Expr, Box<Diagnostic>> {
+    let mut definitions = Vec::new();
+    loop {
+        match module.kind {
             ExprKind::Define {
                 definition,
-                body: Box::new(splice_module(*module_body, body, span)?),
+                body: module_body,
+            } => {
+                definitions.push(definition);
+                module = *module_body;
+            }
+            ExprKind::Empty => break,
+            _ => {
+                return Err(module_error(
+                    "TQ-MODULE-CONTENT-001",
+                    "module files may contain metadata, imports, includes, and definitions"
+                        .to_owned(),
+                    module.span,
+                ));
+            }
+        }
+    }
+    for definition in definitions.into_iter().rev() {
+        body = Expr::new(
+            ExprKind::Define {
+                definition,
+                body: Box::new(body),
             },
             span,
-        )),
-        ExprKind::Empty => Ok(body),
-        _ => Err(module_error(
-            "TQ-MODULE-CONTENT-001",
-            "module files may contain metadata, imports, includes, and definitions".to_owned(),
-            module.span,
-        )),
+        );
     }
+    Ok(body)
 }
 
 fn qualify_module(expr: &mut Expr, alias: &str) {
@@ -1335,155 +1180,33 @@ fn qualify_module(expr: &mut Expr, alias: &str) {
     qualify_expr(expr, alias, &definitions);
 }
 
-fn collect_definitions(expr: &Expr, definitions: &mut BTreeSet<(Arc<str>, usize)>) {
-    if let ExprKind::Define { definition, body } = &expr.kind {
+fn collect_definitions(mut expr: &Expr, definitions: &mut BTreeSet<(Arc<str>, usize)>) {
+    while let ExprKind::Define { definition, body } = &expr.kind {
         definitions.insert((Arc::clone(&definition.name), definition.parameters.len()));
-        collect_definitions(body, definitions);
+        expr = body;
     }
 }
 
 fn qualify_expr(expr: &mut Expr, alias: &str, definitions: &BTreeSet<(Arc<str>, usize)>) {
-    match &mut expr.kind {
-        ExprKind::Define { definition, body } => {
-            let old = Arc::clone(&definition.name);
-            definition.name = Arc::from(format!("{alias}::{old}"));
-            qualify_expr(&mut definition.body, alias, definitions);
-            qualify_expr(body, alias, definitions);
+    work::visit_mut(expr, |expr| match &mut expr.kind {
+        ExprKind::Define { definition, .. } => {
+            definition.name = Arc::from(format!("{alias}::{}", definition.name));
         }
         ExprKind::Call {
             name, arguments, ..
-        } => {
-            if definitions.contains(&(Arc::clone(name), arguments.len())) {
-                *name = Arc::from(format!("{alias}::{name}"));
-            }
-            for argument in arguments {
-                qualify_expr(argument, alias, definitions);
-            }
+        } if definitions.contains(&(Arc::clone(name), arguments.len())) => {
+            *name = Arc::from(format!("{alias}::{name}"));
         }
-        _ => walk_expr_mut(expr, |child| qualify_expr(child, alias, definitions)),
-    }
+        _ => {}
+    });
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the shared AST walker keeps module qualification exhaustive"
-)]
-fn walk_expr_mut(expr: &mut Expr, mut visit: impl FnMut(&mut Expr)) {
+fn expansion_children(expr: &mut Expr) -> Vec<&mut Expr> {
     match &mut expr.kind {
-        ExprKind::Interpolation(segments) => {
-            for segment in segments {
-                if let InterpolationSegment::Expression(expression) = segment {
-                    visit(expression);
-                }
-            }
-        }
-        ExprKind::Access { base, access } => {
-            visit(base);
-            match access {
-                Access::Index(index) => visit(index),
-                Access::Slice { start, end } => {
-                    if let Some(start) = start {
-                        visit(start);
-                    }
-                    if let Some(end) = end {
-                        visit(end);
-                    }
-                }
-                Access::Field(_) | Access::Iterate => {}
-            }
-        }
-        ExprKind::Optional(expression)
-        | ExprKind::Array(expression)
-        | ExprKind::Unary { expression, .. } => visit(expression),
-        ExprKind::Pipe(left, right)
-        | ExprKind::Comma(left, right)
-        | ExprKind::Binary { left, right, .. }
-        | ExprKind::Assignment {
-            path: left,
-            value: right,
-            ..
-        } => {
-            visit(left);
-            visit(right);
-        }
-        ExprKind::Object(entries) => {
-            for entry in entries {
-                if let ObjectKey::Computed(key) = &mut entry.key {
-                    visit(key);
-                }
-                visit(&mut entry.value);
-            }
-        }
-        ExprKind::Conditional {
-            branches,
-            alternative,
-        } => {
-            for (condition, body) in branches {
-                visit(condition);
-                visit(body);
-            }
-            visit(alternative);
-        }
-        ExprKind::Bind { value, body, .. } | ExprKind::BindAlternatives { value, body, .. } => {
-            visit(value);
-            visit(body);
-        }
-        ExprKind::Reduce {
-            generator,
-            initial,
-            update,
-            ..
-        } => {
-            visit(generator);
-            visit(initial);
-            visit(update);
-        }
-        ExprKind::Foreach {
-            generator,
-            initial,
-            update,
-            extract,
-            ..
-        } => {
-            visit(generator);
-            visit(initial);
-            visit(update);
-            if let Some(extract) = extract {
-                visit(extract);
-            }
-        }
-        ExprKind::Define { definition, body } => {
-            visit(&mut definition.body);
-            visit(body);
-        }
-        ExprKind::Include { metadata, body, .. } | ExprKind::Import { metadata, body, .. } => {
-            if let Some(metadata) = metadata {
-                visit(metadata);
-            }
-            visit(body);
-        }
-        ExprKind::Module { metadata, body } => {
-            visit(metadata);
-            visit(body);
-        }
-        ExprKind::Call { arguments, .. } => {
-            for argument in arguments {
-                visit(argument);
-            }
-        }
-        ExprKind::TryCatch { expression, catch } => {
-            visit(expression);
-            if let Some(catch) = catch {
-                visit(catch);
-            }
-        }
-        ExprKind::Label { body, .. } => visit(body),
-        ExprKind::Identity
-        | ExprKind::Literal(_)
-        | ExprKind::Variable(_)
-        | ExprKind::Empty
-        | ExprKind::RecursiveDescent
-        | ExprKind::Break { .. } => {}
+        ExprKind::Include { body, .. }
+        | ExprKind::Import { body, .. }
+        | ExprKind::Module { body, .. } => vec![body],
+        kind => work::children_kind_mut(kind),
     }
 }
 
@@ -1529,7 +1252,7 @@ pub fn resolve(
             .sources
             .insert(source.id(), SourceMetadata::from_source(source));
     }
-    let expanded = loader.expand(query.ast().clone())?;
+    let expanded = loader.expand(work::take(query.ast_mut()))?;
     *query.ast_mut() = expanded;
     query.set_modules(loader.module_info());
 
@@ -1643,25 +1366,33 @@ pub fn analyze_with_context(
 }
 
 fn optimize_resolved(expr: &mut Expr, rewrites: &mut Vec<OptimizerRewrite>) {
-    walk_expr_mut(expr, |child| optimize_resolved(child, rewrites));
-    let replacement = match &expr.kind {
-        ExprKind::Pipe(left, length) if builtin_call(length, "length", 0) => match &left.kind {
-            ExprKind::Pipe(array, sort)
-                if matches!(array.kind, ExprKind::Array(_)) && builtin_call(sort, "sort", 0) =>
-            {
-                Some(((**array).clone(), sort.span, (**length).clone()))
-            }
+    *expr = work::map(work::take(expr), |expr| {
+        let span = match &expr.kind {
+            ExprKind::Pipe(left, length) if builtin_call(length, "length", 0) => match &left.kind {
+                ExprKind::Pipe(array, sort)
+                    if matches!(array.kind, ExprKind::Array(_))
+                        && builtin_call(sort, "sort", 0) =>
+                {
+                    Some(sort.span)
+                }
+                _ => None,
+            },
             _ => None,
-        },
-        _ => None,
-    };
-    if let Some((array, span, length)) = replacement {
-        expr.kind = ExprKind::Pipe(Box::new(array), Box::new(length));
-        rewrites.push(OptimizerRewrite {
-            name: "array-sort-before-length",
-            span,
-        });
-    }
+        };
+        if let Some(span) = span {
+            let ExprKind::Pipe(left, length) = work::take(expr).kind else {
+                unreachable!()
+            };
+            let ExprKind::Pipe(array, _) = left.kind else {
+                unreachable!()
+            };
+            expr.kind = ExprKind::Pipe(array, length);
+            rewrites.push(OptimizerRewrite {
+                name: "array-sort-before-length",
+                span,
+            });
+        }
+    });
 }
 
 fn builtin_call(expr: &Expr, expected: &str, arity: usize) -> bool {
@@ -1711,270 +1442,257 @@ impl Resolver {
         reason = "resolution exhaustively walks syntax and rewrites stable symbols"
     )]
     fn resolve_expr(&mut self, expr: &mut Expr) -> Result<(), Box<Diagnostic>> {
-        match &mut expr.kind {
-            ExprKind::Variable(name) => {
-                if &**name == "__loc__" {
-                    let source = self.sources.get(&expr.span.source).ok_or_else(|| {
-                        error(
-                            "TQ-RESOLVE-SOURCE-001",
-                            "source metadata is unavailable for $__loc__".to_owned(),
-                            expr.span,
-                        )
-                    })?;
-                    let line = Number::parse(&source.line(expr.span.start).to_string())
-                        .expect("source line is an admitted number");
-                    let file = if source.name.as_ref() == "<command-line>" {
-                        "<top-level>"
-                    } else {
-                        source.name.as_ref()
-                    };
-                    *expr = Expr {
-                        kind: ExprKind::Literal(Value::object(Object::from_iter([
-                            (Arc::from("file"), Value::string(file)),
-                            (Arc::from("line"), Value::Number(line)),
-                        ]))),
-                        span: expr.span,
-                    };
-                    return Ok(());
+        enum Task<'a> {
+            Visit(&'a mut Expr),
+            Bind(Vec<&'a mut BindingPattern>, Vec<&'a mut Expr>),
+            PopVariables,
+            PopFunctions,
+            PopLabel,
+            Call {
+                name: &'a Arc<str>,
+                arity: usize,
+                target: &'a mut Option<CallTarget>,
+                span: Span,
+            },
+        }
+        let mut pending = vec![Task::Visit(expr)];
+        while let Some(task) = pending.pop() {
+            let expr = match task {
+                Task::PopVariables => {
+                    self.variables.pop();
+                    continue;
                 }
-                let Some(runtime) = self
-                    .variables
-                    .iter()
-                    .rev()
-                    .find_map(|scope| scope.get(name))
-                else {
-                    return Err(error(
-                        "TQ-RESOLVE-VARIABLE-001",
-                        format!("unknown variable ${name}"),
-                        expr.span,
-                    ));
-                };
-                *name = Arc::clone(runtime);
-            }
-            ExprKind::Label { name, symbol, body } => {
-                let resolved = self.next_label;
-                self.next_label = self.next_label.checked_add(1).ok_or_else(|| {
+                Task::PopFunctions => {
+                    self.functions.pop();
+                    continue;
+                }
+                Task::PopLabel => {
+                    self.labels.pop();
+                    continue;
+                }
+                Task::Bind(patterns, bodies) => {
+                    let mut bindings = BTreeMap::new();
+                    for pattern in patterns {
+                        self.resolve_pattern(pattern, &mut bindings);
+                    }
+                    self.variables.push(bindings);
+                    pending.push(Task::PopVariables);
+                    pending.extend(bodies.into_iter().rev().map(Task::Visit));
+                    continue;
+                }
+                Task::Call {
+                    name,
+                    arity,
+                    target,
+                    span,
+                } => {
+                    self.resolve_call(name, arity, target, span)?;
+                    continue;
+                }
+                Task::Visit(expr) => expr,
+            };
+            if matches!(&expr.kind, ExprKind::Variable(name) if name.as_ref() == "__loc__") {
+                let source = self.sources.get(&expr.span.source).ok_or_else(|| {
                     error(
-                        "TQ-RESOURCE-LABELS-001",
-                        "label symbol limit exceeded".to_owned(),
+                        "TQ-RESOLVE-SOURCE-001",
+                        "source metadata is unavailable for $__loc__".to_owned(),
                         expr.span,
                     )
                 })?;
-                *symbol = Some(resolved);
-                self.labels.push((Arc::clone(name), resolved));
-                let result = self.resolve_expr(body);
-                self.labels.pop();
-                result?;
-            }
-            ExprKind::Break { name, symbol } => {
-                let Some(resolved) = self
-                    .labels
-                    .iter()
-                    .rev()
-                    .find_map(|(candidate, symbol)| (candidate == name).then_some(*symbol))
-                else {
-                    return Err(error(
-                        "TQ-RESOLVE-LABEL-001",
-                        format!("unknown label ${name}"),
-                        expr.span,
-                    ));
+                let line = Number::parse(&source.line(expr.span.start).to_string())
+                    .expect("source line is an admitted number");
+                let file = if source.name.as_ref() == "<command-line>" {
+                    "<top-level>"
+                } else {
+                    source.name.as_ref()
                 };
-                *symbol = Some(resolved);
+                *expr = Expr {
+                    kind: ExprKind::Literal(Value::object(Object::from_iter([
+                        (Arc::from("file"), Value::string(file)),
+                        (Arc::from("line"), Value::Number(line)),
+                    ]))),
+                    span: expr.span,
+                };
+                continue;
             }
-            ExprKind::Interpolation(segments) => {
-                for segment in segments {
-                    if let InterpolationSegment::Expression(expression) = segment {
-                        self.resolve_expr(expression)?;
-                    }
-                }
-            }
-            ExprKind::Access { base, access } => {
-                self.resolve_expr(base)?;
-                match access {
-                    Access::Index(index) => self.resolve_expr(index)?,
-                    Access::Slice { start, end } => {
-                        if let Some(start) = start {
-                            self.resolve_expr(start)?;
-                        }
-                        if let Some(end) = end {
-                            self.resolve_expr(end)?;
-                        }
-                    }
-                    Access::Field(_) | Access::Iterate => {}
-                }
-            }
-            ExprKind::Optional(expression)
-            | ExprKind::Array(expression)
-            | ExprKind::Unary { expression, .. } => self.resolve_expr(expression)?,
-            ExprKind::Pipe(left, right)
-            | ExprKind::Comma(left, right)
-            | ExprKind::Binary { left, right, .. }
-            | ExprKind::Assignment {
-                path: left,
-                value: right,
-                ..
-            } => {
-                self.resolve_expr(left)?;
-                self.resolve_expr(right)?;
-            }
-            ExprKind::Object(entries) => {
-                for entry in entries {
-                    if let ObjectKey::Computed(key) = &mut entry.key {
-                        self.resolve_expr(key)?;
-                    }
-                    self.resolve_expr(&mut entry.value)?;
-                }
-            }
-            ExprKind::Conditional {
-                branches,
-                alternative,
-            } => {
-                for (condition, body) in branches {
-                    self.resolve_expr(condition)?;
-                    self.resolve_expr(body)?;
-                }
-                self.resolve_expr(alternative)?;
-            }
-            ExprKind::Bind {
-                value,
-                pattern,
-                body,
-            } => {
-                self.resolve_expr(value)?;
-                let mut bindings = BTreeMap::new();
-                self.resolve_pattern(pattern, &mut bindings);
-                self.variables.push(bindings);
-                let result = self.resolve_expr(body);
-                self.variables.pop();
-                result?;
-            }
-            ExprKind::BindAlternatives {
-                value,
-                patterns,
-                body,
-            } => {
-                self.resolve_expr(value)?;
-                let mut bindings = BTreeMap::new();
-                for pattern in patterns {
-                    self.resolve_pattern(pattern, &mut bindings);
-                }
-                self.variables.push(bindings);
-                let result = self.resolve_expr(body);
-                self.variables.pop();
-                result?;
-            }
-            ExprKind::Reduce {
-                generator,
-                pattern,
-                initial,
-                update,
-            } => {
-                self.resolve_expr(generator)?;
-                self.resolve_expr(initial)?;
-                let mut bindings = BTreeMap::new();
-                self.resolve_pattern(pattern, &mut bindings);
-                self.variables.push(bindings);
-                let result = self.resolve_expr(update);
-                self.variables.pop();
-                result?;
-            }
-            ExprKind::Foreach {
-                generator,
-                pattern,
-                initial,
-                update,
-                extract,
-            } => {
-                self.resolve_expr(generator)?;
-                self.resolve_expr(initial)?;
-                let mut bindings = BTreeMap::new();
-                self.resolve_pattern(pattern, &mut bindings);
-                self.variables.push(bindings);
-                let result = self.resolve_expr(update).and_then(|()| {
-                    extract
-                        .as_deref_mut()
-                        .map_or(Ok(()), |extract| self.resolve_expr(extract))
-                });
-                self.variables.pop();
-                result?;
-            }
-            ExprKind::Define { definition, body } => {
-                self.resolve_definition(definition, body)?;
-            }
-            ExprKind::Call {
-                name,
-                arguments,
-                target,
-            } => {
-                for argument in &mut *arguments {
-                    self.resolve_expr(argument)?;
-                }
-                let arity = arguments.len();
-                if let Some(resolved) = self
-                    .functions
-                    .iter()
-                    .rev()
-                    .find_map(|scope| scope.get(&(Arc::clone(name), arity)).copied())
-                {
-                    *target = Some(resolved);
-                } else if self
-                    .functions
-                    .iter()
-                    .rev()
-                    .any(|scope| scope.keys().any(|(candidate, _)| candidate == name))
-                {
-                    return Err(error(
-                        "TQ-RESOLVE-ARITY-001",
-                        format!("invalid arity {arity} for user filter {name}"),
-                        expr.span,
-                    ));
-                } else if let Some(capability) = deferred_builtin(name) {
-                    return Err(error(
-                        &format!("TQ-CAP-{}", capability.to_ascii_uppercase()),
-                        format!("jq capability {capability:?} is deferred"),
-                        expr.span,
-                    ));
-                } else if let Some(builtin) = self.registry.get(name) {
-                    if !(builtin.minimum_arity..=builtin.maximum_arity).contains(&arity) {
+            match &mut expr.kind {
+                ExprKind::Variable(name) => {
+                    let Some(runtime) = self
+                        .variables
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.get(name))
+                    else {
                         return Err(error(
-                            "TQ-RESOLVE-ARITY-001",
-                            format!("invalid arity {arity} for built-in {name}"),
+                            "TQ-RESOLVE-VARIABLE-001",
+                            format!("unknown variable ${name}"),
                             expr.span,
                         ));
-                    }
-                    *target = Some(CallTarget::Builtin);
-                } else if name.starts_with('@') {
+                    };
+                    *name = Arc::clone(runtime);
+                }
+                ExprKind::Break { name, symbol } => {
+                    let Some(resolved) = self
+                        .labels
+                        .iter()
+                        .rev()
+                        .find_map(|(candidate, symbol)| (candidate == name).then_some(*symbol))
+                    else {
+                        return Err(error(
+                            "TQ-RESOLVE-LABEL-001",
+                            format!("unknown label ${name}"),
+                            expr.span,
+                        ));
+                    };
+                    *symbol = Some(resolved);
+                }
+
+                ExprKind::Label { name, symbol, body } => {
+                    let resolved = self.next_label;
+                    self.next_label = self.next_label.checked_add(1).ok_or_else(|| {
+                        error(
+                            "TQ-RESOURCE-LABELS-001",
+                            "label symbol limit exceeded".to_owned(),
+                            expr.span,
+                        )
+                    })?;
+                    *symbol = Some(resolved);
+                    self.labels.push((Arc::clone(name), resolved));
+                    pending.push(Task::PopLabel);
+                    pending.push(Task::Visit(body));
+                }
+                ExprKind::Bind {
+                    value,
+                    pattern,
+                    body,
+                } => {
+                    pending.push(Task::Bind(vec![pattern], vec![body]));
+                    pending.push(Task::Visit(value));
+                }
+                ExprKind::BindAlternatives {
+                    value,
+                    patterns,
+                    body,
+                } => {
+                    pending.push(Task::Bind(patterns.iter_mut().collect(), vec![body]));
+                    pending.push(Task::Visit(value));
+                }
+                ExprKind::Reduce {
+                    generator,
+                    pattern,
+                    initial,
+                    update,
+                } => {
+                    pending.push(Task::Bind(vec![pattern], vec![update]));
+                    pending.push(Task::Visit(initial));
+                    pending.push(Task::Visit(generator));
+                }
+                ExprKind::Foreach {
+                    generator,
+                    pattern,
+                    initial,
+                    update,
+                    extract,
+                } => {
+                    let mut bodies = vec![update.as_mut()];
+                    bodies.extend(extract.as_deref_mut());
+                    pending.push(Task::Bind(vec![pattern], bodies));
+                    pending.push(Task::Visit(initial));
+                    pending.push(Task::Visit(generator));
+                }
+                ExprKind::Define { definition, body } => {
+                    self.prepare_definition(definition)?;
+                    pending.push(Task::PopFunctions);
+                    pending.push(Task::Visit(body));
+                    pending.push(Task::PopVariables);
+                    pending.push(Task::PopFunctions);
+                    pending.push(Task::Visit(&mut definition.body));
+                }
+                ExprKind::Call {
+                    name,
+                    arguments,
+                    target,
+                } => {
+                    pending.push(Task::Call {
+                        name,
+                        arity: arguments.len(),
+                        target,
+                        span: expr.span,
+                    });
+                    pending.extend(arguments.iter_mut().rev().map(Task::Visit));
+                }
+                ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
                     return Err(error(
-                        "TQ-RESOLVE-FORMAT-001",
-                        format!("unknown jq format {name}"),
-                        expr.span,
-                    ));
-                } else {
-                    return Err(error(
-                        "TQ-RESOLVE-BUILTIN-001",
-                        format!("unknown filter {name}/{arity}"),
+                        "TQ-MODULE-INTERNAL-001",
+                        "module directive remained after expansion".to_owned(),
                         expr.span,
                     ));
                 }
+                kind => pending.extend(
+                    work::children_kind_mut(kind)
+                        .into_iter()
+                        .rev()
+                        .map(Task::Visit),
+                ),
             }
-            ExprKind::TryCatch { expression, catch } => {
-                self.resolve_expr(expression)?;
-                if let Some(catch) = catch {
-                    self.resolve_expr(catch)?;
-                }
-            }
-            ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
+        }
+        Ok(())
+    }
+
+    fn resolve_call(
+        &self,
+        name: &Arc<str>,
+        arity: usize,
+        target: &mut Option<CallTarget>,
+        span: Span,
+    ) -> Result<(), Box<Diagnostic>> {
+        if let Some(resolved) = self
+            .functions
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(&(Arc::clone(name), arity)).copied())
+        {
+            *target = Some(resolved);
+        } else if self
+            .functions
+            .iter()
+            .rev()
+            .any(|scope| scope.keys().any(|(candidate, _)| candidate == name))
+        {
+            return Err(error(
+                "TQ-RESOLVE-ARITY-001",
+                format!("invalid arity {arity} for user filter {name}"),
+                span,
+            ));
+        } else if let Some(capability) = deferred_builtin(name) {
+            return Err(error(
+                &format!("TQ-CAP-{}", capability.to_ascii_uppercase()),
+                format!("jq capability {capability:?} is deferred"),
+                span,
+            ));
+        } else if let Some(builtin) = self.registry.get(name) {
+            if !(builtin.minimum_arity..=builtin.maximum_arity).contains(&arity) {
                 return Err(error(
-                    "TQ-MODULE-INTERNAL-001",
-                    "module directive remained after expansion".to_owned(),
-                    expr.span,
+                    "TQ-RESOLVE-ARITY-001",
+                    format!("invalid arity {arity} for built-in {name}"),
+                    span,
                 ));
             }
-            ExprKind::Identity
-            | ExprKind::Literal(_)
-            | ExprKind::Empty
-            | ExprKind::RecursiveDescent => {}
+            *target = Some(CallTarget::Builtin);
+        } else if name.starts_with('@') {
+            return Err(error(
+                "TQ-RESOLVE-FORMAT-001",
+                format!("unknown jq format {name}"),
+                span,
+            ));
+        } else {
+            return Err(error(
+                "TQ-RESOLVE-BUILTIN-001",
+                format!("unknown filter {name}/{arity}"),
+                span,
+            ));
         }
+
         Ok(())
     }
 
@@ -1983,34 +1701,29 @@ impl Resolver {
         pattern: &mut BindingPattern,
         bindings: &mut BTreeMap<Arc<str>, Arc<str>>,
     ) {
-        match pattern {
-            BindingPattern::Variable(name) => {
-                let source_name = Arc::clone(name);
-                let runtime = bindings
-                    .get(&source_name)
-                    .cloned()
-                    .unwrap_or_else(|| self.runtime_variable(&source_name));
-                *name = Arc::clone(&runtime);
-                bindings.insert(source_name, runtime);
-            }
-            BindingPattern::Array(patterns) => {
-                for pattern in patterns {
-                    self.resolve_pattern(pattern, bindings);
+        let mut pending = vec![pattern];
+        while let Some(pattern) = pending.pop() {
+            match pattern {
+                BindingPattern::Variable(name) => {
+                    let source_name = Arc::clone(name);
+                    let runtime = bindings
+                        .get(&source_name)
+                        .cloned()
+                        .unwrap_or_else(|| self.runtime_variable(&source_name));
+                    *name = Arc::clone(&runtime);
+                    bindings.insert(source_name, runtime);
                 }
-            }
-            BindingPattern::Object(entries) => {
-                for entry in entries {
-                    self.resolve_pattern(&mut entry.pattern, bindings);
+                BindingPattern::Array(patterns) => {
+                    pending.extend(patterns.iter_mut().rev());
+                }
+                BindingPattern::Object(entries) => {
+                    pending.extend(entries.iter_mut().rev().map(|entry| &mut entry.pattern));
                 }
             }
         }
     }
 
-    fn resolve_definition(
-        &mut self,
-        definition: &mut Definition,
-        body: &mut Expr,
-    ) -> Result<(), Box<Diagnostic>> {
+    fn prepare_definition(&mut self, definition: &mut Definition) -> Result<(), Box<Diagnostic>> {
         let symbol = self.next_function;
         self.next_function = self.next_function.checked_add(1).ok_or_else(|| {
             error(
@@ -2054,14 +1767,7 @@ impl Resolver {
         }
         self.variables.push(parameter_variables);
         self.functions.push(parameter_filters);
-        let definition_result = self.resolve_expr(&mut definition.body);
-        self.functions.pop();
-        self.variables.pop();
-        definition_result?;
-
-        let body_result = self.resolve_expr(body);
-        self.functions.pop();
-        body_result
+        Ok(())
     }
 
     fn runtime_variable(&mut self, name: &str) -> Arc<str> {
@@ -2080,254 +1786,167 @@ fn deferred_builtin(_name: &str) -> Option<&'static str> {
     reason = "effect propagation exhaustively maps every syntax form"
 )]
 fn analyze_expr(expr: &Expr, analysis: &mut Analysis) {
-    match &expr.kind {
-        ExprKind::Identity | ExprKind::Literal(_) | ExprKind::Variable(_) => {}
-        ExprKind::Empty => add_effect(analysis, Effect::Generator, expr.span),
-        ExprKind::RecursiveDescent => {
-            add_effect(analysis, Effect::Generator, expr.span);
-            add_effect(analysis, Effect::Subtree, expr.span);
-        }
-        ExprKind::Label { body, .. } => {
-            analyze_expr(body, analysis);
-            add_effect(analysis, Effect::Generator, expr.span);
-            add_effect(analysis, Effect::PossibleFailure, expr.span);
-        }
-        ExprKind::Break { .. } => {
-            add_effect(analysis, Effect::Generator, expr.span);
-            add_effect(analysis, Effect::PossibleFailure, expr.span);
-        }
-        ExprKind::Interpolation(segments) => {
-            for segment in segments {
-                if let InterpolationSegment::Expression(expression) = segment {
-                    analyze_expr(expression, analysis);
-                }
-            }
-            add_effect(analysis, Effect::Generator, expr.span);
-        }
-        ExprKind::Access { base, access } => {
-            analyze_expr(base, analysis);
-            match access {
-                Access::Index(index) => analyze_expr(index, analysis),
-                Access::Slice { start, end } => {
-                    if let Some(start) = start {
-                        analyze_expr(start, analysis);
-                    }
-                    if let Some(end) = end {
-                        analyze_expr(end, analysis);
-                    }
-                }
-                Access::Iterate => add_effect(analysis, Effect::Generator, expr.span),
-                Access::Field(_) => {}
-            }
-            add_effect(analysis, Effect::PossibleFailure, expr.span);
-        }
-        ExprKind::Optional(expression) | ExprKind::Unary { expression, .. } => {
-            analyze_expr(expression, analysis);
-        }
-        ExprKind::Pipe(left, right) | ExprKind::Binary { left, right, .. } => {
-            analyze_expr(left, analysis);
-            analyze_expr(right, analysis);
-            if matches!(expr.kind, ExprKind::Binary { .. }) {
-                add_effect(analysis, Effect::PossibleFailure, expr.span);
-            }
-        }
-        ExprKind::Comma(left, right) => {
-            analyze_expr(left, analysis);
-            analyze_expr(right, analysis);
-            add_effect(analysis, Effect::Generator, expr.span);
-        }
-        ExprKind::Array(expression) => {
-            analyze_expr(expression, analysis);
-            add_effect(analysis, Effect::Subtree, expr.span);
-            add_effect(analysis, Effect::Blocking, expr.span);
-        }
-        ExprKind::Object(entries) => {
-            for entry in entries {
-                if let ObjectKey::Computed(key) = &entry.key {
-                    analyze_expr(key, analysis);
-                }
-                analyze_expr(&entry.value, analysis);
-            }
-            add_effect(analysis, Effect::Subtree, expr.span);
-        }
-        ExprKind::Conditional {
-            branches,
-            alternative,
-        } => {
-            for (condition, body) in branches {
-                analyze_expr(condition, analysis);
-                analyze_expr(body, analysis);
-            }
-            analyze_expr(alternative, analysis);
-        }
-        ExprKind::Bind { value, body, .. } | ExprKind::BindAlternatives { value, body, .. } => {
-            analyze_expr(value, analysis);
-            analyze_expr(body, analysis);
-            add_effect(analysis, Effect::Generator, expr.span);
-        }
-        ExprKind::Reduce {
-            generator,
-            initial,
-            update,
-            ..
-        } => {
-            analyze_expr(generator, analysis);
-            analyze_expr(initial, analysis);
-            analyze_expr(update, analysis);
-            add_effect(analysis, Effect::FoldState, expr.span);
-            add_effect(analysis, Effect::Subtree, expr.span);
-            add_effect(analysis, Effect::Blocking, expr.span);
-        }
-        ExprKind::Foreach {
-            generator,
-            initial,
-            update,
-            extract,
-            ..
-        } => {
-            analyze_expr(generator, analysis);
-            analyze_expr(initial, analysis);
-            analyze_expr(update, analysis);
-            if let Some(extract) = extract {
-                analyze_expr(extract, analysis);
-            }
-            add_effect(analysis, Effect::FoldState, expr.span);
-            add_effect(analysis, Effect::Subtree, expr.span);
-            add_effect(analysis, Effect::Generator, expr.span);
-        }
-        ExprKind::Define { definition, body } => {
-            analyze_expr(&definition.body, analysis);
-            analyze_expr(body, analysis);
-            add_effect(analysis, Effect::Generator, expr.span);
-            add_effect(analysis, Effect::PossibleFailure, expr.span);
-        }
-        ExprKind::Call {
-            name, arguments, ..
-        } => {
-            for argument in arguments {
-                analyze_expr(argument, analysis);
-            }
-            if BuiltinRegistry
-                .get(name)
-                .is_some_and(|builtin| builtin.blocking)
-            {
-                add_effect(analysis, Effect::Blocking, expr.span);
-            }
-            if matches!(
-                &**name,
-                "range"
-                    | "inputs"
-                    | "paths"
-                    | "tostream"
-                    | "select"
-                    | "values"
-                    | "scalars"
-                    | "arrays"
-                    | "objects"
-                    | "iterables"
-                    | "booleans"
-                    | "numbers"
-                    | "strings"
-                    | "nulls"
-                    | "recurse"
-                    | "while"
-                    | "until"
-                    | "repeat"
-            ) {
+    work::postorder(expr, |expr| {
+        match &expr.kind {
+            ExprKind::Identity
+            | ExprKind::Literal(_)
+            | ExprKind::Variable(_)
+            | ExprKind::Optional(_)
+            | ExprKind::Unary { .. }
+            | ExprKind::Pipe(..)
+            | ExprKind::Conditional { .. }
+            | ExprKind::TryCatch { .. } => {}
+            ExprKind::Empty
+            | ExprKind::Interpolation(_)
+            | ExprKind::Comma(..)
+            | ExprKind::Bind { .. }
+            | ExprKind::BindAlternatives { .. } => {
                 add_effect(analysis, Effect::Generator, expr.span);
             }
-            if matches!(&**name, "input" | "inputs") {
-                add_effect(analysis, Effect::WholeInput, expr.span);
-            }
-            if matches!(
-                &**name,
-                "env"
-                    | "input_filename"
-                    | "input_line_number"
-                    | "localtime"
-                    | "now"
-                    | "strflocaltime"
-            ) {
-                // These builtins read process or source ambient state.  Keep
-                // them on the document plan so the host can enforce the
-                // capability policy and provide the current source context.
-                add_effect(analysis, Effect::Document, expr.span);
-            }
-            if &**name == "recurse" {
+            ExprKind::RecursiveDescent => {
+                add_effect(analysis, Effect::Generator, expr.span);
                 add_effect(analysis, Effect::Subtree, expr.span);
             }
-            if &**name == "walk" {
-                add_effect(analysis, Effect::Document, expr.span);
+            ExprKind::Label { .. } | ExprKind::Break { .. } | ExprKind::Define { .. } => {
                 add_effect(analysis, Effect::Generator, expr.span);
-            }
-            if name.starts_with('@')
-                || matches!(
-                    &**name,
-                    "all"
-                        | "any"
-                        | "abs"
-                        | "ascii_downcase"
-                        | "ascii_upcase"
-                        | "ceil"
-                        | "endswith"
-                        | "explode"
-                        | "fabs"
-                        | "floor"
-                        | "fromjson"
-                        | "getpath"
-                        | "group_by"
-                        | "implode"
-                        | "input"
-                        | "limit"
-                        | "ltrimstr"
-                        | "ltrim"
-                        | "rtrim"
-                        | "trimstr"
-                        | "rtrimstr"
-                        | "startswith"
-                        | "join"
-                        | "trim"
-                        | "toboolean"
-                        | "max_by"
-                        | "min_by"
-                        | "path"
-                        | "setpath"
-                        | "to_entries"
-                        | "tojson"
-                        | "fromstream"
-                        | "tostream"
-                        | "truncate_stream"
-                        | "with_entries"
-                        | "error"
-                        | "tonumber"
-                        | "length"
-                        | "has"
-                        | "in"
-                        | "recurse"
-                        | "walk"
-                )
-            {
                 add_effect(analysis, Effect::PossibleFailure, expr.span);
             }
-        }
-        ExprKind::TryCatch { expression, catch } => {
-            analyze_expr(expression, analysis);
-            if let Some(catch) = catch {
-                analyze_expr(catch, analysis);
+            ExprKind::Access { access, .. } => {
+                if matches!(access, Access::Iterate) {
+                    add_effect(analysis, Effect::Generator, expr.span);
+                }
+                add_effect(analysis, Effect::PossibleFailure, expr.span);
+            }
+            ExprKind::Binary { .. } => add_effect(analysis, Effect::PossibleFailure, expr.span),
+            ExprKind::Array(_) => {
+                add_effect(analysis, Effect::Subtree, expr.span);
+                add_effect(analysis, Effect::Blocking, expr.span);
+            }
+            ExprKind::Object(_) => add_effect(analysis, Effect::Subtree, expr.span),
+            ExprKind::Reduce { .. } => {
+                add_effect(analysis, Effect::FoldState, expr.span);
+                add_effect(analysis, Effect::Subtree, expr.span);
+                add_effect(analysis, Effect::Blocking, expr.span);
+            }
+            ExprKind::Foreach { .. } => {
+                add_effect(analysis, Effect::FoldState, expr.span);
+                add_effect(analysis, Effect::Subtree, expr.span);
+                add_effect(analysis, Effect::Generator, expr.span);
+            }
+            ExprKind::Call { name, .. } => {
+                if BuiltinRegistry
+                    .get(name)
+                    .is_some_and(|builtin| builtin.blocking)
+                {
+                    add_effect(analysis, Effect::Blocking, expr.span);
+                }
+                if matches!(
+                    &**name,
+                    "range"
+                        | "inputs"
+                        | "paths"
+                        | "tostream"
+                        | "select"
+                        | "values"
+                        | "scalars"
+                        | "arrays"
+                        | "objects"
+                        | "iterables"
+                        | "booleans"
+                        | "numbers"
+                        | "strings"
+                        | "nulls"
+                        | "recurse"
+                        | "while"
+                        | "until"
+                        | "repeat"
+                ) {
+                    add_effect(analysis, Effect::Generator, expr.span);
+                }
+                if matches!(&**name, "input" | "inputs") {
+                    add_effect(analysis, Effect::WholeInput, expr.span);
+                }
+                if matches!(
+                    &**name,
+                    "env"
+                        | "input_filename"
+                        | "input_line_number"
+                        | "localtime"
+                        | "now"
+                        | "strflocaltime"
+                ) {
+                    // These builtins read process or source ambient state.  Keep
+                    // them on the document plan so the host can enforce the
+                    // capability policy and provide the current source context.
+                    add_effect(analysis, Effect::Document, expr.span);
+                }
+                if &**name == "recurse" {
+                    add_effect(analysis, Effect::Subtree, expr.span);
+                }
+                if &**name == "walk" {
+                    add_effect(analysis, Effect::Document, expr.span);
+                    add_effect(analysis, Effect::Generator, expr.span);
+                }
+                if name.starts_with('@')
+                    || matches!(
+                        &**name,
+                        "all"
+                            | "any"
+                            | "abs"
+                            | "ascii_downcase"
+                            | "ascii_upcase"
+                            | "ceil"
+                            | "endswith"
+                            | "explode"
+                            | "fabs"
+                            | "floor"
+                            | "fromjson"
+                            | "getpath"
+                            | "group_by"
+                            | "implode"
+                            | "input"
+                            | "limit"
+                            | "ltrimstr"
+                            | "ltrim"
+                            | "rtrim"
+                            | "trimstr"
+                            | "rtrimstr"
+                            | "startswith"
+                            | "join"
+                            | "trim"
+                            | "toboolean"
+                            | "max_by"
+                            | "min_by"
+                            | "path"
+                            | "setpath"
+                            | "to_entries"
+                            | "tojson"
+                            | "fromstream"
+                            | "tostream"
+                            | "truncate_stream"
+                            | "with_entries"
+                            | "error"
+                            | "tonumber"
+                            | "length"
+                            | "has"
+                            | "in"
+                            | "recurse"
+                            | "walk"
+                    )
+                {
+                    add_effect(analysis, Effect::PossibleFailure, expr.span);
+                }
+            }
+            ExprKind::Assignment { .. } => {
+                add_effect(analysis, Effect::Mutation, expr.span);
+                add_effect(analysis, Effect::Document, expr.span);
+                add_effect(analysis, Effect::PossibleFailure, expr.span);
+            }
+            ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
+                add_effect(analysis, Effect::Document, expr.span);
             }
         }
-        ExprKind::Assignment { path, value, .. } => {
-            analyze_expr(path, analysis);
-            analyze_expr(value, analysis);
-            add_effect(analysis, Effect::Mutation, expr.span);
-            add_effect(analysis, Effect::Document, expr.span);
-            add_effect(analysis, Effect::PossibleFailure, expr.span);
-        }
-        ExprKind::Include { .. } | ExprKind::Import { .. } | ExprKind::Module { .. } => {
-            add_effect(analysis, Effect::Document, expr.span);
-            add_effect(analysis, Effect::PossibleFailure, expr.span);
-        }
-    }
+    });
 }
 
 fn add_effect(analysis: &mut Analysis, effect: Effect, span: Span) {

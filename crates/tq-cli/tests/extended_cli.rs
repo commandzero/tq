@@ -32,7 +32,8 @@ fn tq_with_default_palette(arguments: &[&str], stdin: &[u8]) -> Outcome {
     command
         .args(arguments)
         .env_remove("NO_COLOR")
-        .env_remove("JQ_COLORS");
+        .env_remove("JQ_COLORS")
+        .env_remove("TQ_COLORS");
     run_tq(command, stdin)
 }
 

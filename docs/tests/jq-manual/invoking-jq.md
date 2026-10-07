@@ -85,18 +85,19 @@ for the current contract.
 
 | Verdict | Cases |
 | --- | ---: |
-| match | 48 |
+| Differences | 4 |
+| Exact match | 44 |
 
 Independent output campaigns must pass too. Compact JSON compares exact stdout bytes and process behavior; TOON compares ordered values and process behavior with the JSON execution.
 
-| Output campaign | Matches | Cases |
+| Output campaign | Exact matches | Cases |
 | --- | ---: | ---: |
 | compact_json | 25 | 25 |
 | toon | 25 | 25 |
 
-A match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from matches. Historical expected-difference labels do not pass either gate.
+An exact match requires equivalent JSON results and process behavior, or a matching non-JSON CLI contract. Reviewed disparities retain exact observations and count separately from exact matches. Historical expected-difference labels do not pass either gate.
 
-Missing features and unaccepted mismatches remain failures. Reference discrepancies describe errors in the imported manual, not successful compatibility.
+Differences include missing features and unaccepted mismatches; these still fail the strict and completion gates. Reference discrepancies describe errors in the imported manual, not successful compatibility.
 
 JSON equivalence ignores whitespace and object key order but retains array and result-sequence order. Error-only cases do not count as JSON matches or size samples. Raw CLI cases keep their original arguments and have no JSON/TOON size measurement.
 
@@ -111,10 +112,12 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
-### Reviewed disparities and historical differences
+### Differences
 
-| Case | Reason |
-| --- | --- |
+1. `manual.invoking.color-output`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+2. `manual.invoking.jq-colors`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+3. `manual.invoking.no-color-forced`: Expected presentation difference: quote styling and ANSI escapes differ; JSON data is unchanged.
+4. `manual.invoking.run-tests`: jq prints extra internal self-test messages; both tools pass the supplied test and exit 0.
 
 ### Cases
 
@@ -267,8 +270,8 @@ jq -a .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 5 | 5 | n/a | n/a | n/a |
-| `cl100k_base` | 5 | 5 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.binary-portable
 
@@ -288,8 +291,8 @@ jq -b -c .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 5 | 5 | n/a | n/a | n/a |
-| `cl100k_base` | 5 | 5 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.build-configuration
 
@@ -301,7 +304,7 @@ jq --build-configuration
 --host=arm64-apple-darwin23.6.0 --disable-docs --with-oniguruma=builtin --disable-shared --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=arm64-apple-darwin23.6.0 'CC=clang -target arm64-apple-darwin23.6.0' LDFLAGS=-dead_strip
 
 # tq -o json
-target=macos binary-stdio=native formats=toon,yaml,json,jsonl jq-target=1.8.x
+target=macos binary-stdio=native formats=toon,yaml,json,json5,jsonl,toon-seq,json-seq,csv,tsv jq-target=1.8.x
 
 # tq
 <not run>
@@ -309,8 +312,8 @@ target=macos binary-stdio=native formats=toon,yaml,json,jsonl jq-target=1.8.x
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 95 | 25 | n/a | n/a | n/a |
-| `cl100k_base` | 95 | 26 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.color-output
 
@@ -319,16 +322,16 @@ target=macos binary-stdio=native formats=toon,yaml,json,jsonl jq-target=1.8.x
 jq -C .
 
 # jq
-\x1b[1;39m{\x1b[0m
-  \x1b[1;34m"z"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m
-  \x1b[1;34m"a"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m2\x1b[0m
-\x1b[1;39m}\x1b[0m
+\x1b[0;90m{\x1b[0m
+  \x1b[0;36m"z"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m\x1b[0;90m,\x1b[0m
+  \x1b[0;36m"a"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m2\x1b[0m
+\x1b[0;90m}\x1b[0m
 
 # tq -o json
-\x1b[1;39m{\x1b[0m
-  \x1b[1;34m"z"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m\x1b[1;39m,\x1b[0m
-  \x1b[1;34m"a"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m2\x1b[0m
-\x1b[1;39m}\x1b[0m
+\x1b[0;90m{\x1b[0m
+  \x1b[0;90m"\x1b[0m\x1b[0;36mz\x1b[0m\x1b[0;90m"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m\x1b[0;90m,\x1b[0m
+  \x1b[0;90m"\x1b[0m\x1b[0;36ma\x1b[0m\x1b[0;90m"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m2\x1b[0m
+\x1b[0;90m}\x1b[0m
 
 # tq
 <not run>
@@ -336,8 +339,8 @@ jq -C .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 112 | 112 | n/a | n/a | n/a |
-| `cl100k_base` | 94 | 94 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.compact-output
 
@@ -357,8 +360,8 @@ jq -c .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 9 | 9 | n/a | n/a | n/a |
-| `cl100k_base` | 9 | 9 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.exit-empty
 
@@ -376,8 +379,8 @@ jq -e empty
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | n/a | n/a | n/a |
-| `cl100k_base` | 0 | 0 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.exit-false
 
@@ -397,8 +400,8 @@ false
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | n/a | n/a | n/a |
-| `cl100k_base` | 2 | 2 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.exit-null
 
@@ -418,8 +421,8 @@ null
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | n/a | n/a | n/a |
-| `cl100k_base` | 2 | 2 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.exit-true
 
@@ -439,8 +442,8 @@ true
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | n/a | n/a | n/a |
-| `cl100k_base` | 2 | 2 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.from-file
 
@@ -487,8 +490,8 @@ failure
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | n/a | n/a | n/a |
-| `cl100k_base` | 0 | 0 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.help
 
@@ -497,7 +500,7 @@ failure
 jq --help
 
 # jq
-jq - commandline JSON processor [version 1.8.1]
+jq - commandline JSON processor [version 1.8.2]
 
 Usage:	jq [options] <jq filter> [file...]
 	jq [options] --args <jq filter> [strings...]
@@ -561,15 +564,15 @@ Named arguments are also available as $ARGS.named[], while
 positional arguments are available as $ARGS.positional[].
 
 # tq -o json
-tq - jq-compatible queries over TOON, YAML, JSON, JSON5, and JSON Lines
+tq - jq-compatible queries over toon, yaml, json, json5, jsonl, toon-seq, json-seq, csv, tsv
 
 Usage: tq [OPTIONS] [FILTER [FILE...]]
        tq [OPTIONS] -f FILE [INPUT...]
        tq compatibility
 
 Options:
-  -i, --input-format FORMAT       select auto, TOON, YAML, JSON, JSON5, JSON Lines, or TOON sequence input
-  -o, --output-format FORMAT      select TOON, YAML, JSON, or JSON Lines output
+  -i, --input-format FORMAT       select automatic detection or an input format (see Formats below)
+  -o, --output-format FORMAT      select TOON (default) or another output format (see Formats below)
   -n, --null-input                run once with null input
   -R, --raw-input                 read physical lines as strings
   -s, --slurp                     collect ordered inputs and run once
@@ -579,17 +582,18 @@ Options:
   -j, --join-output               emit raw output without separators
   -a, --ascii-output              escape non-ASCII JSON output
   -S, --sort-keys                 sort object keys recursively
-  -C, --color-output              force stable ANSI JSON color
+  -C, --color-output              force ANSI color for any output format (TQ_COLORS/JQ_COLORS supported)
   -M, --monochrome-output         disable ANSI color
   --tab                           indent JSON with tabs
   --indent N                      indent structured output
   --unbuffered                    flush after every output
-  --allow-environment             permit env to inspect a redaction-safe process snapshot
-  --allow-platform                permit clock, timezone, and input metadata built-ins
+  --allow-environment             admit environment access for embedded callers; enabled by the CLI
+  --allow-platform                admit platform access for embedded callers; enabled by the CLI
   --stream                        read path/value events
   --stream-errors                 report stream parse errors as values
   -x, --proxy-on-error            pass through sources rejected by structured parsing
-  --seq                           use sequence framing for the selected structured output
+  --seq                           use sequence framing (TOON by default; JSON with -o json or -c)
+  --strict-conversion             reject native output that loses shared-value semantics
   -f, --from-file FILE            load filter from a file
   -L, --library-path DIR          add an explicit jq module search path
   --arg NAME VALUE                bind a string variable
@@ -606,17 +610,23 @@ Options:
   --run-tests [FILE]              run a jq-compatible test file
   -h, --help                      print this generated help
 
-Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq
--o, --output-format toon|yaml|json|jsonl, --toon-sequence-input, --unframed
+Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq|csv|tsv
+         -o, --output-format toon|yaml|json|jsonl|toon-seq|json-seq|csv|tsv, --toon-sequence-input, --unframed
 TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict
 Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE
 Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,
---max-line-bytes N, --max-lookahead-bytes N, --max-vm-steps N,
+--max-line-bytes N, --max-frame-bytes N, --max-fields N,
+--max-lookahead-bytes N, --max-vm-steps N,
 --max-results N, --max-output-bytes N, --prepare-memory-bytes N,
 --hybrid-batch-values N, --hybrid-in-flight-batches N,
 --hybrid-in-flight-bytes N, --decode-batch-values N,
 --decode-batch-bytes N, --decode-in-flight-batches N,
 --decode-in-flight-bytes N, --max-spool-bytes N
+
+Color: automatic on terminals, plain in pipes/files; NO_COLOR disables automatic color.
+-C forces color, -M requests plain bytes; the last flag wins.
+TQ_COLORS overrides JQ_COLORS; both accept seven/eight SGR slots.
+Raw strings and proxy bytes stay verbatim.
 
 # tq
 <not run>
@@ -624,8 +634,8 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 652 | 801 | n/a | n/a | n/a |
-| `cl100k_base` | 652 | 804 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.identity
 
@@ -678,8 +688,8 @@ jq -n --indent 4 '{a:{b:1}}'
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 16 | 16 | n/a | n/a | n/a |
-| `cl100k_base` | 16 | 16 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.join-output
 
@@ -699,8 +709,8 @@ ab
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | n/a | n/a | n/a |
-| `cl100k_base` | 1 | 1 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.jq-colors
 
@@ -716,8 +726,8 @@ jq -C .
 
 # tq -o json
 \x1b[1;37m{\x1b[0m
-  \x1b[1;34m"z"\x1b[0m\x1b[1;37m:\x1b[0m \x1b[1;34m1\x1b[0m\x1b[1;37m,\x1b[0m
-  \x1b[1;34m"a"\x1b[0m\x1b[1;37m:\x1b[0m \x1b[1;34m2\x1b[0m
+  \x1b[1;37m"\x1b[0m\x1b[1;34mz\x1b[0m\x1b[1;37m"\x1b[0m\x1b[1;37m:\x1b[0m \x1b[1;34m1\x1b[0m\x1b[1;37m,\x1b[0m
+  \x1b[1;37m"\x1b[0m\x1b[1;34ma\x1b[0m\x1b[1;37m"\x1b[0m\x1b[1;37m:\x1b[0m \x1b[1;34m2\x1b[0m
 \x1b[1;37m}\x1b[0m
 
 # tq
@@ -726,8 +736,8 @@ jq -C .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 112 | 112 | n/a | n/a | n/a |
-| `cl100k_base` | 94 | 94 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.jsonargs
 
@@ -802,8 +812,8 @@ jq -M .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 16 | 16 | n/a | n/a | n/a |
-| `cl100k_base` | 16 | 16 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.no-color-forced
 
@@ -812,14 +822,14 @@ jq -M .
 jq -C .
 
 # jq
-\x1b[1;39m{\x1b[0m
-  \x1b[1;34m"foo"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m
-\x1b[1;39m}\x1b[0m
+\x1b[0;90m{\x1b[0m
+  \x1b[0;36m"foo"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m
+\x1b[0;90m}\x1b[0m
 
 # tq -o json
-\x1b[1;39m{\x1b[0m
-  \x1b[1;34m"foo"\x1b[0m\x1b[1;39m:\x1b[0m \x1b[0;39m1\x1b[0m
-\x1b[1;39m}\x1b[0m
+\x1b[0;90m{\x1b[0m
+  \x1b[0;90m"\x1b[0m\x1b[0;36mfoo\x1b[0m\x1b[0;90m"\x1b[0m\x1b[0;90m:\x1b[0m \x1b[0;35m1\x1b[0m
+\x1b[0;90m}\x1b[0m
 
 # tq
 <not run>
@@ -827,8 +837,8 @@ jq -C .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 63 | 63 | n/a | n/a | n/a |
-| `cl100k_base` | 53 | 53 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.null-input
 
@@ -899,8 +909,8 @@ hello
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | n/a | n/a | n/a |
-| `cl100k_base` | 2 | 2 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.raw-output0
 
@@ -920,8 +930,8 @@ a\x00b\x00
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 4 | 4 | n/a | n/a | n/a |
-| `cl100k_base` | 4 | 4 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.rawfile
 
@@ -955,6 +965,14 @@ Test #1: '.' at line number 2
 1 of 1 tests passed (0 malformed, 0 skipped)
 Test jq_state: .[]
 Test jq_state: .[] | if .%2 == 0 then halt_error else . end
+Test jq_compile_args with array args
+  subtest: 42
+  subtest: $val
+  subtest: $x + $y
+  subtest: $a + $b + $c
+  subtest: $x * $y
+Test jq recompile on same state
+Test jq exhaust and reuse
 
 # tq -o json
 Test #1: '.' at line number 2
@@ -968,8 +986,8 @@ Test jq_state: .[] | if .%2 == 0 then halt_error else . end
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 52 | 52 | n/a | n/a | n/a |
-| `cl100k_base` | 52 | 52 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.seq
 
@@ -991,8 +1009,8 @@ jq --seq .
 
 | Tokenizer | jq --seq | tq -o json --seq | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 6 | 6 | n/a | n/a | n/a |
-| `cl100k_base` | 6 | 6 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.shell-unix
 
@@ -1099,8 +1117,8 @@ jq -S .
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 30 | 30 | n/a | n/a | n/a |
-| `cl100k_base` | 30 | 30 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.stdin-default-filter
 
@@ -1338,8 +1356,8 @@ jq -n --tab '{a:{b:1}}'
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 16 | 16 | n/a | n/a | n/a |
-| `cl100k_base` | 16 | 16 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.unbuffered
 
@@ -1395,8 +1413,8 @@ tq: query compilation failed: TQ-RESOLVE-BUILTIN-001: unknown filter foo/0
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 0 | 0 | 0 | 0 | n/a |
-| `cl100k_base` | 0 | 0 | 0 | 0 | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.user-function
 
@@ -1426,10 +1444,10 @@ jq 'def f: .foo; f'
 jq --version
 
 # jq
-jq-1.8.1
+jq-1.8.2
 
 # tq -o json
-tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
+tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown)
 
 # tq
 <not run>
@@ -1437,8 +1455,8 @@ tq 0.1.0 (TOON v3; jq target 1.8.x; revision unknown)
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 8 | 25 | n/a | n/a | n/a |
-| `cl100k_base` | 8 | 25 | n/a | n/a | n/a |
+| `o200k_base` | n/a | n/a | n/a | n/a | n/a |
+| `cl100k_base` | n/a | n/a | n/a | n/a | n/a |
 
 #### manual.invoking.whitespace-stream
 

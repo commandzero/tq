@@ -4,14 +4,17 @@ use std::{fmt::Write as _, fs, path::Path};
 
 use serde::Deserialize;
 use sha2::{Digest as _, Sha256};
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 use tq_test_support::benchmark::worker::worker_executable_path;
 use tq_test_support::benchmark::{
     LaunchIsolationEvidence, MeasurementProtocol, WorkerIdentity, collect_environment,
     collector_source_sha256,
 };
 
+#[cfg(not(windows))]
 const WORKER_PROTOCOL: &str = "tq-bench-worker-protocol-v4";
+#[cfg(windows)]
+const WORKER_PROTOCOL: &str = "tq-bench-worker-windows-v1";
 
 #[derive(Deserialize)]
 struct Summary {
@@ -360,10 +363,10 @@ fn worker_calibration_protocol(
 /// Calibration is loaded before the first measured workload, so comparing the
 /// retained executable digest here prevents an old worker beside a newly built
 /// driver from authorizing native samples. Keep the lookup in lockstep with the
-/// worker's own launch lookup: an explicit `TQ_BENCH_WORKER` wins, followed by
-/// the normal target directory, its parent, or Cargo's build-script output
-/// directory (for integration-test layouts).
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+/// worker's own platform-specific launch lookup, including `TQ_BENCH_WORKER`
+/// overrides and native executable suffixes. Do not duplicate that path search
+/// here: the executable hashed must be the one the worker launcher selects.
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 fn current_worker_identity() -> Result<WorkerIdentity, String> {
     let path =
         worker_executable_path().map_err(|error| format!("locate worker executable: {error}"))?;
@@ -383,7 +386,7 @@ fn current_worker_identity() -> Result<WorkerIdentity, String> {
     })
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn current_worker_identity() -> Result<WorkerIdentity, String> {
     Err("native worker identity is unsupported on this platform".to_owned())
 }
@@ -500,16 +503,20 @@ fn rss_comparison_tolerance(native_rss: u64, independent_rss: u64, page_size: u6
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     use std::{path::PathBuf, time::Duration};
 
-    use super::TimingCalibration;
+    use super::{TimingCalibration, WORKER_PROTOCOL};
+    use tq_test_support::benchmark::WorkerIdentity;
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     use tq_test_support::benchmark::{
         BenchmarkAdapter, BenchmarkCase, BenchmarkCorpusIdentity, BenchmarkInvocation,
         BenchmarkLimits, BenchmarkSampling, BenchmarkTool, ComparisonFamily,
         CorrectnessObservation, CorrectnessPayload, DatasetFamily, DatasetSelector, DatasetTier,
-        ExecutionClass, InputFormat, OutputContract, OutputContractKind, WorkerIdentity,
-        run_gated_row, semantic_digest,
+        ExecutionClass, InputFormat, OutputContract, OutputContractKind, run_gated_row,
+        semantic_digest,
     };
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     use tq_test_support::corpus::ArtifactIdentity;
 
     fn summary() -> serde_json::Value {
@@ -524,7 +531,7 @@ mod tests {
                     "validated_accuracy_micros": null,
                     "worker": {
                         "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "launch_protocol": "tq-bench-worker-protocol-v4",
+                        "launch_protocol": WORKER_PROTOCOL,
                         "collector_source_sha256": "collector"
                     },
                     "isolation_evidence": {
@@ -593,7 +600,7 @@ mod tests {
                 "validated_accuracy_micros": null,
                 "worker": {
                     "executable_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    "launch_protocol": "tq-bench-worker-protocol-v4",
+                    "launch_protocol": WORKER_PROTOCOL,
                     "collector_source_sha256": "collector"
                 },
                 "isolation_evidence": null
@@ -616,7 +623,7 @@ mod tests {
     fn load_with_worker(value: &serde_json::Value) -> Result<TimingCalibration, String> {
         let worker = WorkerIdentity {
             executable_sha256: "a".repeat(64),
-            launch_protocol: "tq-bench-worker-protocol-v4".to_owned(),
+            launch_protocol: WORKER_PROTOCOL.to_owned(),
             collector_source_sha256: "collector".to_owned(),
         };
         TimingCalibration::from_bytes_with_worker(
@@ -711,6 +718,7 @@ mod tests {
         assert_eq!(calibrated.validated_accuracy_micros, Some(3000));
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn campaign_invocation() -> BenchmarkInvocation {
         BenchmarkInvocation {
             cancellation: None,
@@ -725,6 +733,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn campaign_case() -> BenchmarkCase {
         BenchmarkCase {
             schema_version: 1,
@@ -756,6 +765,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn campaign_adapter() -> BenchmarkAdapter {
         BenchmarkAdapter {
             id: "jq-json".to_owned(),
@@ -769,6 +779,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn campaign_corpus() -> BenchmarkCorpusIdentity {
         BenchmarkCorpusIdentity {
             origin: "synthetic".to_owned(),
@@ -785,6 +796,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     fn empty_reference() -> CorrectnessObservation {
         CorrectnessObservation {
             payload: CorrectnessPayload::SemanticSequence(
@@ -960,6 +972,36 @@ mod tests {
             "tq-bench-worker-protocol-v3".into();
 
         assert!(load(&value).is_err());
+    }
+
+    #[test]
+    fn other_platform_worker_protocol_is_rejected_not_relabeled() {
+        let foreign_protocol = if cfg!(windows) {
+            "tq-bench-worker-protocol-v4"
+        } else {
+            "tq-bench-worker-windows-v1"
+        };
+        let mut value = summary();
+        value["calibration_linkage"]["measurement_protocol"]["worker"]["launch_protocol"] =
+            foreign_protocol.into();
+        value["worker_control_measurement_protocol"]["worker"]["launch_protocol"] =
+            foreign_protocol.into();
+        assert!(load(&value).is_err());
+        assert!(load_with_worker(&value).is_err());
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    fn current_identity_hashes_the_worker_selected_by_launch_lookup() {
+        let path = super::worker_executable_path().expect("worker launch lookup");
+        let bytes = std::fs::read(path).expect("read selected worker");
+        let identity = super::current_worker_identity().expect("current worker identity");
+        assert_eq!(identity.executable_sha256, super::summary_sha256(&bytes));
+        assert_eq!(identity.launch_protocol, WORKER_PROTOCOL);
+        assert_eq!(
+            identity.collector_source_sha256,
+            super::collector_source_sha256()
+        );
     }
 
     #[test]

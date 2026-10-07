@@ -11,12 +11,38 @@ These notes describe the unreleased manual-compatibility work. They are not a
 claim that the full manual or every release platform has passed acceptance.
 See the [compatibility guide](compatibility.md) for the evidence policy.
 
+## Required native acceptance and reference version
+
+Current acceptance targets pinned jq 1.8.2 on local macOS, ironhide Linux
+x86_64, and smokescreen Windows 11 Pro `x86_64-pc-windows-msvc`. The earlier
+Windows deferral is superseded: native Windows jq/tq execution in native
+PowerShell is required before completion. SSH into WSL, cross-compilation,
+and PowerShell on macOS/Linux do not provide native Windows evidence.
+Historical jq 1.8.1 reports and approvals do not establish acceptance for a
+new source, executable, reference, or target identity. Exact matches, reviewed
+safe-library disparities, and unresolved failures remain separate; this update
+approves no new math differences and completes no acceptance evidence.
+
+Native Windows compatibility capture is implemented with overlapped named
+pipes and JobObjects. Native CPU/RSS accounting is implemented through a
+retained exact-child handle using `GetProcessTimes` and `PeakWorkingSetSize`,
+with a surviving isolated worker. Validation remains incomplete: separate
+control executions vary in 15.625 ms CPU quanta, with differences up to
+62.5 ms exceeding the unchanged 20 ms check. No check relaxation or performance
+acceptance is authorized; issue #31 remains open. Strict-report differences
+remain differences, not exact matches.
+
+The user disabled Smart App Control on development-only smokescreen and
+reported native launch verified with state `0`. No further security changes
+are needed; launch success does not establish compatibility or performance
+acceptance.
+
 ## Rust library migration to 0.4.0
 
-The workspace crates move together from 0.3.0 to 0.4.0. This minor-version
-boundary identifies incompatible pre-1.0 Rust API changes, not a change to the
-jq language target or a completed compatibility claim. Update dependencies on
-the published tq crates together to avoid mixing incompatible value types.
+The incompatible API boundary is 0.4.0; the current upgrade target is 0.4.1.
+Upgrade all workspace crates together from 0.3.0 to 0.4.1 to avoid mixing
+incompatible value types. This pre-1.0 API change does not change the jq language
+target or establish a completed compatibility claim.
 
 `tq_formats::Document` adds the required public `line_number: u64` field.
 Code constructing a struct literal must supply the one-based physical source
@@ -73,6 +99,26 @@ jq's compact and pretty sequence modes. Use `-i toon-seq` when reading
 TOON sequence records; JSON and TOON record payloads are different formats even
 though both use an ASCII record separator.
 
+## Color presentation
+
+The archived `output-colors` main spec supersedes the earlier requirement for
+exact jq default color bytes. Every supported output format, including JSON
+Lines/NDJSON, accepts the shared tq color policy. `TQ_COLORS` takes priority
+over `JQ_COLORS`, even when empty or invalid; an invalid selected palette falls
+back to the complete tq default. Seven/eight-slot overrides remain supported.
+Enclosing quotes use structural styles rather than jq's string/key styles.
+These explicit presentation differences are not exact jq ANSI matches or new
+safe-library disparity approvals.
+
+JSON Lines remains compact and rejects pretty/indent/tab and raw/join modes,
+but no longer rejects forced color. Forced-color output contains ANSI SGR;
+use redirected automatic output or `-M` for directly parseable data. Removing
+only tq-generated SGR must reproduce the exact corresponding plain bytes,
+including framing. Raw strings and proxy bytes remain undecorated, while
+structured non-string raw fallback retains compact JSON and its separators.
+Data, numeric, stderr, and process comparisons are not weakened by this
+presentation contract.
+
 ## Numbers
 
 Admitted decimal literals retain their identity and observable scale until an
@@ -100,7 +146,7 @@ bounded at 8,192 bytes. Input token limits can impose a tighter bound. Embedded
 numeric callers can supply explicit `NumberLimits`.
 
 Mathematical functions use safe Rust libraries. Measured last-bit and target
-differences are recorded in the [disparity register](jq-compatibility-disparities.md),
+differences are recorded in the [jq manual coverage](tests/jq-manual/coverage.md#differences-by-test),
 not silently rounded into exact matches. The compatibility harness compares
 decimal results losslessly, separately from runtime JSON projection.
 

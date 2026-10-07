@@ -75,7 +75,7 @@ values.
 
 Executable shell cases cover argument parsing, stdin, ordered files, output
 bytes, stderr, and exit classes. The full campaign records the exact reference
-binary and targets the pinned jq 1.8.1 manual, including 1.8-only behavior such
+binary and runs the pinned jq 1.8 manual cases against jq 1.8.2, including behavior such
 as `--raw-output0`. The table marks platform-dependent behavior. Local POSIX
 and PowerShell tests do not establish native Windows binary/newline behavior;
 release-host acceptance requires matched-platform evidence. A recognized option
