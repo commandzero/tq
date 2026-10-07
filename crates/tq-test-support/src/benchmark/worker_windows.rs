@@ -182,6 +182,8 @@ pub(super) struct WorkerControl {
     coordinator: CloseHandleGuard<HPROCESS>,
     abort: PathBuf,
     target_cleanup: AtomicU8,
+    #[cfg(test)]
+    accounting_attempted: AtomicBool,
 }
 impl WorkerControl {
     #[cfg(test)]
@@ -190,6 +192,7 @@ impl WorkerControl {
             coordinator: open_process(std::process::id())?,
             abort: marker(reply, "abort"),
             target_cleanup: AtomicU8::new(TargetCleanup::Pending as u8),
+            accounting_attempted: AtomicBool::new(false),
         })
     }
 
@@ -205,14 +208,31 @@ impl WorkerControl {
             coordinator,
             abort: marker(reply, "abort"),
             target_cleanup: AtomicU8::new(TargetCleanup::Pending as u8),
+            #[cfg(test)]
+            accounting_attempted: AtomicBool::new(false),
         })
     }
+
+    #[cfg(test)]
+    pub(super) fn record_accounting_attempt(&self) {
+        assert_eq!(
+            self.target_cleanup.load(Ordering::Acquire),
+            TargetCleanup::Pending as u8,
+            "cleanup preceded exact-root accounting"
+        );
+        self.accounting_attempted.store(true, Ordering::Release);
+    }
+
     pub(super) fn mark_target_collected(&self) {
+        #[cfg(test)]
+        assert!(self.accounting_attempted.load(Ordering::Acquire));
         self.target_cleanup
             .store(TargetCleanup::Verified as u8, Ordering::Release);
     }
 
     pub(super) fn mark_fallback_collected(&self) {
+        #[cfg(test)]
+        assert!(self.accounting_attempted.load(Ordering::Acquire));
         self.target_cleanup
             .store(TargetCleanup::Fallback as u8, Ordering::Release);
     }
@@ -785,22 +805,23 @@ async fn run_owned_measurement(
     measurement: impl std::future::Future<Output = Result<MeasuredOutcome, MeasureError>>,
 ) -> Result<MeasuredOutcome, MeasureError> {
     let mut measurement = std::pin::pin!(measurement);
-    let mut orphan_deadline = None;
+    let mut capture_deadline = None;
     loop {
         tokio::select! {
             result = &mut measurement => return result,
             () = tokio::time::sleep(Duration::from_millis(25)) => {
                 let cleanup = control.target_cleanup.load(Ordering::Acquire);
                 if cleanup == TargetCleanup::Fallback as u8
-                    || (cleanup == TargetCleanup::Verified as u8
-                        && matches!(process_has_exited(&control.coordinator), Ok(true)))
+                    || cleanup == TargetCleanup::Verified as u8
                 {
-                    let deadline = orphan_deadline.get_or_insert_with(|| Instant::now() + Duration::from_secs(1));
+                    let deadline = capture_deadline.get_or_insert_with(|| Instant::now() + Duration::from_secs(1));
                     if Instant::now() >= *deadline {
                         // Exact-root exit/accounting precedes either verified
                         // tree cleanup or explicit closure of BOTH kill-on-close
-                        // job guards. Failure fallback also bounds blocked file
-                        // writers while the coordinator is alive. Worker exit
+                        // job guards. Bound synchronous capture writes even
+                        // after verified cleanup with a live coordinator; a
+                        // reader timeout cannot cancel an active file write.
+                        // Pending accounting is never interrupted. Worker exit
                         // releases OS handles; coordinator admission stays owned
                         // until that exit, never interrupting root collection.
                         std::process::exit(1);
@@ -1189,6 +1210,7 @@ mod tests {
             coordinator: open_process(parent_pid).unwrap(),
             abort: directory.join("abort"),
             target_cleanup: AtomicU8::new(TargetCleanup::Pending as u8),
+            accounting_attempted: AtomicBool::new(false),
         };
         let (created, _, _, _) = control.coordinator.GetProcessTimes().unwrap();
         assert_eq!(
@@ -1254,6 +1276,16 @@ mod tests {
                         tokio::time::sleep(EXIT_POLL).await;
                     }
                     fs::write(directory.join("writer-entered"), []).unwrap();
+                    while control.target_cleanup.load(Ordering::Acquire) == TargetCleanup::Pending as u8 {
+                        tokio::time::sleep(EXIT_POLL).await;
+                    }
+                    assert!(control.accounting_attempted.load(Ordering::Acquire));
+                    let pending = directory.join("cleanup-observed.pending");
+                    fs::write(
+                        &pending,
+                        control.target_cleanup.load(Ordering::Acquire).to_string(),
+                    ).unwrap();
+                    fs::rename(pending, directory.join("cleanup-observed")).unwrap();
                     std::future::pending::<()>().await;
                 } => unreachable!(),
             }
@@ -1262,17 +1294,22 @@ mod tests {
 
     #[test]
     fn coordinator_death_with_blocked_writer_exits_only_after_target_cleanup() {
-        blocked_writer_watchdog_case(None);
+        blocked_writer_watchdog_case(None, false);
     }
 
     #[test]
     fn persistent_job_errors_with_blocked_writer_fail_closed_with_live_coordinator() {
         for fault in ["query", "terminate"] {
-            blocked_writer_watchdog_case(Some(fault));
+            blocked_writer_watchdog_case(Some(fault), true);
         }
     }
 
-    fn blocked_writer_watchdog_case(fault: Option<&str>) {
+    #[test]
+    fn verified_cleanup_with_blocked_writer_fails_closed_with_live_coordinator() {
+        blocked_writer_watchdog_case(None, true);
+    }
+
+    fn blocked_writer_watchdog_case(fault: Option<&str>, live_coordinator: bool) {
         let directory = tempfile::tempdir().unwrap();
         let mut coordinator = TestChild(
             std::process::Command::new("powershell.exe")
@@ -1322,7 +1359,15 @@ mod tests {
             .parse()
             .unwrap();
         let target = open_process(target_pid).unwrap();
-        if fault.is_some() {
+        if live_coordinator && fault.is_none() {
+            // Exceed the watchdog grace while accounting is still Pending.
+            // A blocked writer must not let the watchdog interrupt the target.
+            thread::sleep(Duration::from_millis(1250));
+            assert!(!process_has_exited(&target).unwrap());
+            assert!(worker.try_wait().unwrap().is_none());
+            assert!(!directory.path().join("cleanup-observed").is_file());
+        }
+        if live_coordinator {
             fs::write(directory.path().join("abort"), []).unwrap();
         } else {
             coordinator.kill().unwrap();
@@ -1343,6 +1388,12 @@ mod tests {
             worker.try_wait().unwrap().is_none(),
             "worker exited before post-collection grace"
         );
+        let expected_cleanup = if fault.is_some() {
+            TargetCleanup::Fallback
+        } else {
+            TargetCleanup::Verified
+        };
+        assert_accounted_cleanup(directory.path(), &mut worker, deadline, expected_cleanup);
         let status = loop {
             if let Some(status) = worker.try_wait().unwrap() {
                 break status;
@@ -1354,7 +1405,7 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         };
         assert_eq!(status.code(), Some(1), "watchdog did not fail closed");
-        if fault.is_some() {
+        if live_coordinator {
             assert!(!process_has_exited(&parent).unwrap());
         }
         assert!(
@@ -1362,6 +1413,25 @@ mod tests {
             "blocked capture published success"
         );
     }
+
+    fn assert_accounted_cleanup(
+        directory: &Path,
+        worker: &mut TestChild,
+        deadline: Instant,
+        expected: TargetCleanup,
+    ) {
+        let observed = directory.join("cleanup-observed");
+        while !observed.is_file() {
+            assert!(Instant::now() < deadline, "cleanup was never observed");
+            assert!(worker.try_wait().unwrap().is_none());
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            fs::read_to_string(observed).unwrap(),
+            (expected as u8).to_string()
+        );
+    }
+
     #[test]
     fn coordinator_death_helper() {
         let Some(directory) = env::var_os("TQ_BENCH_TEST_COORDINATOR_DEATH") else {
