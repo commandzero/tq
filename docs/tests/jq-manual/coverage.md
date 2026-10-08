@@ -410,6 +410,15 @@ The command regenerates the [overview](overview.md) and all 21 section Results
 blocks. The [index](index.md) remains frontmatter-free navigation, without a
 generated Results block.
 
+For `--render-only`, supply a saved report with the complete reviewed/catalog
+case inventory. Missing, duplicate, unexpected or malformed case IDs are
+rejected before page updates. Complete reports with differences still render;
+rendering is not strict acceptance.
+
+Capture identity uses only explicit `campaign_id` and `captured_at` fields.
+Live execution records capture completion; historical missing fields stay null.
+Document `generated_at` does not supply a missing capture timestamp.
+
 The historical **newhelp-final** report was rendered into all 21 section Results
 blocks. At that checkpoint, twenty section bodies were byte-identical;
 invoking-jq changed the help capture, not match counts. Authored blocks remain

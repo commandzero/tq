@@ -80,8 +80,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let markdown_destination = markdown_path.unwrap_or_else(|| root.join("docs/tests/jq-manual"));
     let reviews = root.join("tests/compatibility/reviews/jq-manual");
     if render_only {
-        let report: Value = tq_test_support::fixture_data::read(&destination)?;
-        write_markdown_sections(&markdown_destination, &report, &reviews)?;
+        render_saved_report(&destination, &markdown_destination, &root, &reviews)?;
         return Ok(ExitCode::SUCCESS);
     }
     let config = ExecutableConfig::from_env();
@@ -94,7 +93,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Duration::from_secs(5),
         &approvals,
     )?;
-    report["generated_at"] = Value::String(jiff::Timestamp::now().to_string());
+    report["captured_at"] = Value::String(jiff::Timestamp::now().to_string());
+    report["generated_at"] = report["captured_at"].clone();
     report["reference_pin"] = serde_json::json!({
         "source_inventory_sha256": pin.source_inventory_sha256,
         "target": manual_host_target(),
@@ -111,6 +111,56 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         &approvals,
         approval_path.is_some(),
     )
+}
+
+fn render_saved_report(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    root: &std::path::Path,
+    reviews: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let report: Value = tq_test_support::fixture_data::read(source)?;
+    let catalog = load_catalog(&root.join("tests/compatibility/cases"))?;
+    let reviewed = read_manual_review_case_ids(reviews)?;
+    // Use the same review/catalog union as the executing manual comparator.
+    let expected = reviewed
+        .iter()
+        .map(String::as_str)
+        .chain(
+            catalog
+                .cases
+                .iter()
+                .filter(|case| case.id.starts_with("manual.") || case.id.starts_with("manual-"))
+                .map(|case| case.id.as_str()),
+        )
+        .collect();
+    validate_saved_manual_case_ids(&report, &expected)?;
+    write_markdown_sections(destination, &report, reviews)
+}
+
+fn validate_saved_manual_case_ids(
+    report: &Value,
+    expected: &std::collections::BTreeSet<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = report["cases"]
+        .as_array()
+        .ok_or("saved comparison report cases must be an array")?;
+    let mut seen = std::collections::BTreeSet::new();
+    for case in cases {
+        let id = case["id"]
+            .as_str()
+            .ok_or("saved comparison report case lacks an ID")?;
+        if !expected.contains(id) {
+            return Err(format!("unexpected saved manual case: {id}").into());
+        }
+        if !seen.insert(id) {
+            return Err(format!("duplicate saved manual case: {id}").into());
+        }
+    }
+    if let Some(id) = expected.difference(&seen).next() {
+        return Err(format!("saved report missing expected manual case: {id}").into());
+    }
+    Ok(())
 }
 
 fn validate_written_report(
@@ -390,6 +440,7 @@ fn bind_benchmark_runs(
 ) -> Result<String, Box<dyn std::error::Error>> {
     validate_tool_metadata(report)?;
     let generated_at = report["generated_at"].as_str();
+    let captured_at = report["captured_at"].as_str();
     let (mut value, original_body) = if document.starts_with("---\n") {
         (parse_frontmatter(document)?, None)
     } else {
@@ -435,7 +486,7 @@ fn bind_benchmark_runs(
         .ok_or("benchmark_runs must be a sequence")?;
     let existing = runs.iter_mut().find(|run| {
         run["campaign_id"] == report["campaign_id"]
-            && run["captured_at"].as_str() == generated_at
+            && run["captured_at"].as_str() == captured_at
             && run["target"].as_str() == target
             && tools.iter().all(|tool| {
                 let name = tool["tool"].as_str().expect("validated name");
@@ -464,7 +515,7 @@ fn bind_benchmark_runs(
     } else {
         runs.push(serde_json::json!({
             "campaign_id": report["campaign_id"],
-            "captured_at": generated_at,
+            "captured_at": captured_at,
             "platform": target.and_then(|target| target.rsplit_once('-').map(|(_, platform)| platform)),
             "target": target,
             "binaries": binaries
@@ -1102,6 +1153,50 @@ mod tests {
     }
 
     #[test]
+    fn saved_inventory_rejects_lost_duplicate_and_unknown_cases_without_requiring_parity() {
+        let expected = std::collections::BTreeSet::from(["sample.result", "sample.raw"]);
+        let mut complete = tiny_report();
+        complete["cases"][0]["verdict"] = json!("failure");
+        super::validate_saved_manual_case_ids(&complete, &expected).unwrap();
+        let mut missing = complete.clone();
+        missing["cases"].as_array_mut().unwrap().remove(0);
+        let mut duplicate = complete.clone();
+        duplicate["cases"][0] = duplicate["cases"][1].clone();
+        let mut unexpected = complete.clone();
+        unexpected["cases"][0]["id"] = json!("unknown");
+        let mut malformed = complete;
+        malformed["cases"][0].as_object_mut().unwrap().remove("id");
+        for report in [missing, duplicate, unexpected, malformed] {
+            assert!(super::validate_saved_manual_case_ids(&report, &expected).is_err());
+        }
+    }
+
+    #[test]
+    fn generation_time_does_not_invent_or_change_capture_identity() {
+        let mut report = tiny_report();
+        let initial = super::bind_benchmark_runs("# authored\n", &report).unwrap();
+        let metadata = super::parse_frontmatter(&initial).unwrap();
+        assert_eq!(
+            metadata["benchmark_runs"][0]["captured_at"],
+            serde_json::Value::Null
+        );
+        report["generated_at"] = json!("2026-09-11T03:30:00Z");
+        let regenerated = super::bind_benchmark_runs(&initial, &report).unwrap();
+        assert_eq!(regenerated, initial);
+        report["captured_at"] = json!("2026-09-10T03:29:00Z");
+        let distinct = super::bind_benchmark_runs(&regenerated, &report).unwrap();
+        let metadata = super::parse_frontmatter(&distinct).unwrap();
+        let runs = metadata["benchmark_runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["captured_at"], serde_json::Value::Null);
+        assert_eq!(runs[1]["captured_at"], report["captured_at"]);
+        assert_eq!(
+            super::bind_benchmark_runs(&distinct, &report).unwrap(),
+            distinct
+        );
+    }
+
+    #[test]
     fn legacy_report_without_timestamp_keeps_capture_time_unknown() {
         let mut report = tiny_report();
         report.as_object_mut().unwrap().remove("generated_at");
@@ -1166,7 +1261,7 @@ mod tests {
             rendered
         );
         let mut distinct = report;
-        distinct["generated_at"] = json!("2026-09-10T03:30:01Z");
+        distinct["captured_at"] = json!("2026-09-10T03:30:01Z");
         let appended = super::bind_benchmark_runs(&rendered, &distinct).unwrap();
         let appended = super::parse_frontmatter(&appended).unwrap();
         assert_eq!(appended["benchmark_runs"].as_array().unwrap().len(), 3);
@@ -1325,7 +1420,7 @@ mod tests {
         assert_eq!(metadata["title"], "Authored overview");
         let run = &metadata["benchmark_runs"][0];
         assert_eq!(run["campaign_id"], serde_json::Value::Null);
-        assert_eq!(run["captured_at"], report["generated_at"]);
+        assert_eq!(run["captured_at"], report["captured_at"]);
         assert_eq!(run["binaries"]["yq"]["identity_status"], "not-recorded");
         let mut malformed = report.clone();
         malformed["tools"] = json!({});
