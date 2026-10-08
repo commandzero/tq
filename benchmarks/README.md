@@ -45,22 +45,22 @@ an explicit, calibrated CLI operation rather than a dispatcher side effect.
 
 ## TOON 4.1 comparison run admission
 
-The new exhaustive natural-corpus comparison is pending an observably idle
-Linux host. Current observations do not admit any candidate: Ironhide load
-4.66 with CPU idle 42–49% and heavy swap/I/O; Sideswipe load 3.87–3.96 with
-CPU idle 70–78%; Jetfire load 1.97–2.05 with CPU idle 90–93%. Require idle
-CPU and I/O immediately before and throughout execution. Do not stop unrelated
-services, overlap builds/tests, or relax the gate. No fresh comparison has
-been executed or promoted.
+The exhaustive Linux campaign `2026-10-08T15:10:27.867608118Z` completed all
+858 planned observations across 39 workloads: 707 timed, 134 unsupported,
+8 incorrect yq formatting rows and 9 tq resource-limit rows. Its status is
+`observed-failures` (exit 1), not incomplete or all-correct acceptance.
+Fresh accounting/isolation controls passed before measurement. Admission
+required 30 seconds of idle CPU/I/O, no active swap and no concurrent builds
+or tests; monitored execution had no admission violations.
 
-When eligible, run the frozen Linux candidate at
+The measured frozen candidate is
 `/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq`,
-whose captured identity is `tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision
-unknown)` with SHA-256
-`474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91`. Use the
-existing comparison helper and tools; capture jq/yq versions and hashes from
-the actual runner. Prior tool identities are expectations only.
-
+version `tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)`, SHA-256
+`474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91`.
+Actual reference binaries were jq 1.8.1 and yq 4.53.2; their recorded versions
+and hashes are retained with the report. The release harness was built from
+`3c025a842f23a76a3b444ed85269ac21b0304a0c` in a separate tree.
+The following is the recorded invocation, not a request to overwrite its output.
 Use all four retained manifests:
 
 - `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json`
@@ -69,7 +69,7 @@ Use all four retained manifests:
 - `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json`
 
 ```console
-/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq-bench run \
+/var/tmp/tq-toon-4-1-comparison-20261008T1453Z/source/target/release/tq-bench run \
   --suite natural-corpus --profile standard --mode exhaustive --sampling compare \
   --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json \
   --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json \
@@ -77,21 +77,24 @@ Use all four retained manifests:
   --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json \
   --origin frozen \
   --cache-root /var/tmp/tq-performance-20260924.UbhxO1/corpus \
-  --output /var/tmp/tq-toon-4-1-comparison-20261008.json
+  --timing-calibration /var/tmp/tq-toon-4-1-comparison-20261008T1453Z/evidence/calibration/1791472002396089-2556502/summary.json \
+  --output /var/tmp/tq-toon-4-1-comparison-20261008T1453Z/evidence/natural-comparison.json
 ```
 
-This is the native `tq-bench` CLI contract. Bind the frozen binaries through
-the existing `ExecutableConfig` environment: set `TQ_BIN` to the candidate
-above, and use the runner's actual jq/yq executables (`TQ_JQ` and `TQ_YQ`).
-Capture jq/yq versions and hashes from the actual runner. The specified output
-path must be new and ignored. Standard with compare sampling
-uses one warmup plus three measured samples. Do not add case or adapter filters,
-or substitute catalog sampling. Retain all rows, outcomes, campaign metadata,
-and tool/input hashes. A different host needs distinct campaign metadata and
-fresh measured identities. No build or test may overlap measurement. Do not use
-`--markdown-dir` without fresh matching calibration and launch-isolation
-evidence; do not run a quick baseline or promote the report. Keep the status
-pending until an actual run completes; never create a placeholder report.
+Bind the frozen binaries through `ExecutableConfig`: `TQ_BIN` is the candidate
+above; `TQ_JQ` and `TQ_YQ` are the retained
+`/var/tmp/tq-performance-20260924.UbhxO1/tools/jq-1.8.1` and `yq-4.53.2`
+binaries. `TQ_BENCH_WORKER` selects the worker next to the recorded harness.
+Future campaigns require fresh output/calibration paths and measured tool
+identities; do not reuse this timestamp or assume the binaries are unchanged.
+
+Standard with compare sampling uses one warmup plus three measured samples,
+without case or adapter filters. Retain every outcome, including failures.
+No self-regression baseline was supplied for this cross-tool campaign; the
+historical migration guard is not renewed by it. Publication passed the native
+calibration/isolation gates and rerendered the complete report, including all
+three native-format workload concepts. Raw evidence remains in the benchmark
+archive. Never overlap builds/tests with measurement or promote quick reports.
 
 ## Suites and sampling profiles
 

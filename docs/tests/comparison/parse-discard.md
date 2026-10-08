@@ -1,16 +1,35 @@
 ---
 type: Report
-title: "Discarding a stream"
-description: "Measures parsing and stream control when a query emits no values."
+title: Discarding a stream
+description: Measures parsing and stream control when a query emits no values.
 workload: benchmark.parse-discard
-generated: { by: codex/gpt-5.6-luna, at: 2026-09-10T20:15:01Z }
+generated:
+  by: codex/gpt-5.6-luna
+  at: 2026-09-10T20:15:01Z
 benchmark_runs:
-  - campaign_id: "2026-09-11"
-    provenance: "Native Linux workload report; captured tool identities are listed in the Results section. No executable hashes or unique campaign ID retained."
-    binaries:
-      tq: { version: "tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)", sha256: null }
-      jq: { version: "jq-1.8.1", sha256: null }
-      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: null }
+- campaign_id: 2026-09-11
+  provenance: Native Linux workload report; captured tool identities are listed in the Results section. No executable hashes or unique campaign ID retained.
+  binaries:
+    tq:
+      version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)
+      sha256: null
+    jq:
+      version: jq-1.8.1
+      sha256: null
+    yq:
+      version: yq (https://github.com/mikefarah/yq/) version v4.53.2
+      sha256: null
+- campaign_id: 2026-10-08T15:10:27.867608118Z
+  binaries:
+    jq:
+      version: jq-1.8.1
+      sha256: 020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d
+    tq:
+      version: tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)
+      sha256: 474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91
+    yq:
+      version: yq (https://github.com/mikefarah/yq/) version v4.53.2
+      sha256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
 ---
 
 # Discarding a stream
@@ -34,14 +53,14 @@ parsing cost separate from output construction.
 ## Results
 
 <!-- benchmark-results:start -->
-Last updated: 2026-09-11
-Profile: `standard` | Campaign status: `observed-failures`
+Last updated: 2026-10-08
+Suite: `natural-corpus` | Profile: `standard` | Campaign status: `observed-failures`
 
-Tools: `jq` (jq-1.8.1), `tq` (tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
-Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.0-ogc4.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Aug 20 16:15:37 UTC 2026`; compiler profile `release-benchmark`
+Tools: `jq` (jq-1.8.1), `tq` (tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)), `yq` (yq (https://github.com/mikefarah/yq/) version v4.53.2)
+Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.4-ogc3.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Sun Sep 13 01:41:06 UTC 2026`; compiler profile `release-benchmark`
 
 Peak RSS is authoritative only after the campaign RSS preflight passes. Missing or invalid values are `-`, never estimates. RSS collector provenance (outside measurement tables): `linux-wait4`.
-Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.1 ms`; primary timing is sampler-free.
+Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.6 MiB` retained, not subtracted; observed control excess `0.9 ms`; primary timing is sampler-free.
 
 Compare columns with the same input format to isolate tool differences. Missing adapters have `-` measurement cells and `not recorded` outcome/detail cells.
 
@@ -49,85 +68,85 @@ Timing rows show numeric medians followed by compact MAD / p95 / range rows, wit
 
 ### usgs-all-day
 
-`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`.
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below.
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall time | 2.8 ms | 8.0 ms | 17.4 ms | 3.3 ms | 4.0 ms | 3.7 ms |
-| Wall time dispersion | 0.1 ms / 3.1 ms / 2.6-3.1 ms | 0.1 ms / 8.6 ms / 7.8-8.6 ms | 0.3 ms / 17.9 ms / 16.4-17.9 ms | 0.2 ms / 3.6 ms / 2.9-3.6 ms | 0.0 ms / 4.0 ms / 3.7-4.0 ms | 0.2 ms / 4.1 ms / 3.4-4.1 ms |
+| Wall time | 2.9 ms | 9.7 ms | 20.9 ms | 3.3 ms | 4.2 ms | 4.5 ms |
+| Wall time dispersion | 0.0 ms / 3.0 ms / 2.9-3.0 ms | 0.2 ms / 10.0 ms / 9.2-10.0 ms | 0.6 ms / 21.4 ms / 19.8-21.4 ms | 0.1 ms / 3.8 ms / 3.2-3.8 ms | 0.0 ms / 4.4 ms / 4.2-4.4 ms | 0.1 ms / 4.6 ms / 4.4-4.6 ms |
 | First output | - | - | - | - | - | - |
 | First output dispersion | - | - | - | - | - | - |
-| User CPU | 1.8 ms | 6.8 ms | 16.8 ms | 2.1 ms | 2.8 ms | 2.4 ms |
-| System CPU | 0.9 ms | 4.1 ms | 9.0 ms | 1.0 ms | 1.0 ms | 1.1 ms |
-| Peak RSS | 4.3 MiB | 17.6 MiB | 32.1 MiB | 8.4 MiB | 8.9 MiB | 8.2 MiB |
-| Logical throughput | 70162.7 records/s | 24248.5 records/s | 11179.0 records/s | 59673.9 records/s | 48252.7 records/s | 51788.6 records/s |
-| Physical throughput | 48.0 MiB/s | 16.6 MiB/s | 7.6 MiB/s | 40.9 MiB/s | 33.0 MiB/s | 41.9 MiB/s |
+| User CPU | 1.9 ms | 8.3 ms | 18.3 ms | 1.0 ms | 2.2 ms | 3.2 ms |
+| System CPU | 0.9 ms | 5.9 ms | 11.4 ms | 2.0 ms | 2.2 ms | 1.1 ms |
+| Peak RSS | 3.3 MiB | 20.2 MiB | 35.8 MiB | 14.5 MiB | 16.8 MiB | 16.8 MiB |
+| Logical throughput | 85047.1 records/s | 25041.1 records/s | 11686.9 records/s | 73471.8 records/s | 57465.9 records/s | 54054.1 records/s |
+| Physical throughput | 58.0 MiB/s | 17.1 MiB/s | 8.0 MiB/s | 50.1 MiB/s | 39.1 MiB/s | 43.6 MiB/s |
 | Output bytes | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
-| Samples (warmups) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
+| Samples (warmups) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) |
 | Comparison view | same input | same input | same input | same input | same input | native input |
 
 ### usgs-all-hour
 
-`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`.
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below.
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall time | 1.5 ms | 2.8 ms | 2.9 ms | 1.0 ms | 1.2 ms | 1.1 ms |
-| Wall time dispersion | 0.1 ms / 1.7 ms / 1.3-1.8 ms | 0.2 ms / 3.1 ms / 2.4-3.1 ms | 0.1 ms / 3.2 ms / 2.7-3.4 ms | 0.0 ms / 1.5 ms / 1.0-1.5 ms | 0.1 ms / 1.5 ms / 1.0-1.5 ms | 0.1 ms / 1.3 ms / 1.0-1.4 ms |
+| Wall time | 1.2 ms | 2.7 ms | 3.1 ms | 1.8 ms | 1.8 ms | 1.7 ms |
+| Wall time dispersion | 0.0 ms / 1.2 ms / 1.2-1.2 ms | 0.1 ms / 2.8 ms / 2.5-2.8 ms | 0.0 ms / 3.2 ms / 3.0-3.2 ms | 0.1 ms / 1.8 ms / 1.6-1.8 ms | 0.0 ms / 1.8 ms / 1.8-1.8 ms | 0.0 ms / 1.8 ms / 1.7-1.8 ms |
 | First output | - | - | - | - | - | - |
 | First output dispersion | - | - | - | - | - | - |
-| User CPU | 1.3 ms | 0.9 ms | 1.0 ms | 0.0 ms | 0.0 ms | 0.0 ms |
-| System CPU | 0.0 ms | 2.0 ms | 2.0 ms | 1.0 ms | 1.0 ms | 0.9 ms |
-| Peak RSS | 4.1 MiB | 10.9 MiB | 11.0 MiB | 7.2 MiB | 7.6 MiB | 7.2 MiB |
-| Logical throughput | 1336.0 records/s | 726.6 records/s | 692.6 records/s | 1942.7 records/s | 1716.0 records/s | 1822.3 records/s |
-| Physical throughput | 1.1 MiB/s | 0.6 MiB/s | 0.6 MiB/s | 1.6 MiB/s | 1.5 MiB/s | 1.8 MiB/s |
+| User CPU | 1.1 ms | 1.3 ms | 2.1 ms | 0.0 ms | 0.0 ms | 0.0 ms |
+| System CPU | 0.0 ms | 1.3 ms | 1.1 ms | 1.6 ms | 1.6 ms | 1.6 ms |
+| Peak RSS | 2.7 MiB | 12.1 MiB | 12.9 MiB | 14.5 MiB | 15.0 MiB | 14.9 MiB |
+| Logical throughput | 5932.2 records/s | 2618.8 records/s | 2236.4 records/s | 3990.9 records/s | 3926.0 records/s | 4227.1 records/s |
+| Physical throughput | 4.3 MiB/s | 1.9 MiB/s | 1.6 MiB/s | 2.9 MiB/s | 2.8 MiB/s | 3.6 MiB/s |
 | Output bytes | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
-| Samples (warmups) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) | 30 measured (2 warmup) |
+| Samples (warmups) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) |
 | Comparison view | same input | same input | same input | same input | same input | native input |
 
 ### usgs-all-month
 
-`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`.
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below.
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall time | 93.5 ms | 261.7 ms | 906.2 ms | 120.3 ms | 161.3 ms | 137.0 ms |
-| Wall time dispersion | 0.7 ms / 95.5 ms / 92.6-95.5 ms | 1.6 ms / 265.9 ms / 258.1-265.9 ms | 24.3 ms / 935.6 ms / 838.1-935.6 ms | 1.1 ms / 122.9 ms / 118.1-122.9 ms | 1.2 ms / 163.3 ms / 158.7-163.3 ms | 0.9 ms / 138.5 ms / 135.6-138.5 ms |
+| Wall time | 88.1 ms | 257.6 ms | 833.5 ms | 73.5 ms | 116.6 ms | 123.0 ms |
+| Wall time dispersion | 0.0 ms / 88.7 ms / 88.1-88.7 ms | 3.1 ms / 260.7 ms / 254.3-260.7 ms | 44.1 ms / 885.4 ms / 789.4-885.4 ms | 0.6 ms / 74.3 ms / 72.9-74.3 ms | 0.1 ms / 116.7 ms / 115.4-116.7 ms | 0.1 ms / 123.8 ms / 122.9-123.8 ms |
 | First output | - | - | - | - | - | - |
 | First output dispersion | - | - | - | - | - | - |
-| User CPU | 66.3 ms | 227.6 ms | 1258.6 ms | 93.7 ms | 130.3 ms | 110.0 ms |
-| System CPU | 26.5 ms | 120.3 ms | 446.4 ms | 26.0 ms | 30.8 ms | 26.5 ms |
-| Peak RSS | 60.3 MiB | 294.4 MiB | 1301.3 MiB | 68.6 MiB | 88.7 MiB | 77.4 MiB |
-| Logical throughput | 120602.7 records/s | 43084.8 records/s | 12440.6 records/s | 93744.9 records/s | 69911.3 records/s | 82280.0 records/s |
-| Physical throughput | 81.7 MiB/s | 29.2 MiB/s | 8.4 MiB/s | 63.5 MiB/s | 47.3 MiB/s | 66.1 MiB/s |
+| User CPU | 63.8 ms | 221.5 ms | 1065.2 ms | 69.1 ms | 110.1 ms | 118.2 ms |
+| System CPU | 23.9 ms | 118.6 ms | 443.7 ms | 4.0 ms | 6.0 ms | 5.1 ms |
+| Peak RSS | 56.6 MiB | 280.7 MiB | 1027.7 MiB | 72.3 MiB | 116.9 MiB | 96.6 MiB |
+| Logical throughput | 122523.6 records/s | 41888.4 records/s | 12947.9 records/s | 146855.9 records/s | 92582.7 records/s | 87744.1 records/s |
+| Physical throughput | 83.0 MiB/s | 28.4 MiB/s | 8.8 MiB/s | 99.5 MiB/s | 62.6 MiB/s | 70.4 MiB/s |
 | Output bytes | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
-| Samples (warmups) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
+| Samples (warmups) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) |
 | Comparison view | same input | same input | same input | same input | same input | native input |
 
 ### usgs-all-week
 
-`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `tool identity differs`.
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below.
 
 | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Wall time | 19.3 ms | 55.5 ms | 170.8 ms | 24.6 ms | 31.9 ms | 28.3 ms |
-| Wall time dispersion | 0.3 ms / 21.1 ms / 18.5-21.1 ms | 0.4 ms / 56.3 ms / 53.2-56.3 ms | 3.8 ms / 175.4 ms / 155.3-175.4 ms | 0.8 ms / 25.4 ms / 23.2-25.4 ms | 0.6 ms / 33.5 ms / 29.5-33.5 ms | 0.7 ms / 29.2 ms / 26.6-29.2 ms |
+| Wall time | 19.0 ms | 55.9 ms | 174.1 ms | 16.7 ms | 25.1 ms | 26.7 ms |
+| Wall time dispersion | 0.5 ms / 20.7 ms / 18.4-20.7 ms | 0.5 ms / 57.4 ms / 55.4-57.4 ms | 0.2 ms / 183.2 ms / 174.0-183.2 ms | 0.5 ms / 17.8 ms / 16.2-17.8 ms | 0.0 ms / 25.2 ms / 24.1-25.2 ms | 0.5 ms / 27.2 ms / 26.0-27.2 ms |
 | First output | - | - | - | - | - | - |
 | First output dispersion | - | - | - | - | - | - |
-| User CPU | 15.1 ms | 48.4 ms | 199.7 ms | 18.4 ms | 26.2 ms | 22.3 ms |
-| System CPU | 5.0 ms | 25.2 ms | 90.2 ms | 6.4 ms | 5.7 ms | 5.1 ms |
-| Peak RSS | 14.6 MiB | 67.6 MiB | 235.0 MiB | 19.4 MiB | 23.4 MiB | 20.8 MiB |
-| Logical throughput | 115180.5 records/s | 40096.6 records/s | 13030.0 records/s | 90351.7 records/s | 69774.4 records/s | 78519.3 records/s |
-| Physical throughput | 78.0 MiB/s | 27.2 MiB/s | 8.8 MiB/s | 61.2 MiB/s | 47.2 MiB/s | 63.0 MiB/s |
+| User CPU | 14.5 ms | 56.0 ms | 200.9 ms | 15.5 ms | 22.0 ms | 23.9 ms |
+| System CPU | 5.1 ms | 21.9 ms | 104.1 ms | 1.9 ms | 3.0 ms | 2.9 ms |
+| Peak RSS | 13.3 MiB | 67.7 MiB | 226.2 MiB | 26.4 MiB | 32.9 MiB | 32.7 MiB |
+| Logical throughput | 117733.9 records/s | 39994.3 records/s | 12828.5 records/s | 133636.4 records/s | 88908.3 records/s | 83799.1 records/s |
+| Physical throughput | 79.8 MiB/s | 27.1 MiB/s | 8.7 MiB/s | 90.6 MiB/s | 60.2 MiB/s | 67.3 MiB/s |
 | Output bytes | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B | 0.0 B |
 | Outcome | timed | timed | timed | timed | timed | timed |
 | Details | none | none | none | none | none | none |
-| Samples (warmups) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) | 10 measured (2 warmup) |
+| Samples (warmups) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) | 3 measured (1 warmup) |
 | Comparison view | same input | same input | same input | same input | same input | native input |
 <!-- benchmark-results:end -->

@@ -1,9 +1,88 @@
 ---
-type: "Report"
-title: "jq, yq, and tq benchmark comparisons"
-description: "Recorded benchmark comparisons across jq, yq, and tq."
-generated: {"by":"omp","at":"2026-10-08T03:04:39.695Z"}
-benchmark_runs: [{"campaign_id":null,"identity_status":"not-recorded","provenance":"The workload tables identify tq 0.1.0 build a4b4d916-worktree, jq 1.8.1, and yq 4.53.2; no retained campaign ID or binary hashes are recorded in this index.","binaries":{"tq":{"version":"tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)","sha256":null},"jq":{"version":"jq-1.8.1","sha256":null},"yq":{"version":"yq (https://github.com/mikefarah/yq/) version v4.53.2","sha256":null}}},{"campaign_id":"2026-09-26T19:27:09.746840362Z","identity_status":"not-recorded","run_scope":"system-allocator","provenance":"Extended Linux diagnostic; exact tq, jq, and yq versions and executable hashes retained in system.json; tq revision unknown.","binaries":{"tq":{"version":"tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)","sha256":"221c680db8481f965b8579d036183766e180473185799590c72247be7fb107c4","identity_status":"not-recorded","allocator":"system"},"jq":{"version":"jq-1.8.1","sha256":"136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97"},"yq":{"version":"yq (https://github.com/mikefarah/yq/) version v4.53.2","sha256":"d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b"}}},{"campaign_id":"2026-09-26T19:45:18.07883121Z","identity_status":"not-recorded","run_scope":"default-mimalloc","provenance":"Extended Linux diagnostic; exact tq, jq, and yq versions and executable hashes retained in mimalloc.json; tq revision unknown.","binaries":{"tq":{"version":"tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)","sha256":"7068a178ce8f62f6cbfaaaf588049882dd5500d8213a7711a121043db6a0d338","identity_status":"not-recorded"},"jq":{"version":"jq-1.8.1","sha256":"136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97"},"yq":{"version":"yq (https://github.com/mikefarah/yq/) version v4.53.2","sha256":"d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b"}}},{"campaign_id":null,"identity_status":"not-recorded","run_scope":"release-validation","provenance":"Helper-only release-validation controls; exact campaign IDs, helper version strings, and executable hashes were not recorded. Collector source SHA-256 is retained.","binaries":{"tq-bench-worker":{"version":null,"sha256":null,"identity_status":"not-recorded","protocol":"tq-bench-worker-protocol-v3","collector_source_sha256":"9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5"}}},{"campaign_id":null,"identity_status":"not-recorded","run_scope":"worker-isolation","provenance":"Helper-only worker-isolation controls; exact campaign IDs, helper version strings, and executable hashes were not recorded. Collector source SHA-256 is retained.","binaries":{"tq-bench-worker":{"version":null,"sha256":null,"identity_status":"not-recorded","protocol":"tq-bench-worker-protocol-v3","collector_source_sha256":"9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5"}}}]
+type: Report
+title: jq, yq, and tq benchmark comparisons
+description: Recorded benchmark comparisons across jq, yq, and tq.
+generated:
+  by: codex
+  at: 2026-10-08T15:38:02.825Z
+benchmark_runs:
+- campaign_id: null
+  identity_status: not-recorded
+  provenance: The workload tables identify tq 0.1.0 build a4b4d916-worktree, jq 1.8.1, and yq 4.53.2; no retained campaign ID or binary hashes are recorded in this index.
+  binaries:
+    tq:
+      version: tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)
+      sha256: null
+    jq:
+      version: jq-1.8.1
+      sha256: null
+    yq:
+      version: yq (https://github.com/mikefarah/yq/) version v4.53.2
+      sha256: null
+- campaign_id: 2026-09-26T19:27:09.746840362Z
+  identity_status: not-recorded
+  run_scope: system-allocator
+  provenance: Extended Linux diagnostic; exact tq, jq, and yq versions and executable hashes retained in system.json; tq revision unknown.
+  binaries:
+    tq:
+      version: tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)
+      sha256: 221c680db8481f965b8579d036183766e180473185799590c72247be7fb107c4
+      identity_status: not-recorded
+      allocator: system
+    jq:
+      version: jq-1.8.1
+      sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+    yq:
+      version: yq (https://github.com/mikefarah/yq/) version v4.53.2
+      sha256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
+- campaign_id: 2026-09-26T19:45:18.07883121Z
+  identity_status: not-recorded
+  run_scope: default-mimalloc
+  provenance: Extended Linux diagnostic; exact tq, jq, and yq versions and executable hashes retained in mimalloc.json; tq revision unknown.
+  binaries:
+    tq:
+      version: tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)
+      sha256: 7068a178ce8f62f6cbfaaaf588049882dd5500d8213a7711a121043db6a0d338
+      identity_status: not-recorded
+    jq:
+      version: jq-1.8.1
+      sha256: 136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97
+    yq:
+      version: yq (https://github.com/mikefarah/yq/) version v4.53.2
+      sha256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
+- campaign_id: null
+  identity_status: not-recorded
+  run_scope: release-validation
+  provenance: Helper-only release-validation controls; exact campaign IDs, helper version strings, and executable hashes were not recorded. Collector source SHA-256 is retained.
+  binaries:
+    tq-bench-worker:
+      version: null
+      sha256: null
+      identity_status: not-recorded
+      protocol: tq-bench-worker-protocol-v3
+      collector_source_sha256: 9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5
+- campaign_id: null
+  identity_status: not-recorded
+  run_scope: worker-isolation
+  provenance: Helper-only worker-isolation controls; exact campaign IDs, helper version strings, and executable hashes were not recorded. Collector source SHA-256 is retained.
+  binaries:
+    tq-bench-worker:
+      version: null
+      sha256: null
+      identity_status: not-recorded
+      protocol: tq-bench-worker-protocol-v3
+      collector_source_sha256: 9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5
+- campaign_id: 2026-10-08T15:10:27.867608118Z
+  binaries:
+    jq:
+      version: jq-1.8.1
+      sha256: 020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d
+    tq:
+      version: tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)
+      sha256: 474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91
+    yq:
+      version: yq (https://github.com/mikefarah/yq/) version v4.53.2
+      sha256: d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b
 ---
 # jq, yq, and tq benchmark comparisons
 
@@ -11,12 +90,11 @@ Compare jq, yq, and tq on common data-processing tasks. Each page explains
 what the query does and preserves the recorded results for that workload.
 
 Only outputs that pass the correctness check are timed. Failed, unsupported,
-and unmeasured cases remain visible. This historical Linux review uses
-`tq-bench` native measurements of jq 1.8.1, pinned yq 4.53.2, and the recorded
-`tq 0.1.0` build at `a4b4d916-worktree`. It is not evidence about the current
-tq implementation or a self-regression baseline. A future rerun with
-the reviewed executable must supersede this snapshot under a new explicit
-tool identity.
+and unmeasured cases remain visible. The current Linux campaign measures
+jq 1.8.1, yq 4.53.2 and the frozen tq 0.5.0 / TOON 4.1 candidate with
+fresh native calibration and worker-isolation evidence. Captured versions and
+digests are in frontmatter; earlier capture identities remain historical.
+This cross-tool comparison is not a tq self-regression baseline.
 
 The [Linux worker-validation results](worker-validation.md) cover the new
 native accounting path separately. They are helper controls, not jq/yq/tq
@@ -73,13 +151,11 @@ and Linux 15 under [#70](https://github.com/commandzero/tq/issues/70), unresolve
 with exact witnesses retained for reconsideration after platform/reference fixes.
 It does not renew approvals or establish an all-platform pass.
 
-Calibration and calibrated performance acceptance remain deferred under
-[#31](https://github.com/commandzero/tq/issues/31) and platform follow-ups.
-No fresh calibration is established on any platform; Windows same-child
-accounting checks are not calibration or macOS proof. Unfinished macOS
-calibration and affected benchmark comparisons remain unpublished as accepted
-performance evidence. These correctness runs do not replace the historical
-workload timing tables below.
+The correctness closeouts above do not establish calibration. Fresh Linux
+controls captured on 2026-10-08 now validate the workload campaign below.
+They do not renew macOS or Windows calibration, allocator diagnostics, or
+other platform acceptance. [#31](https://github.com/commandzero/tq/issues/31)
+and platform follow-ups remain separate.
 
 ## Current allocator diagnostic
 
@@ -93,152 +169,151 @@ memory costs, unchanged failures, and retained raw-report identities.
 
 ## Findings
 
-The standard review covers 846 adapter observations: 703 timed, 134
-unsupported capability rows, 9 resource-limit rows, and 0 incorrect rows. It
-records 10,579 primary samples: 10,570 valid timed samples and 9 samples from
-failed resource-limit attempts. Another 180 instrumented samples check RSS
-limits separately. Every recorded sample has positive native peak RSS. The
-three additional smoke workloads are rendered on their own pages and complete
-the 39-workload review with 18 timed rows and 540 measured samples.
+Campaign `2026-10-08T15:10:27.867608118Z` completed all 858 planned adapter
+observations across 39 workloads: 707 timed, 134 unsupported, 8 incorrect,
+and 9 resource-limit rows. Each timed row has one warmup and three measured
+samples: 2,121 valid timed samples plus 9 retained failed resource attempts.
+All recorded samples have positive native peak RSS. No rows were filtered.
 
-The Results overview shows 35 workloads on the largest dataset,
-`usgs-all-month`. The 36th standard workload, [Reading additional inputs](issue5-inputs.md),
-uses its own `issue5-input-sequence` dataset and is included in the campaign
-totals. Its measurements belong on that separate page, not in the month-dataset
-table.
+The eight incorrect rows are yq JSON/YAML CSV and TSV formatting on the week
+and month snapshots; ordered-result checks failed before timing. The nine
+resource-limit rows are tq JSON/YAML/TOON object construction on the month
+snapshot and string reduction on the week/month snapshots, all classified
+resource exits (status 5). Unsupported and failed rows support no speed ranking.
+The complete campaign therefore exits 1 with `observed-failures`, not a pass.
 
-The rapid check covers 30 observations: 27 timed, 3 unsupported, and 0
-incorrect, with one positive-RSS sample for each timed row and three separate
-instrumented limit checks. In the standard
-review, the 134 unsupported observations are 130 yq adapters and 4 tq YAML
-event-stream adapters. The rapid exclusions are the two yq event-stream
-adapters and the tq YAML event-stream adapter.
+The four frozen USGS snapshots retain their original input identities.
+Native CSV, TSV and JSON-sequence workloads additionally cover deterministic
+8-record and 131,072-record fixtures. Their results are separate from the
+month-dataset overview and from accounting calibration controls.
 
-On `usgs-all-month`, identity shows the main tradeoff. jq took 196.7 ms and
-used 64.9 MiB; tq JSON took 533.6 ms and 15.4 MiB; tq TOON took 527.2 ms
-and 15.2 MiB. Path update favored tq JSON at 168.6 ms versus jq at 196.8 ms,
-while RSS was 69.5 MiB versus 64.9 MiB. Event streaming favored jq at
-257.4 ms and 3.9 MiB versus tq JSON at 1,153.1 ms and 7.9 MiB. Recursive
-scalar traversal also favored jq at 342.7 ms and 64.9 MiB versus tq JSON at
-2,297.7 ms and 69.1 MiB. Object construction took 23,812.7 ms and 491.4 MiB
-for yq JSON and 22,755.4 ms and 1,475.8 MiB for yq YAML; jq took 111.3 ms
-and 65.8 MiB, while tq reached its resource limit.
+On the month snapshot, identity re-encoding has median wall time / MAD of
+267.698 / 0.313 ms for jq JSON, 189.093 / 1.703 ms for tq JSON, and
+211.167 / 0.138 ms for tq TOON. Peak RSS is respectively 61.1, 67.0 and
+66.4 MiB. These are workload-specific tradeoffs, not an overall winner.
 
-The Linux self-regression gate evaluated 410 comparable standard tq rows. No
-independent wall-time or peak-RSS increase exceeded 20%, so there are no
-disclosures and no blocking increases above 50%. Thirteen rows were excluded
-from evaluation: four unsupported tq YAML event-stream rows and nine
-resource-limit attempts (three object-construction and six string-reduction
-rows). The [archived Linux self-regression review](../../../openspec/changes/archive/2026-09-11-native-benchmark-process-accounting/linux-regression-review.md)
-records the gate decision and identifies the retained raw reports by filename
-and SHA-256; it does not embed the unrounded samples.
+The identity commands emit pretty JSON from jq, compact JSON from yq and
+default TOON 4.1 from tq. Their input may be the same JSON snapshot, but
+output encoding and byte counts differ; this is not a same-output serializer
+comparison. The command/output concessions are retained rather than silently
+changing the measured matrix.
 
-These examples describe workload-specific tradeoffs rather than an overall
-winner. Unsupported and resource-limit rows do not support speed rankings.
-The resource-limit rows record tq's classified resource exit, status 5.
-These measurements do not establish a tq self-regression against earlier
-wrapper-based reports, which use a different measurement method.
+Native-format throughput has different tradeoffs. For 131,072 records, tq
+CSV takes 5,049.766 ms versus yq's 2,257.305 ms, but uses 15.3 versus
+598.5 MiB peak RSS. JSON sequences take 5,242.910 ms for tq versus
+96.992 ms for jq, with 14.8 versus 2.7 MiB peak RSS. Dispersion and first
+output timings remain in the individual workload tables; no overhead is
+subtracted from measured samples.
+
+No self-regression baseline was supplied, so the new report's regression
+gate is explicitly not evaluated. The historical
+[Linux self-regression review](../../../openspec/changes/archive/2026-09-11-native-benchmark-process-accounting/linux-regression-review.md)
+evaluated 410 tq rows under its original identities and remains historical.
+Likewise, the focused migration guard's existing +20% hard / +10% advisory
+evidence is not renewed or relabelled by this cross-tool campaign.
 
 ## Results
 
 <!-- benchmark-results:start -->
-Last updated: 2026-09-11
-Profile: `standard` | Campaign status: `observed-failures`
+Last updated: 2026-10-08
+Suite: `natural-corpus` | Profile: `standard` | Campaign status: `observed-failures`
 
-846 adapter observations across 36 workloads. Only correctness-checked outputs are timed; failed rows cannot support a speed ranking.
+858 adapter observations across 39 workloads. Only correctness-checked outputs are timed; failed rows cannot support a speed ranking.
 
-Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.0-ogc4.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Thu Aug 20 16:15:37 UTC 2026`; compiler profile `release-benchmark`
+Environment: `linux` / `x86_64`, AMD Ryzen 7 7700 8-Core Processor, 16 logical CPUs, 61.9 GiB RAM; kernel `Linux 7.2.4-ogc3.1.fc44.x86_64 #1 SMP PREEMPT_DYNAMIC Sun Sep 13 01:41:06 UTC 2026`; compiler profile `release-benchmark`
 
-RSS collector provenance (outside measurement tables): `instrumented linux-wait4`, `linux-wait4`.
-Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.1 ms`; primary timing is sampler-free; instrumented `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads; sampled worker process group`; residual RSS floor `2.5 MiB` retained, not subtracted; observed control excess `1.0 ms`; RSS-limit enforcement uses a separate worker process-group sampler and is not pooled with primary timing.
+RSS collector provenance (outside measurement tables): `linux-wait4`.
+Measurement method (outside measurement tables): `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads; sampled worker process group`; residual RSS floor `2.6 MiB` retained, not subtracted; observed control excess `0.9 ms`; primary timing includes process-group RSS sampling; `tq-bench` native measurement: RSS scope `wait4 child lifetime including pre exec waited descendants and threads`; residual RSS floor `2.6 MiB` retained, not subtracted; observed control excess `0.9 ms`; primary timing is sampler-free.
 
 ### Campaign coverage
 
-| Outcome | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| timed | 141 | 76 | 76 | 138 | 134 | 138 |
-| incorrect | 0 | 0 | 0 | 0 | 0 | 0 |
-| unsupported | 0 | 65 | 65 | 0 | 4 | 0 |
-| timeout | 0 | 0 | 0 | 0 | 0 | 0 |
-| resource-limit | 0 | 0 | 0 | 3 | 3 | 3 |
-| oom-or-signal | 0 | 0 | 0 | 0 | 0 | 0 |
+| Outcome | jq JSON | jq JSON-SEQ | yq JSON | yq YAML | yq CSV | yq TSV | tq JSON | tq YAML | tq TOON | tq JSON-SEQ | tq CSV | tq TSV |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| timed | 141 | 2 | 72 | 72 | 2 | 2 | 138 | 134 | 138 | 2 | 2 | 2 |
+| incorrect | 0 | 0 | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| unsupported | 0 | 0 | 65 | 65 | 0 | 0 | 0 | 4 | 0 | 0 | 0 | 0 |
+| timeout | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| resource-limit | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 3 | 3 | 0 | 0 | 0 |
+| oom-or-signal | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 
 ### usgs-all-month
 
-Largest recorded JSON input: 8013185 bytes, 11274 logical records. Each row compares the same workload across tools. Wall time cells use milliseconds and peak RSS cells use MiB, with one decimal place. Lower is better. A `-` cell means no valid comparable measurement, not zero; compare matching formats and check each workload page for outcomes and sample counts.
+Largest recorded JSON input: 7665096 bytes, 10792 logical records. Each row compares the same workload across tools. Wall time cells use milliseconds and peak RSS cells use MiB, with one decimal place. Lower is better. A `-` cell means no valid comparable measurement, not zero; compare matching formats and check each workload page for outcomes and sample counts.
 
-| Workload | Metric | jq JSON | yq JSON | yq YAML | tq JSON | tq YAML | tq TOON |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| array-construction | Wall time | 114.7 ms | 559.5 ms | 1157.8 ms | 147.5 ms | 190.6 ms | 166.6 ms |
-| array-construction | Peak RSS | 64.6 MiB | 474.4 MiB | 1310.3 MiB | 74.2 MiB | 94.2 MiB | 82.9 MiB |
-| blocking-sort | Wall time | 106.0 ms | 320.5 ms | 932.5 ms | 146.2 ms | 180.8 ms | 139.8 ms |
-| blocking-sort | Peak RSS | 60.9 MiB | 332.9 MiB | 1303.5 MiB | 9.3 MiB | 90.7 MiB | 8.6 MiB |
-| comma-generator-sort | Wall time | 216.3 ms | 983.0 ms | 1512.5 ms | 207.1 ms | 249.8 ms | 226.5 ms |
-| comma-generator-sort | Peak RSS | 64.7 MiB | 851.4 MiB | 1528.0 MiB | 72.7 MiB | 93.3 MiB | 81.8 MiB |
-| dead-sort-length | Wall time | 99.3 ms | 304.0 ms | 957.7 ms | 125.7 ms | 171.4 ms | 117.4 ms |
-| dead-sort-length | Peak RSS | 60.5 MiB | 331.4 MiB | 1296.0 MiB | 8.7 MiB | 90.1 MiB | 8.1 MiB |
-| event-stream | Wall time | 257.4 ms | - | - | 1153.1 ms | - | 1081.8 ms |
-| event-stream | Peak RSS | 3.9 MiB | - | - | 7.9 MiB | - | 7.7 MiB |
-| format-base64-roundtrip | Wall time | 106.4 ms | 484.1 ms | 1082.3 ms | 369.7 ms | 245.1 ms | 202.9 ms |
-| format-base64-roundtrip | Peak RSS | 60.2 MiB | 454.4 MiB | 1305.3 MiB | 11.6 MiB | 89.6 MiB | 8.1 MiB |
-| format-csv | Wall time | 117.8 ms | 1093.8 ms | 1709.8 ms | 217.6 ms | 258.0 ms | 235.9 ms |
-| format-csv | Peak RSS | 60.6 MiB | 476.7 MiB | 1439.7 MiB | 69.3 MiB | 89.4 MiB | 78.1 MiB |
-| format-json | Wall time | 225.3 ms | 974.4 ms | 1489.7 ms | 256.2 ms | 299.1 ms | 274.5 ms |
-| format-json | Peak RSS | 63.7 MiB | 832.6 MiB | 1528.0 MiB | 69.6 MiB | 89.6 MiB | 78.3 MiB |
-| format-shell | Wall time | 116.6 ms | - | - | 217.7 ms | 260.4 ms | 240.5 ms |
-| format-shell | Peak RSS | 60.5 MiB | - | - | 69.4 MiB | 89.4 MiB | 78.1 MiB |
-| format-template | Wall time | 120.5 ms | - | - | 374.0 ms | 258.9 ms | 212.9 ms |
-| format-template | Peak RSS | 60.2 MiB | - | - | 11.6 MiB | 89.4 MiB | 8.0 MiB |
-| format-tsv | Wall time | 118.1 ms | 506.4 ms | 1052.9 ms | 215.0 ms | 258.2 ms | 236.5 ms |
-| format-tsv | Peak RSS | 60.5 MiB | 463.3 MiB | 1309.7 MiB | 69.5 MiB | 89.4 MiB | 78.0 MiB |
-| format-uri-html | Wall time | 114.6 ms | - | - | 371.0 ms | 250.0 ms | 203.7 ms |
-| format-uri-html | Peak RSS | 60.2 MiB | - | - | 11.6 MiB | 89.5 MiB | 8.1 MiB |
-| identity-reencode | Wall time | 196.7 ms | 728.9 ms | 1318.5 ms | 533.6 ms | 210.9 ms | 527.2 ms |
-| identity-reencode | Peak RSS | 64.9 MiB | 487.3 MiB | 1362.2 MiB | 15.4 MiB | 88.8 MiB | 15.2 MiB |
-| issue5-collection | Wall time | 113.0 ms | 564.5 ms | 1090.4 ms | 146.7 ms | 187.2 ms | 164.0 ms |
-| issue5-collection | Peak RSS | 61.4 MiB | 615.3 MiB | 1357.8 MiB | 72.3 MiB | 93.0 MiB | 81.5 MiB |
-| issue5-json-conversion | Wall time | 94.4 ms | 257.3 ms | 912.9 ms | 120.1 ms | 161.5 ms | 137.8 ms |
-| issue5-json-conversion | Peak RSS | 60.3 MiB | 293.4 MiB | 1299.4 MiB | 69.3 MiB | 89.5 MiB | 78.3 MiB |
-| issue5-paths | Wall time | 94.1 ms | - | - | 121.5 ms | 163.5 ms | 139.5 ms |
-| issue5-paths | Peak RSS | 60.3 MiB | - | - | 69.3 MiB | 89.5 MiB | 78.1 MiB |
-| issue5-predicate | Wall time | 94.4 ms | - | - | 121.2 ms | 164.6 ms | 139.4 ms |
-| issue5-predicate | Peak RSS | 60.3 MiB | - | - | 69.3 MiB | 89.4 MiB | 78.1 MiB |
-| issue5-scalar-utilities | Wall time | 211.6 ms | - | - | 154.7 ms | 198.5 ms | 172.7 ms |
-| issue5-scalar-utilities | Peak RSS | 60.7 MiB | - | - | 70.4 MiB | 90.6 MiB | 79.3 MiB |
-| label-early-break | Wall time | 95.2 ms | - | - | 122.6 ms | 164.7 ms | 141.1 ms |
-| label-early-break | Peak RSS | 60.3 MiB | - | - | 69.4 MiB | 89.5 MiB | 78.0 MiB |
-| multi-result-projection | Wall time | 100.8 ms | 370.6 ms | 1005.5 ms | 134.0 ms | 229.6 ms | 118.7 ms |
-| multi-result-projection | Peak RSS | 60.5 MiB | 332.4 MiB | 1303.8 MiB | 7.9 MiB | 89.3 MiB | 7.2 MiB |
-| numeric-reduction | Wall time | 100.5 ms | 327.5 ms | 894.5 ms | 136.3 ms | 175.9 ms | 152.7 ms |
-| numeric-reduction | Peak RSS | 60.1 MiB | 335.4 MiB | 1296.8 MiB | 69.5 MiB | 89.3 MiB | 78.1 MiB |
-| object-construction | Wall time | 111.3 ms | 23812.7 ms | 22755.4 ms | - | - | - |
-| object-construction | Peak RSS | 65.8 MiB | 491.4 MiB | 1475.8 MiB | - | - | - |
-| parse-discard | Wall time | 93.5 ms | 261.7 ms | 906.2 ms | 120.3 ms | 161.3 ms | 137.0 ms |
-| parse-discard | Peak RSS | 60.3 MiB | 294.4 MiB | 1301.3 MiB | 68.6 MiB | 88.7 MiB | 77.4 MiB |
-| path-update | Wall time | 196.8 ms | 737.7 ms | 1337.6 ms | 168.6 ms | 210.4 ms | 184.6 ms |
-| path-update | Peak RSS | 64.9 MiB | 481.8 MiB | 1362.4 MiB | 69.5 MiB | 89.6 MiB | 78.0 MiB |
-| recurse-bounded | Wall time | 284.7 ms | - | - | 226.8 ms | 274.3 ms | 247.5 ms |
-| recurse-bounded | Peak RSS | 64.9 MiB | - | - | 69.4 MiB | 89.3 MiB | 78.1 MiB |
-| recursive-scalars | Wall time | 342.7 ms | - | - | 2297.7 ms | 2314.8 ms | 2336.4 ms |
-| recursive-scalars | Peak RSS | 64.9 MiB | - | - | 69.1 MiB | 89.1 MiB | 77.9 MiB |
-| regex-test | Wall time | 113.8 ms | - | - | 194.6 ms | 235.6 ms | 211.4 ms |
-| regex-test | Peak RSS | 60.7 MiB | - | - | 70.9 MiB | 90.9 MiB | 79.8 MiB |
-| scalar-extraction | Wall time | 94.1 ms | 260.0 ms | 848.6 ms | 121.3 ms | 162.3 ms | 137.3 ms |
-| scalar-extraction | Peak RSS | 60.2 MiB | 294.1 MiB | 1301.3 MiB | 69.2 MiB | 89.3 MiB | 78.2 MiB |
-| selective-filter | Wall time | 101.4 ms | 365.8 ms | 969.3 ms | 163.4 ms | 202.3 ms | 197.2 ms |
-| selective-filter | Peak RSS | 60.3 MiB | 344.6 MiB | 1296.4 MiB | 8.8 MiB | 89.4 MiB | 8.0 MiB |
-| string-reduction | Wall time | 104.5 ms | 314.8 ms | 886.1 ms | - | - | - |
-| string-reduction | Peak RSS | 60.9 MiB | 333.4 MiB | 1296.1 MiB | - | - | - |
-| user-filter-call | Wall time | 99.3 ms | - | - | 195.2 ms | 238.2 ms | 213.8 ms |
-| user-filter-call | Peak RSS | 60.7 MiB | - | - | 69.2 MiB | 89.4 MiB | 78.1 MiB |
-| user-filter-map | Wall time | 101.2 ms | - | - | 135.3 ms | 178.7 ms | 153.7 ms |
-| user-filter-map | Peak RSS | 60.5 MiB | - | - | 69.9 MiB | 90.0 MiB | 79.1 MiB |
-| user-filter-select | Wall time | 103.5 ms | - | - | 145.5 ms | 186.8 ms | 162.9 ms |
-| user-filter-select | Peak RSS | 60.4 MiB | - | - | 69.6 MiB | 89.7 MiB | 78.4 MiB |
-| user-filter-sort-by | Wall time | 118.1 ms | - | - | 156.0 ms | 199.7 ms | 174.2 ms |
-| user-filter-sort-by | Peak RSS | 61.5 MiB | - | - | 72.8 MiB | 93.1 MiB | 81.4 MiB |
-| walk-structural | Wall time | 940.8 ms | - | - | 690.3 ms | 734.7 ms | 708.0 ms |
-| walk-structural | Peak RSS | 86.5 MiB | - | - | 107.4 MiB | 127.3 MiB | 116.2 MiB |
+`-` denotes no valid comparable measurement, not zero. Missing, unavailable, unsupported, failed, unmeasured, and non-comparable measurements are excluded from rankings; outcome classifications and diagnostics remain in the rows below. Applicable exclusions or failures: `ordered result sequence`, `process exited with classified error Resource (exit status 5)`, `tq stream mode requires TOON or JSON event input; YAML is document-at-a-time.`, `yq rejects the catalog jq @html/@uri expression.`, `yq rejects the catalog jq @sh expression for this array.`, `yq rejects the catalog jq any predicate expression.`, `yq rejects the catalog jq def expression used by this adapter.`, `yq rejects the catalog jq format-string expression.`, `yq rejects the catalog jq label/break expression.`, `yq rejects the catalog jq paths expression.`, `yq rejects the catalog jq recurse expression.`, `yq rejects the catalog jq recursive scalar expression.`, `yq rejects the catalog jq scalar-utility expression.`, `yq rejects the catalog jq stream-event invocation.`, `yq rejects the catalog jq strings/test expression.`, `yq rejects the catalog jq walk expression.`.
+
+| Workload | Metric | jq JSON | jq JSON-SEQ | yq JSON | yq YAML | yq CSV | yq TSV | tq JSON | tq YAML | tq TOON | tq JSON-SEQ | tq CSV | tq TSV |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| array-construction | Wall time | 125.5 ms | - | 552.4 ms | 1085.5 ms | - | - | 91.4 ms | 131.8 ms | 143.6 ms | - | - | - |
+| array-construction | Peak RSS | 60.8 MiB | - | 454.9 MiB | 1040.3 MiB | - | - | 78.8 MiB | 117.7 MiB | 99.5 MiB | - | - | - |
+| blocking-sort | Wall time | 120.1 ms | - | 313.9 ms | 898.3 ms | - | - | 115.2 ms | 131.8 ms | 143.3 ms | - | - | - |
+| blocking-sort | Peak RSS | 57.3 MiB | - | 322.4 MiB | 1032.3 MiB | - | - | 27.8 MiB | 87.8 MiB | 21.9 MiB | - | - | - |
+| comma-generator-sort | Wall time | 300.9 ms | - | 984.9 ms | 1476.3 ms | - | - | 190.1 ms | 232.6 ms | 239.8 ms | - | - | - |
+| comma-generator-sort | Peak RSS | 61.1 MiB | - | 699.4 MiB | 1238.4 MiB | - | - | 83.2 MiB | 117.6 MiB | 99.3 MiB | - | - | - |
+| dead-sort-length | Wall time | 109.4 ms | - | 310.3 ms | 856.6 ms | - | - | 101.9 ms | 121.1 ms | 133.9 ms | - | - | - |
+| dead-sort-length | Peak RSS | 56.9 MiB | - | 325.7 MiB | 954.2 MiB | - | - | 23.6 MiB | 87.7 MiB | 22.0 MiB | - | - | - |
+| event-stream | Wall time | 240.6 ms | - | - | - | - | - | 557.6 ms | - | 600.8 ms | - | - | - |
+| event-stream | Peak RSS | 2.7 MiB | - | - | - | - | - | 15.3 MiB | - | 15.5 MiB | - | - | - |
+| format-base64-roundtrip | Wall time | 100.5 ms | - | 466.6 ms | 1028.8 ms | - | - | 272.4 ms | 189.9 ms | 207.1 ms | - | - | - |
+| format-base64-roundtrip | Peak RSS | 56.6 MiB | - | 437.3 MiB | 1170.2 MiB | - | - | 30.2 MiB | 117.7 MiB | 16.3 MiB | - | - | - |
+| format-csv | Wall time | 112.8 ms | - | - | - | - | - | 158.5 ms | 200.5 ms | 207.1 ms | - | - | - |
+| format-csv | Peak RSS | 56.8 MiB | - | - | - | - | - | 73.1 MiB | 117.8 MiB | 97.0 MiB | - | - | - |
+| format-json | Wall time | 246.4 ms | - | 1007.5 ms | 1458.1 ms | - | - | 229.4 ms | 272.0 ms | 281.9 ms | - | - | - |
+| format-json | Peak RSS | 59.8 MiB | - | 798.3 MiB | 1270.3 MiB | - | - | 73.0 MiB | 117.8 MiB | 97.2 MiB | - | - | - |
+| format-shell | Wall time | 110.9 ms | - | - | - | - | - | 159.4 ms | 199.4 ms | 206.4 ms | - | - | - |
+| format-shell | Peak RSS | 56.8 MiB | - | - | - | - | - | 73.3 MiB | 117.7 MiB | 97.4 MiB | - | - | - |
+| format-template | Wall time | 113.1 ms | - | - | - | - | - | 276.2 ms | 198.4 ms | 208.2 ms | - | - | - |
+| format-template | Peak RSS | 56.6 MiB | - | - | - | - | - | 30.0 MiB | 87.8 MiB | 15.9 MiB | - | - | - |
+| format-tsv | Wall time | 112.0 ms | - | - | - | - | - | 156.8 ms | 197.9 ms | 207.1 ms | - | - | - |
+| format-tsv | Peak RSS | 56.8 MiB | - | - | - | - | - | 73.2 MiB | 117.8 MiB | 97.3 MiB | - | - | - |
+| format-uri-html | Wall time | 109.6 ms | - | - | - | - | - | 274.1 ms | 193.9 ms | 207.1 ms | - | - | - |
+| format-uri-html | Peak RSS | 56.6 MiB | - | - | - | - | - | 30.3 MiB | 117.5 MiB | 15.9 MiB | - | - | - |
+| identity-reencode | Wall time | 267.7 ms | - | 721.9 ms | 1260.7 ms | - | - | 189.1 ms | 203.5 ms | 211.2 ms | - | - | - |
+| identity-reencode | Peak RSS | 61.1 MiB | - | 460.1 MiB | 1042.6 MiB | - | - | 67.0 MiB | 117.0 MiB | 66.4 MiB | - | - | - |
+| issue5-collection | Wall time | 122.8 ms | - | 572.8 ms | 1075.0 ms | - | - | 90.4 ms | 133.1 ms | 140.5 ms | - | - | - |
+| issue5-collection | Peak RSS | 57.7 MiB | - | 599.1 MiB | 1185.2 MiB | - | - | 81.5 MiB | 117.7 MiB | 99.6 MiB | - | - | - |
+| issue5-json-conversion | Wall time | 107.7 ms | - | 252.8 ms | 864.9 ms | - | - | 75.4 ms | 116.0 ms | 124.3 ms | - | - | - |
+| issue5-json-conversion | Peak RSS | 56.6 MiB | - | 281.1 MiB | 1030.9 MiB | - | - | 73.3 MiB | 117.9 MiB | 97.9 MiB | - | - | - |
+| issue5-paths | Wall time | 105.8 ms | - | - | - | - | - | 73.5 ms | 117.6 ms | 123.2 ms | - | - | - |
+| issue5-paths | Peak RSS | 56.6 MiB | - | - | - | - | - | 73.2 MiB | 117.8 MiB | 97.4 MiB | - | - | - |
+| issue5-predicate | Wall time | 88.5 ms | - | - | - | - | - | 75.0 ms | 115.1 ms | 122.7 ms | - | - | - |
+| issue5-predicate | Peak RSS | 56.6 MiB | - | - | - | - | - | 73.2 MiB | 117.6 MiB | 97.6 MiB | - | - | - |
+| issue5-scalar-utilities | Wall time | 209.7 ms | - | - | - | - | - | 91.0 ms | 132.7 ms | 142.3 ms | - | - | - |
+| issue5-scalar-utilities | Peak RSS | 57.1 MiB | - | - | - | - | - | 79.3 MiB | 117.5 MiB | 99.7 MiB | - | - | - |
+| label-early-break | Wall time | 88.7 ms | - | - | - | - | - | 73.5 ms | 115.8 ms | 124.1 ms | - | - | - |
+| label-early-break | Peak RSS | 56.6 MiB | - | - | - | - | - | 73.3 MiB | 117.7 MiB | 97.3 MiB | - | - | - |
+| multi-result-projection | Wall time | 95.9 ms | - | 351.2 ms | 922.8 ms | - | - | 111.3 ms | 182.8 ms | 140.5 ms | - | - | - |
+| multi-result-projection | Peak RSS | 56.9 MiB | - | 327.2 MiB | 1015.0 MiB | - | - | 17.1 MiB | 117.7 MiB | 15.1 MiB | - | - | - |
+| numeric-reduction | Wall time | 111.2 ms | - | 328.4 ms | 885.6 ms | - | - | 84.0 ms | 126.3 ms | 135.5 ms | - | - | - |
+| numeric-reduction | Peak RSS | 56.6 MiB | - | 323.0 MiB | 1032.7 MiB | - | - | 72.9 MiB | 117.7 MiB | 97.6 MiB | - | - | - |
+| object-construction | Wall time | 124.2 ms | - | 21428.0 ms | 20881.0 ms | - | - | - | - | - | - | - | - |
+| object-construction | Peak RSS | 62.1 MiB | - | 470.4 MiB | 1310.8 MiB | - | - | - | - | - | - | - | - |
+| parse-discard | Wall time | 88.1 ms | - | 257.6 ms | 833.5 ms | - | - | 73.5 ms | 116.6 ms | 123.0 ms | - | - | - |
+| parse-discard | Peak RSS | 56.6 MiB | - | 280.7 MiB | 1027.7 MiB | - | - | 72.3 MiB | 116.9 MiB | 96.6 MiB | - | - | - |
+| path-update | Wall time | 268.2 ms | - | 722.1 ms | 1220.2 ms | - | - | 159.2 ms | 202.5 ms | 210.3 ms | - | - | - |
+| path-update | Peak RSS | 60.9 MiB | - | 461.0 MiB | 964.1 MiB | - | - | 73.1 MiB | 117.9 MiB | 97.4 MiB | - | - | - |
+| recurse-bounded | Wall time | 432.8 ms | - | - | - | - | - | 262.5 ms | 305.9 ms | 312.5 ms | - | - | - |
+| recurse-bounded | Peak RSS | 61.1 MiB | - | - | - | - | - | 73.3 MiB | 117.3 MiB | 97.4 MiB | - | - | - |
+| recursive-scalars | Wall time | 315.1 ms | - | - | - | - | - | 2054.1 ms | 2144.2 ms | 2115.5 ms | - | - | - |
+| recursive-scalars | Peak RSS | 60.9 MiB | - | - | - | - | - | 72.9 MiB | 117.4 MiB | 96.8 MiB | - | - | - |
+| regex-test | Wall time | 122.3 ms | - | - | - | - | - | 136.9 ms | 179.4 ms | 187.0 ms | - | - | - |
+| regex-test | Peak RSS | 57.1 MiB | - | - | - | - | - | 80.3 MiB | 118.7 MiB | 100.5 MiB | - | - | - |
+| scalar-extraction | Wall time | 105.3 ms | - | 255.4 ms | 865.9 ms | - | - | 73.5 ms | 116.0 ms | 123.1 ms | - | - | - |
+| scalar-extraction | Peak RSS | 56.6 MiB | - | 279.6 MiB | 1031.4 MiB | - | - | 72.8 MiB | 117.4 MiB | 97.1 MiB | - | - | - |
+| selective-filter | Wall time | 113.1 ms | - | 350.1 ms | 943.5 ms | - | - | 218.9 ms | 146.8 ms | 200.4 ms | - | - | - |
+| selective-filter | Peak RSS | 56.6 MiB | - | 327.9 MiB | 1033.9 MiB | - | - | 18.3 MiB | 117.8 MiB | 15.9 MiB | - | - | - |
+| string-reduction | Wall time | 115.8 ms | - | 311.0 ms | 893.5 ms | - | - | - | - | - | - | - | - |
+| string-reduction | Peak RSS | 56.9 MiB | - | 324.4 MiB | 1029.7 MiB | - | - | - | - | - | - | - | - |
+| user-filter-call | Wall time | 95.2 ms | - | - | - | - | - | 148.4 ms | 189.2 ms | 197.8 ms | - | - | - |
+| user-filter-call | Peak RSS | 56.9 MiB | - | - | - | - | - | 73.0 MiB | 117.6 MiB | 97.2 MiB | - | - | - |
+| user-filter-map | Wall time | 112.5 ms | - | - | - | - | - | 84.9 ms | 127.4 ms | 135.7 ms | - | - | - |
+| user-filter-map | Peak RSS | 56.9 MiB | - | - | - | - | - | 77.1 MiB | 117.8 MiB | 99.4 MiB | - | - | - |
+| user-filter-select | Wall time | 111.9 ms | - | - | - | - | - | 89.5 ms | 132.5 ms | 140.4 ms | - | - | - |
+| user-filter-select | Peak RSS | 56.8 MiB | - | - | - | - | - | 77.3 MiB | 117.8 MiB | 97.2 MiB | - | - | - |
+| user-filter-sort-by | Wall time | 131.7 ms | - | - | - | - | - | 98.0 ms | 137.7 ms | 147.4 ms | - | - | - |
+| user-filter-sort-by | Peak RSS | 57.7 MiB | - | - | - | - | - | 89.3 MiB | 120.0 MiB | 99.6 MiB | - | - | - |
+| walk-structural | Wall time | 919.9 ms | - | - | - | - | - | 382.0 ms | 426.6 ms | 440.3 ms | - | - | - |
+| walk-structural | Peak RSS | 81.7 MiB | - | - | - | - | - | 109.3 MiB | 117.4 MiB | 131.5 MiB | - | - | - |
 <!-- benchmark-results:end -->
 
 ## Method
@@ -296,49 +371,33 @@ See the [measurement details](../benchmark-harness.md).
 37. [Bounded recursion](recurse-bounded.md)
 38. [Structural walking](walk-structural.md)
 39. [Early break with a label](label-early-break.md)
+40. [Native CSV record parsing](native-csv.md)
+41. [Native TSV record parsing](native-tsv.md)
+42. [Native JSON sequence parsing](native-json-seq.md)
 
-## Pending TOON 4.1 comparison
+## TOON 4.1 campaign evidence
 
-A fresh exhaustive natural-corpus comparison remains pending; no fresh run has
-been executed or promoted. Current host observations do not admit a run:
-Ironhide load 4.66 with CPU idle 42–49% and heavy swap/I/O; Sideswipe load
-3.87–3.96 with CPU idle 70–78%; Jetfire load 1.97–2.05 with CPU idle 90–93%.
-Require idle CPU and I/O immediately before and throughout execution. Do not
-overlap builds/tests, stop unrelated services, or relax admission rules.
+The standard/exhaustive/compare campaign completed in 717.291 seconds with
+all four frozen hour/day/week/month manifests and no case or adapter filters.
+The release harness was built from
+`3c025a842f23a76a3b444ed85269ac21b0304a0c` before host admission.
 
-When admitted, use the frozen native Linux candidate
-`/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq`
-(version `tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)`;
-SHA-256 `474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91`),
-with the existing helper and retained jq 1.8.1/yq 4.53.2 identities. Capture
-jq/yq versions and hashes from the actual runner, rather than assuming prior
-identities.
+Each measurement phase passed a 30-second idle window. The comparison's
+pre-run CPU idle minimum was 99.57%; all 150 host observations recorded no
+swap activity, no unrelated builds/tests, at most 0.60% external host CPU
+and at most 0.30% I/O wait. The monitor excludes owned benchmark descendants
+from external CPU and interrupts the owned coordinator on admission violations.
+No unrelated workload was stopped.
 
-Use all four manifests:
-`/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json`,
-`/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json`,
-`/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-week/manifest.json`,
-`/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json`.
+Fresh controls contain 420 accounting records and 120 worker-isolation
+records with no validation failures. The worker uses
+`tq-bench-worker-protocol-v4`; its SHA-256 is
+`35263fb3f434f7a2e8be8d9b3f4bde6784da5bf075d7316880ade03d98e548de`.
+The linked calibration summary SHA-256 is
+`1054b037c39bcc36cd967aa54d60a4131e13c851f4008b2eff549aa18bf04eed`;
+the raw workload report SHA-256 is
+`9b901f72318284cc9421a9bb44cbf20a7d434c37360250a4a58437aea6447053`.
+Raw records, host observations and commands remain in the benchmark archive,
+not this documentation bundle. See [worker validation](worker-validation.md)
+for the control scope and limits.
 
-Use this concrete CLI invocation, after confirming the helper's actual frozen
-tool configuration and environment:
-
-```console
-/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq-bench run \
-  --suite natural-corpus --profile standard --mode exhaustive --sampling compare \
-  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json \
-  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json \
-  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-week/manifest.json \
-  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json \
-  --origin frozen \
-  --cache-root /var/tmp/tq-performance-20260924.UbhxO1/corpus \
-  --output /var/tmp/tq-toon-4-1-comparison-20261008.json
-```
-
-Standard with compare sampling uses one warmup and three measured samples. Do
-not add case or adapter filters. The command is contingent on checking its
-configuration against the helper's actual frozen-tool setup, and that output
-path must be new and ignored. Do not overlap a build or test with measurement.
-Do not use `--markdown-dir` absent fresh matching calibration and
-launch-isolation evidence, use a quick baseline, or promote the result. Do not
-create a report until a new campaign actually runs.
