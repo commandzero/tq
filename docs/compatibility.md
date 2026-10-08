@@ -131,15 +131,82 @@ Identity JSON or strict TOON conversion may use the optimized `transcode` plan:
 
 ## Compatibility evidence
 
-- [Coverage summary](tests/jq-manual/coverage.md): documented manual differences and their practical impact.
-- [Manual comparison](tests/jq-manual/index.md): per-case outputs and token observations with their recorded provenance.
+- [Manual comparison results](tests/jq-manual/overview.md): measured aggregate results and tokenizer measurements.
+- [Manual review navigation](tests/jq-manual/index.md): links to review sections.
 - [Campaign instructions](../tests/compatibility/readme.md): reference setup and reproduction commands.
 - [Native-format review](../tests/compatibility/reviews/native-formats-v1.md): format-specific comparison evidence.
 
-The 0.4.1 manual comparisons and token totals remain historical evidence; they
-are not renewed native TOON 4.1 acceptance. This implementation documentation
-does not claim fresh manual execution, refreshed result/token summaries, or
-release-wide compatibility acceptance.
+Manual comparison run identities (retained report headers do not record campaign IDs or capture timestamps):
+
+| Platform | Target | Campaign ID | Captured at | tq version | tq SHA-256 | jq version | jq SHA-256 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| macos | aarch64-macos | not recorded | not recorded | tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown) | `8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00` | jq-1.8.2 | `2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e` |
+| linux | x86_64-linux | not recorded | not recorded | tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown) | `474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91` | jq-1.8.2 | `b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f` |
+| windows | x86_64-windows | not recorded | not recorded | tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown) | `a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428` | jq-1.8.2 | `a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627` |
+
+The fresh **2026-10-07 tq 0.5.0 / native TOON 4.1 C9** campaigns use frozen
+release/default products and rebuilt native manual comparators against unchanged
+pinned jq 1.8.2. macOS ARM64 retains **943/952 primary, 919/921 compact,
+921/921 TOON**; Linux AMD64 retains **937/952, 913/921, 921/921**; native Windows
+AMD64 MSVC/PowerShell retains **912/952, 879/921, 921/921**. All strict commands
+exit **1**, preserving the existing 9/15/60 combined exact differences. All
+518 original IDs and 303 protected IDs remain present. macOS/Linux preserve
+303 protected primary/applicable-compact exact contracts; Windows preserves
+291 primary and 289 primary-plus-compact matches, not 303 exact. All 4,667
+manual observations per target execute and exit; there are no new primary
+failures. Windows's known required-stderr CRLF mismatch in
+`manual.audit.streaming.json-root-boundary-nested-empty` is explicitly removed
+from savings, leaving 857 eligible samples instead of the older 858.
+
+Source, target, profile/features, compiler, all 15 executable/reference
+identities, raw observations and all-case baseline-to-candidate review are
+retained locally under ignored `target/toon-4-1/candidate-c9/`. The source
+snapshot has 903 files on integrated revision
+`407b35d81681b8ca4ab85968f7186eea645f250f`, SHA-256
+`b0a3e076abc748319859ea9810fd75bc93132b05c5b07cc116f97ffe27ecbc62`.
+C9 changes only the manual comparator's required-process eligibility gates;
+all product sources and frozen C8 tq/embedded binaries remain byte-identical.
+Later documentation/checklist/spec synchronization is outside that snapshot.
+This is not a clean release-commit build or a debug/bench substitute. Earlier
+C8 and 0.4.1 reports remain immutable, not relabeled.
+
+All 21 generated manual section Results and the unique-case summary are renewed
+from the actual macOS C9 report, not old stdout rendered with a new writer.
+The 877 eligible macOS samples count 11,391 JSON versus 8,152 TOON tokens with
+`o200k_base` (−28.43%) and 11,365 versus 8,165 with `cl100k_base` (−28.16%).
+Exact complete ordinary stdout includes LF; signed growth, unavailable
+zero-denominator percentages, exclusions and section deduplication are retained.
+Linux's separately scoped 871-sample and Windows's 857-sample totals are in the
+[native coverage table](tests/jq-manual/coverage.md#native-platform-results).
+The Windows origin-module witness also retains changed process observations:
+tq now emits `origin-path`, but pinned jq still reports a missing module. It
+remains a #69 failure without token eligibility, not a new exact match.
+These correctness-corpus counts are not representative-workload or all-platform
+savings claims. Authored inventory/audit text outside Results is historical.
+
+The final macOS full compatibility campaign freshly covers **1,220 cases**,
+**4,804 executed** and **1,961 unsupported** observations, with **218 pairwise
+differences**, zero harness errors, non-exited executions or declared-contract
+failures. Actual embedded environment/platform denials use the frozen host for
+JSON/YAML/TOON: six observations retain exit 5, the required redacted denial,
+and empty stdout/results. `observed-differences` is not strict manual acceptance.
+Actual corpus conversion and sequence-boundary recovery also run with the
+native candidate. Full macOS preflight passes with `RUST_TEST_THREADS=1`;
+the preceding parallel run's two OS `ps`-inspection timeouts remain nonpassing
+evidence, without changing RSS limits or inspection deadlines. All 72
+all-feature native TOON tests and four explicitly executed ordinarily ignored
+reference/relocation tests pass. Remaining ignored accounting/helper tests are
+not calibration proof.
+
+The macOS differences remain the existing scoped `erfc(2)` 2-ULP and
+`tgamma(0.5)` 1-ULP results, six ANSI presentations and jq's internal
+`--run-tests` suffix. They are not exact matches or fresh disparity approvals.
+Safe Rust `libm` and pinned jq independently round the two math inputs; exact
+witnesses remain in `tests/compatibility/cases/manual-math-boundaries.jsonl`.
+Color and supplied-program regressions remain in
+`crates/tq-cli/tests/output_colors.rs` and `extended_cli.rs`. Reconsider each
+after implementation/reference/library changes; do not normalize captured
+bytes or introduce blanket tolerances.
 
 The unchanged [PR68 closeout ledger](../tests/compatibility/reviews/parity-closeout.toon)
 retains historical 0.4.1 native observations and ownership. PR68's owner-created
@@ -152,9 +219,14 @@ Windows newline/reference/module obligations remain separately owned by
 [#70](https://github.com/commandzero/tq/issues/70). Their historical workspaces,
 overlays and calibrated-accounting limits are not silently renamed candidate proof.
 
-The prior performance reports remain historical evidence. No calibrated or
-all-platform performance acceptance is established; #31 and the native-platform
-follow-ups remain unresolved.
+The comparison's correctness-corpus results are independent of performance
+acceptance. The separate same-host migration guard was owned by the comparison
+PR. Its reported 20% hard limit and 14.32% keyed-transcode slowdown advisory are
+historical comparison-PR evidence, not manual-comparison measurements. The
+prior noisy run remains inconclusive. No calibrated or all-platform performance
+acceptance is established. See [compatibility follow-ups](https://github.com/commandzero/tq/issues/31).
+[#31](https://github.com/commandzero/tq/issues/31) and native-platform follow-ups
+remain unresolved; native renewal cannot waive their actual obligations.
 
 - Ordered JSON results and process behavior are compared.
 - Compact JSON also requires exact stdout bytes.

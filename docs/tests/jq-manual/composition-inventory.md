@@ -3,6 +3,7 @@ type: Report
 title: "jq manual: composition-inventory token comparison"
 description: Generated jq and tq output comparisons and token counts.
 generated: { by: "tq-manual-compare/0.1.0", at: "2026-09-10T20:22:34.585009Z" }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # jq manual: composition-inventory token comparison
@@ -36,8 +37,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2962 | 2183 | -779 | -26.3% |
-| `cl100k_base` | 2960 | 2183 | -777 | -26.25% |
+| `o200k_base` | 2962 | 2165 | -797 | -26.91% |
+| `cl100k_base` | 2960 | 2166 | -794 | -26.82% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -301,13 +302,13 @@ jq 'def __manual_composition_witness: .[] | arrays; __manual_composition_witness
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.composition.arity.ascii-downcase.0
 
@@ -524,13 +525,13 @@ jq 'def __manual_composition_witness: ["abs/0","acos/0","acosh/0","add/0","add/1
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.composition.arity.capture.1
 
@@ -1292,13 +1293,13 @@ jq 'def __manual_composition_witness: [finites]; __manual_composition_witness'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.composition.arity.first.0
 
@@ -1809,17 +1810,17 @@ jq 'def __manual_composition_witness: group_by(.k); __manual_composition_witness
 
 # tq
 [2]:
-  - [1]{k}:
-    1
-  - [2]{k}:
-    2
-    2
+  - [1]:
+    - k: 1
+  - [2]:
+    - k: 2
+    - k: 2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 43 | 43 | 31 | -12 | -27.91% |
-| `cl100k_base` | 43 | 43 | 31 | -12 | -27.91% |
+| `o200k_base` | 43 | 43 | 34 | -9 | -20.93% |
+| `cl100k_base` | 43 | 43 | 34 | -9 | -20.93% |
 
 #### manual.composition.arity.gsub.2
 
@@ -2376,14 +2377,14 @@ jq 'def __manual_composition_witness: .[] | iterables; __manual_composition_witn
 {}
 
 # tq
-[0]:
+[]
 
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 3 | +1 | +50% |
-| `cl100k_base` | 2 | 2 | 3 | +1 | +50% |
+| `o200k_base` | 2 | 2 | 1 | -1 | -50% |
+| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
 
 #### manual.composition.arity.j0.0
 
@@ -2957,13 +2958,13 @@ jq 'def __manual_composition_witness: match("foo"); __manual_composition_witness
 offset: 0
 length: 3
 string: foo
-captures[0]:
+captures: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
-| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
 
 #### manual.composition.arity.match.2
 
@@ -3240,14 +3241,14 @@ jq -L tests/fixtures/manual-modules 'import "basic" as b; def __manual_compositi
 
 # tq
 homepage: "https://example.invalid/basic"
-deps[0]:
+deps: []
 defs[1]: value/0
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 31 | 31 | 21 | -10 | -32.26% |
-| `cl100k_base` | 31 | 31 | 21 | -10 | -32.26% |
+| `o200k_base` | 31 | 31 | 20 | -11 | -35.48% |
+| `cl100k_base` | 31 | 31 | 20 | -11 | -35.48% |
 
 #### manual.composition.arity.nan.0
 
@@ -3346,13 +3347,13 @@ jq 'def __manual_composition_witness: [normals]; __manual_composition_witness'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.composition.arity.not.0
 
@@ -3905,19 +3906,19 @@ jq 'def __manual_composition_witness: recurse(.foo[]); __manual_composition_witn
 
 # tq
 foo[2]:
-  - foo[0]:
+  - foo: []
   - foo[1]:
-      - foo[0]:
-foo[0]:
+      - foo: []
+foo: []
 foo[1]:
-  - foo[0]:
-foo[0]:
+  - foo: []
+foo: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 70 | 70 | 40 | -30 | -42.86% |
-| `cl100k_base` | 70 | 70 | 40 | -30 | -42.86% |
+| `o200k_base` | 70 | 70 | 35 | -35 | -50% |
+| `cl100k_base` | 70 | 70 | 35 | -35 | -50% |
 
 #### manual.composition.arity.recurse.2
 
@@ -5641,18 +5642,15 @@ jq 'def __manual_composition_witness: INDEX(.[]; .id); __manual_composition_witn
 }
 
 # tq
-a:
-  id: a
-  v: 1
-b:
-  id: b
-  v: 2
+[2:]{id,v}:
+  a: a,1
+  b: b,2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 44 | 44 | 26 | -18 | -40.91% |
-| `cl100k_base` | 44 | 44 | 26 | -18 | -40.91% |
+| `o200k_base` | 44 | 44 | 22 | -22 | -50% |
+| `cl100k_base` | 44 | 44 | 22 | -22 | -50% |
 
 #### manual.composition.arity.upper-join.2
 

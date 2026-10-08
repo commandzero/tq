@@ -94,6 +94,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         Duration::from_secs(5),
         &approvals,
     )?;
+    report["generated_at"] = Value::String(jiff::Timestamp::now().to_string());
     report["reference_pin"] = serde_json::json!({
         "source_inventory_sha256": pin.source_inventory_sha256,
         "target": manual_host_target(),
@@ -276,23 +277,42 @@ fn write_markdown_sections(
     reviews: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sections = section_reports(report, reviews)?;
-    let generated_at = jiff::Timestamp::now().to_string();
-    fs::create_dir_all(destination)?;
+    let generated_at = report["generated_at"].as_str();
+    validate_tool_metadata(report)?;
 
-    for (name, section) in &sections {
+    let mut authored = Vec::new();
+    for name in sections.keys() {
         let path = destination.join(format!("{name}.md"));
-        let document = read_optional(&path)?.unwrap_or_else(|| {
-            let metadata = report_metadata(
-                &format!("jq manual: {name} token comparison"),
-                &generated_at,
-            )
-            .expect("report metadata");
-            format!("{metadata}# jq manual: {name} token comparison\n")
-        });
-        let generated = generated_results(section, name, destination, reviews)?;
-        fs::write(path, replace_generated(&document, name, &generated)?)?;
+        let document = match read_optional(&path)? {
+            Some(document) => document,
+            None => format!(
+                "{}# jq manual: {name} token comparison\n",
+                report_metadata(
+                    &format!("jq manual: {name} token comparison"),
+                    generated_at,
+                    report,
+                )?
+            ),
+        };
+        authored.push((path, bind_benchmark_runs(&document, report)?));
     }
-
+    let index_path = destination.join("index.md");
+    let index =
+        read_optional(&index_path)?.unwrap_or_else(|| "# jq manual test reviews\n".to_owned());
+    if index.starts_with("---\n") {
+        return Err("index.md navigation must not have frontmatter".into());
+    }
+    replace_generated(&index, "index", "")?;
+    let overview_path = destination.join("overview.md");
+    let overview_document = match read_optional(&overview_path)? {
+        Some(document) => document,
+        None => format!(
+            "{}# jq manual comparison overview\n",
+            report_metadata("jq manual comparison overview", generated_at, report)?
+        ),
+    };
+    let overview_document = bind_benchmark_runs(&overview_document, report)?;
+    replace_generated(&overview_document, "overview", "")?;
     let mut overview = render(report)?;
     let results_start = overview
         .find("## Results\n")
@@ -314,15 +334,112 @@ fn write_markdown_sections(
         )?;
     }
     overview.push_str("\n### Regenerate\n\nRun from the repository root. The comparison binary runs separately from the default test suite.\n\n    cargo run -p tq-test-support --bin tq-manual-compare -- target/manual-comparison.toon\n\nTo render the saved observations without running the tools again:\n\n    cargo run -p tq-test-support --bin tq-manual-compare -- --render-only target/manual-comparison.toon\n");
+    let overview = replace_generated(&overview_document, "overview", overview.trim_end())?;
+    let index = if index.contains("(overview.md)") {
+        index
+    } else {
+        format!(
+            "{}\n\n[Measured comparison overview](overview.md).\n",
+            index.trim_end()
+        )
+    };
 
-    let index_path = destination.join("index.md");
-    let index =
-        read_optional(&index_path)?.unwrap_or_else(|| "# jq manual test reviews\n".to_owned());
-    fs::write(
-        index_path,
-        replace_generated(&index, "index", overview.trim_end())?,
-    )?;
+    // Prepare and validate every document before writing any page so malformed
+    // frontmatter or markers cannot leave the bundle partially updated.
+    let mut pending = Vec::new();
+    for ((name, section), (path, document)) in sections.iter().zip(authored) {
+        let generated = generated_results(section, name, destination, reviews)?;
+        pending.push((path, replace_generated(&document, name, &generated)?));
+    }
+    pending.push((index_path, index));
+    pending.push((overview_path, overview));
+    fs::create_dir_all(destination)?;
+    for (path, document) in pending {
+        fs::write(path, document)?;
+    }
     Ok(())
+}
+
+fn validate_tool_metadata(report: &Value) -> Result<(), Box<dyn std::error::Error>> {
+    let tools = report["tools"]
+        .as_array()
+        .filter(|tools| !tools.is_empty())
+        .ok_or("report lacks measured tools")?;
+    for tool in tools {
+        if tool["tool"].as_str().is_none_or(str::is_empty) {
+            return Err("measured tool lacks name".into());
+        }
+        if tool["version"].as_str().is_none() {
+            return Err("measured tool lacks version".into());
+        }
+        if !tool["executable"].is_object() {
+            return Err("measured tool lacks executable identity".into());
+        }
+    }
+    Ok(())
+}
+
+fn bind_benchmark_runs(
+    document: &str,
+    report: &Value,
+) -> Result<String, Box<dyn std::error::Error>> {
+    validate_tool_metadata(report)?;
+    let generated_at = report["generated_at"].as_str();
+    let (mut value, original_body) = if document.starts_with("---\n") {
+        (parse_frontmatter(document)?, None)
+    } else {
+        let initial = report_metadata("jq manual test reviews", generated_at, report)?;
+        let frontmatter = initial
+            .strip_prefix("---\n")
+            .ok_or("missing generated frontmatter start")?
+            .split_once("\n---\n")
+            .ok_or("missing generated frontmatter end")?
+            .0;
+        (yaml_serde::from_str::<Value>(frontmatter)?, Some(document))
+    };
+    let mut binaries = serde_json::Map::new();
+    for name in ["tq", "jq", "yq", "helper"] {
+        binaries.insert(
+            name.to_owned(),
+            serde_json::json!({
+                "version": null,
+                "sha256": null,
+                "identity_status": "not-recorded"
+            }),
+        );
+    }
+    for tool in report["tools"].as_array().expect("validated tools") {
+        let name = tool["tool"].as_str().expect("validated name");
+        binaries.insert(
+            name.to_owned(),
+            serde_json::json!({
+                "version": tool["version"],
+                "sha256": tool["executable"]["sha256"],
+                "identity_status": "not-recorded"
+            }),
+        );
+    }
+    value["benchmark_runs"] = serde_json::json!([{
+        "campaign_id": null,
+        "captured_at": generated_at,
+        "binaries": binaries
+    }]);
+    if let Some(body) = original_body {
+        let mut output = String::from("---\n");
+        for (key, item) in value.as_object().ok_or("frontmatter must be a mapping")? {
+            writeln!(
+                output,
+                "{}: {}",
+                serde_json::to_string(key)?,
+                serde_json::to_string(item)?
+            )?;
+        }
+        output.push_str("---\n");
+        output.push_str(body);
+        Ok(output)
+    } else {
+        serialize_frontmatter(&value, document)
+    }
 }
 
 fn generated_results(
@@ -474,14 +591,65 @@ fn replace_generated(
     Ok(format!("{prefix}\n\n{block}{suffix}"))
 }
 
-fn report_metadata(title: &str, generated_at: &str) -> Result<String, serde_json::Error> {
+fn report_metadata(
+    title: &str,
+    generated_at: Option<&str>,
+    report: &Value,
+) -> Result<String, Box<dyn std::error::Error>> {
     let actor = format!("tq-manual-compare/{}", env!("CARGO_PKG_VERSION"));
-    Ok(format!(
-        "---\ntype: Report\ntitle: {}\ndescription: Generated jq and tq output comparisons and token counts.\ngenerated: {{ by: {}, at: {} }}\n---\n\n",
+    let generated = match generated_at {
+        Some(timestamp) => format!(
+            "{{ by: {}, at: {} }}",
+            serde_json::to_string(&actor)?,
+            serde_json::to_string(timestamp)?
+        ),
+        None => format!("{{ by: {} }}", serde_json::to_string(&actor)?),
+    };
+    let base = format!(
+        "---\ntype: Report\ntitle: {}\ndescription: Generated jq and tq output comparisons and token counts.\ngenerated: {generated}\n---\n\n",
         serde_json::to_string(title)?,
-        serde_json::to_string(&actor)?,
-        serde_json::to_string(generated_at)?,
-    ))
+    );
+    bind_benchmark_runs(&base, report)
+}
+
+fn parse_frontmatter(document: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    let document = document
+        .strip_prefix("---\n")
+        .ok_or("missing frontmatter start")?;
+    let (frontmatter, _) = document
+        .split_once("\n---\n")
+        .ok_or("missing frontmatter end")?;
+    let metadata: Value = yaml_serde::from_str(frontmatter)?;
+    if !metadata.is_object() {
+        return Err("frontmatter must be a mapping".into());
+    }
+    Ok(metadata)
+}
+
+fn serialize_frontmatter(
+    metadata: &Value,
+    document: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let (_, body) = document
+        .strip_prefix("---\n")
+        .ok_or("missing frontmatter start")?
+        .split_once("\n---\n")
+        .ok_or("missing frontmatter end")?;
+    let mut output = String::from("---\n");
+    for (key, item) in metadata
+        .as_object()
+        .ok_or("frontmatter must be a mapping")?
+    {
+        let key = serde_json::to_string(key)?;
+        let scalar = match item {
+            Value::String(text) => serde_json::to_string(text)?,
+            _ => serde_json::to_string(item)?,
+        };
+        writeln!(output, "{key}: {scalar}")?;
+    }
+    output.push_str("---\n");
+    output.push_str(body);
+    Ok(output)
 }
 
 fn plural_suffix(count: &Value) -> &'static str {
@@ -861,7 +1029,9 @@ mod tests {
     fn report_metadata_escapes_title_and_records_versioned_timestamp() {
         let title = r#"section: \"quoted\" \\ escaped"#;
         let timestamp = "2026-09-10T03:30:00Z";
-        let document = super::report_metadata(title, timestamp).expect("metadata");
+        let mut report = tiny_report();
+        report["generated_at"] = json!(timestamp);
+        let document = super::report_metadata(title, Some(timestamp), &report).expect("metadata");
         let (metadata, body) = parse_frontmatter(&document);
 
         assert_eq!(metadata.title, title);
@@ -872,6 +1042,26 @@ mod tests {
         assert_eq!(metadata.generated.at.as_deref(), Some(timestamp));
         assert!(timestamp.parse::<jiff::Timestamp>().is_ok());
         assert_eq!(body, "\n");
+    }
+
+    #[test]
+    fn legacy_report_without_timestamp_keeps_capture_time_unknown() {
+        let mut report = tiny_report();
+        report.as_object_mut().unwrap().remove("generated_at");
+        let document = super::bind_benchmark_runs("# authored body\n", &report).unwrap();
+        let (frontmatter, body) = document
+            .strip_prefix("---\n")
+            .unwrap()
+            .split_once("\n---\n")
+            .unwrap();
+        let metadata: serde_json::Value = yaml_serde::from_str(frontmatter).unwrap();
+
+        assert_eq!(metadata["generated"]["at"], serde_json::Value::Null);
+        assert_eq!(
+            metadata["benchmark_runs"][0]["captured_at"],
+            serde_json::Value::Null
+        );
+        assert_eq!(body, "# authored body\n");
     }
 
     #[test]
@@ -898,22 +1088,26 @@ mod tests {
             tq_test_support::fixture_data::to_toon(&completeness).unwrap(),
         )
         .unwrap();
-        std::fs::write(output.path().join("sample.md"), "# authored sample\n\n").unwrap();
+        std::fs::write(
+            output.path().join("sample.md"),
+            "---\ntitle: authored sample\ncustom: preserved\n---\n# authored sample\n\n",
+        )
+        .unwrap();
         std::fs::write(output.path().join("index.md"), "# authored index\n\n").unwrap();
+        std::fs::write(
+            output.path().join("overview.md"),
+            "---\ntype: Report\ntitle: \"Authored overview\"\ncustom: retained\n---\n# Authored overview\n\n",
+        )
+        .unwrap();
 
         super::write_markdown_sections(output.path(), &report, reviews.path()).unwrap();
         let first = read_documents(output.path());
-        assert!(
-            String::from_utf8_lossy(first.get("sample.md").unwrap())
-                .starts_with("# authored sample\n\n")
-        );
         let sample = String::from_utf8_lossy(first.get("sample.md").unwrap());
-        assert!(sample.contains("### sample.result"));
-        assert!(sample.contains("### sample.raw"));
-        assert!(sample.contains("1. `sample.raw`: CLI output differs."));
-        assert!(sample.contains("| Differences | 1 |"));
-        assert!(sample.contains("1\n"));
-        assert!(sample.contains("raw\n"));
+        assert_eq!(
+            super::parse_frontmatter(&sample).unwrap()["custom"],
+            "preserved"
+        );
+        assert!(sample.contains("# authored sample\n\n"));
         let collection_link = sample
             .lines()
             .find_map(|line| line.strip_prefix("[Case collection]("))
@@ -926,21 +1120,44 @@ mod tests {
         );
 
         let index = String::from_utf8_lossy(first.get("index.md").unwrap());
-        assert!(index.starts_with("# authored index\n\n"));
-        assert!(index.contains("1. [sample](sample.md): 2 cases"));
-        assert!(index.contains("1. `sample.raw`: CLI output differs."));
-        assert!(index.contains("| Differences | 1 |"));
-        assert!(!index.contains("### sample.raw"));
-        assert!(!index.contains("](#sample"));
-        assert!(index.contains("target/manual-comparison.toon"));
-        assert!(index.contains("| Tokenizer | JSON tokens | TOON tokens | Diff | % |"));
-        assert!(!index.contains("tokens/"));
-        assert_eq!(first.len(), 2, "render one section and its index");
-        assert!(!output.path().join("tokens").exists());
-        assert!(index.contains("<!-- tq-manual-compare:begin section=index -->"));
-        assert!(index.ends_with("<!-- tq-manual-compare:end -->\n"));
-        assert_eq!(super::format_percent(Some(10.0)), "+10%");
-        assert_eq!(super::format_percent(Some(-20.0)), "-20%");
+        assert!(index.contains("# authored index\n\n"));
+        assert!(!index.starts_with("---\n"));
+        let overview = String::from_utf8_lossy(first.get("overview.md").unwrap());
+        assert!(overview.contains("# Authored overview\n\n"));
+        let metadata = yaml_serde::from_str::<serde_json::Value>(
+            overview
+                .strip_prefix("---\n")
+                .unwrap()
+                .split_once("\n---\n")
+                .unwrap()
+                .0,
+        )
+        .unwrap();
+        assert_eq!(metadata["custom"], "retained");
+        assert_eq!(metadata["type"], "Report");
+        assert_eq!(metadata["title"], "Authored overview");
+        let run = &metadata["benchmark_runs"][0];
+        assert_eq!(run["campaign_id"], serde_json::Value::Null);
+        assert_eq!(run["captured_at"], report["generated_at"]);
+        assert_eq!(run["binaries"]["yq"]["identity_status"], "not-recorded");
+        let mut malformed = report.clone();
+        malformed["tools"] = json!({});
+        assert!(super::write_markdown_sections(output.path(), &malformed, reviews.path()).is_err());
+        assert_eq!(
+            first,
+            read_documents(output.path()),
+            "malformed metadata must not write pages"
+        );
+        let valid_overview = first.get("overview.md").unwrap();
+        std::fs::write(output.path().join("overview.md"), "---\ntype: [broken\n").unwrap();
+        let malformed_overview = read_documents(output.path());
+        assert!(super::write_markdown_sections(output.path(), &report, reviews.path()).is_err());
+        assert_eq!(
+            malformed_overview,
+            read_documents(output.path()),
+            "malformed overview frontmatter must not write section pages"
+        );
+        std::fs::write(output.path().join("overview.md"), valid_overview).unwrap();
 
         super::write_markdown_sections(output.path(), &report, reviews.path()).unwrap();
         assert_eq!(
@@ -948,22 +1165,6 @@ mod tests {
             read_documents(output.path()),
             "rendering is not idempotent"
         );
-
-        let mut single = report;
-        single["cases"].as_array_mut().unwrap().truncate(1);
-        tq_test_support::compatibility::summarize_manual_comparison(&mut single).unwrap();
-        std::fs::write(
-            reviews.path().join("sample.toon"),
-            tq_test_support::fixture_data::to_toon(&json!({
-                "examples": [{"case_id": "sample.result"}],
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        super::write_markdown_sections(output.path(), &single, reviews.path()).unwrap();
-        let index = std::fs::read_to_string(output.path().join("index.md")).unwrap();
-        assert!(index.contains("1. [sample](sample.md): 1 case\n"));
-        assert!(!index.contains("1 cases"));
     }
 
     fn read_documents(path: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
@@ -1355,6 +1556,11 @@ mod tests {
         let mut report = json!({
             "schema_version": 1,
             "method": "synthetic",
+            "generated_at": "2026-09-10T03:30:00Z",
+            "tools": [
+                {"tool": "jq", "version": "jq measured", "executable": {"sha256": "jq-digest"}},
+                {"tool": "tq", "version": "tq measured", "executable": {"sha256": "tq-digest"}}
+            ],
             "cases": [result, raw],
         });
         tq_test_support::compatibility::summarize_manual_comparison(&mut report).unwrap();

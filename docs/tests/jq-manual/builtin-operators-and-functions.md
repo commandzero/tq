@@ -3,6 +3,7 @@ type: Report
 title: "jq manual: builtin operators and functions coverage review"
 description: "Recorded review of jq manual: builtin operators and functions coverage review."
 generated: { by: codex/gpt-6, at: 2026-09-10T02:12:04Z }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # jq manual: builtin operators and functions coverage review
@@ -1535,8 +1536,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2950 | 2086 | -864 | -29.29% |
-| `cl100k_base` | 2952 | 2089 | -863 | -29.23% |
+| `o200k_base` | 2950 | 2076 | -874 | -29.63% |
+| `cl100k_base` | 2952 | 2080 | -872 | -29.54% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -1603,13 +1604,13 @@ jq '.[] | arrays'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### builtin.ascii-downcase
 
@@ -1819,17 +1820,17 @@ jq 'group_by(.k)'
 
 # tq
 [2]:
-  - [1]{k}:
-    1
-  - [2]{k}:
-    2
-    2
+  - [1]:
+    - k: 1
+  - [2]:
+    - k: 2
+    - k: 2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 43 | 43 | 31 | -12 | -27.91% |
-| `cl100k_base` | 43 | 43 | 31 | -12 | -27.91% |
+| `o200k_base` | 43 | 43 | 34 | -9 | -20.93% |
+| `cl100k_base` | 43 | 43 | 34 | -9 | -20.93% |
 
 #### builtin.has
 
@@ -1915,14 +1916,14 @@ jq '.[] | iterables'
 {}
 
 # tq
-[0]:
+[]
 
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 3 | +1 | +50% |
-| `cl100k_base` | 2 | 2 | 3 | +1 | +50% |
+| `o200k_base` | 2 | 2 | 1 | -1 | -50% |
+| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
 
 #### builtin.keys
 
@@ -2995,13 +2996,13 @@ jq 'map(empty)'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual-bof-code-map-004
 
@@ -3066,13 +3067,13 @@ jq 'map_values(empty)'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual-bof-code-recurse-query
 
@@ -3552,18 +3553,15 @@ jq 'INDEX(.[]; .id)'
 }
 
 # tq
-a:
-  id: a
-  v: 1
-b:
-  id: b
-  v: 2
+[2:]{id,v}:
+  a: a,1
+  b: b,2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 44 | 44 | 26 | -18 | -40.91% |
-| `cl100k_base` | 44 | 44 | 26 | -18 | -40.91% |
+| `o200k_base` | 44 | 44 | 22 | -22 | -50% |
+| `cl100k_base` | 44 | 44 | 22 | -22 | -50% |
 
 #### manual-bof-synth-sql-join2
 
@@ -5423,13 +5421,13 @@ jq flatten
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual-bof-table-063
 
@@ -5594,13 +5592,13 @@ jq '[range(0; 10; -1)]'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual-bof-table-069
 
@@ -6029,17 +6027,20 @@ jq 'group_by(.foo)'
 
 # tq
 [2]:
-  - [2]{foo,bar}:
-    1,10
-    1,1
-  - [1]{foo,bar}:
-    3,100
+  - [2]:
+    - foo: 1
+      bar: 10
+    - foo: 1
+      bar: 1
+  - [1]:
+    - foo: 3
+      bar: 100
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 64 | 64 | 41 | -23 | -35.94% |
-| `cl100k_base` | 64 | 64 | 41 | -23 | -35.94% |
+| `o200k_base` | 64 | 64 | 52 | -12 | -18.75% |
+| `cl100k_base` | 64 | 64 | 52 | -12 | -18.75% |
 
 #### manual-bof-table-082
 
@@ -7257,19 +7258,19 @@ jq 'recurse(.foo[])'
 
 # tq
 foo[2]:
-  - foo[0]:
+  - foo: []
   - foo[1]:
-      - foo[0]:
-foo[0]:
+      - foo: []
+foo: []
 foo[1]:
-  - foo[0]:
-foo[0]:
+  - foo: []
+foo: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 70 | 70 | 40 | -30 | -42.86% |
-| `cl100k_base` | 70 | 70 | 40 | -30 | -42.86% |
+| `o200k_base` | 70 | 70 | 35 | -35 | -50% |
+| `cl100k_base` | 70 | 70 | 35 | -35 | -50% |
 
 #### manual-bof-table-126
 
@@ -7424,15 +7425,14 @@ jq 'walk( if type == "object" then with_entries( .key |= sub( "^_+"; "") ) else 
 ]
 
 # tq
-[1]:
-  - a:
-      b: 2
+[1]{a{b}}:
+  2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 20 | 20 | 13 | -7 | -35% |
-| `cl100k_base` | 20 | 20 | 13 | -7 | -35% |
+| `o200k_base` | 20 | 20 | 12 | -8 | -40% |
+| `cl100k_base` | 20 | 20 | 12 | -8 | -40% |
 
 #### manual-bof-table-130
 
@@ -7844,13 +7844,13 @@ jq '["abs/0","acos/0","acosh/0","add/0","add/1","all/0","all/1","all/2","any/0",
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.invoking.halt-error
 

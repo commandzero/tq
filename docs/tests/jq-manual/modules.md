@@ -3,6 +3,7 @@ type: Report
 title: "Modules coverage audit"
 description: "Recorded review of Modules coverage audit."
 generated: { by: codex/gpt-6, at: 2026-09-10T02:12:04Z }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # Modules coverage audit
@@ -62,8 +63,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 160 | 106 | -54 | -33.75% |
-| `cl100k_base` | 160 | 106 | -54 | -33.75% |
+| `o200k_base` | 160 | 105 | -55 | -34.38% |
+| `cl100k_base` | 160 | 105 | -55 | -34.38% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -355,14 +356,14 @@ jq -L tests/fixtures/manual-modules 'import "basic" as b; "basic" | modulemeta'
 
 # tq
 homepage: "https://example.invalid/basic"
-deps[0]:
+deps: []
 defs[1]: value/0
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 31 | 31 | 21 | -10 | -32.26% |
-| `cl100k_base` | 31 | 31 | 21 | -10 | -32.26% |
+| `o200k_base` | 31 | 31 | 20 | -11 | -35.48% |
+| `cl100k_base` | 31 | 31 | 20 | -11 | -35.48% |
 
 #### manual.modules.modulemeta-deps
 

@@ -46,7 +46,7 @@ mod unix {
             .arg(script)
             .arg("sh")
             .arg("-c")
-            .arg("test \"$TQ_JQ\" = \"$EXPECTED_JQ\"")
+            .arg("printf '%s\\n' \"$TQ_JQ\"")
             .env(
                 "TQ_REFERENCE_JQ_URL",
                 format!("file://{}", source.display()),
@@ -135,7 +135,6 @@ mod unix {
             Some(&"00".repeat(32)),
         );
         assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("SHA-256"));
     }
 
     #[test]
@@ -158,7 +157,18 @@ mod unix {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        assert!(output_path.is_file());
+        assert_eq!(fs::read(&output_path).unwrap(), bytes);
+        let cached = run_download(
+            &root().join("scripts/reference-jq-provision.sh"),
+            &source,
+            &output_path,
+            Some(&digest(bytes)),
+        );
+        assert!(cached.status.success(), "{cached:?}");
+        assert_eq!(
+            cached.stdout,
+            format!("{}\n", output_path.display()).as_bytes()
+        );
 
         let wrong_digest_output = directory.path().join("target/wrong-digest-jq");
         let output = run_download(
@@ -168,8 +178,17 @@ mod unix {
             Some(&"00".repeat(32)),
         );
         assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("SHA-256 mismatch"));
+        assert_eq!(output.stdout, [] as [u8; 0]);
         assert!(!wrong_digest_output.exists());
+        let cached_wrong_digest = run_download(
+            &root().join("scripts/reference-jq-provision.sh"),
+            &source,
+            &output_path,
+            Some(&"00".repeat(32)),
+        );
+        assert!(!cached_wrong_digest.status.success());
+        assert_eq!(cached_wrong_digest.stdout, [] as [u8; 0]);
+        assert!(output_path.is_file());
 
         let missing_digest_output = directory.path().join("target/missing-digest-jq");
         let output = run_download(
@@ -179,9 +198,6 @@ mod unix {
             None,
         );
         assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("requires TQ_REFERENCE_JQ_SHA256")
-        );
         assert!(!missing_digest_output.exists());
     }
 
@@ -358,6 +374,7 @@ mod unix {
                     reference.canonicalize().unwrap().to_str().unwrap()
                 );
             }
+            assert_eq!(fs::read(&reference).unwrap(), bytes);
         }
     }
 

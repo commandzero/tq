@@ -1,6 +1,6 @@
 # Test reviews
 
-1. [jq manual reviews](jq-manual/index.md): source reviews and token comparisons.
+1. [jq manual reviews](jq-manual/index.md): navigation, section reviews, and measured overview.
 2. [Performance comparisons](comparison/index.md): stable jq, yq, and tq workload pages.
 3. [Benchmark harness repair](benchmark-harness.md): tasks and verification for campaign correctness.
 4. [Stack Overflow top 50](stack-overflow/index.md): 50 separately invoked scenarios with generated results.

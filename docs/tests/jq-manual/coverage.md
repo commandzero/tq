@@ -2,6 +2,8 @@
 type: Report
 title: "jq manual coverage"
 description: "Current jq manual test coverage, comparison results, and known differences."
+generated: { by: "process:toon-4-1-evidence-review", at: "2026-10-07T05:53:56.657Z" }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # jq manual coverage
@@ -13,24 +15,13 @@ A mapped example is covered, but coverage alone does not mean it passes.
 
 ## Results
 
-The latest 2026-10-06 macOS **newhelp-final** comparison reports (release/default,
-locked; pinned jq 1.8.2; base `3e0dedb` plus uncommitted implementation/catalog,
-embedded-denial helper and final CLI help fixes):
+The detailed historical comparison and token results are in the
+[measured overview](overview.md).
 
-| Check | Exact matches | Differences | Cases |
-| --- | ---: | ---: | ---: |
-| Values and process behavior, including CLI contracts | 943 | 9 | 952 |
-| Compact JSON output | 919 | 2 | 921 |
-| TOON values and process behavior | 921 | 0 | 921 |
-
-JSON value comparison ignores whitespace and object key order, but preserves
-array and result order. Compact JSON and CLI contracts compare exact bytes.
-Raw CLI cases are not included in the JSON/TOON output checks.
-
-**9 differences remain:** 2 expected math rounding differences,
-6 expected presentation differences, and 1 test-runner message difference.
-The all-cases exact gate does not pass.
-These results describe the measured build, not every platform or release.
+The overview retains the frozen C9 macOS results (943/952 primary,
+919/921 compact JSON, and 921/921 TOON), with strict exit 1. This coverage page
+describes broader native-target scope below; it does not claim fresh manual
+capture, complete parity, or new platform acceptance.
 
 ## Differences by test
 
@@ -117,7 +108,97 @@ witnesses and protected contracts rather than renewing approvals automatically.
 
 ## Native platform results
 
-Latest macOS/Linux closeout evidence dated 2026-10-06 is in
+Current C9 manual evidence is retained in ignored `target/toon-4-1/candidate-c9/`.
+The complete 903-file source snapshot is on integrated revision
+`407b35d81681b8ca4ab85968f7186eea645f250f`, SHA-256
+`b0a3e076abc748319859ea9810fd75bc93132b05c5b07cc116f97ffe27ecbc62`.
+This is a reviewed working-tree snapshot, not a clean release commit.
+C9 rebuilds only the native manual comparator to enforce required process
+contracts; product sources and all frozen C8 tq/embedded binaries are unchanged.
+Later documentation/checklist/spec synchronization is outside that snapshot.
+
+| Native target | Primary exact / cases | Compact exact / cases | TOON matches / cases | Strict exit |
+| --- | ---: | ---: | ---: | ---: |
+| macOS ARM64, release/default | 943/952 | 919/921 | 921/921 | 1 |
+| Linux AMD64, release/default | 937/952 | 913/921 | 921/921 | 1 |
+| Windows AMD64 MSVC, native PowerShell, release/default | 912/952 | 879/921 | 921/921 | 1 |
+
+All three runs retain all 518 original IDs and all 303 protected IDs.
+macOS/Linux retain 303 protected primary and applicable-compact exact contracts;
+Windows retains 291 primary and 289 primary-plus-compact protected matches,
+not 303 exact. All 4,667 observations per target execute and exit; no mapping
+is removed and no new primary failure appears. Baseline-to-C9 review records
+41 changed cases on macOS/Linux and 43 on Windows. The changed Windows
+`manual.modules.path-origin` captures now show tq's `origin-path` result while
+pinned jq still reports a missing module; it remains a #69 failure, not a pass
+or eligible size sample.
+
+Windows's formerly eligible `manual.audit.streaming.json-root-boundary-nested-empty`
+is now explicitly excluded: values match, but required jq stderr has CRLF and tq
+has LF. This retained #69 process-contract failure cannot enter savings.
+The other 857 Windows samples remain eligible; older 858-sample reports are
+immutable historical evidence, not silently corrected or relabeled.
+
+The macOS CLI SHA-256 is
+`8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00`;
+Linux is `474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91`;
+native Windows is `a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428`.
+Native toolchains, all 15 executable identities, before/after unchanged reference
+hashes, complete raw reports and 903-file source verification are retained per
+target. The newly rebuilt macOS/Linux/Windows manual-comparator hashes are
+`a581e66aa551e2c3397ae4507c6daf8b7a6def331e2ce5697664e3ed134e4cf4`,
+`42567656150b80c0b0ccd18309839ba7d5ca0fdd3b8287f6b3fd25c16cfb88c0` and
+`84889bf94101d48780cd888dbb4ec70ad6271165431118ae884d30df24223ea2`.
+Windows executes native MSVC binaries in PowerShell 5.1; WSL is transport only.
+The jq reference remains 1.8.2; no source/reference pin was changed.
+
+| Native target | Eligible unique cases | `o200k_base` JSON → TOON | Signed % | `cl100k_base` JSON → TOON | Signed % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| macOS | 877 | 11,391 → 8,152 | −28.43% | 11,365 → 8,165 | −28.16% |
+| Linux | 871 | 11,245 → 8,022 | −28.66% | 11,219 → 8,035 | −28.38% |
+| Windows | 857 | 11,187 → 7,978 | −28.69% | 11,161 → 7,991 | −28.40% |
+
+Both encodings count exact complete ordinary stdout, including terminating LF;
+empty streams have zero tokens and unavailable zero-denominator percentages.
+Each target retains 22 growth rows per tokenizer. Section overlap is
+deduplicated in the index. Separate sequence and ineligible captures do not
+enter ordinary-output totals. This correctness corpus is not a workload
+benchmark, and these totals are not all-platform savings guarantees.
+
+The final macOS full compatibility campaign freshly executes 4,804 of 6,765
+observations across 1,220 cases, retaining 1,961 unsupported observations and
+218 pairwise differences. There are zero harness errors, non-exited executions
+or declared-contract failures. Six actual embedded-denial observations use
+the frozen embedded host across JSON/YAML/TOON, with runtime-policy exit 5
+and empty output. `observed-differences` is not strict manual acceptance.
+
+Final macOS full repository preflight passes with `RUST_TEST_THREADS=1`,
+including formatting, locked workspace/all-target checking, all-feature Clippy
+with warnings denied, workspace tests, microbenchmark smoke and 21 strict
+main-spec validations. The preceding parallel run is retained as nonpassing:
+two RSS tests hit OS `ps`-inspection timeouts. Serialization changes only test
+concurrency; no RSS limit, inspection deadline or assertion is relaxed.
+All 72 native TOON all-feature conformance tests pass separately. Of 11 ordinary
+workspace ignored entries, four reference/relocation tests explicitly pass;
+the remaining seven accounting/helper entries are not passes or calibration.
+The earlier pre-commit associated-change boundary exited 1 and is retained;
+committed archive correspondence remains a separate PR-boundary gate, not
+waived by preflight. Forty actual final CLI scenarios cover
+format discovery, layouts, framing, controls, colors, duplicate normalization,
+depth/resource boundaries and a real keyed disk replay. All 96 live metadata
+ledgers decode identically through the final native CLI. The actual 0.5.0
+release-package smoke also passes using the real native binary; temporary
+fixture tags are not an official release or publication.
+
+The separate same-host performance guard belongs to the comparison PR, not
+this manual report. That PR reported a user-approved 20% hard limit and a
+14.32% keyed-transcode slowdown advisory; its earlier noisy run remains
+nonpassing. This historical manual capture is not performance evidence.
+No calibration, exact all-platform acceptance or #69/#70/#31 waiver is claimed.
+
+## Historical tq 0.4.1 native platform closeout
+
+Historical macOS/Linux closeout evidence dated 2026-10-06 is in
 `target/closeout/macos/newhelp-final` and `target/closeout/linux/help-final`, using newly
 built frozen release campaign executables. Both full source snapshots contain
 884 files at base `3e0dedb` plus uncommitted changes, not clean-commit builds.
@@ -254,9 +335,9 @@ for batched inputs. Complex searches can reach resource limits; whole-pattern
 recursion with `l` is unsupported, and some engine-specific edge cases remain.
 These measurements are not general performance guarantees.
 
-## Details and verification
+## Historical tq 0.4.1 details and verification
 
-- [Comparison results](index.md): test-by-test outputs and token measurements.
+- [Comparison results](overview.md): measured results and token measurements.
 - [Source inventory](../../../tests/compatibility/reviews/jq-manual/source-examples.toon): manual examples and source-to-test mappings.
 - [Test setup](../../../tests/compatibility/readme.md#jq-manual-coverage): reference setup and coverage checks.
 
@@ -334,7 +415,7 @@ approved scope; #69/#70 and calibrated performance follow-ups remain open.
 Current published-reference and source/pin/strict-gate checks pass in the retained
 campaigns; this does not turn the manual strict exit 1 into success.
 
-Current macOS raw evidence is in
+Historical macOS raw evidence is in
 `target/closeout/macos/newhelp-final/manual-full-final.json`; Linux is in
 `target/closeout/linux/help-final/evidence/manual-strict.json`. Earlier late-p2,
 `20261006T071209Z`, `run-tgrv3qmn`, and catalog-contract shared artifacts remain
