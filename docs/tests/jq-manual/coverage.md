@@ -414,6 +414,10 @@ For `--render-only`, supply a saved report with the complete reviewed/catalog
 case inventory. Missing, duplicate, unexpected or malformed case IDs are
 rejected before page updates. Complete reports with differences still render;
 rendering is not strict acceptance.
+Each capture requires exactly one measured jq and tq identity with recorded
+versions/digests. Aggregate verdict/token totals are derived from captured
+cases in memory rather than trusting persisted summaries; raw evidence is not
+rewritten.
 
 Capture identity uses only explicit `campaign_id` and `captured_at` fields.
 Live execution records capture completion; historical missing fields stay null.

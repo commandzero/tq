@@ -119,7 +119,7 @@ fn render_saved_report(
     root: &std::path::Path,
     reviews: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let report: Value = tq_test_support::fixture_data::read(source)?;
+    let mut report: Value = tq_test_support::fixture_data::read(source)?;
     let catalog = load_catalog(&root.join("tests/compatibility/cases"))?;
     let reviewed = read_manual_review_case_ids(reviews)?;
     // Use the same review/catalog union as the executing manual comparator.
@@ -135,6 +135,7 @@ fn render_saved_report(
         )
         .collect();
     validate_saved_manual_case_ids(&report, &expected)?;
+    summarize_manual_comparison(&mut report)?;
     write_markdown_sections(destination, &report, reviews)
 }
 
@@ -415,9 +416,13 @@ fn validate_tool_metadata(report: &Value) -> Result<(), Box<dyn std::error::Erro
         .as_array()
         .filter(|tools| !tools.is_empty())
         .ok_or("report lacks measured tools")?;
+    let mut reference_seen = false;
+    let mut target_seen = false;
     for tool in tools {
-        if tool["tool"].as_str().is_none_or(str::is_empty) {
-            return Err("measured tool lacks name".into());
+        match tool["tool"].as_str() {
+            Some("jq") if !reference_seen => reference_seen = true,
+            Some("tq") if !target_seen => target_seen = true,
+            _ => return Err("manual report requires exactly one measured jq and tq".into()),
         }
         if tool["version"]
             .as_str()
@@ -430,6 +435,9 @@ fn validate_tool_metadata(report: &Value) -> Result<(), Box<dyn std::error::Erro
         }) {
             return Err("measured tool lacks valid SHA-256 executable identity".into());
         }
+    }
+    if !reference_seen || !target_seen {
+        return Err("manual report requires exactly one measured jq and tq".into());
     }
     Ok(())
 }
@@ -1332,6 +1340,25 @@ mod tests {
             metadata["benchmark_runs"][0]["platform"],
             serde_json::Value::Null
         );
+    }
+
+    #[test]
+    fn manual_provenance_requires_a_unique_measured_jq_and_tq_pair() {
+        let valid = tiny_report();
+        let mut missing_reference = valid.clone();
+        missing_reference["tools"].as_array_mut().unwrap().remove(0);
+        let mut missing_target = valid.clone();
+        missing_target["tools"].as_array_mut().unwrap().remove(1);
+        let mut duplicate = valid.clone();
+        duplicate["tools"]
+            .as_array_mut()
+            .unwrap()
+            .push(valid["tools"][0].clone());
+        let mut unknown = valid;
+        unknown["tools"][0]["tool"] = json!("unknown");
+        for report in [missing_reference, missing_target, duplicate, unknown] {
+            assert!(super::bind_benchmark_runs("# authored\n", &report).is_err());
+        }
     }
 
     #[test]
