@@ -188,7 +188,7 @@ mod unix {
         );
         assert!(!cached_wrong_digest.status.success());
         assert_eq!(cached_wrong_digest.stdout, [] as [u8; 0]);
-        assert!(output_path.is_file());
+        assert_eq!(fs::read(&output_path).unwrap(), bytes);
 
         let missing_digest_output = directory.path().join("target/missing-digest-jq");
         let output = run_download(

@@ -3,7 +3,7 @@ type: Report
 title: "jq manual coverage"
 description: "Current jq manual test coverage, comparison results, and known differences."
 generated: { by: "process:toon-4-1-evidence-review", at: "2026-10-07T05:53:56.657Z" }
-benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}},{"platform":null,"target":null,"campaign_id":null,"captured_at":null,"source_role":"historical-fix-local-performance","source":"#longest-match-regex-support","binaries":{"jq":{"version":"1.8.1","version_source":"authored historical timing description; exact version stdout not retained","sha256":null,"identity_status":"not-recorded"},"tq":{"version":null,"sha256":null,"identity_status":"not-recorded"}}}]
 ---
 
 # jq manual coverage
@@ -161,7 +161,7 @@ The jq reference remains 1.8.2; no source/reference pin was changed.
 Both encodings count exact complete ordinary stdout, including terminating LF;
 empty streams have zero tokens and unavailable zero-denominator percentages.
 Each target retains 22 growth rows per tokenizer. Section overlap is
-deduplicated in the index. Separate sequence and ineligible captures do not
+deduplicated in the overview. Separate sequence and ineligible captures do not
 enter ordinary-output totals. This correctness corpus is not a workload
 benchmark, and these totals are not all-platform savings guarantees.
 
@@ -335,6 +335,10 @@ for batched inputs. Complex searches can reach resource limits; whole-pattern
 recursion with `l` is unsupported, and some engine-specific edge cases remain.
 These measurements are not general performance guarantees.
 
+The separate historical timing entry records the documented jq 1.8.1 version;
+the measured tq version and executable digests were not recorded with this
+table and remain unknown. These rows are not measurements of the C9 binaries.
+
 ## Historical tq 0.4.1 details and verification
 
 - [Comparison results](overview.md): measured results and token measurements.
@@ -402,13 +406,18 @@ cargo run -p tq-test-support --bin tq-manual-compare -- \
   --markdown-dir target/jq-manual-review target/manual-comparison.toon
 ```
 
-The jq 1.8.2 comparison can regenerate the [index](index.md) and all 21 section
-Results blocks. The parent has rendered the **newhelp-final** report into all
-21 section Results blocks and updated index provenance. Twenty section bodies
-are byte-identical; invoking-jq changes the help capture, not match counts.
-Authored blocks remain preserved and repeated rendering is idempotent. Final
-help/version/documentation proof reports no blocking mismatches. The manual
-index now records renewed Windows provenance alongside the macOS Results.
+The command regenerates the [overview](overview.md) and all 21 section Results
+blocks. The [index](index.md) remains frontmatter-free navigation, without a
+generated Results block.
+
+The historical **newhelp-final** report was rendered into all 21 section Results
+blocks. At that checkpoint, twenty section bodies were byte-identical;
+invoking-jq changed the help capture, not match counts. Authored blocks remain
+preserved and repeated rendering is idempotent.
+
+The current overview retains source-bound C9 provenance for macOS, Linux and
+Windows. The earlier newhelp-final/help-final reports below are historical
+checkpoints, not source/version labels for the C9 capture.
 The [implementation/evidence change](../../../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/tasks.md)
 is verified, synchronized and archived with 69 tasks complete under the
 approved scope; #69/#70 and calibrated performance follow-ups remain open.
