@@ -425,6 +425,7 @@ fn bind_benchmark_runs(
         );
     }
     let tools = report["tools"].as_array().expect("validated tools");
+    let target = report["reference_execution"]["target"].as_str();
     let runs = value
         .as_object_mut()
         .ok_or("frontmatter must be a mapping")?
@@ -435,6 +436,7 @@ fn bind_benchmark_runs(
     let existing = runs.iter_mut().find(|run| {
         run["campaign_id"] == report["campaign_id"]
             && run["captured_at"].as_str() == generated_at
+            && run["target"].as_str() == target
             && tools.iter().all(|tool| {
                 let name = tool["tool"].as_str().expect("validated name");
                 run["binaries"][name]["version"] == tool["version"]
@@ -463,9 +465,8 @@ fn bind_benchmark_runs(
         runs.push(serde_json::json!({
             "campaign_id": report["campaign_id"],
             "captured_at": generated_at,
-            "platform": report["reference_execution"]["target"].as_str()
-                .and_then(|target| target.rsplit_once('-').map(|(_, platform)| platform)),
-            "target": report["reference_execution"]["target"].as_str(),
+            "platform": target.and_then(|target| target.rsplit_once('-').map(|(_, platform)| platform)),
+            "target": target,
             "binaries": binaries
         }));
     }
@@ -1171,6 +1172,40 @@ mod tests {
         assert_eq!(appended["benchmark_runs"].as_array().unwrap().len(), 3);
         assert_eq!(appended["benchmark_runs"][0], runs[0]);
         assert_eq!(appended["benchmark_runs"][1], other);
+    }
+
+    #[test]
+    fn identical_binary_captures_keep_native_and_unknown_targets_distinct() {
+        let mut report = tiny_report();
+        let legacy = super::bind_benchmark_runs("# authored\n", &report).unwrap();
+        let legacy_run = super::parse_frontmatter(&legacy).unwrap()["benchmark_runs"][0].clone();
+        let mut document = legacy;
+        for target in ["aarch64-macos", "x86_64-macos"] {
+            report["reference_execution"] = json!({"target": target});
+            document = super::bind_benchmark_runs(&document, &report).unwrap();
+        }
+        let metadata = super::parse_frontmatter(&document).unwrap();
+        let runs = metadata["benchmark_runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0], legacy_run);
+        assert_eq!(runs[0]["target"], serde_json::Value::Null);
+        assert_eq!(runs[1]["target"], "aarch64-macos");
+        assert_eq!(runs[2]["target"], "x86_64-macos");
+        for target in ["aarch64-macos", "x86_64-macos"] {
+            report["reference_execution"] = json!({"target": target});
+            assert_eq!(
+                super::bind_benchmark_runs(&document, &report).unwrap(),
+                document
+            );
+        }
+        report
+            .as_object_mut()
+            .unwrap()
+            .remove("reference_execution");
+        assert_eq!(
+            super::bind_benchmark_runs(&document, &report).unwrap(),
+            document
+        );
     }
 
     #[test]
