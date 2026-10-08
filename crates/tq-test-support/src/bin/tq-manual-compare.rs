@@ -369,11 +369,16 @@ fn validate_tool_metadata(report: &Value) -> Result<(), Box<dyn std::error::Erro
         if tool["tool"].as_str().is_none_or(str::is_empty) {
             return Err("measured tool lacks name".into());
         }
-        if tool["version"].as_str().is_none() {
+        if tool["version"]
+            .as_str()
+            .is_none_or(|version| version.trim().is_empty())
+        {
             return Err("measured tool lacks version".into());
         }
-        if !tool["executable"].is_object() {
-            return Err("measured tool lacks executable identity".into());
+        if tool["executable"]["sha256"].as_str().is_none_or(|sha256| {
+            sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err("measured tool lacks valid SHA-256 executable identity".into());
         }
     }
     Ok(())
@@ -415,15 +420,52 @@ fn bind_benchmark_runs(
             serde_json::json!({
                 "version": tool["version"],
                 "sha256": tool["executable"]["sha256"],
-                "identity_status": "not-recorded"
+                "identity_status": "measured"
             }),
         );
     }
-    value["benchmark_runs"] = serde_json::json!([{
-        "campaign_id": null,
-        "captured_at": generated_at,
-        "binaries": binaries
-    }]);
+    let tools = report["tools"].as_array().expect("validated tools");
+    let runs = value
+        .as_object_mut()
+        .ok_or("frontmatter must be a mapping")?
+        .entry("benchmark_runs")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or("benchmark_runs must be a sequence")?;
+    let existing = runs.iter_mut().find(|run| {
+        run["campaign_id"] == report["campaign_id"]
+            && run["captured_at"].as_str() == generated_at
+            && tools.iter().all(|tool| {
+                let name = tool["tool"].as_str().expect("validated name");
+                run["binaries"][name]["version"] == tool["version"]
+                    && run["binaries"][name]["sha256"] == tool["executable"]["sha256"]
+            })
+    });
+    if let Some(existing) = existing {
+        let existing_binaries = existing["binaries"]
+            .as_object_mut()
+            .ok_or("benchmark binaries must be a mapping")?;
+        for (name, binary) in binaries {
+            if binary["identity_status"] == "measured" {
+                if let Some(Value::Object(fields)) = existing_binaries.get_mut(&name) {
+                    let Value::Object(current) = binary else {
+                        unreachable!("constructed binary mapping")
+                    };
+                    fields.extend(current);
+                } else {
+                    existing_binaries.insert(name, binary);
+                }
+            } else {
+                existing_binaries.entry(name).or_insert(binary);
+            }
+        }
+    } else {
+        runs.push(serde_json::json!({
+            "campaign_id": report["campaign_id"],
+            "captured_at": generated_at,
+            "binaries": binaries
+        }));
+    }
     if let Some(body) = original_body {
         let mut output = String::from("---\n");
         for (key, item) in value.as_object().ok_or("frontmatter must be a mapping")? {
@@ -1065,6 +1107,74 @@ mod tests {
     }
 
     #[test]
+    fn regeneration_preserves_other_captures_and_authored_provenance() {
+        let report = tiny_report();
+        let body = "# Synthetic authored content\n";
+        let initial = super::bind_benchmark_runs(body, &report).unwrap();
+        let mut metadata = super::parse_frontmatter(&initial).unwrap();
+        let matched = &mut metadata["benchmark_runs"][0];
+        matched["source_role"] = json!("authored");
+        matched["binaries"]["tq"]["capture_note"] = json!("retained");
+        matched["binaries"]["tq"]["identity_status"] = json!("not-recorded");
+        let mut other = matched.clone();
+        other["binaries"]["tq"]["sha256"] =
+            json!("3333333333333333333333333333333333333333333333333333333333333333");
+        metadata["benchmark_runs"]
+            .as_array_mut()
+            .unwrap()
+            .push(other.clone());
+        let source = format!(
+            "---\ncustom: {{owner: authored}}\nbenchmark_runs: {}\n---\n{body}",
+            metadata["benchmark_runs"]
+        );
+        let rendered = super::bind_benchmark_runs(&source, &report).unwrap();
+        let actual = super::parse_frontmatter(&rendered).unwrap();
+        let runs = actual["benchmark_runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[1], other);
+        assert_eq!(
+            runs[0]["source_role"],
+            metadata["benchmark_runs"][0]["source_role"]
+        );
+        assert_eq!(
+            runs[0]["binaries"]["tq"]["capture_note"],
+            metadata["benchmark_runs"][0]["binaries"]["tq"]["capture_note"]
+        );
+        assert_eq!(runs[0]["binaries"]["tq"]["identity_status"], "measured");
+        assert_eq!(
+            actual["custom"],
+            super::parse_frontmatter(&source).unwrap()["custom"]
+        );
+        assert!(rendered.ends_with(body));
+        assert_eq!(
+            super::bind_benchmark_runs(&rendered, &report).unwrap(),
+            rendered
+        );
+        let mut distinct = report;
+        distinct["generated_at"] = json!("2026-09-10T03:30:01Z");
+        let appended = super::bind_benchmark_runs(&rendered, &distinct).unwrap();
+        let appended = super::parse_frontmatter(&appended).unwrap();
+        assert_eq!(appended["benchmark_runs"].as_array().unwrap().len(), 3);
+        assert_eq!(appended["benchmark_runs"][0], runs[0]);
+        assert_eq!(appended["benchmark_runs"][1], other);
+    }
+
+    #[test]
+    fn malformed_captured_versions_and_digests_cannot_generate_provenance() {
+        for (field, value) in [
+            ("version", json!("")),
+            ("version", json!(" \n")),
+            ("executable", json!({})),
+            ("executable", json!({"sha256": ""})),
+            ("executable", json!({"sha256": "not-a-digest"})),
+        ] {
+            let mut report = tiny_report();
+            report["tools"][0][field] = value;
+            assert!(super::bind_benchmark_runs("# authored\n", &report).is_err());
+        }
+    }
+
+    #[test]
     fn temporary_sections_preserve_authored_content_and_render_idempotently() {
         let mut report = tiny_report();
         report["cases"][1]["verdict"] = json!("failure");
@@ -1558,8 +1668,8 @@ mod tests {
             "method": "synthetic",
             "generated_at": "2026-09-10T03:30:00Z",
             "tools": [
-                {"tool": "jq", "version": "jq measured", "executable": {"sha256": "jq-digest"}},
-                {"tool": "tq", "version": "tq measured", "executable": {"sha256": "tq-digest"}}
+                {"tool": "jq", "version": "jq measured", "executable": {"sha256": "1111111111111111111111111111111111111111111111111111111111111111"}},
+                {"tool": "tq", "version": "tq measured", "executable": {"sha256": "2222222222222222222222222222222222222222222222222222222222222222"}}
             ],
             "cases": [result, raw],
         });

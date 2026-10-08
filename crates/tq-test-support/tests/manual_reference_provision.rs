@@ -44,15 +44,11 @@ mod unix {
         let mut command = Command::new("sh");
         command
             .arg(script)
-            .arg("sh")
-            .arg("-c")
-            .arg("printf '%s\\n' \"$TQ_JQ\"")
             .env(
                 "TQ_REFERENCE_JQ_URL",
                 format!("file://{}", source.display()),
             )
             .env("TQ_REFERENCE_JQ_OUTPUT", output_path)
-            .env("EXPECTED_JQ", output_path)
             .env_remove("TQ_JQ")
             .env_remove("TQ_REFERENCE_JQ");
         if let Some(expected_digest) = expected_digest {
@@ -158,6 +154,10 @@ mod unix {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(fs::read(&output_path).unwrap(), bytes);
+        assert_eq!(
+            output.stdout,
+            format!("{}\n", output_path.display()).as_bytes()
+        );
         let cached = run_download(
             &root().join("scripts/reference-jq-provision.sh"),
             &source,
