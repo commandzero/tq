@@ -3,7 +3,7 @@
 #[path = "tq_color_bench/report.rs"]
 mod report;
 
-use std::{env, error::Error, fs, path::PathBuf, time::Duration};
+use std::{env, error::Error, fs, path::PathBuf, process::Command, time::Duration};
 use tq_test_support::benchmark::{
     BenchmarkInvocation, collect_environment, measure_process, preflight_rss, run_allocation_probe,
 };
@@ -55,6 +55,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
         }
     }
+    let version = Command::new(&binary).arg("--version").output()?;
+    if !version.status.success() {
+        return Err("tq --version failed before color measurement".into());
+    }
+    let tq_version = String::from_utf8(version.stdout)?.trim().to_owned();
+    if tq_version.is_empty() {
+        return Err("tq --version returned an empty identity".into());
+    }
     let preflight = preflight_rss(None)?;
     let environment = collect_environment("release");
     let mut reports = Vec::new();
@@ -62,6 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let source = fs::canonicalize(source)?;
         let mut report = ColorReport {
             source_bytes: fs::metadata(&source)?.len(),
+            tq_version: Some(tq_version.clone()),
             source_sha256: Some(sha256(&source)?),
             binary_sha256: Some(sha256(&binary)?),
             source: source.clone(),
@@ -178,6 +187,7 @@ mod tests {
         )
         .unwrap();
         let mut report = ColorReport {
+            tq_version: None,
             source: source.clone(),
             source_bytes: fs::metadata(source).unwrap().len(),
             binary,

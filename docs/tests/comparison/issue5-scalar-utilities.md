@@ -4,6 +4,13 @@ title: "String and scalar utilities"
 description: "Measures case conversion and Unicode scalar handling across place names."
 workload: benchmark.issue5-scalar-utilities
 generated: { by: codex/gpt-5.6-luna, at: 2026-09-10T20:15:01Z }
+benchmark_runs:
+  - campaign_id: "2026-09-11"
+    provenance: "Native Linux workload report; captured tool identities are listed in the Results section. No executable hashes or unique campaign ID retained."
+    binaries:
+      tq: { version: "tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)", sha256: null }
+      jq: { version: "jq-1.8.1", sha256: null }
+      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: null }
 ---
 
 # String and scalar utilities

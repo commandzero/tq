@@ -3,6 +3,14 @@ type: Report
 title: "How to format a JSON string as a table using jq?"
 description: "Benchmark reproduction and measured results for Stack Overflow scenario 23."
 generated: { by: codex/gpt-5.6-luna, at: 2026-09-13T05:53:31Z }
+benchmark_runs:
+  - campaign_id: "2026-09-13"
+    identity_status: not-recorded
+    provenance: "Native macOS scenario results preserve captured tool version strings in the Results section; exact campaign ID and binary hashes are not recorded."
+    binaries:
+      tq: { version: "tq 0.3.0 (TOON v3; jq target 1.8.x; revision 24bbd2581677b951c5bf275ca80e64e366c9cefb)", sha256: null }
+      jq: { version: "jq-1.8.2", sha256: null }
+      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: null }
 ---
 
 # 23: How to format a JSON string as a table using jq?

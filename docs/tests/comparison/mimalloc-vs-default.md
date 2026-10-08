@@ -3,6 +3,23 @@ type: Report
 title: "mimalloc versus the system allocator"
 description: "Extended diagnostic comparison of default mimalloc tq, system-allocator tq, and jq, with speed, memory, and publication limitations."
 generated: { by: openai-codex/gpt-6-astra, at: 2026-09-26T20:44:24Z }
+benchmark_runs:
+  - campaign_id: "2026-09-26T19:27:09.746840362Z"
+    identity_status: not-recorded
+    provenance: "Extended Linux diagnostic system-allocator campaign; exact tool version strings and executable SHA-256 values are retained in system.json; tq revision is unknown."
+    run_scope: system-allocator
+    binaries:
+      tq: { version: "tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)", sha256: "221c680db8481f965b8579d036183766e180473185799590c72247be7fb107c4", identity_status: not-recorded, allocator: system }
+      jq: { version: "jq-1.8.1", sha256: "136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97" }
+      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: "d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b" }
+  - campaign_id: "2026-09-26T19:45:18.07883121Z"
+    identity_status: not-recorded
+    provenance: "Extended Linux diagnostic mimalloc campaign; exact tool version strings and executable SHA-256 values are retained in mimalloc.json; tq revision is unknown."
+    run_scope: default-mimalloc
+    binaries:
+      tq: { version: "tq 0.4.0 (TOON v3; jq target 1.8.x; revision unknown)", sha256: "7068a178ce8f62f6cbfaaaf588049882dd5500d8213a7711a121043db6a0d338", identity_status: not-recorded }
+      jq: { version: "jq-1.8.1", sha256: "136748786226819bf582738e8be963638c9d721aa0c5d1d650b506a2a52ddb97" }
+      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: "d56bf5c6819e8e696340c312bd70f849dc1678a7cda9c2ad63eebd906371d56b" }
 ---
 
 # mimalloc versus the system allocator

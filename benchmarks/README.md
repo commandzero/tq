@@ -18,12 +18,11 @@ automatically; set `TQ_BENCHMARK_ARCHIVE_ROOT` when the archive lives elsewhere.
 
 The saved-report renderer updates the `## Results` blocks in the stable
 user-facing pages under `docs/tests/comparison/`. The Stack Overflow renderer
-updates the matching `## Results` blocks in `docs/tests/stack-overflow/index.md`
-and its 50 scenario pages. Each page has authored context that regeneration
-preserves. Do not embed archive paths, local executable paths, or exhaustive
-provenance in the pages. Raw samples, logs, and corpus artifacts remain in the
-benchmark archive. Render smoke-suite results before natural-corpus results;
-rendering natural-corpus last leaves the comparison index on its full review.
+updates the matching `## Results` blocks in
+`docs/tests/stack-overflow/overview.md` and its 50 scenario pages. Each page has
+authored context that regeneration preserves. Do not embed archive paths, local
+executable paths, or exhaustive provenance in the pages. Raw samples, logs, and
+corpus artifacts remain in the benchmark archive.
 
 Every benchmark report must include the measured host's CPU model, logical
 CPU count, RAM capacity, OS, architecture, kernel, and build profile. Use
@@ -43,6 +42,56 @@ cargo run -p tq-test-support --bin tq-bench -- \
 Quick results are session-only diagnostics and cannot replace durable reference
 pages. Standard runs also default to temporary session reports; publication is
 an explicit, calibrated CLI operation rather than a dispatcher side effect.
+
+## TOON 4.1 comparison run admission
+
+The new exhaustive natural-corpus comparison is pending an observably idle
+Linux host. Current observations do not admit any candidate: Ironhide load
+4.66 with CPU idle 42–49% and heavy swap/I/O; Sideswipe load 3.87–3.96 with
+CPU idle 70–78%; Jetfire load 1.97–2.05 with CPU idle 90–93%. Require idle
+CPU and I/O immediately before and throughout execution. Do not stop unrelated
+services, overlap builds/tests, or relax the gate. No fresh comparison has
+been executed or promoted.
+
+When eligible, run the frozen Linux candidate at
+`/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq`,
+whose captured identity is `tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision
+unknown)` with SHA-256
+`474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91`. Use the
+existing comparison helper and tools; capture jq/yq versions and hashes from
+the actual runner. Prior tool identities are expectations only.
+
+Use all four retained manifests:
+
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json`
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json`
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-week/manifest.json`
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json`
+
+```console
+/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq-bench run \
+  --suite natural-corpus --profile standard --mode exhaustive --sampling compare \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-week/manifest.json \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json \
+  --origin frozen \
+  --cache-root /var/tmp/tq-performance-20260924.UbhxO1/corpus \
+  --output /var/tmp/tq-toon-4-1-comparison-20261008.json
+```
+
+This is the native `tq-bench` CLI contract. Bind the frozen binaries through
+the existing `ExecutableConfig` environment: set `TQ_BIN` to the candidate
+above, and use the runner's actual jq/yq executables (`TQ_JQ` and `TQ_YQ`).
+Capture jq/yq versions and hashes from the actual runner. The specified output
+path must be new and ignored. Standard with compare sampling
+uses one warmup plus three measured samples. Do not add case or adapter filters,
+or substitute catalog sampling. Retain all rows, outcomes, campaign metadata,
+and tool/input hashes. A different host needs distinct campaign metadata and
+fresh measured identities. No build or test may overlap measurement. Do not use
+`--markdown-dir` without fresh matching calibration and launch-isolation
+evidence; do not run a quick baseline or promote the report. Keep the status
+pending until an actual run completes; never create a placeholder report.
 
 ## Suites and sampling profiles
 
@@ -351,12 +400,12 @@ Set `TQ_CORPUS_ORIGIN=refreshed` to acquire a new upstream snapshot for
 The Stack Overflow campaign is a separate, explicitly invoked suite. It runs
 the 50 checked-in scenarios in `tests/stack-overflow`, each with jq as the
 correctness reference and jq, yq, and tq through the shared measurement code.
-The generated pages live in `docs/tests/stack-overflow/`: `index.md` summarizes
-the campaign and one page documents each scenario. The pages keep the query,
-input, and authored explanation beside the harness-generated `## Results`
-section. Generated metadata is limited to the campaign date, host, and tool
-versions. Exact executable paths, digests, and full samples stay in the raw
-archive.
+The generated pages live in `docs/tests/stack-overflow/`: `index.md` is
+frontmatter-free scenario navigation, `overview.md` records campaign results,
+and one page documents each scenario. The pages keep the query, input, and
+authored explanation beside the harness-generated `## Results` section.
+Generated metadata is limited to the campaign date, host, and tool versions.
+Exact executable paths, digests, and full samples stay in the raw archive.
 
 Run the suite from the repository root, selecting quick 0+1, standard 1+3,
 or extended 1+5 independently of the `stack-overflow` suite:

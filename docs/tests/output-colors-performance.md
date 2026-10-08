@@ -3,6 +3,19 @@ type: Report
 title: Output color performance
 description: Regenerable monochrome and colored output test results.
 generated: { by: codex, at: 2026-09-13T22:04:09Z }
+benchmark_runs:
+  - campaign_id: "2026-09-13"
+    run_scope: week-corpus
+    identity_status: not-recorded
+    provenance: "Retained raw report: /Users/reno/Development/commandzero/tq-benchmarks/.work/output-colors-20260913/week-recorded.json. Report identity is transcribed from historical-review.md; no unique campaign ID or exact --version output was recorded."
+    binaries:
+      tq: { version: null, sha256: "a943425168c26e7fb5aa397be3d3bb0ad0bf11dc45a87b78bc59799a4a0d8ddd", identity_status: not-recorded }
+  - campaign_id: "2026-09-13"
+    run_scope: month-corpus
+    identity_status: not-recorded
+    provenance: "Retained raw report: /Users/reno/Development/commandzero/tq-benchmarks/.work/output-colors-20260913/month-recorded.json. Report identity is transcribed from historical-review.md; no unique campaign ID or exact --version output was recorded."
+    binaries:
+      tq: { version: null, sha256: "a943425168c26e7fb5aa397be3d3bb0ad0bf11dc45a87b78bc59799a4a0d8ddd", identity_status: not-recorded }
 ---
 
 # Output color performance

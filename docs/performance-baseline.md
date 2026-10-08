@@ -3,6 +3,13 @@ type: Report
 title: Performance review policy
 description: Benchmark evidence, regression limits, and archive requirements.
 generated: { by: codex/gpt-6-astra, at: 2026-09-26T05:34:45Z }
+benchmark_runs:
+  - campaign_id: "2026-10-07-toon-4-1-migration-guard"
+    provenance: "Native macOS C8 migration guard; baseline/candidate tq identities and executable hashes are recorded in the retained report body. The guard executable SHA-256 is from candidate-c9/executables.json and C9 product-and-gate-binding.json confirms the guard worker is unchanged from C8. Exact --version output, jq/yq participation, and raw C8 report identity are not recorded."
+    binaries:
+      tq: { version: null, sha256: "abcf52ac46be785203458024f108682c9d972af03d6940b3e2002b5d9ce88501", identity_status: not-recorded, role: baseline-0.4.1 }
+      tq-candidate: { version: null, sha256: "8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00", identity_status: not-recorded, role: candidate-0.5.0 }
+      tq-toon-regression: { version: null, sha256: "abd039af0348a30fde088bd1f6576e340e50c7d5912118157398445664bd6b6d", identity_status: not-recorded }
 ---
 
 # Performance review policy
@@ -54,6 +61,140 @@ explicitly comparable RSS scope.
 
 The current reviewed reports are kept in the benchmark archive
 repository alongside their raw campaign outputs.
+
+## TOON migration guard
+
+`tq-toon-regression` compares immutable release/default baseline and candidate
+executables on a fixed TOON migration matrix. It is a same-host local guard,
+not calibrated publication approval or a replacement for the archive policies
+below. Run it outside restricted sandboxes with an explicit deadline:
+
+```bash
+cargo build --release --locked -p tq-test-support --bin tq-toon-regression
+target/release/tq-toon-regression prepare \
+  --baseline /path/to/baseline/tq \
+  --directory target/toon-migration-guard \
+  --build-manifest /path/to/baseline-build.json \
+  --deadline-seconds 1800
+target/release/tq-toon-regression run \
+  --candidate /path/to/candidate/tq \
+  --directory target/toon-migration-guard \
+  --build-manifest /path/to/candidate-build.json \
+  --report-file target/toon-migration-guard/candidate-report.json \
+  --deadline-seconds 1800
+```
+
+Build manifests identify the source revision and snapshot SHA-256, toolchain,
+native target, release profile, default features, allocator, thread policy and
+optimization settings. The guard preserves executable/input hashes, versions,
+ordered semantic witnesses, process correctness, plan/preparation observations
+and every selected workload. Version-specific TOON inputs may differ in bytes
+but must reconstruct the same ordered model. A spool workload must actually
+write and replay temporary data.
+
+Each row receives one warmup and three alternating measured baseline/candidate
+pairs. A bounded seven-pair confirmation resolves a suspected hard-limit slowdown
+or noisy hard-threshold evidence. Decisions use unrounded per-row wall-time ratios:
+exactly `1.20` with zero dispersion passes; confirmed ratios above `1.20` fail.
+Observed median ratios above `1.10` receive a nonblocking review note in the report
+and CLI; exactly `1.10` does not. Crossing the advisory boundary alone neither
+triggers confirmation nor blocks acceptance. The user approved the 20% hard limit
+and deferred review of advisory regressions. Earlier 10%-policy reports keep their
+original thresholds and outcomes; they are not relabeled as passes.
+Improvements in another row cannot offset a hard-limit slowdown. MAD bands crossing
+the hard threshold, disagreeing rounds, invalid samples or incomplete/interrupted
+evidence cannot pass. The report retains all rounds, dispersion, output sizes,
+both thresholds, advisory notes
+and available native CPU/RSS diagnostics. Exit `0` means every row passed;
+`1` means regression, correctness failure or incompatible evidence; `2` means
+invalid invocation or incomplete/inconclusive evidence.
+
+### TOON 4.1 migration candidate — 2026-10-07
+
+The complete fixed ten-workload guard passed on native
+`aarch64-apple-darwin` (Apple M4 Pro, Darwin 25.6.0), exit `0`, in 41.657 seconds.
+This is local, uncalibrated evidence—not release-wide or all-platform approval.
+Both builds use Rust 1.99.0 / LLVM 23.1.2, workspace release/default optimization
+and mimalloc. Each workload has one warmup per executable and three alternating
+measured pairs; no row required hard-limit confirmation.
+
+The immutable 0.4.1 baseline remains commit
+`286b5f6690bc1bee260cba007f3953c52178bf68`, executable SHA-256
+`abcf52ac46be785203458024f108682c9d972af03d6940b3e2002b5d9ce88501`.
+The 0.5.0 candidate is the reviewed working-tree snapshot on integrated revision
+`407b35d81681b8ca4ab85968f7186eea645f250f`, with 903 source files, snapshot SHA-256
+`2860439d15b72d2e93fc3407b710d767c1c20bf097ec981e4c18d939d96d61ff`,
+and executable SHA-256
+`8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00`.
+The later C9 manual-comparator rebuild enforces required process contracts;
+all product sources, this frozen CLI and the guard worker remain byte-identical.
+These timings retain their C8 source/binary binding, not a relabeled C9 run.
+
+All workload identities, queries and sizes remain fixed at 32,768 records and
+96 payload bytes. The user approved correcting only the candidate keyed TOON
+representation from `k0, ...` to conforming `k0: ...`; its semantic source,
+baseline representation and all eight other input files remain unchanged.
+The corrected candidate file is 4,128,251 bytes, SHA-256
+`7d68b2a2c8d27c7296fa0a31ba098a795585c22e0f6e0e40a2a8c28e5d277092`.
+Nested/keyed decoding is explicitly a representation-migration comparison;
+the other comparisons use identical input bytes. Every row independently
+satisfied semantic/process correctness.
+
+Displayed ratios/diagnostics are rounded; decisions use unrounded ratios.
+CPU is median native user plus system time. RSS is median OS-recorded child
+peak RSS, not arena usage or optional process-group sampling.
+
+| Workload | Wall median µs B → C | MAD µs B / C | C / B | CPU median ms B → C | Peak RSS median MiB B → C | Stdout bytes B → C |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| flat-json-control | 33092 → 33064 | 494 / 993 | 0.999154 | 28.226 → 28.683 | 41.31 → 41.38 | 5248157 → 5248157 |
+| decode-flat | 30715 → 33042 | 13 / 602 | 1.075761 | 26.023 → 27.699 | 43.55 → 43.69 | 5248157 → 5248157 |
+| decode-nested | 46343 → 39768 | 414 / 283 | 0.858123 | 40.557 → 33.955 | 59.94 → 51.50 | 7022903 → 7022903 |
+| decode-keyed | 51794 → 44961 | 503 / 104 | 0.868074 | 45.831 → 38.592 | 61.16 → 57.03 | 7339473 → 7339473 |
+| document-flat | 60532 → 61123 | 447 / 561 | 1.009763 | 28.148 → 27.675 | 27.03 → 27.02 | 3609782 → 3609782 |
+| transcode-flat | 48911 → 47160 | 105 / 616 | 0.964200 | 45.342 → 43.171 | 25.47 → 30.23 | 3609782 → 3609782 |
+| transcode-nested | 84496 → 72655 | 118 / 24 | 0.859863 | 79.742 → 68.550 | 31.56 → 29.95 | 5843261 → 3877216 |
+| transcode-keyed | 72087 → 82408 | 67 / 326 | 1.143174 | 67.420 → 76.971 | 21.56 → 33.77 | 5766606 → 4128251 |
+| transcode-late | 85001 → 87769 | 1066 / 1063 | 1.032564 | 80.487 → 82.882 | 31.56 → 35.81 | 5843225 → 5843225 |
+| spool-flat | 160232 → 59262 | 5521 / 743 | 0.369851 | 152.716 → 55.174 | 10.17 → 9.70 | 3609782 → 3609782 |
+
+Keyed transcode's unrounded ratio is `1.1431742200396742`, a **14.32% slowdown**.
+Its MAD-derived dispersion band is
+`[1.1375945893505557, 1.148764232157734]`: below the approved 1.20 hard limit,
+but above the 1.10 advisory boundary. The report and CLI retain the deferred-review
+note. The band is a dispersion heuristic, not a confidence interval.
+
+The spool row actually wrote 10,521,441 temporary bytes and replayed 60,838,755
+bytes, with arena high-water 219,718 bytes under its 262,144-byte preparation
+limit. It did not merely declare spool eligibility.
+
+Earlier C3–C6 reports retain their original 10% hard-limit failures/inconclusive
+outcomes. Mitigations before the final candidate were borrowed ordered-key
+matching, encounter-order member indexing without finish-time sorting, and
+charged keyed-entry cursors that avoid retaining/copying all root keys.
+Actual allocator capacity is reconciled for disk keys and member-index growth;
+admission failures release owned capacity. Native product source and executable
+are unchanged between C6 and the fresh C7 amended-policy run.
+The final C8 candidate additionally corrects admission of the existing staged
+non-strict TOON-sequence stream path; native formatting and replay code are
+unchanged. Fresh full-matrix evidence was collected after that correction.
+
+The first C8 run remains **inconclusive**, exit `2`: nested decoding's initial
+MAD ratio band `[0.7811207342295761, 1.2288710431935133]` crossed the hard limit,
+while seven-pair confirmation was below it (`0.8756948330535348`).
+No gate was relaxed. A fresh complete run after the preceding paired executions
+produced the passing table above, with the same binaries, inputs,
+matrix, one-warmup/three-pair protocol and thresholds. This does not establish
+general cold-start stability. The earlier report is retained at
+`target/toon-4-1/performance-corrected-keyed-v1/candidate-c8-policy20-report.json`,
+SHA-256 `a0f048f8c76b33e4666b987066ccbc22d62b225b62912f3201ba70cb98532100`.
+
+Raw initial samples, per-row dispersion bands, correctness/resource observations,
+CPU/RSS diagnostics and immutable identities are retained in
+`target/toon-4-1/performance-corrected-keyed-v1/candidate-c8-policy20-warm-report.json`,
+SHA-256 `6a79ba9ca87268395f183e42aa85771847b6d078ea16c4162a1a0e53e571d203`.
+`target/toon-4-1/candidate-c8/performance-summary.json` retains the extracted
+individual wall samples and diagnostic medians. These local artifacts do not
+populate calibrated archive approval or resolve #31.
 
 ## Self-regression policy
 

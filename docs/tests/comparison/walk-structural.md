@@ -4,6 +4,13 @@ title: "Structural walking"
 description: "Measures a post-order walk that increments every numeric value."
 workload: benchmark.walk-structural
 generated: { by: codex/gpt-5.6-luna, at: 2026-09-10T20:15:01Z }
+benchmark_runs:
+  - campaign_id: "2026-09-11"
+    provenance: "Native Linux workload report; captured tool identities are listed in the Results section. No executable hashes or unique campaign ID retained."
+    binaries:
+      tq: { version: "tq 0.1.0 (TOON v3; jq target 1.8.x; revision a4b4d916-worktree)", sha256: null }
+      jq: { version: "jq-1.8.1", sha256: null }
+      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: null }
 ---
 
 # Structural walking

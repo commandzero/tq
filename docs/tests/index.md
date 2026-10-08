@@ -7,3 +7,5 @@
 5. [Event-stream microbenchmarks](event-stream-microbenchmarks.md): in-process attribution and baseline comparisons.
 6. [Output color performance](output-colors-performance.md): regenerable plain and colored output measurements.
 7. [Benchmark suites](benchmark-suites.md): inventory, profile selection, entrypoints, and measurement boundaries.
+
+Measured comparison findings are collected in the [performance comparison overview](comparison/overview.md).

@@ -3,6 +3,17 @@ type: Report
 title: "Linux worker-validation results"
 description: "Native Linux CPU and RSS controls supporting the published benchmark campaign."
 generated: { by: codex, at: 2026-09-11T20:18:00Z }
+benchmark_runs:
+  - campaign_id: "2026-09-11"
+    run_scope: release-validation
+    provenance: "420 CPU/RSS control records; helper controls only, not jq/yq/tq workload measurements. Exact campaign ID and helper binary hashes/versions are not recorded."
+    binaries:
+      tq-bench-worker: { version: null, sha256: null, identity_status: not-recorded, protocol: "tq-bench-worker-protocol-v3", collector_source_sha256: "9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5" }
+  - campaign_id: "2026-09-11"
+    run_scope: worker-isolation
+    provenance: "120 worker-isolation control records; helper controls only, not jq/yq/tq workload measurements. Exact campaign ID and helper binary hashes/versions are not recorded."
+    binaries:
+      tq-bench-worker: { version: null, sha256: null, identity_status: not-recorded, protocol: "tq-bench-worker-protocol-v3", collector_source_sha256: "9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5" }
 ---
 
 # Linux worker-validation results
