@@ -80,33 +80,6 @@ values. Decoders populate the field themselves. For multiline or multi-document
 sources, preserve the physical line position rather than deriving it from the
 document index. The unreleased version bump does not publish crates or tags.
 
-## Native TOON 4.1 migration to 0.5.0
-
-Upgrade `tq-core`, `tq-toon`, `tq-formats`, and `tq-cli` together. `WriterConfig`
-no longer has key-folding/flattening fields; `DecoderConfig` no longer has
-path-expansion configuration. Remove those fields and the `KeyFolding` /
-`PathExpansion` imports rather than substituting aliases. The CLI rejects
-`--fold-keys` and `--flatten-depth` before reading input.
-
-Quoted and unquoted dotted names are literal keys. Use `.["profile.city"]` to
-query that literal name; recursive headers such as `profile{city}` explicitly
-construct a nested `profile` object. Uniform array rows and keyed object values
-use the first row's recursive header order. Later matching rows may have a
-different insertion order; ordinary expanded objects and keyed entry order do
-not gain a general order-insensitive comparison.
-
-Root/object-field empty arrays use `[]`; anonymous nested arrays retain counted
-list headers, including `[0]:`. Full-line comments, BOM/CRLF, and quoted control
-escapes are accepted. Encoding and strict input acceptance follow 4.1 rather
-than retaining v3 folding behavior. JSON and TOON sequence directions and
-default LF result terminators are unchanged.
-
-Identity transcode prepares complete object/array shapes in a shared bounded
-arena and replay store before selecting canonical layouts. Replay bodies may
-spill, but active key indexes and recursive schemas remain memory-bounded.
-Non-strict duplicate semantics use a staged/document path where consumers
-cannot retract values.
-
 ## Minimum Rust version
 
 Building from source now requires Rust 1.95 or newer for `wait4 0.2.0`
