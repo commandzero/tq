@@ -352,6 +352,12 @@ mod unix {
                 .output()
                 .unwrap();
             assert_eq!(output.status.success(), succeeds, "{output:?}");
+            if succeeds {
+                assert_eq!(
+                    String::from_utf8_lossy(&output.stdout).trim(),
+                    reference.canonicalize().unwrap().to_str().unwrap()
+                );
+            }
         }
     }
 

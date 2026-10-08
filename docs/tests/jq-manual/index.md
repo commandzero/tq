@@ -25,37 +25,30 @@
 23. [streaming](streaming.md)
 24. [types and values](types-and-values.md)
 
-The Results below are fresh **2026-10-07 tq 0.5.0 / native TOON 4.1**
-observations on macOS ARM64, release/default, compared with unchanged pinned
-jq 1.8.2. All 952 unique cases ran; 9 exact differences remain and strict exit
-status is **1**. The original 518 IDs and all 303 protected exact contracts
-remain present. No historical stdout or token rows were reused.
+The Results below use the 2026-10-06 newhelp-final macOS ARM64 final-candidate observations:
+tq 0.4.1, release/default, compared with pinned jq 1.8.2. The source is base
+`3e0dedb` plus uncommitted implementation, reconciled catalog, runner P2, and
+CLI help fixes, not a clean-commit build or the historical bench-profile capture. The run covers
+952 cases; 9 exact-contract differences remain and the strict command exits 1.
 
-The reviewed C9 source snapshot contains 903 files on integrated revision
-`407b35d81681b8ca4ab85968f7186eea645f250f`, SHA-256
-`b0a3e076abc748319859ea9810fd75bc93132b05c5b07cc116f97ffe27ecbc62`.
-C9 rebuilds the native manual comparator to enforce required process contracts;
-all product sources and the frozen C8 native CLI remain unchanged. The CLI
-SHA-256 is `8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00`;
-the rebuilt comparator is `a581e66aa551e2c3397ae4507c6daf8b7a6def331e2ce5697664e3ed134e4cf4`.
-Later documentation/checklist/spec synchronization is outside that snapshot.
-Full fresh observations, source/build manifests and executable identities are
-retained locally under ignored `target/toon-4-1/candidate-c9/`; C8 evidence is
-retained separately, not relabeled.
+See the [numbered difference list](coverage.md#differences-by-test) for each
+test's practical impact. [Current closeout metadata](../../../tests/compatibility/reviews/parity-closeout.toon)
+records source manifests, profiles, executable/report hashes, and retained raw
+evidence for all three hosts. The newhelp-final snapshot adds corrected CLI help
+and its regression test; fresh product/helper binaries were frozen after the
+final release/default build. Current hashes and validation provenance are retained
+in `target/closeout/macos/newhelp-final/summary.json`. Full observations are
+retained locally in ignored
+`target/closeout/macos/newhelp-final/manual-full-final.json`.
 
-All 21 section Results blocks were regenerated from this candidate report.
-Authored source-inventory/audit text outside those blocks is historical.
-The unique-case index excludes section overlap. Ordinary stdout counts include
-LF; both tokenizers retain signed growth and savings. Sequence/raw/error or
-failed observations do not acquire ordinary-output size eligibility.
-
-See [coverage](coverage.md) for current native-target scope and the
-[numbered differences](coverage.md#differences-by-test) for practical impact.
-The [PR68 closeout ledger](../../../tests/compatibility/reviews/parity-closeout.toon)
-and [earlier platform metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
-remain historical, unchanged evidence—not this migration's executable identity.
-Deferred #69/#70/#31 obligations are not waived. No exact all-platform or
-calibrated performance acceptance is claimed.
+Native Windows release evidence was renewed on smokescreen for `286b5f6`,
+with a test-only binary-reference fix; product/helper source and frozen binary
+hashes are unchanged by that fix. Windows retains 60 differences under #69;
+Linux retains 15 under #70. The [coverage summary](coverage.md#native-platform-results)
+records their counts and limitations separately from these macOS Results.
+[Historical platform metadata](../../../tests/compatibility/reviews/native-platform-acceptance.toon)
+retains the earlier v6 checkpoint. No exact all-platform or calibrated
+performance acceptance is claimed.
 See the [jq/tq option inventory](../../jq-1.8-cli-options.md) for the CLI contract.
 
 <!-- tq-manual-compare:begin section=index -->
@@ -85,8 +78,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 11391 | 8152 | -3239 | -28.43% |
-| `cl100k_base` | 11365 | 8165 | -3200 | -28.16% |
+| `o200k_base` | 11391 | 8204 | -3187 | -27.98% |
+| `cl100k_base` | 11365 | 8214 | -3151 | -27.73% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 

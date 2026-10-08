@@ -194,28 +194,16 @@ from an override or detection, each bounded probe's inspected and commitment
 bytes, and rejected probe candidates. Input staging counters are zero for the
 single-pass transcode plan.
 
-## Compatibility and benchmarks
+## Compatibility
 
 The compatibility suite sends the same cases through jq, yq, and tq, then
-compares result order, result count, failures, and raw framing.
-See the [format compatibility matrix](docs/formats.md) for native input and
-output support in each tool.
+compares result order, result count, failures, and raw framing. See the
+[format compatibility matrix](docs/formats.md) for native input and output
+support in each tool.
 
-The unreleased manual-parity change requires fresh pinned jq 1.8.2 acceptance
-on local macOS, ironhide Linux x86_64, and smokescreen Windows 11 Pro
-`x86_64-pc-windows-msvc`. The earlier Windows deferral is superseded: native
-Windows jq/tq execution in native PowerShell is required; SSH into WSL does
-not count. Windows capture is implemented with overlapped named pipes and
-JobObjects; native CPU/RSS uses a retained exact-child handle for
-`GetProcessTimes` and `PeakWorkingSetSize`, with a surviving isolated worker.
-Validation remains incomplete: separate control executions vary in 15.625 ms
-CPU quanta, reaching 62.5 ms differences beyond the unchanged 20 ms check.
-Issue #31 remains open; no performance acceptance is claimed. The user disabled
-Smart App Control on development-only smokescreen and reported native launch
-verified with state `0`; no further security changes are needed. Strict-report
-differences are not matches, and no new math differences are approved. See
-[the migration notes](docs/jq-parity-migration.md#required-native-acceptance-and-reference-version)
-for scope and evidence limitations.
+The earlier 0.4.1 manual comparisons remain historical evidence only. See the
+[migration notes](docs/jq-parity-migration.md) for native implementation behavior
+and acceptance boundaries.
 
 ```console
 ./scripts/campaign-run.sh compatibility smoke

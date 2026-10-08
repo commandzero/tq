@@ -9,7 +9,6 @@ mod markdown;
 mod measure;
 #[cfg(windows)]
 mod measure_windows;
-pub mod migration_guard;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod native_process;
 #[cfg(windows)]

@@ -46,7 +46,7 @@ The inventory records source coverage, not compatibility. The generated Results 
 <!-- tq-manual-compare:begin section=regular-expressions -->
 ## Results
 
-[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/regular-expressions.toon)
+[Case collection](../../../tests/compatibility/reviews/jq-manual/regular-expressions.toon)
 
 
 | Verdict | Cases |
@@ -72,8 +72,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 570 | 348 | -222 | -38.95% |
-| `cl100k_base` | 568 | 348 | -220 | -38.73% |
+| `o200k_base` | 570 | 353 | -217 | -38.07% |
+| `cl100k_base` | 568 | 353 | -215 | -37.85% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -182,13 +182,13 @@ jq 'match(["foo"])'
 offset: 0
 length: 3
 string: foo
-captures: []
+captures[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
-| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
 
 #### manual.regex.array-test
 
@@ -288,13 +288,13 @@ jq 'match("a|ab"; "l")'
 offset: 0
 length: 2
 string: ab
-captures: []
+captures[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
-| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
 
 #### manual.regex.flag-m
 
@@ -516,13 +516,13 @@ jq 'match("foo")'
 offset: 0
 length: 3
 string: foo
-captures: []
+captures[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
-| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
 
 #### manual.regex.table-005
 
@@ -562,17 +562,17 @@ jq 'match(["foo", "ig"])'
 offset: 0
 length: 3
 string: foo
-captures: []
+captures[0]:
 offset: 8
 length: 3
 string: FOO
-captures: []
+captures[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 57 | 57 | 35 | -22 | -38.6% |
-| `cl100k_base` | 57 | 57 | 35 | -22 | -38.6% |
+| `o200k_base` | 57 | 57 | 37 | -20 | -35.09% |
+| `cl100k_base` | 57 | 57 | 37 | -20 | -35.09% |
 
 #### manual.regex.table-006
 

@@ -80,7 +80,7 @@ for the current contract.
 <!-- tq-manual-compare:begin section=invoking-jq -->
 ## Results
 
-[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/invoking-jq.toon)
+[Case collection](../../../tests/compatibility/reviews/jq-manual/invoking-jq.toon)
 
 
 | Verdict | Cases |
@@ -612,7 +612,7 @@ Options:
 
 Formats: -i, --input-format auto|toon|yaml|json|json5|jsonl|toon-seq|json-seq|csv|tsv
          -o, --output-format toon|yaml|json|jsonl|toon-seq|json-seq|csv|tsv, --toon-sequence-input, --unframed
-TOON:    --delimiter comma|tab|pipe, --non-strict (dotted keys are literal)
+TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict
 Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE
 Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,
 --max-line-bytes N, --max-frame-bytes N, --max-fields N,
@@ -622,11 +622,6 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,
 --hybrid-in-flight-bytes N, --decode-batch-values N,
 --decode-batch-bytes N, --decode-in-flight-batches N,
 --decode-in-flight-bytes N, --max-spool-bytes N
-
-Preparation: object/array layout decisions retain bounded replay and schema state;
-completed members may wait for the enclosing shape to close.
---prepare-memory-bytes bounds shared memory; --max-spool-bytes
-bounds secure disk spill. Unspillable or exhausted state fails.
 
 Color: automatic on terminals, plain in pipes/files; NO_COLOR disables automatic color.
 -C forces color, -M requests plain bytes; the last flag wins.
@@ -1452,7 +1447,7 @@ jq --version
 jq-1.8.2
 
 # tq -o json
-tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)
+tq 0.4.1 (TOON v3; jq target 1.8.x; revision unknown)
 
 # tq
 <not run>

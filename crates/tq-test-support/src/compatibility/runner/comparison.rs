@@ -229,8 +229,6 @@ fn compare_case(
         && successful
         && json_equivalent == Some(true)
         && toon_equivalent == Some(true)
-        && differences.is_empty()
-        && toon_contract_match == Some(true)
     {
         token_sizes(&reference, &actual, toon.as_ref(), tokenizers)
     } else {

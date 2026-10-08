@@ -1509,7 +1509,7 @@ Coverage status is about whether the manual example has a case. Execution status
 <!-- tq-manual-compare:begin section=builtin-operators-and-functions -->
 ## Results
 
-[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/builtin-operators-and-functions.toon)
+[Case collection](../../../tests/compatibility/reviews/jq-manual/builtin-operators-and-functions.toon)
 
 
 | Verdict | Cases |
@@ -1535,8 +1535,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2950 | 2076 | -874 | -29.63% |
-| `cl100k_base` | 2952 | 2080 | -872 | -29.54% |
+| `o200k_base` | 2950 | 2086 | -864 | -29.29% |
+| `cl100k_base` | 2952 | 2089 | -863 | -29.23% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -1603,13 +1603,13 @@ jq '.[] | arrays'
 []
 
 # tq
-[]
+[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
-| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
+| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
+| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
 
 #### builtin.ascii-downcase
 
@@ -1819,17 +1819,17 @@ jq 'group_by(.k)'
 
 # tq
 [2]:
-  - [1]:
-    - k: 1
-  - [2]:
-    - k: 2
-    - k: 2
+  - [1]{k}:
+    1
+  - [2]{k}:
+    2
+    2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 43 | 43 | 34 | -9 | -20.93% |
-| `cl100k_base` | 43 | 43 | 34 | -9 | -20.93% |
+| `o200k_base` | 43 | 43 | 31 | -12 | -27.91% |
+| `cl100k_base` | 43 | 43 | 31 | -12 | -27.91% |
 
 #### builtin.has
 
@@ -1915,14 +1915,14 @@ jq '.[] | iterables'
 {}
 
 # tq
-[]
+[0]:
 
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 2 | 2 | 1 | -1 | -50% |
-| `cl100k_base` | 2 | 2 | 2 | 0 | +0% |
+| `o200k_base` | 2 | 2 | 3 | +1 | +50% |
+| `cl100k_base` | 2 | 2 | 3 | +1 | +50% |
 
 #### builtin.keys
 
@@ -2995,13 +2995,13 @@ jq 'map(empty)'
 []
 
 # tq
-[]
+[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
-| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
+| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
+| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
 
 #### manual-bof-code-map-004
 
@@ -3066,13 +3066,13 @@ jq 'map_values(empty)'
 []
 
 # tq
-[]
+[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
-| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
+| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
+| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
 
 #### manual-bof-code-recurse-query
 
@@ -3552,15 +3552,18 @@ jq 'INDEX(.[]; .id)'
 }
 
 # tq
-[2:]{id,v}:
-  a: a,1
-  b: b,2
+a:
+  id: a
+  v: 1
+b:
+  id: b
+  v: 2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 44 | 44 | 22 | -22 | -50% |
-| `cl100k_base` | 44 | 44 | 22 | -22 | -50% |
+| `o200k_base` | 44 | 44 | 26 | -18 | -40.91% |
+| `cl100k_base` | 44 | 44 | 26 | -18 | -40.91% |
 
 #### manual-bof-synth-sql-join2
 
@@ -5420,13 +5423,13 @@ jq flatten
 []
 
 # tq
-[]
+[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
-| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
+| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
+| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
 
 #### manual-bof-table-063
 
@@ -5591,13 +5594,13 @@ jq '[range(0; 10; -1)]'
 []
 
 # tq
-[]
+[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
-| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
+| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
+| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
 
 #### manual-bof-table-069
 
@@ -6026,20 +6029,17 @@ jq 'group_by(.foo)'
 
 # tq
 [2]:
-  - [2]:
-    - foo: 1
-      bar: 10
-    - foo: 1
-      bar: 1
-  - [1]:
-    - foo: 3
-      bar: 100
+  - [2]{foo,bar}:
+    1,10
+    1,1
+  - [1]{foo,bar}:
+    3,100
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 64 | 64 | 52 | -12 | -18.75% |
-| `cl100k_base` | 64 | 64 | 52 | -12 | -18.75% |
+| `o200k_base` | 64 | 64 | 41 | -23 | -35.94% |
+| `cl100k_base` | 64 | 64 | 41 | -23 | -35.94% |
 
 #### manual-bof-table-082
 
@@ -7257,19 +7257,19 @@ jq 'recurse(.foo[])'
 
 # tq
 foo[2]:
-  - foo: []
+  - foo[0]:
   - foo[1]:
-      - foo: []
-foo: []
+      - foo[0]:
+foo[0]:
 foo[1]:
-  - foo: []
-foo: []
+  - foo[0]:
+foo[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 70 | 70 | 35 | -35 | -50% |
-| `cl100k_base` | 70 | 70 | 35 | -35 | -50% |
+| `o200k_base` | 70 | 70 | 40 | -30 | -42.86% |
+| `cl100k_base` | 70 | 70 | 40 | -30 | -42.86% |
 
 #### manual-bof-table-126
 
@@ -7424,14 +7424,15 @@ jq 'walk( if type == "object" then with_entries( .key |= sub( "^_+"; "") ) else 
 ]
 
 # tq
-[1]{a{b}}:
-  2
+[1]:
+  - a:
+      b: 2
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 20 | 20 | 12 | -8 | -40% |
-| `cl100k_base` | 20 | 20 | 12 | -8 | -40% |
+| `o200k_base` | 20 | 20 | 13 | -7 | -35% |
+| `cl100k_base` | 20 | 20 | 13 | -7 | -35% |
 
 #### manual-bof-table-130
 
@@ -7843,13 +7844,13 @@ jq '["abs/0","acos/0","acosh/0","add/0","add/1","all/0","all/1","all/2","any/0",
 []
 
 # tq
-[]
+[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
-| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
+| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
+| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
 
 #### manual.invoking.halt-error
 

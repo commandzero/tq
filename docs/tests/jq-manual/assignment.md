@@ -24,7 +24,7 @@ During the initial source audit, jq passed all six table queries. The tq develop
 <!-- tq-manual-compare:begin section=assignment -->
 ## Results
 
-[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/assignment.toon)
+[Case collection](../../../tests/compatibility/reviews/jq-manual/assignment.toon)
 
 
 | Verdict | Cases |
@@ -50,8 +50,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 485 | 320 | -165 | -34.02% |
-| `cl100k_base` | 485 | 323 | -162 | -33.4% |
+| `o200k_base` | 485 | 323 | -162 | -33.4% |
+| `cl100k_base` | 485 | 326 | -159 | -32.78% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -155,13 +155,13 @@ jq '.posts[0].title = "JQ Manual"'
 # tq
 posts[1]:
   - title: JQ Manual
-    comments: []
+    comments[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 27 | 27 | 16 | -11 | -40.74% |
-| `cl100k_base` | 27 | 27 | 16 | -11 | -40.74% |
+| `o200k_base` | 27 | 27 | 17 | -10 | -37.04% |
+| `cl100k_base` | 27 | 27 | 17 | -10 | -37.04% |
 
 #### manual.assignment.fence-select-comment
 
@@ -213,13 +213,13 @@ posts[2]:
     comments[1]: terrible.
   - title: Second
     author: other
-    comments: []
+    comments[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 63 | 63 | 38 | -25 | -39.68% |
-| `cl100k_base` | 63 | 63 | 39 | -24 | -38.1% |
+| `o200k_base` | 63 | 63 | 39 | -24 | -38.1% |
+| `cl100k_base` | 63 | 63 | 40 | -23 | -36.51% |
 
 #### manual.assignment.fence-select-posts
 
@@ -244,13 +244,13 @@ jq '.posts[] | select(.author == "stedolan")'
 # tq
 title: First
 author: stedolan
-comments: []
+comments[0]:
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 22 | 22 | 12 | -10 | -45.45% |
-| `cl100k_base` | 22 | 22 | 13 | -9 | -40.91% |
+| `o200k_base` | 22 | 22 | 13 | -9 | -40.91% |
+| `cl100k_base` | 22 | 22 | 14 | -8 | -36.36% |
 
 #### manual.assignment.fence-var-plain-error
 

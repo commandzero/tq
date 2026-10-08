@@ -15,13 +15,12 @@ Historical release entries retain their original ordering.
 
 ### Removed
 
-- **Breaking:** Removed TOON key folding/path expansion configuration and the `--fold-keys` / `--flatten-depth` switches. Dotted keys are literal keys; removed switches fail before input consumption.
+- **Breaking:** Removed TOON key folding/path expansion configuration and the `--fold-keys` / `--flatten-depth` switches. Dotted keys are literal keys; removed switches fail before input consumption (#71).
 
 ### Changed
 
-- `TQ_COLORS` now takes priority over `JQ_COLORS` for terminal palette customization.
-- **Breaking:** Upgrade the tq Rust crates together to 0.5.0; see the [native TOON 4.1 migration notes](docs/jq-parity-migration.md#native-toon-41-migration-to-050).
-- **Breaking:** Native TOON now follows 4.1, with recursive field groups, keyed tables, position-specific empty arrays/list indentation, comments, and control escapes. Canonical bytes and strict input acceptance change; default LF and explicit sequence/unframed output contracts remain unchanged.
+- **Breaking:** Upgrade the tq Rust crates together to 0.5.0; see the [native TOON 4.1 migration notes](docs/jq-parity-migration.md#native-toon-41-migration-to-050) (#71).
+- **Breaking:** Native TOON now follows 4.1, with recursive field groups, keyed tables, position-specific empty arrays/list indentation, comments, and control escapes. Canonical bytes and strict input acceptance change; default LF and explicit sequence/unframed output contracts remain unchanged (#71).
 - **Breaking:** `-c` and `--compact-output` now select compact JSON. Remove `-c` when expecting TOON; combining it with explicit TOON output is rejected (#42).
 - **Breaking:** Default TOON output now emits zero or more LF-terminated values, preserving earlier results on later errors. Use `-o toon-seq` for RS framing or `--unframed` to require exactly one document (#41, #42).
 - **Breaking:** `--seq` now reads JSON sequences and emits TOON sequences by default. Use `--seq -o json` or `--seq -c` to retain JSON sequence output (#42).
@@ -31,8 +30,6 @@ Historical release entries retain their original ordering.
 - CLI memory-budget defaults now scale with available RAM and readable Linux cgroup limits. Explicit byte-limit flags override these defaults; embedded library defaults remain deterministic (#59).
 - Terminal colors now use a shared palette across all output formats, with light-blue booleans, delimiter-colored quotes, and seven/eight-slot `JQ_COLORS` customization (#38).
 - Source builds now require Rust 1.95 or newer (#34).
-- macOS and Linux benchmarks now measure direct spawn-to-exit time and OS-recorded child peak RSS, keeping optional diagnostic sampling separate (#47).
-- Benchmark suites now support independent quick, standard, and extended sampling. Quick runs are time-bounded diagnostics, not evidence for formal regression comparisons or replacements for extended archives (#60).
 
 ### Fixed
 
@@ -50,7 +47,6 @@ Historical release entries retain their original ordering.
 
 ### Added
 
-- Focused, correctness-gated TOON migration wall-time comparisons with repeated paired runs, bounded confirmation, a user-approved greater-than-20% hard regression limit, and nonblocking review notes above 10%. This local guard does not replace calibrated benchmark publication gates.
 - Bounded longest-match regex support with the `l` flag; whole-pattern recursion remains unsupported.
 - Expanded jq mathematical function support, including trigonometric, logarithmic, gamma, and Bessel functions; platform differences remain documented in the [jq manual coverage](docs/tests/jq-manual/coverage.md#differences-by-test) (#39, #40).
 - Runtime NaN and infinity values, plus jq-style non-finite JSON input and `fromjson`. Native TOON and YAML input still reject non-finite values (#39, #40, #41).
@@ -60,6 +56,7 @@ Historical release entries retain their original ordering.
 - URI decoding with `@urid` (#39, #40).
 - Filter-driven diagnostics and termination with `debug`, `stderr`, `halt`, and `halt_error` (#39, #40, #42).
 - Execution of jq-format test files with `--run-tests` (#42).
+- Added `TQ_COLORS` palette overrides for all output formats, taking priority over `JQ_COLORS` (#68).
 
 ## [0.3.0] - 2026-09-06
 

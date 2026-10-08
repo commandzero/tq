@@ -33,7 +33,7 @@ The remaining prose entries are recorded in the JSON ledger. They are semantic t
 <!-- tq-manual-compare:begin section=conditionals-and-comparisons -->
 ## Results
 
-[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/conditionals-and-comparisons.toon)
+[Case collection](../../../tests/compatibility/reviews/jq-manual/conditionals-and-comparisons.toon)
 
 
 | Verdict | Cases |

@@ -42,7 +42,7 @@ observations recorded `[0.5,4]` and `[0.5,3]`.
 <!-- tq-manual-compare:begin section=math -->
 ## Results
 
-[Case collection](../../../target/toon-4-1/candidate-c9/source/tests/compatibility/reviews/jq-manual/math.toon)
+[Case collection](../../../tests/compatibility/reviews/jq-manual/math.toon)
 
 
 | Verdict | Cases |
