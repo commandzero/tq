@@ -302,7 +302,7 @@ fn write_markdown_sections(
     if index.starts_with("---\n") {
         return Err("index.md navigation must not have frontmatter".into());
     }
-    replace_generated(&index, "index", "")?;
+    let index = replace_generated(&index, "index", "")?;
     let overview_path = destination.join("overview.md");
     let overview_document = match read_optional(&overview_path)? {
         Some(document) => document,
@@ -347,13 +347,13 @@ fn write_markdown_sections(
     // Prepare and validate every document before writing any page so malformed
     // frontmatter or markers cannot leave the bundle partially updated.
     let mut pending = Vec::new();
+    fs::create_dir_all(destination)?;
     for ((name, section), (path, document)) in sections.iter().zip(authored) {
         let generated = generated_results(section, name, destination, reviews)?;
         pending.push((path, replace_generated(&document, name, &generated)?));
     }
     pending.push((index_path, index));
     pending.push((overview_path, overview));
-    fs::create_dir_all(destination)?;
     for (path, document) in pending {
         fs::write(path, document)?;
     }
@@ -463,6 +463,9 @@ fn bind_benchmark_runs(
         runs.push(serde_json::json!({
             "campaign_id": report["campaign_id"],
             "captured_at": generated_at,
+            "platform": report["reference_execution"]["target"].as_str()
+                .and_then(|target| target.rsplit_once('-').map(|(_, platform)| platform)),
+            "target": report["reference_execution"]["target"].as_str(),
             "binaries": binaries
         }));
     }
@@ -609,6 +612,17 @@ fn replace_generated(
     let ends = document.matches(GENERATED_END).count();
     if starts > 1 || ends > 1 || starts != ends {
         return Err(format!("malformed generated markers in {section}.md").into());
+    }
+    if generated.is_empty() {
+        let Some(start) = document.find(GENERATED_START) else {
+            return Ok(document.to_owned());
+        };
+        let end = start
+            + document[start..]
+                .find(GENERATED_END)
+                .ok_or("generated end marker not found")?
+            + GENERATED_END.len();
+        return Ok(format!("{}{}", &document[..start], &document[end..]));
     }
     let block = format!("{GENERATED_START} section={section} -->\n{generated}\n{GENERATED_END}");
     let document = document.trim_end();
@@ -1160,6 +1174,37 @@ mod tests {
     }
 
     #[test]
+    fn native_identity_comes_from_the_capture_not_the_rendering_host() {
+        let mut report = tiny_report();
+        for (target, platform) in [
+            ("aarch64-macos", "macos"),
+            ("x86_64-linux", "linux"),
+            ("x86_64-windows", "windows"),
+        ] {
+            report["reference_execution"] = json!({"target": target});
+            let document = super::bind_benchmark_runs("# authored\n", &report).unwrap();
+            let metadata = super::parse_frontmatter(&document).unwrap();
+            let run = &metadata["benchmark_runs"][0];
+            assert_eq!(run["target"], target);
+            assert_eq!(run["platform"], platform);
+        }
+        report
+            .as_object_mut()
+            .unwrap()
+            .remove("reference_execution");
+        let document = super::bind_benchmark_runs("# authored\n", &report).unwrap();
+        let metadata = super::parse_frontmatter(&document).unwrap();
+        assert_eq!(
+            metadata["benchmark_runs"][0]["target"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            metadata["benchmark_runs"][0]["platform"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
     fn malformed_captured_versions_and_digests_cannot_generate_provenance() {
         for (field, value) in [
             ("version", json!("")),
@@ -1182,28 +1227,21 @@ mod tests {
         tq_test_support::compatibility::summarize_manual_comparison(&mut report).unwrap();
         let reviews = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();
-        let section = json!({
-            "examples": [{"case_id": "sample.result"}, {"case_id": "sample.raw"}],
-            "coverage_notes": [],
-            "coverage_evidence": [],
-        });
-        let completeness = json!({"requirements": []});
-        std::fs::write(
-            reviews.path().join("sample.toon"),
-            tq_test_support::fixture_data::to_toon(&section).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            reviews.path().join("completeness.toon"),
-            tq_test_support::fixture_data::to_toon(&completeness).unwrap(),
-        )
-        .unwrap();
+        write_sample_reviews(reviews.path());
         std::fs::write(
             output.path().join("sample.md"),
             "---\ntitle: authored sample\ncustom: preserved\n---\n# authored sample\n\n",
         )
         .unwrap();
-        std::fs::write(output.path().join("index.md"), "# authored index\n\n").unwrap();
+        std::fs::write(
+            output.path().join("index.md"),
+            format!(
+                "# authored index\n\n{} section=index -->\n## Results\n\nstale legacy row\n{}\n\n# authored footer\n",
+                super::GENERATED_START,
+                super::GENERATED_END,
+            ),
+        )
+        .unwrap();
         std::fs::write(
             output.path().join("overview.md"),
             "---\ntype: Report\ntitle: \"Authored overview\"\ncustom: retained\n---\n# Authored overview\n\n",
@@ -1232,6 +1270,10 @@ mod tests {
         let index = String::from_utf8_lossy(first.get("index.md").unwrap());
         assert!(index.contains("# authored index\n\n"));
         assert!(!index.starts_with("---\n"));
+        assert!(index.contains("# authored footer"));
+        assert!(!index.contains("stale legacy row"));
+        assert!(!index.contains(super::GENERATED_START));
+        assert!(!index.contains(super::GENERATED_END));
         let overview = String::from_utf8_lossy(first.get("overview.md").unwrap());
         assert!(overview.contains("# Authored overview\n\n"));
         let metadata = yaml_serde::from_str::<serde_json::Value>(
@@ -1275,6 +1317,50 @@ mod tests {
             read_documents(output.path()),
             "rendering is not idempotent"
         );
+    }
+
+    #[test]
+    fn a_new_markdown_directory_produces_resolvable_source_links() {
+        let report = tiny_report();
+        let reviews = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let output = parent.path().join("new-output");
+        write_sample_reviews(reviews.path());
+        super::write_markdown_sections(&output, &report, reviews.path()).unwrap();
+        let sample = std::fs::read_to_string(output.join("sample.md")).unwrap();
+        let link = sample
+            .lines()
+            .find_map(|line| line.strip_prefix("[Case collection]("))
+            .and_then(|line| line.strip_suffix(')'))
+            .unwrap();
+        assert_eq!(
+            std::fs::canonicalize(output.join(link)).unwrap(),
+            std::fs::canonicalize(reviews.path().join("sample.toon")).unwrap()
+        );
+        let index = std::fs::read_to_string(output.join("index.md")).unwrap();
+        assert!(!index.contains(super::GENERATED_START));
+        assert!(!index.starts_with("---\n"));
+        let first = read_documents(&output);
+        super::write_markdown_sections(&output, &report, reviews.path()).unwrap();
+        assert_eq!(first, read_documents(&output));
+    }
+
+    fn write_sample_reviews(reviews: &std::path::Path) {
+        let section = json!({
+            "examples": [{"case_id": "sample.result"}, {"case_id": "sample.raw"}],
+            "coverage_notes": [],
+            "coverage_evidence": [],
+        });
+        std::fs::write(
+            reviews.join("sample.toon"),
+            tq_test_support::fixture_data::to_toon(&section).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            reviews.join("completeness.toon"),
+            tq_test_support::fixture_data::to_toon(&json!({"requirements": []})).unwrap(),
+        )
+        .unwrap();
     }
 
     fn read_documents(path: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {

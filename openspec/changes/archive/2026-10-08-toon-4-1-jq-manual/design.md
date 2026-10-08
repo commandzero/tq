@@ -13,6 +13,8 @@ The original strict comparison retained 9 exact differences and exit status 1. I
 5. Regeneration matches a capture by its recorded campaign/time and measured version/SHA-256 identities. It updates only that capture's measured tool fields, retains authored run/tool metadata and every other native capture, and appends genuinely distinct captures.
 6. Measured tools require nonempty version strings and 64-digit hexadecimal SHA-256 identities before any page is written. Their identity status is `measured`; uncaptured optional identities remain `not-recorded`. Missing historical campaign/time fields remain null.
 7. Preserve authored metadata values and Markdown body bytes. YAML presentation may normalize when provenance is updated; subsequent identical regeneration is byte-stable. Do not promise preservation of incidental YAML quoting, whitespace or comments.
+8. Native target identity comes from the saved `reference_execution.target` architecture/OS pair. Derive `platform` from its captured OS component; missing targets remain null. Never probe the rendering host to fill historical identity.
+9. Prepare a new Markdown directory before resolving source-collection links, but validate all documents before writing any page. Strip obsolete generated Results blocks from navigation without removing authored surrounding content or introducing empty index markers.
 
 ## Risks / Trade-offs
 
