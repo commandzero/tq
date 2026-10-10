@@ -51,7 +51,7 @@ focused migration wall-time guard, are separate acceptance obligations. PR #71's
 native implementation behavior and historical records do not establish those
 results, waive their gates, or turn prior observations into new evidence.
 
-## Rust library migration to 0.4.0
+## Rust library migration to 0.5.0
 
 The incompatible value-model boundary remains 0.4.0; the current upgrade target
 is 0.5.0. Upgrade all workspace crates together from 0.3.0 to 0.5.0 to avoid mixing
