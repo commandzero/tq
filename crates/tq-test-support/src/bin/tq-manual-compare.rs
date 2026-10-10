@@ -1260,7 +1260,12 @@ mod tests {
             metadata["benchmark_runs"][0]["binaries"]["tq"]["capture_note"]
         );
         assert!(!runs[0]["binaries"].as_object().unwrap().contains_key("yq"));
-        assert!(!runs[0]["binaries"].as_object().unwrap().contains_key("helper"));
+        assert!(
+            !runs[0]["binaries"]
+                .as_object()
+                .unwrap()
+                .contains_key("helper")
+        );
         assert_eq!(runs[0]["binaries"]["tq"]["identity_status"], "measured");
         assert_eq!(
             actual["custom"],
