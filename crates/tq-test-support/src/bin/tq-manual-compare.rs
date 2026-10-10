@@ -6,8 +6,9 @@ use tq_test_support::compatibility::{
     CompatibilityCatalog, ExecutableConfig, ManualReferencePin, ReviewedDisparity, ToolKind,
     compare_manual_with_disparities, discover_tool, load_catalog, manual_host_target,
     read_gap_inventory, read_manual_review_case_ids, summarize_manual_comparison,
-    validate_completion_manual_report, validate_manual_reference, validate_manual_source_checkout,
-    validate_manual_source_inventory, validate_strict_manual_report,
+    validate_completion_manual_report, validate_manual_reference, validate_manual_report_catalog,
+    validate_manual_source_checkout, validate_manual_source_inventory,
+    validate_strict_manual_report,
 };
 
 fn main() -> ExitCode {
@@ -135,6 +136,7 @@ fn render_saved_report(
         )
         .collect();
     validate_saved_manual_case_ids(&report, &expected)?;
+    validate_manual_report_catalog(&report, &catalog)?;
     summarize_manual_comparison(&mut report)?;
     write_markdown_sections(destination, &report, reviews)
 }

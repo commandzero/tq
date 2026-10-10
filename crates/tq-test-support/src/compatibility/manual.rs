@@ -1225,6 +1225,47 @@ fn validate_report_case(id: &str, case: &Value, context: ReportCaseContext<'_>) 
     }
 }
 
+/// Validates saved rows against their catalog definitions without requiring
+/// successful compatibility observations.
+///
+/// # Errors
+/// Returns an error for missing catalog cases, stale fingerprints, or changed
+/// contracts. This does not authenticate captured output or assert acceptance.
+pub fn validate_manual_report_catalog(
+    report: &Value,
+    catalog: &CompatibilityCatalog,
+) -> Result<(), StrictCampaignError> {
+    let cases = report["cases"]
+        .as_array()
+        .ok_or_else(|| StrictCampaignError::Report("cases must be an array".to_owned()))?;
+    let mut failures = Vec::new();
+    for case in cases {
+        let id = case["id"].as_str().ok_or_else(|| {
+            StrictCampaignError::Report("every report case needs a string id".to_owned())
+        })?;
+        let catalog_case = catalog
+            .cases
+            .iter()
+            .find(|catalog_case| catalog_case.id == id);
+        let fingerprint = catalog_case
+            .map(case_fingerprint)
+            .transpose()
+            .map_err(|error| StrictCampaignError::Report(error.to_string()))?;
+        validate_catalog_identity(
+            id,
+            case,
+            catalog_case,
+            fingerprint.as_deref(),
+            &mut failures,
+        );
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(StrictCampaignError::Report(failures.join("\n")))
+    }
+}
+
 fn validate_catalog_identity(
     id: &str,
     case: &Value,

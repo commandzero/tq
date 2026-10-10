@@ -181,6 +181,10 @@ rows rather than trusting persisted summaries. Token blocks are excluded when
 process differences are present or the TOON process contract is not explicitly
 matched, including historical rows missing either eligibility field. Raw
 observations and token blocks remain unchanged.
+Before writing pages, rendering rejects stale catalog fingerprints, changed
+case contracts, and eligible token blocks missing unsigned JSON/TOON counts
+for either required tokenizer. Catalog binding is not output authentication or
+strict acceptance; complete captures with recorded differences still render.
 Linux's separately scoped 871-sample and Windows's 857-sample totals are in the
 [native coverage table](tests/jq-manual/coverage.md#native-platform-results).
 The Windows origin-module witness also retains changed process observations:

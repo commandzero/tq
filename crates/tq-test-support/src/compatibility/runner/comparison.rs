@@ -118,8 +118,8 @@ pub fn summarize_manual_comparison(report: &mut Value) -> Result<(), Box<dyn std
             && let Some(token_rows) = row["tokens"].as_object()
         {
             samples += 1;
-            for (encoding, counts) in token_rows {
-                let totals = tokens.entry(encoding.clone()).or_default();
+            for (encoding, totals) in &mut tokens {
+                let counts = token_rows.get(encoding).ok_or("missing tokenizer counts")?;
                 totals.0 += counts["json"].as_u64().ok_or("missing JSON token count")?;
                 totals.1 += counts["toon"].as_u64().ok_or("missing TOON token count")?;
             }

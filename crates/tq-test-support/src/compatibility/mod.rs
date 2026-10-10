@@ -30,7 +30,7 @@ pub use manual::{
     ReviewedDisparity, ReviewedObservation, StrictCampaignError, apply_reviewed_disparities,
     case_fingerprint, manual_case_ids, manual_verdict_counts, read_gap_inventory,
     read_manual_ledger, read_manual_review_case_ids, validate_completion_manual_report,
-    validate_gap_inventory, validate_strict_manual_report,
+    validate_gap_inventory, validate_manual_report_catalog, validate_strict_manual_report,
 };
 pub use manual_pin::{
     ManualBaselineCase, ManualBuildPin, ManualPinError, ManualReferencePin, ManualSourcePin,
