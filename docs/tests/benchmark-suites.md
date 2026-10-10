@@ -14,8 +14,9 @@ numbers into one baseline or aggregate winner.
 
 This page is the inventory and selection guide. The
 [benchmark campaign guide](../../benchmarks/README.md) contains the detailed
-corpus, accounting, calibration, reporting, and replay procedures. Run commands
-below from the repository root.
+corpus, accounting, calibration, reporting, and replay procedures. The
+[performance comparison overview](comparison/overview.md) records historical
+comparison results. Run commands below from the repository root.
 
 ## Suite and profile axes
 
@@ -117,6 +118,7 @@ RSS preflight. Those prerequisites remain enabled. Quick summary tables are
 diagnostic evidence, not a statistically qualified performance regression gate.
 
 ### Select coverage and repetition policy
+
 
 Build the CLI and native harness binaries before invoking them directly:
 

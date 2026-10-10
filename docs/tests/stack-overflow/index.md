@@ -1,6 +1,8 @@
 # Stack Overflow jq top 50
 
-One scenario page corresponds to each checked-in question fixture. The fixtures are the source of the question metadata, benchmark query, and benchmark input used by the harness.
+Browse the checked-in Stack Overflow scenarios or open the measured benchmark overview.
+
+- [Measured overview](overview.md)
 
 ## Scenarios
 

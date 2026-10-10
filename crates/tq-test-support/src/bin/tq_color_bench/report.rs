@@ -31,6 +31,8 @@ pub struct ColorReport {
     pub source_bytes: u64,
     pub binary: PathBuf,
     #[serde(default)]
+    pub tq_version: Option<String>,
+    #[serde(default)]
     pub source_sha256: Option<String>,
     #[serde(default)]
     pub binary_sha256: Option<String>,
@@ -186,8 +188,35 @@ pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dy
     }
     let generated = render(reports)?;
     let source = fs::read_to_string(page)?;
-    let updated = replace_results_region(page, &source, &generated)?;
-    // All reports and markers are validated before replacing the page.
+    let mut updated = replace_results_region(page, &source, &generated)?;
+    for (label, report) in ["week", "month"].into_iter().zip(reports) {
+        let campaign_id = report
+            .environment
+            .as_ref()
+            .map(|environment| environment.collected_at.as_str())
+            .filter(|identity| !identity.is_empty())
+            .unwrap_or_else(|| {
+                if label == "week" {
+                    "not-recorded:color-week"
+                } else {
+                    "not-recorded:color-month"
+                }
+            });
+        let mut binary = serde_json::json!({
+            "version": report.tq_version,
+            "sha256": report.binary_sha256,
+        });
+        if report.tq_version.is_none() {
+            binary["identity_status"] = serde_json::Value::String("not-recorded".to_owned());
+            binary["provenance"] = serde_json::Value::String(
+                "legacy color report has no retained tq --version output".to_owned(),
+            );
+        }
+        let binaries = serde_json::json!({"tq": binary});
+        let binaries = yaml_serde::from_str(&binaries.to_string())?;
+        updated = tq_test_support::benchmark::merge_benchmark_run(&updated, campaign_id, binaries)?;
+    }
+    // All reports, markers, and frontmatter are validated before replacing the page.
     fs::write(page, updated)?;
     Ok(())
 }

@@ -18,12 +18,11 @@ automatically; set `TQ_BENCHMARK_ARCHIVE_ROOT` when the archive lives elsewhere.
 
 The saved-report renderer updates the `## Results` blocks in the stable
 user-facing pages under `docs/tests/comparison/`. The Stack Overflow renderer
-updates the matching `## Results` blocks in `docs/tests/stack-overflow/index.md`
-and its 50 scenario pages. Each page has authored context that regeneration
-preserves. Do not embed archive paths, local executable paths, or exhaustive
-provenance in the pages. Raw samples, logs, and corpus artifacts remain in the
-benchmark archive. Render smoke-suite results before natural-corpus results;
-rendering natural-corpus last leaves the comparison index on its full review.
+updates the matching `## Results` blocks in
+`docs/tests/stack-overflow/overview.md` and its 50 scenario pages. Each page has
+authored context that regeneration preserves. Do not embed archive paths, local
+executable paths, or exhaustive provenance in the pages. Raw samples, logs, and
+corpus artifacts remain in the benchmark archive.
 
 Every benchmark report must include the measured host's CPU model, logical
 CPU count, RAM capacity, OS, architecture, kernel, and build profile. Use
@@ -43,6 +42,59 @@ cargo run -p tq-test-support --bin tq-bench -- \
 Quick results are session-only diagnostics and cannot replace durable reference
 pages. Standard runs also default to temporary session reports; publication is
 an explicit, calibrated CLI operation rather than a dispatcher side effect.
+
+## TOON 4.1 comparison run admission
+
+The exhaustive Linux campaign `2026-10-08T15:10:27.867608118Z` completed all
+858 planned observations across 39 workloads: 707 timed, 134 unsupported,
+8 incorrect yq formatting rows and 9 tq resource-limit rows. Its status is
+`observed-failures` (exit 1), not incomplete or all-correct acceptance.
+Fresh accounting/isolation controls passed before measurement. Admission
+required 30 seconds of idle CPU/I/O, no active swap and no concurrent builds
+or tests; monitored execution had no admission violations.
+
+The measured frozen candidate is
+`/tmp/tq-toon-4-1-candidate-c9-alpha-20261007/source/target/release/tq`,
+version `tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)`, SHA-256
+`474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91`.
+Actual reference binaries were jq 1.8.1 and yq 4.53.2; their recorded versions
+and hashes are retained with the report. The release harness was built from
+`3c025a842f23a76a3b444ed85269ac21b0304a0c` in a separate tree.
+The following is the recorded invocation, not a request to overwrite its output.
+Use all four retained manifests:
+
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json`
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json`
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-week/manifest.json`
+- `/var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json`
+
+```console
+/var/tmp/tq-toon-4-1-comparison-20261008T1453Z/source/target/release/tq-bench run \
+  --suite natural-corpus --profile standard --mode exhaustive --sampling compare \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-hour/manifest.json \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-day/manifest.json \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-week/manifest.json \
+  --manifest /var/tmp/tq-performance-20260924.UbhxO1/corpus/campaigns/2026-09-24T22-27-25.718567059Z/usgs-all-month/manifest.json \
+  --origin frozen \
+  --cache-root /var/tmp/tq-performance-20260924.UbhxO1/corpus \
+  --timing-calibration /var/tmp/tq-toon-4-1-comparison-20261008T1453Z/evidence/calibration/1791472002396089-2556502/summary.json \
+  --output /var/tmp/tq-toon-4-1-comparison-20261008T1453Z/evidence/natural-comparison.json
+```
+
+Bind the frozen binaries through `ExecutableConfig`: `TQ_BIN` is the candidate
+above; `TQ_JQ` and `TQ_YQ` are the retained
+`/var/tmp/tq-performance-20260924.UbhxO1/tools/jq-1.8.1` and `yq-4.53.2`
+binaries. `TQ_BENCH_WORKER` selects the worker next to the recorded harness.
+Future campaigns require fresh output/calibration paths and measured tool
+identities; do not reuse this timestamp or assume the binaries are unchanged.
+
+Standard with compare sampling uses one warmup plus three measured samples,
+without case or adapter filters. Retain every outcome, including failures.
+No self-regression baseline was supplied for this cross-tool campaign; the
+historical migration guard is not renewed by it. Publication passed the native
+calibration/isolation gates and rerendered the complete report, including all
+three native-format workload concepts. Raw evidence remains in the benchmark
+archive. Never overlap builds/tests with measurement or promote quick reports.
 
 ## Suites and sampling profiles
 
@@ -351,12 +403,12 @@ Set `TQ_CORPUS_ORIGIN=refreshed` to acquire a new upstream snapshot for
 The Stack Overflow campaign is a separate, explicitly invoked suite. It runs
 the 50 checked-in scenarios in `tests/stack-overflow`, each with jq as the
 correctness reference and jq, yq, and tq through the shared measurement code.
-The generated pages live in `docs/tests/stack-overflow/`: `index.md` summarizes
-the campaign and one page documents each scenario. The pages keep the query,
-input, and authored explanation beside the harness-generated `## Results`
-section. Generated metadata is limited to the campaign date, host, and tool
-versions. Exact executable paths, digests, and full samples stay in the raw
-archive.
+The generated pages live in `docs/tests/stack-overflow/`: `index.md` is
+frontmatter-free scenario navigation, `overview.md` records campaign results,
+and one page documents each scenario. The pages keep the query, input, and
+authored explanation beside the harness-generated `## Results` section.
+Generated metadata is limited to the campaign date, host, and tool versions.
+Exact executable paths, digests, and full samples stay in the raw archive.
 
 Run the suite from the repository root, selecting quick 0+1, standard 1+3,
 or extended 1+5 independently of the `stack-overflow` suite:

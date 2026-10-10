@@ -2,7 +2,27 @@
 type: Report
 title: "Linux worker-validation results"
 description: "Native Linux CPU and RSS controls supporting the published benchmark campaign."
-generated: { by: codex, at: 2026-09-11T20:18:00Z }
+generated: { by: codex, at: 2026-10-08T15:38:02.825Z }
+benchmark_runs:
+  - campaign_id: "2026-09-11"
+    run_scope: release-validation
+    provenance: "420 CPU/RSS control records; helper controls only, not jq/yq/tq workload measurements. Exact campaign ID and helper binary hashes/versions are not recorded."
+    binaries:
+      tq-bench-worker: { version: null, sha256: null, identity_status: not-recorded, protocol: "tq-bench-worker-protocol-v3", collector_source_sha256: "9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5" }
+  - campaign_id: "2026-09-11"
+    run_scope: worker-isolation
+    provenance: "120 worker-isolation control records; helper controls only, not jq/yq/tq workload measurements. Exact campaign ID and helper binary hashes/versions are not recorded."
+    binaries:
+      tq-bench-worker: { version: null, sha256: null, identity_status: not-recorded, protocol: "tq-bench-worker-protocol-v3", collector_source_sha256: "9527c5326c87782e237f448ae91eb93ee479c0e4ebcb6f039ad04cdd51e03bf5" }
+  - campaign_id: "2026-10-08T15:10:27.867608118Z"
+    run_scope: release-validation-and-worker-isolation
+    captured_at: "2026-10-08T15:06:42.429278292Z"
+    provenance: "420 accounting records plus 120 worker-isolation records; controls only, not jq/yq/tq workloads."
+    binaries:
+      tq-bench-worker: { version: null, version_status: not-reported, sha256: "35263fb3f434f7a2e8be8d9b3f4bde6784da5bf075d7316880ade03d98e548de", identity_status: measured, protocol: "tq-bench-worker-protocol-v4", collector_source_sha256: "06c46e92f370f1c5d12a3a7e95984eedee7ebbc22f0dcc37bb82ab4445a89522" }
+      tq-bench-probe: { version: null, version_status: not-reported, sha256: "750ad5fcb8123afaf3aa3c4ade792129df486d044e53971bfdf216f81ccab6a9", identity_status: measured }
+      validation-runner: { version: null, version_status: not-reported, sha256: "483389fd72deb2a825be3c1d770d9a8d03fd6b999cc9f0178c5d535b886cf006", identity_status: measured }
+      time: { version: "GNU Time 1.9", sha256: "909e093b36b17e73da85952ee0986e12de46c4fe7da8c2b0cff4de47570828f7", identity_status: measured }
 ---
 
 # Linux worker-validation results
@@ -25,7 +45,7 @@ The release helpers used `rustc 1.100.0-nightly (fd7ed57df 2026-08-29)`.
 Both runs used 20 repetitions and were captured on 2026-09-11 under
 elevated permissions.
 
-## Results
+## Historical 2026-09-11 results
 
 All 420 main validation records passed RSS and CPU comparison gates. All 120
 worker-isolation records passed RSS comparison. Their 240 CPU metric
@@ -99,3 +119,32 @@ calibration artifacts remain retained in the external benchmark archive.
 
 The [comparison index](index.md) reports Linux workload measurements. These
 validation controls remain separate from workload samples.
+
+## Results
+
+Fresh Linux controls captured on 2026-10-08 passed all 420 accounting records
+and 120 worker-isolation records, with no validation failures. Each control
+uses 20 repetitions. Both sampler-free and sampler linkage are `verified`.
+
+The recorded host has the same AMD Ryzen 7 7700 / 16-logical-CPU / 61.9-GiB
+configuration, now with kernel `Linux 7.2.4-ogc3.1.fc44.x86_64 #1 SMP
+PREEMPT_DYNAMIC Sun Sep 13 01:41:06 UTC 2026`. Release helpers were built from
+`3c025a842f23a76a3b444ed85269ac21b0304a0c` with
+`rustc 1.99.0 (b940084d7 2026-09-28)` before idle-host admission.
+
+The worker uses protocol v4 and collector-source SHA-256
+`06c46e92f370f1c5d12a3a7e95984eedee7ebbc22f0dcc37bb82ab4445a89522`.
+Its coordinator 0/32/128-MiB controls, 32-MiB prepared stdin and high-to-low
+request controls passed. Residual RSS is 2.5625 MiB, retained rather than
+subtracted; the maximum parent delta is 196,608 bytes within 671,744 bytes
+tolerance. Independent GNU Time agreement covers all 120 isolation records.
+
+Observed duration bounds including launch/scheduling are 0.872 ms without
+sampling and 0.914 ms with sampling. They are not universal timer accuracy,
+and no estimated overhead is subtracted. Calibration summary SHA-256
+`1054b037c39bcc36cd967aa54d60a4131e13c851f4008b2eff549aa18bf04eed`
+is linked by the new workload samples.
+
+These controls validate only the fresh Linux campaign and exact worker/build.
+They do not renew historical campaigns or macOS/Windows acceptance. Raw
+control pairs and host-window observations remain in the benchmark archive.

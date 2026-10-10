@@ -34,14 +34,79 @@ pub enum MarkdownRenderError {
     /// A report workload ID cannot be mapped to one safe Markdown filename.
     #[error("unsafe benchmark workload ID: {0}")]
     UnsafeWorkloadId(String),
-    /// An authored page does not have exactly one valid results region.
-    #[error("invalid benchmark results markers in {path}: {reason}")]
-    InvalidMarkers {
-        /// Page containing the malformed region.
+    /// Existing authored YAML frontmatter is malformed or incompatible.
+    #[error("invalid benchmark metadata in {path}: {reason}")]
+    InvalidMetadata {
+        /// Page containing the invalid metadata.
         path: PathBuf,
-        /// Short validation failure.
+        /// Short metadata parsing or validation failure.
+        reason: String,
+    },
+    /// Results markers are missing, duplicated, misplaced, or out of order.
+    #[error("invalid benchmark result markers in {path}: {reason}")]
+    InvalidMarkers {
+        /// Page containing the invalid markers.
+        path: PathBuf,
+        /// Short marker validation failure.
         reason: &'static str,
     },
+}
+
+fn add_run_metadata(
+    path: &Path,
+    source: &str,
+    report: &BenchmarkCampaignReport,
+) -> Result<String, MarkdownRenderError> {
+    let mut binaries = report
+        .tools
+        .iter()
+        .map(|tool| {
+            (
+                format!("{:?}", tool.tool).to_ascii_lowercase(),
+                serde_json::json!({
+                    "version": tool.version,
+                    "sha256": tool.executable.sha256,
+                }),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    for row in &report.cases {
+        let role = row.adapter_id.split('-').next().unwrap_or_default();
+        if matches!(role, "tq" | "jq" | "yq") {
+            binaries.entry(role.to_owned()).or_insert_with(|| {
+                serde_json::json!({
+                    "version": null,
+                    "sha256": null,
+                    "identity_status": "not-recorded",
+                    "provenance": "campaign report did not retain this measured binary identity",
+                })
+            });
+        }
+    }
+    let binaries = serde_json::json!(binaries);
+    let binaries = yaml_serde::from_str(&binaries.to_string()).map_err(|error| {
+        MarkdownRenderError::InvalidMetadata {
+            path: path.to_owned(),
+            reason: error.to_string(),
+        }
+    })?;
+    super::merge_benchmark_run(source, &report.campaign_id, binaries).map_err(|reason| {
+        MarkdownRenderError::InvalidMetadata {
+            path: path.to_owned(),
+            reason,
+        }
+    })
+}
+
+fn add_runs_metadata(
+    path: &Path,
+    mut source: String,
+    reports: &[BenchmarkCampaignReport],
+) -> Result<String, MarkdownRenderError> {
+    for report in reports {
+        source = add_run_metadata(path, &source, report)?;
+    }
+    Ok(source)
 }
 
 /// Updates one stable Markdown page for every workload in `report`.
@@ -54,8 +119,8 @@ pub enum MarkdownRenderError {
 ///
 /// # Errors
 ///
-/// Returns an I/O, unsafe workload ID, malformed-marker, or native-publication
-/// error.
+/// Returns an I/O, unsafe workload ID, malformed-marker or metadata, or
+/// native-publication error.
 pub fn render_markdown_pages(
     markdown_dir: &Path,
     report: &BenchmarkCampaignReport,
@@ -71,8 +136,8 @@ pub fn render_markdown_pages(
 ///
 /// # Errors
 ///
-/// Returns an I/O, unsafe workload ID, malformed-marker, native-publication, or
-/// empty-report error.
+/// Returns an I/O, unsafe workload ID, malformed-marker or metadata,
+/// native-publication, or empty-report error.
 pub fn render_markdown_campaigns(
     markdown_dir: &Path,
     reports: &[BenchmarkCampaignReport],
@@ -99,23 +164,45 @@ pub fn render_markdown_campaigns(
         let source = fs::read_to_string(&path)?;
         let rendered =
             replace_results_region(&path, &source, &render_multi_host_results(reports, case_id))?;
-        pending.push((path, rendered));
+        pending.push((path.clone(), add_runs_metadata(&path, rendered, reports)?));
     }
+
+    let overview_path = markdown_dir.join("overview.md");
+    let overview = match fs::read_to_string(&overview_path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => format!(
+            "---\ntype: Report\ntitle: Benchmark comparisons\ngenerated: {{ by: tq-benchmark, at: {} }}\n---\n\n# Benchmark comparisons\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n",
+            reports[0].environment.collected_at
+        ),
+        Err(error) => return Err(error.into()),
+    };
+    let overview = replace_results_region(
+        &overview_path,
+        &overview,
+        &render_multi_host_overview(reports),
+    )?;
+    pending.push((
+        overview_path.clone(),
+        add_runs_metadata(&overview_path, overview, reports)?,
+    ));
 
     let index_path = markdown_dir.join("index.md");
     let index = match fs::read_to_string(&index_path) {
         Ok(source) => source,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => format!(
-            "# Benchmark comparisons\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n"
-        ),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            "# Benchmark comparisons\n\n- [Overview](overview.md)\n".to_owned()
+        }
         Err(error) => return Err(error.into()),
     };
-    pending.push((
-        index_path.clone(),
-        replace_results_region(&index_path, &index, &render_multi_host_overview(reports))?,
-    ));
+    if index.starts_with("---") {
+        return Err(MarkdownRenderError::InvalidMetadata {
+            path: index_path,
+            reason: "benchmark index must be frontmatter-free navigation".to_owned(),
+        });
+    }
+    pending.push((index_path.clone(), index));
 
-    // Marker validation and rendering above happen before this loop.
+    // Marker and metadata validation/rendering above happen before this loop.
     for (path, contents) in pending {
         fs::write(path, contents)?;
     }
@@ -145,23 +232,41 @@ fn render_markdown_pages_single(
         let path = markdown_dir.join(filename);
         let source = fs::read_to_string(&path)?;
         let rendered = replace_results_region(&path, &source, &render_results(report, &rows))?;
-        pending.push((path, rendered));
+        pending.push((path.clone(), add_run_metadata(&path, &rendered, report)?));
     }
+
+    let overview_path = markdown_dir.join("overview.md");
+    let overview = match fs::read_to_string(&overview_path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => format!(
+            "---\ntype: Report\ntitle: Benchmark overview\ngenerated: {{ by: tq-benchmark, at: {} }}\n---\n\n# Benchmark overview\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n",
+            report.environment.collected_at
+        ),
+        Err(error) => return Err(error.into()),
+    };
+    let overview = replace_results_region(&overview_path, &overview, &render_overview(report))?;
+    pending.push((
+        overview_path.clone(),
+        add_run_metadata(&overview_path, &overview, report)?,
+    ));
 
     let index_path = markdown_dir.join("index.md");
     let index = match fs::read_to_string(&index_path) {
         Ok(source) => source,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => format!(
-            "# Benchmark comparisons\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n"
-        ),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            "# Benchmark overview\n\n- [Overview](overview.md)\n".to_owned()
+        }
         Err(error) => return Err(error.into()),
     };
-    pending.push((
-        index_path.clone(),
-        replace_results_region(&index_path, &index, &render_overview(report))?,
-    ));
+    if index.starts_with("---") {
+        return Err(MarkdownRenderError::InvalidMetadata {
+            path: index_path,
+            reason: "benchmark index must be frontmatter-free navigation".to_owned(),
+        });
+    }
+    pending.push((index_path.clone(), index));
 
-    // Marker validation and rendering above happen before this loop.
+    // Marker and metadata validation/rendering above happen before this loop.
     for (path, contents) in pending {
         fs::write(path, contents)?;
     }
@@ -1233,7 +1338,8 @@ mod tests {
         assert!(first.contains("Authored introduction."));
         assert!(first.contains("Authored trailing note."));
         assert!(!first.contains("old generated text"));
-        assert!(first.starts_with("# Blocking sort\n\nAuthored introduction.\n\n## Results\n"));
+        assert!(first.starts_with("---\n"));
+        assert!(first.contains("\n---\n# Blocking sort\n\nAuthored introduction.\n\n## Results\n"));
         assert!(first.ends_with(&format!(
             "{RESULTS_END_MARKER}\n\nAuthored trailing note.\n"
         )));
@@ -1259,11 +1365,16 @@ mod tests {
         let second = fs::read_to_string(&page).expect("rendered page again");
         assert_eq!(first, second);
 
-        let index = fs::read_to_string(directory.path().join("index.md")).expect("index");
-        assert!(index.contains("Profile: `standard` | Campaign status: `passed`"));
-        assert!(!index.contains("Profile: `standard` | Status:"));
+        let overview = fs::read_to_string(directory.path().join("overview.md")).expect("overview");
+        assert!(overview.starts_with("---\ntype: Report\ntitle: Benchmark overview\n"));
+        assert!(overview.contains("Profile: `standard` | Campaign status: `passed`"));
+        assert!(!overview.contains("Profile: `standard` | Status:"));
+        assert!(
+            !fs::read_to_string(directory.path().join("index.md"))
+                .expect("index")
+                .starts_with("---")
+        );
     }
-
     #[test]
     fn multi_host_rendering_keeps_results_separate_and_preserves_authored_bytes() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -1289,7 +1400,10 @@ mod tests {
 
         render_markdown_campaigns(directory.path(), &[linux, macos]).expect("render hosts");
         let rendered = fs::read_to_string(&page).expect("rendered page");
-        assert!(rendered.starts_with("# Blocking sort\n\nAuthored introduction.\n\n## Results\n"));
+        assert!(rendered.starts_with("---\n"));
+        assert!(
+            rendered.contains("\n---\n# Blocking sort\n\nAuthored introduction.\n\n## Results\n")
+        );
         assert!(rendered.ends_with(&format!(
             "{RESULTS_END_MARKER}\n\nAuthored trailing note.\n"
         )));
@@ -1299,10 +1413,11 @@ mod tests {
         assert!(rendered.contains("| Peak RSS | 2.0 MiB |"));
         assert!(rendered.contains("| Peak RSS | 3.0 MiB |"));
 
+        let overview = fs::read_to_string(directory.path().join("overview.md")).expect("overview");
+        assert_eq!(overview.matches("### Host:").count(), 2);
         let index = fs::read_to_string(directory.path().join("index.md")).expect("index");
-        assert_eq!(index.matches("### Host:").count(), 2);
+        assert!(!index.starts_with("---"));
     }
-
     #[test]
     fn multi_host_rendering_validates_all_markers_before_writing() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -1697,6 +1812,33 @@ mod tests {
                 .lines()
                 .any(|line| line.starts_with("| ") && line.contains("bsd-time-l"))
         );
+    }
+
+    #[test]
+    fn malformed_frontmatter_is_rejected_before_any_page_changes() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let page = directory.path().join("blocking-sort.md");
+        let overview = directory.path().join("overview.md");
+        let bad_page = format!(
+            "---\ntitle: [unterminated\n---\n# Workload\n\n## Results\n{RESULTS_START_MARKER}\nold\n{RESULTS_END_MARKER}\n"
+        );
+        let overview_source = format!(
+            "# Overview\n\n## Results\n{RESULTS_START_MARKER}\nold overview\n{RESULTS_END_MARKER}\n"
+        );
+        let index = directory.path().join("index.md");
+        let index_source = "# Index\n\n- [Overview](overview.md)\n".to_owned();
+        fs::write(&page, &bad_page).expect("malformed page");
+        fs::write(&overview, &overview_source).expect("overview");
+        fs::write(&index, &index_source).expect("index");
+        let report = report(vec![row(
+            "benchmark.blocking-sort",
+            BenchmarkOutcome::Timed,
+        )]);
+
+        assert!(render_markdown_pages(directory.path(), &report).is_err());
+        assert_eq!(fs::read_to_string(page).unwrap(), bad_page);
+        assert_eq!(fs::read_to_string(overview).unwrap(), overview_source);
+        assert_eq!(fs::read_to_string(index).unwrap(), index_source);
     }
 
     fn report(cases: Vec<BenchmarkRow>) -> BenchmarkCampaignReport {

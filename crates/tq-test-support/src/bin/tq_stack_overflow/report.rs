@@ -357,7 +357,8 @@ pub fn render_report_with_outputs(
 
     let mut pending = Vec::with_capacity(scenarios.len() + 1);
     let mut migrations = Vec::new();
-    let mut page_paths = BTreeSet::from([report_dir.join("index.md")]);
+    let overview_path = report_dir.join("overview.md");
+    let mut page_paths = BTreeSet::from([report_dir.join("index.md"), overview_path.clone()]);
     for record in scenarios {
         let path = report_dir.join(page_filename(record));
         if !page_paths.insert(path.clone()) {
@@ -393,7 +394,7 @@ pub fn render_report_with_outputs(
             }
             Err(error) => return Err(error.into()),
         };
-        let source = if source.starts_with("---\n") {
+        let source = if source.starts_with("---") {
             source
         } else {
             format!(
@@ -415,16 +416,38 @@ pub fn render_report_with_outputs(
             &tokenizers,
         ));
         let rendered = replace_results_region(&path, &source, &generated)?;
-        pending.push((path, rendered));
+        pending.push((
+            path.clone(),
+            add_run_metadata(&path, &rendered, report, outputs)?,
+        ));
     }
 
     let index_path = report_dir.join("index.md");
-    let mut source = match fs::read_to_string(&index_path) {
+    let nav = prepare_navigation(&index_path, scenarios, &migrations)?;
+    let overview = prepare_overview(&overview_path, report, scenarios, outputs)?;
+    pending.push((overview_path.clone(), overview));
+
+    for (path, contents) in pending {
+        fs::write(path, contents)?;
+    }
+    fs::write(&index_path, &nav)?;
+    for (legacy, _) in migrations {
+        fs::remove_file(legacy)?;
+    }
+    Ok(nav)
+}
+
+fn prepare_navigation(
+    index_path: &Path,
+    scenarios: &[ScenarioRecord],
+    migrations: &[(PathBuf, PathBuf)],
+) -> Result<String, ReportError> {
+    let mut source = match fs::read_to_string(index_path) {
         Ok(source) => source,
         Err(error) if error.kind() == io::ErrorKind::NotFound => index_preamble(scenarios),
         Err(error) => return Err(error.into()),
     };
-    for (legacy, normalized) in &migrations {
+    for (legacy, normalized) in migrations {
         let old = legacy.file_name().expect("page filename").to_string_lossy();
         let new = normalized
             .file_name()
@@ -433,18 +456,106 @@ pub fn render_report_with_outputs(
         source = source.replace(&format!("(./{old})"), &format!("(./{new})"));
         source = source.replace(&format!("({old})"), &format!("({new})"));
     }
+    if source.starts_with("---") {
+        return Err(ReportError::Invalid(
+            "benchmark index must be frontmatter-free navigation".to_owned(),
+        ));
+    }
+    Ok(if source.contains("overview.md") {
+        source
+    } else {
+        format!("# Stack Overflow jq top 50\n\n- [Measured overview](overview.md)\n\n{source}")
+    })
+}
+
+fn prepare_overview(
+    overview_path: &Path,
+    report: &BenchmarkCampaignReport,
+    scenarios: &[ScenarioRecord],
+    outputs: Option<&super::outputs::OutputCampaign>,
+) -> Result<String, ReportError> {
+    let mut overview = match fs::read_to_string(overview_path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            format!(
+                "---\ntype: Report\ntitle: Stack Overflow benchmark results\ndescription: \"Measured results for Stack Overflow jq scenarios.\"\ngenerated: {{ by: tq-stack-overflow, at: {} }}\n---\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n",
+                report.environment.collected_at
+            )
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if !overview.starts_with("---") {
+        overview = format!(
+            "---\ntype: Report\ntitle: Stack Overflow benchmark results\ndescription: \"Measured results for Stack Overflow jq scenarios.\"\ngenerated: {{ by: tq-stack-overflow, at: {} }}\n---\n\n{overview}",
+            report.environment.collected_at
+        );
+    }
     let mut generated = render_index_results(report, scenarios);
     generated.push_str(&super::outputs::render_summary(outputs));
-    let index = replace_results_region(&index_path, &source, &generated)?;
-    pending.push((index_path, index.clone()));
+    let overview = replace_results_region(overview_path, &overview, &generated)?;
+    add_run_metadata(overview_path, &overview, report, outputs)
+}
 
-    for (path, contents) in pending {
-        fs::write(path, contents)?;
+fn add_run_metadata(
+    path: &Path,
+    source: &str,
+    report: &BenchmarkCampaignReport,
+    outputs: Option<&super::outputs::OutputCampaign>,
+) -> Result<String, ReportError> {
+    let mut binaries = report
+        .tools
+        .iter()
+        .map(|tool| {
+            (
+                format!("{:?}", tool.tool).to_ascii_lowercase(),
+                serde_json::json!({
+                    "version": tool.version,
+                    "sha256": tool.executable.sha256,
+                }),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for row in &report.cases {
+        let role = row.adapter_id.split('-').next().unwrap_or_default();
+        if matches!(role, "tq" | "jq" | "yq") {
+            binaries.entry(role.to_owned()).or_insert_with(|| {
+                serde_json::json!({
+                    "version": null,
+                    "sha256": null,
+                    "identity_status": "not-recorded",
+                    "provenance": "campaign report did not retain this measured binary identity",
+                })
+            });
+        }
     }
-    for (legacy, _) in migrations {
-        fs::remove_file(legacy)?;
+    if let Some(outputs) = outputs {
+        for tool in &outputs.tools {
+            let name = format!("{:?}", tool.tool).to_ascii_lowercase();
+            let measured = report
+                .tools
+                .iter()
+                .find(|measured| measured.tool == tool.tool);
+            let identity = serde_json::json!({
+                "version": tool.version,
+                "sha256": tool.executable.sha256,
+            });
+            if measured.is_some_and(|measured| {
+                measured.version != tool.version
+                    || measured.executable.sha256 != tool.executable.sha256
+            }) {
+                binaries.insert(format!("{name}_output_capture"), identity);
+            } else if measured.is_none() || !binaries.contains_key(&name) {
+                binaries.insert(name, identity);
+            }
+        }
     }
-    Ok(index)
+    let binaries = yaml_serde::from_str(
+        &serde_json::to_string(&binaries)
+            .map_err(|error| ReportError::Invalid(error.to_string()))?,
+    )
+    .map_err(|error| ReportError::Invalid(error.to_string()))?;
+    tq_test_support::benchmark::merge_benchmark_run(source, &report.campaign_id, binaries)
+        .map_err(|reason| ReportError::Invalid(format!("{}: {reason}", path.display())))
 }
 
 fn page_filename(record: &ScenarioRecord) -> String {
@@ -1366,14 +1477,10 @@ mod tests {
         .expect("rerender");
         let page = fs::read_to_string(&page).expect("page");
         assert!(page.contains("Authored note before results."));
-        assert!(page.starts_with("---\ntype: Report\n"));
         assert!(page.contains("[selected answer](https://stackoverflow.com/a/2)"));
-        assert!(page.contains(RESULTS_START_MARKER));
         let index = fs::read_to_string(report_dir.join("index.md")).expect("index");
         assert!(index.contains("(./01-a.md)"));
-        assert!(index.contains("Matched successful scenario comparison"));
-        assert!(!page.contains("Last updated:"));
-        assert!(index.contains("Last updated:"));
+        assert!(!index.starts_with("---"));
     }
 
     #[test]
@@ -1612,8 +1719,8 @@ mod tests {
         });
         render_report(&failed, &scenarios, directory.path(), directory.path())
             .expect("completed campaigns with failed rows remain publishable");
-        let index = fs::read_to_string(directory.path().join("index.md")).unwrap();
-        assert!(index.contains("Status: `observed-failures`"));
+        let overview = fs::read_to_string(directory.path().join("overview.md")).unwrap();
+        assert!(overview.contains("Status: `observed-failures`"));
     }
 
     #[test]

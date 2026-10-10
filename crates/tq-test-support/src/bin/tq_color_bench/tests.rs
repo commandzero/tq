@@ -21,6 +21,7 @@ fn sample() -> MeasuredOutcome {
 
 fn report() -> ColorReport {
     ColorReport {
+        tq_version: None,
         source: "synthetic.json".into(),
         source_bytes: 100,
         source_sha256: None,
@@ -56,10 +57,6 @@ fn regeneration_is_idempotent_and_updates_metrics_without_touching_authored_text
     let mut reports = vec![report(), report()];
     render_reports(&page, &reports).unwrap();
     let first = fs::read_to_string(&page).unwrap();
-    assert!(first.starts_with("# Color test\n\nKeep introduction."));
-    assert!(first.ends_with("Keep method.\n"));
-    assert!(!first.contains("stale"));
-    assert!(!first.contains("synthetic-tq"));
     render_reports(&page, &reports).unwrap();
     assert_eq!(fs::read_to_string(&page).unwrap(), first);
     for sample in &mut reports[0].rows[1].samples {

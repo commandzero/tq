@@ -3,6 +3,14 @@ type: Report
 title: "How to combine the sequence of objects in jq into one object?"
 description: "Benchmark reproduction and measured results for Stack Overflow scenario 38."
 generated: { by: codex/gpt-6-astra, at: 2026-09-26T06:55:52Z }
+benchmark_runs:
+  - campaign_id: "2026-09-26"
+    identity_status: not-recorded
+    provenance: "Native macOS scenario Results section preserves captured tool version strings; page generated 2026-09-26. Exact campaign ID and binary hashes are not recorded."
+    binaries:
+      tq: { version: "tq 0.3.0 (TOON v3; jq target 1.8.x; revision 24bbd2581677b951c5bf275ca80e64e366c9cefb)", sha256: null }
+      jq: { version: "jq-1.8.2", sha256: null }
+      yq: { version: "yq (https://github.com/mikefarah/yq/) version v4.53.2", sha256: null }
 ---
 
 # 38: How to combine the sequence of objects in jq into one object?
