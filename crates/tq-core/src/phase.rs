@@ -211,8 +211,6 @@ pub struct TranscodeProof {
     pub late_errors: bool,
     /// Canonical TOON writer is selected.
     pub canonical_toon_writer: bool,
-    /// Collision-prone key folding is disabled.
-    pub key_folding_disabled: bool,
     /// Publication behavior selected for the output framing.
     pub commitment: TranscodeCommitment,
     /// Configured finite resource bounds.
@@ -761,7 +759,7 @@ impl Program<Compiled> {
                 "query is not proven to emit its input unchanged exactly once",
             ));
         }
-        if !proof.canonical_toon_writer || !proof.key_folding_disabled {
+        if !proof.canonical_toon_writer {
             return Err(plan_error(
                 "TQ-CAP-TRANSCODE-003",
                 "writer options do not admit canonical structural transcode",
@@ -1338,7 +1336,6 @@ mod tests {
             duplicate_policy: TranscodeDuplicatePolicy::Reject,
             late_errors: true,
             canonical_toon_writer: true,
-            key_folding_disabled: true,
             commitment: TranscodeCommitment::DirectSequence,
             limits: TranscodeLimits {
                 maximum_memory_bytes: 1024,

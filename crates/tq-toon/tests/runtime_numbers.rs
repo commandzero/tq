@@ -1,15 +1,23 @@
 //! Computed non-finite numbers project to valid TOON at output boundaries.
 
 use tq_core::{Number, Value};
-use tq_toon::{ArrayPreparationConfig, PreparedArray, WriterConfig, encode};
+use tq_toon::{
+    ArrayPreparationConfig, PreparationArena, PreparationLimits, PreparedArray, WriterConfig,
+    encode,
+};
 
 #[test]
 fn prepared_output_projects_nan_in_memory_and_after_spilling() {
     for memory_threshold_bytes in [0, 4096] {
-        let mut prepared = PreparedArray::new(ArrayPreparationConfig {
+        let config = ArrayPreparationConfig {
             memory_threshold_bytes,
             ..ArrayPreparationConfig::default()
+        };
+        let arena = PreparationArena::new(PreparationLimits {
+            memory_bytes: 1024 * 1024,
+            ..PreparationLimits::default()
         });
+        let mut prepared = PreparedArray::in_arena(config, arena);
         prepared
             .push(&Value::Number(Number::from_runtime_f64(f64::NAN)))
             .unwrap();

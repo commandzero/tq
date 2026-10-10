@@ -2355,9 +2355,9 @@ dependencies = [
 
 [[package]]
 name = "toon-format"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f89570c1a68d73941f728cca32a4345b2ffca36667ad921af336c60309a3e7e"
+checksum = "60d6b2882e5a8a03fdecf6869a94ea5e84105a4c99d05be0d3878658b9354b1a"
 dependencies = [
  "indexmap",
  "serde",
@@ -2412,7 +2412,7 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tq-cli"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "mimalloc",
@@ -2429,7 +2429,7 @@ dependencies = [
 
 [[package]]
 name = "tq-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "base64 0.23.1",
  "criterion",
@@ -2451,7 +2451,7 @@ dependencies = [
 
 [[package]]
 name = "tq-formats"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "json5",
@@ -2468,7 +2468,7 @@ dependencies = [
 
 [[package]]
 name = "tq-test-support"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "jiff",
  "jsonschema",
@@ -2500,10 +2500,11 @@ dependencies = [
 
 [[package]]
 name = "tq-toon"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "criterion",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "toon-format",

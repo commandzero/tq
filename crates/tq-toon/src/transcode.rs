@@ -9,15 +9,14 @@ use std::{
 };
 
 use thiserror::Error;
-use tq_core::{Number, Object, Value, presentation::ColorPalette};
+use tq_core::presentation::ColorPalette;
 
 use crate::{
     ArrayPreparationConfig, DuplicateKeyPolicy, Event, EventConsumer, PreparationArena,
-    PreparationMemory, PreparationObservations, PreparedArray, PreparedKeySet, PreparedObject,
-    Scalar, ScalarToken, SpoolError, WriterConfig, WriterError, write_value_colored,
-    writer::{self, ScalarContext},
+    PreparationMemory, PreparationObservations, Scalar, ScalarToken, SpoolError, WriterConfig,
+    WriterError,
+    spool::event_tape::{ContainerKind, PreparedContainer, PreparedNode, PreparedTape, TapeError},
 };
-
 /// Output commitment selected before structural decoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TranscodeCommitment {
@@ -63,7 +62,10 @@ pub struct TranscodeConsumer<W> {
     arena: PreparationArena,
     duplicate_keys: DuplicateKeyPolicy,
     commitment: TranscodeCommitment,
+    tape: Option<PreparedTape>,
+    frames_memory: PreparationMemory,
     frames: Vec<Frame>,
+    root: Option<PreparedNode>,
     document_active: bool,
     root_complete: bool,
     documents: u64,
@@ -74,9 +76,15 @@ pub struct TranscodeConsumer<W> {
     palette: Option<ColorPalette>,
 }
 
+struct Frame {
+    kind: ContainerKind,
+    container: PreparedContainer,
+}
+
 struct StagedOutput<W> {
     committed: W,
     pending: Option<BufWriter<crate::PublicationBuffer>>,
+    pending_memory: Option<PreparationMemory>,
 }
 
 impl<W> StagedOutput<W> {
@@ -84,6 +92,7 @@ impl<W> StagedOutput<W> {
         Self {
             committed,
             pending: None,
+            pending_memory: None,
         }
     }
 
@@ -92,12 +101,16 @@ impl<W> StagedOutput<W> {
         config: ArrayPreparationConfig,
         arena: PreparationArena,
     ) -> Result<(), TranscodeError> {
+        const CAPACITY: usize = 64 * 1024;
         if self.pending.is_some() {
             return Err(TranscodeError::Structure("nested output publication"));
         }
+        let mut memory = arena.memory_charge();
+        memory.grow(CAPACITY)?;
+        self.pending_memory = Some(memory);
         // Token-sized writes must not become individual spool-file writes.
         self.pending = Some(BufWriter::with_capacity(
-            64 * 1024,
+            CAPACITY,
             crate::PublicationBuffer::new(config, arena),
         ));
         Ok(())
@@ -124,6 +137,8 @@ impl<W> StagedOutput<W> {
                 crate::PublicationError::Io(error) => TranscodeError::Io(error),
             });
         }
+        drop(pending);
+        drop(self.pending_memory.take());
         self.committed.flush().map_err(TranscodeError::Io)
     }
 
@@ -150,102 +165,6 @@ impl<W: Write> Write for StagedOutput<W> {
     }
 }
 
-enum Frame {
-    DirectObject {
-        _charge: crate::PreparationFrame,
-        parent_key: Option<Arc<str>>,
-        depth: usize,
-        pending_key: Option<Arc<str>>,
-        seen: PreparedKeySet,
-        wrote_member: bool,
-        header_published: bool,
-    },
-    RootObjectNormalized {
-        _charge: crate::PreparationFrame,
-        pending_key: Option<Arc<str>>,
-        object: PreparedObject,
-    },
-    RootArray {
-        _charge: crate::PreparationFrame,
-        array: PreparedArray,
-    },
-    DirectArray {
-        _charge: crate::PreparationFrame,
-        parent_key: Arc<str>,
-        depth: usize,
-        array: PreparedArray,
-    },
-    Object {
-        _charge: crate::PreparationFrame,
-        memory: PreparationMemory,
-        pending_key: Option<Arc<str>>,
-        values: Object,
-    },
-    Array {
-        _charge: crate::PreparationFrame,
-        memory: PreparationMemory,
-        values: Vec<Value>,
-    },
-}
-
-fn grow_preparation_memory(
-    memory: &mut PreparationMemory,
-    bytes: usize,
-    ancestors: &mut [Frame],
-) -> Result<(), SpoolError> {
-    match memory.grow(bytes) {
-        Err(SpoolError::MemoryLimit) => {}
-        result => return result,
-    }
-    // Completed siblings are reclaimable; the element currently being decoded
-    // is not. Spill only under actual pressure, then retry the same charge.
-    for frame in ancestors.iter_mut().rev() {
-        if let Frame::RootArray { array, .. } | Frame::DirectArray { array, .. } = frame
-            && array.spill_retained()?
-        {
-            match memory.grow(bytes) {
-                Err(SpoolError::MemoryLimit) => {}
-                result => return result,
-            }
-        }
-    }
-    Err(SpoolError::MemoryLimit)
-}
-
-struct IndentingWriter<'a, W> {
-    output: &'a mut W,
-    indentation: usize,
-    line_start: bool,
-}
-
-impl<W: Write> Write for IndentingWriter<'_, W> {
-    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        let mut start = 0;
-        while start < buffer.len() {
-            if self.line_start {
-                for _ in 0..self.indentation {
-                    self.output.write_all(b" ")?;
-                }
-                self.line_start = false;
-            }
-            if let Some(relative) = buffer[start..].iter().position(|byte| *byte == b'\n') {
-                let end = start + relative + 1;
-                self.output.write_all(&buffer[start..end])?;
-                self.line_start = true;
-                start = end;
-            } else {
-                self.output.write_all(&buffer[start..])?;
-                break;
-            }
-        }
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.output.flush()
-    }
-}
-
 impl<W: Write> TranscodeConsumer<W> {
     /// Creates a consumer for one selected decoder and output commitment.
     #[must_use]
@@ -257,6 +176,7 @@ impl<W: Write> TranscodeConsumer<W> {
         duplicate_keys: DuplicateKeyPolicy,
         commitment: TranscodeCommitment,
     ) -> Self {
+        let frames_memory = arena.memory_charge();
         Self {
             output: StagedOutput::new(output),
             writer,
@@ -264,7 +184,10 @@ impl<W: Write> TranscodeConsumer<W> {
             arena,
             duplicate_keys,
             commitment,
+            tape: None,
+            frames_memory,
             frames: Vec::new(),
+            root: None,
             document_active: false,
             root_complete: false,
             documents: 0,
@@ -309,9 +232,6 @@ impl<W: Write> TranscodeConsumer<W> {
     }
 
     /// Applies an invocation-owned semantic palette to all TOON output paths.
-    ///
-    /// The palette is stored separately from Copy-compatible configuration so
-    /// plain callers and existing configuration literals remain unchanged.
     #[must_use]
     pub fn with_palette(mut self, palette: ColorPalette) -> Self {
         self.palette = Some(palette);
@@ -336,474 +256,109 @@ impl<W: Write> TranscodeConsumer<W> {
         }
     }
 
-    fn accepts_lightweight_scalar(&self) -> bool {
-        self.frames.last().is_none_or(|frame| {
-            matches!(
-                frame,
-                Frame::DirectObject { .. } | Frame::RootArray { .. } | Frame::DirectArray { .. }
-            )
-        })
+    fn tape(&mut self) -> Result<&mut PreparedTape, TranscodeError> {
+        self.tape
+            .as_mut()
+            .ok_or(TranscodeError::Structure("value outside a document"))
     }
 
-    fn start_object(&mut self) -> Result<(), TranscodeError> {
-        let charge = self.arena.enter()?;
-        if self.duplicate_keys == DuplicateKeyPolicy::Reject
-            && (self.frames.is_empty()
-                || matches!(self.frames.last(), Some(Frame::DirectObject { .. })))
-        {
-            self.current_truthy = Some(true);
-            let (parent_key, depth) = if let Some(Frame::DirectObject {
-                pending_key, depth, ..
-            }) = self.frames.last_mut()
-            {
-                (
-                    Some(
-                        pending_key
-                            .take()
-                            .ok_or(TranscodeError::Structure("object value without a key"))?,
-                    ),
-                    depth.saturating_add(1),
-                )
-            } else {
-                (None, 0)
-            };
-            self.frames.push(Frame::DirectObject {
-                _charge: charge,
-                parent_key,
-                depth,
-                pending_key: None,
-                seen: PreparedKeySet::new(self.preparation.clone(), self.arena.clone()),
-                wrote_member: false,
-                header_published: false,
-            });
-        } else if self.frames.is_empty() && !self.root_complete {
-            self.current_truthy = Some(true);
-            self.frames.push(Frame::RootObjectNormalized {
-                _charge: charge,
-                pending_key: None,
-                object: PreparedObject::new(self.preparation.clone(), self.arena.clone()),
-            });
-        } else {
-            self.frames.push(Frame::Object {
-                _charge: charge,
-                memory: self.arena.memory_charge(),
-                pending_key: None,
-                values: Object::new(),
-            });
+    fn start_container(&mut self, kind: ContainerKind) -> Result<(), TranscodeError> {
+        if self.root_complete {
+            return Err(TranscodeError::Structure("multiple roots in one document"));
         }
-        Ok(())
-    }
-
-    fn start_array(&mut self) -> Result<(), TranscodeError> {
-        let charge = self.arena.enter()?;
-        if self.frames.is_empty() && !self.root_complete {
-            self.current_truthy = Some(true);
-            self.frames.push(Frame::RootArray {
-                _charge: charge,
-                array: PreparedArray::in_arena(self.preparation.clone(), self.arena.clone()),
-            });
-        } else if matches!(self.frames.last(), Some(Frame::DirectObject { .. })) {
-            let (parent_key, depth) = match self.frames.last_mut() {
-                Some(Frame::DirectObject {
-                    pending_key, depth, ..
-                }) => (
-                    pending_key
-                        .take()
-                        .ok_or(TranscodeError::Structure("object value without a key"))?,
-                    *depth,
-                ),
-                _ => unreachable!(),
-            };
-            self.frames.push(Frame::DirectArray {
-                _charge: charge,
-                parent_key,
-                depth,
-                array: PreparedArray::in_arena(self.preparation.clone(), self.arena.clone()),
-            });
-        } else {
-            self.frames.push(Frame::Array {
-                _charge: charge,
-                memory: self.arena.memory_charge(),
-                values: Vec::new(),
-            });
+        if self.frames.len() >= crate::writer::MAX_WRITER_DEPTH {
+            return Err(WriterError::Schema {
+                resource: "depth",
+                limit: crate::writer::MAX_WRITER_DEPTH,
+            }
+            .into());
         }
+        if self.frames.len() == self.frames.capacity() {
+            let next_capacity = self.frames.capacity().max(4).saturating_mul(2);
+            let additional = next_capacity.saturating_sub(self.frames.capacity());
+            self.frames_memory
+                .grow(additional.saturating_mul(std::mem::size_of::<Frame>()))?;
+            self.frames.reserve_exact(additional);
+        }
+        let container = self.tape()?.begin(kind).map_err(tape_error)?;
+        self.frames.push(Frame { kind, container });
         Ok(())
     }
 
     fn key(&mut self, key: Arc<str>) -> Result<(), TranscodeError> {
-        let current = self.frames.len().saturating_sub(1);
-        let (ancestors, current) = self.frames.split_at_mut(current);
-        match current.first_mut() {
-            Some(Frame::DirectObject {
-                pending_key, seen, ..
-            }) => {
-                if !seen.insert(Arc::clone(&key))? {
-                    return Err(TranscodeError::Duplicate(key));
-                }
-                if pending_key.replace(key).is_some() {
-                    return Err(TranscodeError::Structure("object key without a value"));
-                }
-            }
-            Some(Frame::RootObjectNormalized { pending_key, .. }) => {
-                if pending_key.replace(key).is_some() {
-                    return Err(TranscodeError::Structure("object key without a value"));
-                }
-            }
-            Some(Frame::Object {
-                memory,
-                pending_key,
-                ..
-            }) => {
-                grow_preparation_memory(memory, key.len().saturating_add(64), ancestors)?;
-                if pending_key.replace(key).is_some() {
-                    return Err(TranscodeError::Structure("object key without a value"));
-                }
-            }
-            _ => return Err(TranscodeError::Structure("key outside an object")),
+        let tape = self
+            .tape
+            .as_mut()
+            .ok_or(TranscodeError::Structure("key outside a document"))?;
+        let frame = self
+            .frames
+            .last_mut()
+            .ok_or(TranscodeError::Structure("key outside an object"))?;
+        if frame.kind != ContainerKind::Object {
+            return Err(TranscodeError::Structure("key outside an object"));
         }
-        Ok(())
+        tape.key(&mut frame.container, key).map_err(tape_error)
     }
 
-    fn complete_value(&mut self, value: Value) -> Result<(), TranscodeError> {
-        let current = self.frames.len().saturating_sub(1);
-        let (ancestors, current) = self.frames.split_at_mut(current);
-        match current.first_mut() {
-            Some(Frame::DirectObject { pending_key, .. }) => {
-                let key = pending_key
-                    .take()
-                    .ok_or(TranscodeError::Structure("object value without a key"))?;
-                let index = self.frames.len() - 1;
-                self.prepare_direct_member_line(index)?;
-                let palette = self.palette.as_ref();
-                writer::write_key(&mut self.output, &key, palette)?;
-                if matches!(value, Value::Array(_)) {
-                    // Canonical TOON joins an object key directly to an array header.
-                } else {
-                    self.output.write_all(b": ")?;
-                }
-                let depth = match &self.frames[index] {
-                    Frame::DirectObject { depth, .. } => *depth,
-                    _ => unreachable!(),
-                };
-                let mut indented = IndentingWriter {
-                    output: &mut self.output,
-                    indentation: depth.saturating_mul(self.writer.indent_size),
-                    line_start: false,
-                };
-                write_value_colored(&mut indented, &value, self.writer, palette)?;
-                let Frame::DirectObject { wrote_member, .. } = &mut self.frames[index] else {
-                    unreachable!()
-                };
-                *wrote_member = true;
+    fn attach(&mut self, node: PreparedNode) -> Result<(), TranscodeError> {
+        if self.frames.is_empty() {
+            if self.root.is_some() || self.root_complete {
+                return Err(TranscodeError::Structure("multiple roots in one document"));
             }
-            Some(Frame::RootObjectNormalized {
-                pending_key,
-                object,
-                ..
-            }) => {
-                let key = pending_key
-                    .take()
-                    .ok_or(TranscodeError::Structure("object value without a key"))?;
-                object.push(key, &value)?;
-            }
-            Some(Frame::RootArray { array, .. } | Frame::DirectArray { array, .. }) => {
-                array.push(&value)?;
-            }
-            Some(Frame::Object {
-                pending_key,
-                memory,
-                values,
-                ..
-            }) => {
-                let key = pending_key
-                    .take()
-                    .ok_or(TranscodeError::Structure("object value without a key"))?;
-                if self.duplicate_keys == DuplicateKeyPolicy::Reject && values.contains_key(&key) {
-                    return Err(TranscodeError::Duplicate(key));
-                }
-                grow_preparation_memory(memory, retained_value_bytes(&value), ancestors)?;
-                values.insert(key, value);
-            }
-            Some(Frame::Array { memory, values, .. }) => {
-                grow_preparation_memory(memory, retained_value_bytes(&value), ancestors)?;
-                values.push(value);
-            }
-            None if !self.root_complete => {
-                self.current_truthy = Some(!matches!(value, Value::Null | Value::Bool(false)));
-                let palette = self.palette.as_ref();
-                write_value_colored(&mut self.output, &value, self.writer, palette)?;
-                self.root_complete = true;
-            }
-            None => return Err(TranscodeError::Structure("multiple roots in one document")),
+            self.current_truthy = Some(node.truthy());
+            let tape = self
+                .tape
+                .as_mut()
+                .ok_or(TranscodeError::Structure("value outside a document"))?;
+            tape.write(&node, &mut self.output, self.writer, self.palette.as_ref())
+                .map_err(tape_error)?;
+            self.root = Some(node);
+            self.root_complete = true;
+            return Ok(());
         }
-        Ok(())
+        let tape = self
+            .tape
+            .as_mut()
+            .ok_or(TranscodeError::Structure("value outside a document"))?;
+        let parent = self
+            .frames
+            .last_mut()
+            .ok_or(TranscodeError::Structure("missing prepared parent"))?;
+        tape.push(&mut parent.container, node).map_err(tape_error)
     }
 
     fn complete_scalar(&mut self, value: ScalarToken<'_>) -> Result<(), TranscodeError> {
-        match self.frames.last_mut() {
-            Some(Frame::DirectObject { pending_key, .. }) => {
-                let key = pending_key
-                    .take()
-                    .ok_or(TranscodeError::Structure("object value without a key"))?;
-                let index = self.frames.len() - 1;
-                self.prepare_direct_member_line(index)?;
-                let palette = self.palette.as_ref();
-                writer::write_key(&mut self.output, &key, palette)?;
-                self.output.write_all(b": ")?;
-                let depth = match &self.frames[index] {
-                    Frame::DirectObject { depth, .. } => *depth,
-                    _ => unreachable!(),
-                };
-                let mut indented = IndentingWriter {
-                    output: &mut self.output,
-                    indentation: depth.saturating_mul(self.writer.indent_size),
-                    line_start: false,
-                };
-                let palette = self.palette.as_ref();
-                writer::write_scalar_token_colored(
-                    &mut indented,
-                    value,
-                    self.writer,
-                    ScalarContext::Root,
-                    palette,
-                )?;
-                let Frame::DirectObject { wrote_member, .. } = &mut self.frames[index] else {
-                    unreachable!()
-                };
-                *wrote_member = true;
-            }
-            Some(Frame::RootArray { array, .. } | Frame::DirectArray { array, .. }) => {
-                array.push_scalar(value)?;
-            }
-            None if !self.root_complete => {
-                self.current_truthy = Some(!matches!(
-                    value,
-                    ScalarToken::Null | ScalarToken::Bool(false)
-                ));
-                writer::write_scalar_token_colored(
-                    &mut self.output,
-                    value,
-                    self.writer,
-                    ScalarContext::Root,
-                    self.palette.as_ref(),
-                )?;
-                self.root_complete = true;
-            }
-            _ => self.complete_value(scalar_token_value(value)?)?,
-        }
-        Ok(())
+        let node = self.tape()?.scalar_token(value).map_err(tape_error)?;
+        self.attach(node)
     }
 
-    fn end_object(&mut self) -> Result<(), TranscodeError> {
+    fn complete_decoded_scalar(&mut self, value: Scalar) -> Result<(), TranscodeError> {
+        let node = self.tape()?.scalar(value).map_err(tape_error)?;
+        self.attach(node)
+    }
+
+    fn end_container(&mut self, kind: ContainerKind) -> Result<(), TranscodeError> {
         let frame = self
             .frames
             .pop()
-            .ok_or(TranscodeError::Structure("object end without start"))?;
-        match frame {
-            Frame::DirectObject {
-                pending_key,
-                parent_key,
-                header_published,
-                ..
-            } => {
-                if pending_key.is_some() {
-                    return Err(TranscodeError::Structure("object key without a value"));
-                }
-                if let Some(key) = parent_key {
-                    if !header_published {
-                        let parent =
-                            self.frames
-                                .len()
-                                .checked_sub(1)
-                                .ok_or(TranscodeError::Structure(
-                                    "nested object without direct parent",
-                                ))?;
-                        self.prepare_direct_member_line(parent)?;
-                        let palette = self.palette.as_ref();
-                        writer::write_key(&mut self.output, &key, palette)?;
-                        self.output.write_all(b":")?;
-                        let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent]
-                        else {
-                            return Err(TranscodeError::Structure(
-                                "nested object parent is not direct",
-                            ));
-                        };
-                        *wrote_member = true;
-                    }
-                } else {
-                    self.root_complete = true;
-                }
-            }
-            Frame::RootObjectNormalized {
-                pending_key,
-                mut object,
-                ..
-            } => {
-                if pending_key.is_some() {
-                    return Err(TranscodeError::Structure("object key without a value"));
-                }
-                let mut wrote_member = false;
-                object.for_each_member(|key, value| {
-                    if wrote_member {
-                        self.output.write_all(b"\n")?;
-                    }
-                    let mut member = Object::new();
-                    member.insert(Arc::from(key), value.clone());
-                    write_value_colored(
-                        &mut self.output,
-                        &Value::object(member),
-                        self.writer,
-                        self.palette.as_ref(),
-                    )
-                    .map_err(|WriterError::Io(error)| SpoolError::Io(error))?;
-                    wrote_member = true;
-                    Ok(())
-                })?;
-                self.root_complete = true;
-            }
-            Frame::Object {
-                pending_key,
-                memory,
-                values,
-                ..
-            } => {
-                if pending_key.is_some() {
-                    return Err(TranscodeError::Structure("object key without a value"));
-                }
-                drop(memory);
-                self.complete_value(Value::object(values))?;
-            }
-            Frame::RootArray { .. } | Frame::DirectArray { .. } | Frame::Array { .. } => {
-                return Err(TranscodeError::Structure("object end closed an array"));
-            }
+            .ok_or(TranscodeError::Structure("container end without start"))?;
+        if frame.kind != kind {
+            return Err(match kind {
+                ContainerKind::Object => TranscodeError::Structure("object end closed an array"),
+                ContainerKind::Array => TranscodeError::Structure("array end closed an object"),
+            });
         }
-        Ok(())
-    }
-
-    fn end_array(&mut self) -> Result<(), TranscodeError> {
-        let frame = self
-            .frames
-            .pop()
-            .ok_or(TranscodeError::Structure("array end without start"))?;
-        match frame {
-            Frame::RootArray { mut array, .. } => {
-                array.write_to_colored(&mut self.output, self.writer, self.palette.as_ref())?;
-                self.root_complete = true;
-            }
-            Frame::DirectArray {
-                parent_key,
-                depth,
-                mut array,
-                ..
-            } => {
-                let parent = self
-                    .frames
-                    .len()
-                    .checked_sub(1)
-                    .ok_or(TranscodeError::Structure("nested array without parent"))?;
-                self.prepare_direct_member_line(parent)?;
-                let palette = self.palette.as_ref();
-                writer::write_key(&mut self.output, &parent_key, palette)?;
-                let mut indented = IndentingWriter {
-                    output: &mut self.output,
-                    indentation: depth.saturating_mul(self.writer.indent_size),
-                    line_start: false,
-                };
-                array.write_to_colored(&mut indented, self.writer, self.palette.as_ref())?;
-                let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
-                    return Err(TranscodeError::Structure(
-                        "nested array parent is not direct",
-                    ));
-                };
-                *wrote_member = true;
-            }
-            Frame::Array { memory, values, .. } => {
-                drop(memory);
-                self.complete_value(Value::array(values))?;
-            }
-            Frame::DirectObject { .. }
-            | Frame::RootObjectNormalized { .. }
-            | Frame::Object { .. } => {
-                return Err(TranscodeError::Structure("array end closed an object"));
-            }
-        }
-        Ok(())
-    }
-
-    fn prepare_direct_member_line(&mut self, index: usize) -> Result<(), TranscodeError> {
-        let (parent_key, depth, wrote_member, header_published) = match &self.frames[index] {
-            Frame::DirectObject {
-                parent_key,
-                depth,
-                wrote_member,
-                header_published,
-                ..
-            } => (parent_key.clone(), *depth, *wrote_member, *header_published),
-            _ => return Err(TranscodeError::Structure("member outside direct object")),
-        };
-        if !header_published && let Some(ref key) = parent_key {
-            let parent = index
-                .checked_sub(1)
-                .ok_or(TranscodeError::Structure("nested object without parent"))?;
-            self.prepare_direct_member_line(parent)?;
-            let palette = self.palette.as_ref();
-            writer::write_key(&mut self.output, key, palette)?;
-            self.output.write_all(b":")?;
-            let Frame::DirectObject { wrote_member, .. } = &mut self.frames[parent] else {
-                return Err(TranscodeError::Structure(
-                    "nested object parent is not direct",
-                ));
-            };
-            *wrote_member = true;
-            let Frame::DirectObject {
-                header_published, ..
-            } = &mut self.frames[index]
-            else {
-                unreachable!()
-            };
-            *header_published = true;
-        }
-        let nested_header = parent_key.is_some();
-        if wrote_member || nested_header {
-            self.output.write_all(b"\n")?;
-        }
-        for _ in 0..depth.saturating_mul(self.writer.indent_size) {
-            self.output.write_all(b" ")?;
-        }
-        Ok(())
+        let node = self.tape()?.finish(frame.container).map_err(tape_error)?;
+        self.attach(node)
     }
 }
 
-fn scalar_token_value(value: ScalarToken<'_>) -> Result<Value, TranscodeError> {
-    Ok(match value {
-        ScalarToken::Null => Value::Null,
-        ScalarToken::Bool(value) => Value::Bool(value),
-        ScalarToken::Number(value) => Value::Number(
-            Number::parse(value).map_err(|_| TranscodeError::Structure("invalid number token"))?,
-        ),
-        ScalarToken::String(value) => Value::string(value.to_owned()),
-    })
-}
-
-fn retained_value_bytes(value: &Value) -> usize {
-    match value {
-        Value::Null | Value::Bool(_) | Value::Number(_) => std::mem::size_of::<Value>(),
-        Value::String(value) => std::mem::size_of::<Value>().saturating_add(value.len()),
-        Value::Array(values) => values
-            .iter()
-            .fold(std::mem::size_of::<Value>(), |bytes, value| {
-                bytes.saturating_add(retained_value_bytes(value))
-            }),
-        Value::Object(values) => {
-            values
-                .iter()
-                .fold(std::mem::size_of::<Value>(), |bytes, (key, value)| {
-                    bytes
-                        .saturating_add(key.len())
-                        .saturating_add(64)
-                        .saturating_add(retained_value_bytes(value))
-                })
-        }
+fn tape_error(error: TapeError) -> TranscodeError {
+    match error {
+        TapeError::Spool(error) => TranscodeError::Spool(error),
+        TapeError::Writer(error) => TranscodeError::Writer(error),
+        TapeError::Duplicate(key) => TranscodeError::Duplicate(key),
+        TapeError::Structure(message) => TranscodeError::Structure(message),
     }
 }
 
@@ -820,43 +375,45 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
                 if self.document_active || !self.frames.is_empty() {
                     return Err(TranscodeError::Structure("nested document start"));
                 }
+                self.tape = Some(PreparedTape::new(
+                    self.preparation.clone(),
+                    self.arena.clone(),
+                    self.duplicate_keys,
+                ));
+                self.root = None;
                 self.document_active = true;
                 self.root_complete = false;
                 self.current_truthy = None;
-                if self.commitment != TranscodeCommitment::AtomicUnframed {
+                if self.commitment == TranscodeCommitment::DirectSequence {
+                    self.output.write_all(b"\x1e")?;
+                } else if self.commitment == TranscodeCommitment::DirectValues {
                     self.output
                         .begin(self.preparation.clone(), self.arena.clone())?;
-                    if self.commitment == TranscodeCommitment::DirectSequence {
-                        self.output.write_all(b"\x1e")?;
-                    }
                 }
             }
             Event::DocumentEnd { .. } => {
                 if !self.document_active || !self.root_complete || !self.frames.is_empty() {
                     return Err(TranscodeError::Structure("incomplete document"));
                 }
-                if self.commitment != TranscodeCommitment::AtomicUnframed {
+                if self.commitment == TranscodeCommitment::DirectSequence {
+                    self.output.write_all(b"\n")?;
+                    self.output.committed.flush().map_err(TranscodeError::Io)?;
+                } else if self.commitment == TranscodeCommitment::DirectValues {
                     self.output.write_all(b"\n")?;
                     self.output.commit(self.palette.as_ref())?;
                 }
                 self.document_active = false;
+                self.tape = None;
+                self.root = None;
                 self.documents = self.documents.saturating_add(1);
                 self.last_truthy = self.current_truthy;
             }
-            Event::ObjectStart { .. } => self.start_object()?,
-            Event::ObjectEnd { .. } => self.end_object()?,
+            Event::ObjectStart { .. } => self.start_container(ContainerKind::Object)?,
+            Event::ObjectEnd { .. } => self.end_container(ContainerKind::Object)?,
             Event::Key { value, .. } => self.key(value)?,
-            Event::ArrayStart { .. } => self.start_array()?,
-            Event::ArrayEnd { .. } => self.end_array()?,
-            Event::Scalar { value, .. } => {
-                let value = match value {
-                    Scalar::Null => Value::Null,
-                    Scalar::Bool(value) => Value::Bool(value),
-                    Scalar::Number(value) => Value::Number(value),
-                    Scalar::String(value) => Value::String(value),
-                };
-                self.complete_value(value)?;
-            }
+            Event::ArrayStart { .. } => self.start_container(ContainerKind::Array)?,
+            Event::ArrayEnd { .. } => self.end_container(ContainerKind::Array)?,
+            Event::Scalar { value, .. } => self.complete_decoded_scalar(value)?,
         }
         Ok(())
     }
@@ -890,13 +447,8 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
     fn consume_text_string(&mut self, _span: tq_core::Span, value: String) -> Result<(), String> {
         self.check_cancellation()
             .map_err(|error| error.to_string())?;
-        if self.accepts_lightweight_scalar() {
-            self.complete_scalar(ScalarToken::String(&value))
-                .map_err(|error| error.to_string())
-        } else {
-            self.complete_value(Value::string(value))
-                .map_err(|error| error.to_string())
-        }
+        self.complete_decoded_scalar(Scalar::String(Arc::from(value)))
+            .map_err(|error| error.to_string())
     }
 
     fn consume_number_literal(
@@ -906,15 +458,483 @@ impl<W: Write> EventConsumer for TranscodeConsumer<W> {
     ) -> Result<(), String> {
         self.check_cancellation()
             .map_err(|error| error.to_string())?;
-        if self.accepts_lightweight_scalar() {
-            let number = Number::parse(&literal).map_err(|error| error.to_string())?;
-            let canonical = number.canonical_numeric();
-            self.complete_scalar(ScalarToken::Number(&canonical))
-                .map_err(|error| error.to_string())
-        } else {
-            let number = Number::parse(&literal).map_err(|error| error.to_string())?;
-            self.complete_value(Value::Number(number))
-                .map_err(|error| error.to_string())
+        self.complete_scalar(ScalarToken::Number(&literal))
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        io::{self, BufWriter, Write},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+
+    use tq_core::{SourceId, Span};
+
+    use super::{TranscodeCommitment, TranscodeConsumer};
+    use crate::{
+        ArrayPreparationConfig, DuplicateKeyPolicy, Event, EventConsumer, PreparationArena,
+        PreparationLimits, PublicationBuffer, Scalar, WriterConfig,
+    };
+    #[derive(Clone, Default)]
+    struct SharedSink(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedSink {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
         }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn true_member(consumer: &mut TranscodeConsumer<SharedSink>, span: Span, key: &str) {
+        consumer
+            .consume(Event::Key {
+                span,
+                value: Arc::from(key),
+                quoted: false,
+            })
+            .unwrap();
+        consumer
+            .consume(Event::Scalar {
+                span,
+                value: Scalar::Bool(true),
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn sequence_commits_prefix_before_root_and_keeps_prior_results_on_late_error() {
+        let span = Span::new(SourceId::new(1), 0, 0);
+        let sink = SharedSink::default();
+        let observed = Arc::clone(&sink.0);
+        let mut consumer = TranscodeConsumer::new(
+            sink,
+            WriterConfig::default(),
+            ArrayPreparationConfig::default(),
+            PreparationArena::new(PreparationLimits::default()),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectSequence,
+        );
+
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        assert_eq!(
+            &*observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            b"\x1e"
+        );
+        consumer
+            .consume(Event::ArrayStart {
+                span,
+                declared_count: Some(2),
+            })
+            .unwrap();
+        for key in ["a", "b"] {
+            consumer.consume(Event::ObjectStart { span }).unwrap();
+            true_member(&mut consumer, span, key);
+            consumer.consume(Event::ObjectEnd { span }).unwrap();
+            if key == "a" {
+                assert_eq!(
+                    &*observed
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner),
+                    b"\x1e"
+                );
+            }
+        }
+        consumer
+            .consume(Event::ArrayEnd {
+                span,
+                observed_count: 2,
+            })
+            .unwrap();
+        let completed_body = observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert!(!completed_body.windows(4).any(|window| window == b"[2]{"));
+        consumer.consume(Event::DocumentEnd { span }).unwrap();
+        let first_result = observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(first_result.first(), Some(&b'\x1e'));
+        assert_eq!(first_result.last(), Some(&b'\n'));
+
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        assert!(
+            observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .ends_with(b"\x1e")
+        );
+        consumer.consume(Event::ObjectStart { span }).unwrap();
+        true_member(&mut consumer, span, "x");
+        assert!(
+            consumer
+                .consume(Event::Key {
+                    span,
+                    value: Arc::from("x"),
+                    quoted: false,
+                })
+                .is_err()
+        );
+        let after_error = observed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert!(after_error.starts_with(&first_result));
+        assert!(after_error.ends_with(b"\x1e"));
+    }
+
+    #[test]
+    fn unframed_resource_failure_and_cardinality_rejection_publish_nothing() {
+        let span = Span::new(SourceId::new(1), 0, 0);
+        let preparation = ArrayPreparationConfig {
+            memory_threshold_bytes: 0,
+            allow_spool: false,
+            ..ArrayPreparationConfig::default()
+        };
+        let arena = PreparationArena::new(PreparationLimits::default());
+        let publication = PublicationBuffer::new(preparation.clone(), arena.clone());
+        let mut consumer = TranscodeConsumer::new(
+            BufWriter::with_capacity(64 * 1024, publication),
+            WriterConfig::default(),
+            preparation,
+            arena,
+            DuplicateKeyPolicy::LastValueFirstPosition,
+            TranscodeCommitment::AtomicUnframed,
+        );
+
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        consumer
+            .consume(Event::ArrayStart {
+                span,
+                declared_count: Some(1),
+            })
+            .unwrap();
+        assert!(
+            consumer
+                .consume(Event::Scalar {
+                    span,
+                    value: Scalar::Bool(true),
+                })
+                .is_err()
+        );
+        let mut publication = consumer.into_inner().into_inner().unwrap();
+        let mut visible = Vec::new();
+        assert!(publication.publish_single(&mut visible, 0).is_err());
+        assert_eq!(visible, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn root_object_selects_keyed_layout_from_final_normalized_rows() {
+        let span = Span::new(SourceId::new(1), 0, 0);
+        let arena = PreparationArena::new(PreparationLimits::default());
+        let preparation = ArrayPreparationConfig {
+            memory_threshold_bytes: 1,
+            ..ArrayPreparationConfig::default()
+        };
+        let sink = SharedSink::default();
+        let observed = Arc::clone(&sink.0);
+        let mut consumer = TranscodeConsumer::new(
+            sink,
+            WriterConfig::default(),
+            preparation,
+            arena.clone(),
+            DuplicateKeyPolicy::LastValueFirstPosition,
+            TranscodeCommitment::DirectSequence,
+        );
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        assert_eq!(
+            &*observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            b"\x1e"
+        );
+        consumer.consume(Event::ObjectStart { span }).unwrap();
+        consumer
+            .consume(Event::Key {
+                span,
+                value: Arc::from("one"),
+                quoted: false,
+            })
+            .unwrap();
+        consumer
+            .consume(Event::Scalar {
+                span,
+                value: Scalar::Bool(false),
+            })
+            .unwrap();
+        for (entry, value) in [("two", false), ("one", true)] {
+            consumer
+                .consume(Event::Key {
+                    span,
+                    value: Arc::from(entry),
+                    quoted: false,
+                })
+                .unwrap();
+            consumer.consume(Event::ObjectStart { span }).unwrap();
+            consumer
+                .consume(Event::Key {
+                    span,
+                    value: Arc::from("x"),
+                    quoted: false,
+                })
+                .unwrap();
+            consumer.consume(Event::ObjectStart { span }).unwrap();
+            consumer
+                .consume(Event::Key {
+                    span,
+                    value: Arc::from("y"),
+                    quoted: false,
+                })
+                .unwrap();
+            consumer
+                .consume(Event::Scalar {
+                    span,
+                    value: Scalar::Bool(value),
+                })
+                .unwrap();
+            consumer.consume(Event::ObjectEnd { span }).unwrap();
+            consumer.consume(Event::ObjectEnd { span }).unwrap();
+            assert_eq!(
+                &*observed
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                b"\x1e"
+            );
+        }
+        consumer.consume(Event::ObjectEnd { span }).unwrap();
+        assert_eq!(
+            &*observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            b"\x1e[2:]{x{y}}:\n  one: true\n  two: false"
+        );
+        consumer.consume(Event::DocumentEnd { span }).unwrap();
+        assert!(
+            observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .ends_with(b"\n")
+        );
+        assert!(arena.observations().spool_bytes_written > 0);
+        let bytes = consumer.into_inner();
+        assert_eq!(
+            bytes
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            b"\x1e[2:]{x{y}}:\n  one: true\n  two: false\n"
+        );
+    }
+    fn assert_spilled_object(
+        emit: impl FnOnce(&mut TranscodeConsumer<SharedSink>, Span, &str) -> String,
+    ) {
+        const MEMORY_BUDGET: usize = 48 * 1024;
+        let span = Span::new(SourceId::new(1), 0, 0);
+        let payload = "x".repeat(8192);
+        let arena = PreparationArena::new(PreparationLimits {
+            memory_bytes: MEMORY_BUDGET,
+            ..PreparationLimits::default()
+        });
+        let sink = SharedSink::default();
+        let observed = Arc::clone(&sink.0);
+        let mut consumer = TranscodeConsumer::new(
+            sink,
+            WriterConfig::default(),
+            ArrayPreparationConfig {
+                memory_threshold_bytes: 1024,
+                ..ArrayPreparationConfig::default()
+            },
+            arena.clone(),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectSequence,
+        );
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        consumer.consume(Event::ObjectStart { span }).unwrap();
+        let expected_json = emit(&mut consumer, span, &payload);
+        consumer.consume(Event::ObjectEnd { span }).unwrap();
+        consumer.consume(Event::DocumentEnd { span }).unwrap();
+        let expected_value: tq_core::Value = serde_json::from_str(&expected_json).unwrap();
+        let mut expected = b"\x1e".to_vec();
+        crate::write_value(&mut expected, &expected_value, WriterConfig::default()).unwrap();
+        expected.push(b'\n');
+        assert_eq!(
+            *observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            expected,
+        );
+        let observations = arena.observations();
+        assert!(observations.spool_bytes_written > 0);
+        assert!(observations.spool_bytes_replayed > 0);
+        assert!(observations.memory_high_water_bytes <= MEMORY_BUDGET);
+    }
+
+    #[test]
+    fn wide_keyed_values_replay_from_spilled_tape() {
+        assert_spilled_object(|consumer, span, payload| {
+            for row in 0..12 {
+                consumer
+                    .consume(Event::Key {
+                        span,
+                        value: Arc::from(format!("row{row:02}")),
+                        quoted: false,
+                    })
+                    .unwrap();
+                consumer.consume(Event::ObjectStart { span }).unwrap();
+                consumer
+                    .consume(Event::Key {
+                        span,
+                        value: Arc::from("blob"),
+                        quoted: false,
+                    })
+                    .unwrap();
+                consumer
+                    .consume(Event::Scalar {
+                        span,
+                        value: Scalar::String(Arc::from(payload)),
+                    })
+                    .unwrap();
+                true_member(consumer, span, "flag");
+                consumer.consume(Event::ObjectEnd { span }).unwrap();
+            }
+            let rows = (0..12)
+                .map(|row| format!(r#""row{row:02}":{{"blob":"{payload}","flag":true}}"#))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{{{rows}}}")
+        });
+    }
+
+    #[test]
+    fn generic_nested_values_replay_from_spilled_tape() {
+        assert_spilled_object(|consumer, span, payload| {
+            consumer
+                .consume(Event::Key {
+                    span,
+                    value: Arc::from("outer"),
+                    quoted: false,
+                })
+                .unwrap();
+            consumer.consume(Event::ObjectStart { span }).unwrap();
+            for index in 0..12 {
+                consumer
+                    .consume(Event::Key {
+                        span,
+                        value: Arc::from(format!("field{index:02}")),
+                        quoted: false,
+                    })
+                    .unwrap();
+                consumer
+                    .consume(Event::Scalar {
+                        span,
+                        value: Scalar::String(Arc::from(payload)),
+                    })
+                    .unwrap();
+            }
+            consumer.consume(Event::ObjectEnd { span }).unwrap();
+            true_member(consumer, span, "tail");
+            format!(
+                r#"{{"outer":{{{}}},"tail":true}}"#,
+                (0..12)
+                    .map(|index| format!(r#""field{index:02}":"{payload}""#))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        });
+    }
+    #[test]
+    fn cancellation_keeps_prior_record_and_live_sequence_prefix() {
+        let span = Span::new(SourceId::new(1), 0, 0);
+        let sink = SharedSink::default();
+        let observed = Arc::clone(&sink.0);
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let mut consumer = TranscodeConsumer::new(
+            sink,
+            WriterConfig::default(),
+            ArrayPreparationConfig::default(),
+            PreparationArena::new(PreparationLimits::default()),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectSequence,
+        )
+        .with_cancellation(Arc::clone(&cancellation));
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        consumer
+            .consume(Event::Scalar {
+                span,
+                value: Scalar::Bool(true),
+            })
+            .unwrap();
+        consumer.consume(Event::DocumentEnd { span }).unwrap();
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        cancellation.store(true, Ordering::Relaxed);
+        assert!(
+            consumer
+                .consume(Event::Scalar {
+                    span,
+                    value: Scalar::Bool(false),
+                })
+                .is_err()
+        );
+        assert_eq!(
+            observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            b"\x1etrue\n\x1e"
+        );
+    }
+    #[test]
+    fn denied_tape_spill_preserves_only_live_record_prefix() {
+        let span = Span::new(SourceId::new(1), 0, 0);
+        let sink = SharedSink::default();
+        let observed = Arc::clone(&sink.0);
+        let mut consumer = TranscodeConsumer::new(
+            sink,
+            WriterConfig::default(),
+            ArrayPreparationConfig {
+                memory_threshold_bytes: 8,
+                allow_spool: false,
+                ..ArrayPreparationConfig::default()
+            },
+            PreparationArena::new(PreparationLimits {
+                memory_bytes: 16 * 1024,
+                ..PreparationLimits::default()
+            }),
+            DuplicateKeyPolicy::Reject,
+            TranscodeCommitment::DirectSequence,
+        );
+        consumer.consume(Event::DocumentStart { span }).unwrap();
+        assert!(
+            consumer
+                .consume(Event::Scalar {
+                    span,
+                    value: Scalar::String(Arc::from("x".repeat(4096))),
+                })
+                .is_err()
+        );
+        assert_eq!(
+            observed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_slice(),
+            b"\x1e"
+        );
+        drop(consumer);
     }
 }

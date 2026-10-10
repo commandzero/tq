@@ -50,16 +50,11 @@ impl NativeFormat {
                 message: "selected format cannot supply structural events".to_owned(),
             });
         }
+        if self == Self::Toon && representation == InputRepresentation::Events {
+            crate::adapters::require_strict_toon_events(options.toon)?;
+        }
         options.format = self.descriptor().input;
-        options.toon.maximum_depth = options.toon.maximum_depth.min(options.maximum_depth);
-        options.toon.maximum_token_bytes = options
-            .toon
-            .maximum_token_bytes
-            .min(options.maximum_token_bytes);
-        options.toon.maximum_line_bytes = options
-            .toon
-            .maximum_line_bytes
-            .min(options.maximum_line_bytes);
+        options.toon = options.bounded_toon_config();
         Ok(SelectedInput {
             format: self,
             options,
@@ -629,5 +624,60 @@ impl<R: Read> Read for BoundedInput<R> {
         let count = self.reader.read(&mut buffer[..available])?;
         self.remaining -= count;
         Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::ControlFlow;
+
+    use super::{InputDeliveryError, InputRepresentation};
+    use crate::{DecodeOptions, FormatError, NativeFormat};
+
+    #[test]
+    fn non_strict_toon_event_selection_fails_before_input_is_opened() {
+        let error = NativeFormat::Toon
+            .select_input(
+                DecodeOptions {
+                    toon: tq_toon::DecoderConfig {
+                        strict: false,
+                        ..tq_toon::DecoderConfig::default()
+                    },
+                    ..DecodeOptions::default()
+                },
+                InputRepresentation::Events,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            FormatError::Parse {
+                format: crate::InputFormat::Toon,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn selected_toon_events_preserve_configured_name_byte_limit() {
+        let selected = NativeFormat::Toon
+            .select_input(
+                DecodeOptions {
+                    toon: tq_toon::DecoderConfig {
+                        maximum_name_bytes: 3,
+                        ..tq_toon::DecoderConfig::default()
+                    },
+                    ..DecodeOptions::default()
+                },
+                InputRepresentation::Events,
+            )
+            .unwrap();
+        let input = selected.open(b"long: 1".as_slice(), "name-limit");
+        let error = input
+            .consume_events(|_| Ok::<_, std::convert::Infallible>(ControlFlow::Continue(())))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            InputDeliveryError::Input(FormatError::Resource("name-bytes"))
+        ));
     }
 }

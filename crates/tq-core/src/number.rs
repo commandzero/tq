@@ -109,6 +109,32 @@ impl Number {
         Self::canonicalize_literal_with_limits(source, NumberLimits::default())
     }
 
+    /// Canonicalizes an admitted JSON decimal for numeric output, removing
+    /// insignificant scale and applying the runtime's adjusted-exponent bound.
+    ///
+    /// # Errors
+    ///
+    /// Returns a grammar or resource error under the default numeric envelope.
+    pub fn canonicalize_output_literal(source: &str) -> Result<String, NumberError> {
+        let limits = NumberLimits::default();
+        validate_literal_with_limits(source, limits)?;
+        let parts = DecimalParts::parse(source)?;
+        let projected;
+        let parts = if let Some(literal) = parts.runtime_projection() {
+            projected = DecimalParts::parse(literal)?;
+            &projected
+        } else {
+            &parts
+        };
+        let output = canonical_numeric_parts(parts);
+        if output.len() > limits.rendered_bytes {
+            return Err(NumberError::RenderedBytes {
+                limit: limits.rendered_bytes,
+            });
+        }
+        Ok(output)
+    }
+
     /// Validates a JSON numeric literal without retaining its canonical value.
     ///
     /// This applies the same grammar and resource envelope as [`Self::parse`]
@@ -927,6 +953,21 @@ impl DecimalParts {
         })
     }
 
+    fn runtime_projection(&self) -> Option<&'static str> {
+        let digits = self.digits.trim_start_matches('0');
+        let digit_count = i64::try_from(digits.len()).unwrap_or(i64::MAX);
+        let adjusted_exponent = self.scale.saturating_add(digit_count).saturating_sub(1);
+        if !digits.is_empty() && adjusted_exponent > 999_999_999 {
+            Some(if self.negative {
+                "-1.7976931348623157e+308"
+            } else {
+                "1.7976931348623157e+308"
+            })
+        } else {
+            None
+        }
+    }
+
     fn canonical(&self, limits: NumberLimits) -> Result<String, NumberError> {
         let digits = self.digits.trim_start_matches('0');
         let sign = if self.negative { "-" } else { "" };
@@ -948,12 +989,8 @@ impl DecimalParts {
         // Values beyond it become infinities and jq projects those through
         // the largest finite binary64 value rather than emitting an
         // unbounded exponent token.
-        if adjusted_exponent > 999_999_999 {
-            let output = if self.negative {
-                "-1.7976931348623157e+308".to_owned()
-            } else {
-                "1.7976931348623157e+308".to_owned()
-            };
+        if let Some(projected) = self.runtime_projection() {
+            let output = projected.to_owned();
             if output.len() > limits.rendered_bytes {
                 return Err(NumberError::RenderedBytes {
                     limit: limits.rendered_bytes,

@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, ffi::OsString, fmt::Write as _, path::PathBuf};
 
 use thiserror::Error;
 use tq_formats::{InputFormat, JsonIndent, NativeFormat, OutputFormat, ToonFraming};
-use tq_toon::{Delimiter, KeyFolding, WriterConfig};
+use tq_toon::{Delimiter, WriterConfig};
 
 use crate::memory_budget;
 
@@ -134,7 +134,7 @@ pub struct ResourceLimits {
     pub input_bytes: u64,
     /// Maximum payload bytes in one RS recovery segment.
     pub frame_bytes: usize,
-    /// Maximum fields in a delimited row or header.
+    /// Maximum delimited fields or active TOON sibling/schema names.
     pub fields: usize,
     /// Maximum structured nesting depth.
     pub depth: usize,
@@ -150,7 +150,7 @@ pub struct ResourceLimits {
     pub results: u64,
     /// Maximum bytes written to stdout.
     pub output_bytes: u64,
-    /// Maximum in-memory unknown-array preparation bytes.
+    /// Aggregate in-memory object/array replay and schema preparation bytes.
     pub preparation_memory_bytes: usize,
     /// Maximum values in one hybrid preparation batch.
     pub hybrid_batch_values: usize,
@@ -166,7 +166,7 @@ pub struct ResourceLimits {
     pub decode_in_flight_batches: usize,
     /// Maximum selected-decode source bytes simultaneously in flight.
     pub decode_in_flight_bytes: usize,
-    /// Maximum disk-backed unknown-array spool bytes.
+    /// Aggregate disk-backed preparation and publication spool bytes.
     pub spool_bytes: u64,
 }
 
@@ -602,7 +602,7 @@ Usage: tq [OPTIONS] [FILTER [FILE...]]\n       tq [OPTIONS] -f FILE [INPUT...]\n
         "         -o, --output-format {outputs}, --toon-sequence-input, --unframed"
     );
     help.push_str(
-        "TOON:    --delimiter comma|tab|pipe, --fold-keys, --flatten-depth N, --non-strict\n\
+        "TOON:    --delimiter comma|tab|pipe, --non-strict (dotted keys are literal)\n\
 Reports: --explain, --explain-json, --trace, --trace-limit N, --report-file FILE\n\
 Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
          --max-line-bytes N, --max-frame-bytes N, --max-fields N,\n\
@@ -612,6 +612,12 @@ Limits:  --max-input-bytes N, --max-depth N, --max-token-bytes N,\n\
          --hybrid-in-flight-bytes N, --decode-batch-values N,\n\
          --decode-batch-bytes N, --decode-in-flight-batches N,\n\
          --decode-in-flight-bytes N, --max-spool-bytes N\n",
+    );
+    help.push_str(
+        "\nPreparation: object/array layout decisions retain bounded replay and schema state;\n\
+                  completed members may wait for the enclosing shape to close.\n\
+                  --prepare-memory-bytes bounds shared memory; --max-spool-bytes\n\
+                  bounds secure disk spill. Unspillable or exhausted state fails.\n",
     );
     help.push_str("\nColor: automatic on terminals, plain in pipes/files; NO_COLOR disables automatic color.\n\
          -C forces color, -M requests plain bytes; the last flag wins.\n\
@@ -875,14 +881,6 @@ where
                     }
                 };
             }
-            "--fold-keys" => toon_writer.key_folding = KeyFolding::Safe,
-            "--flatten-depth" => {
-                let value = next_value(&mut tokens, &token)?;
-                toon_writer.flatten_depth = value.parse().map_err(|_| CliError::InvalidValue {
-                    option: token.clone(),
-                    value,
-                })?;
-            }
             "--arg" => parse_external(
                 &mut tokens,
                 &mut external,
@@ -1039,6 +1037,7 @@ where
     }
     if stream
         && NativeFormat::from_input(input_format).is_some_and(|format| !format.descriptor().events)
+        && (strict || !matches!(input_format, InputFormat::Toon | InputFormat::ToonSequence))
     {
         return Err(CliError::Incompatible(
             "--stream requires an event-capable input format; YAML and JSON5 are document-at-a-time"
@@ -1422,6 +1421,7 @@ mod tests {
             parse_args(["--wat", "."]),
             Err(CliError::Unsupported(_))
         ));
+
         assert!(parse_args(["--stream", "--input-format", "yaml", "."]).is_err());
         assert!(parse_args(["--stream", "--input-format", "json5", "."]).is_err());
         assert!(parse_args(["--proxy-on-error", "--stream-errors", "."]).is_err());
@@ -1430,6 +1430,15 @@ mod tests {
         };
         assert_eq!(run.output_format, OutputFormat::Json);
         assert!(!run.pretty_json);
+    }
+    #[test]
+    fn removed_toon_options_fail_as_unknown_before_input_arguments() {
+        for option in ["--fold-keys", "--flatten-depth"] {
+            assert!(matches!(
+                parse_args([option, ".", "missing.toon"]),
+                Err(CliError::Unsupported(_))
+            ));
+        }
     }
 
     #[test]

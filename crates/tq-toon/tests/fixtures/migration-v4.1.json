@@ -1,0 +1,55 @@
+{
+  "category": "encode",
+  "description": "Native consumer regressions supplementing, not modifying, the official 4.1 fixture set",
+  "tests": [
+    {
+      "name": "root keyed values recursively follow the first schema without reordering entry keys",
+      "input": {"z":{"id":1,"meta":{"b":2,"a":3}},"a":{"meta":{"a":4,"b":5},"id":6}},
+      "expected": "[2:]{id,meta{b,a}}:\n  z: 1,2,3\n  a: 6,5,4",
+      "specSection": "9.5"
+    },
+    {
+      "name": "nested groups reorder every schema level but preserve outer field order",
+      "input": {"z":[],"rows":[{"id":1,"geo":{"point":{"lon":2,"lat":3},"label":"A"}},{"geo":{"label":"B","point":{"lat":4,"lon":5}},"id":6}],"a":true},
+      "expected": "z: []\nrows[2]{id,geo{point{lon,lat},label}}:\n  1,2,3,A\n  6,5,4,B\na: true",
+      "specSection": "9.3"
+    },
+    {
+      "name": "anonymous nested uniform arrays retain each list object's encounter order",
+      "input": [[{"z":1,"a":2},{"a":3,"z":4}]],
+      "expected": "[1]:\n  - [2]:\n    - z: 1\n      a: 2\n    - a: 3\n      z: 4",
+      "specSection": "9.4"
+    },
+    {
+      "name": "first keyed field in list object keeps deeper entry rows and shallower siblings",
+      "input": [{"users":{"alice":{"age":1},"bob":{"age":2}},"tail":"end"},false],
+      "expected": "[2]:\n  - users[2:]{age}:\n      alice: 1\n      bob: 2\n    tail: end\n  - false",
+      "specSection": "10"
+    },
+    {
+      "name": "tab delimiter affects anonymous zero header but not field empty-array shorthand",
+      "input": {"empty":[],"nested":[[]]},
+      "options": {"delimiter":"\t"},
+      "expected": "empty: []\nnested[1\t]:\n  - [0\t]:",
+      "specSection": "9.2"
+    },
+    {
+      "name": "late nested null invalidation cannot publish a speculative keyed header",
+      "input": {"z":{"meta":{"id":1}},"a":{"meta":{"id":2}},"last":{"meta":null}},
+      "expected": "z:\n  meta:\n    id: 1\na:\n  meta:\n    id: 2\nlast:\n  meta: null",
+      "specSection": "9.5"
+    },
+    {
+      "name": "quoted keyed entry names and literal dotted group fields remain literal",
+      "input": {"users":{"#a":{"a.b":{"é":"#data"}},"full name":{"a.b":{"é":"+1"}}}},
+      "expected": "users[2:]{a.b{\"é\"}}:\n  \"#a\": \"#data\"\n  \"full name\": \"+1\"",
+      "specSection": "9.5"
+    },
+    {
+      "name": "empty anonymous objects and arrays are not table candidates",
+      "input": [{},[],{"only":{"x":1}}],
+      "expected": "[3]:\n  -\n  - [0]:\n  - only:\n      x: 1",
+      "specSection": "9.4"
+    }
+  ]
+}

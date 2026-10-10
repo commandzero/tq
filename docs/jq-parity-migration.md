@@ -7,40 +7,54 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-15T05:04:02Z }
 
 # jq parity migration and security notes
 
-These notes describe the unreleased manual-compatibility work. They are not a
-claim that the full manual or every release platform has passed acceptance.
-See the [compatibility guide](compatibility.md) for the evidence policy.
+These notes describe unreleased jq compatibility work and distinguish inherited
+historical evidence from current implementation scope. Fresh manual comparisons,
+token accounting, and focused performance acceptance are separate delivery
+tracks; their results are not presented as evidence for PR #71.
 
-## Required native acceptance and reference version
+Historical jq 1.8.1/0.4.1 observations remain historical only. Exact matches,
+reviewed safe-library disparities, and unresolved failures remain separate.
+Neither this migration nor a checked task-history item implies refreshed
+acceptance or calibration.
 
-Current acceptance targets pinned jq 1.8.2 on local macOS, ironhide Linux
-x86_64, and smokescreen Windows 11 Pro `x86_64-pc-windows-msvc`. The earlier
-Windows deferral is superseded: native Windows jq/tq execution in native
-PowerShell is required before completion. SSH into WSL, cross-compilation,
-and PowerShell on macOS/Linux do not provide native Windows evidence.
-Historical jq 1.8.1 reports and approvals do not establish acceptance for a
-new source, executable, reference, or target identity. Exact matches, reviewed
-safe-library disparities, and unresolved failures remain separate; this update
-approves no new math differences and completes no acceptance evidence.
+## Native TOON 4.1 migration to 0.5.0
 
-Native Windows compatibility capture is implemented with overlapped named
-pipes and JobObjects. Native CPU/RSS accounting is implemented through a
-retained exact-child handle using `GetProcessTimes` and `PeakWorkingSetSize`,
-with a surviving isolated worker. Validation remains incomplete: separate
-control executions vary in 15.625 ms CPU quanta, with differences up to
-62.5 ms exceeding the unchanged 20 ms check. No check relaxation or performance
-acceptance is authorized; issue #31 remains open. Strict-report differences
-remain differences, not exact matches.
+Upgrade `tq-core`, `tq-toon`, `tq-formats`, and `tq-cli` together. `WriterConfig`
+no longer has key-folding/flattening fields; `DecoderConfig` no longer has
+path-expansion configuration. Remove those fields and the `KeyFolding` /
+`PathExpansion` imports rather than substituting aliases. The CLI rejects
+`--fold-keys` and `--flatten-depth` before reading input.
 
-The user disabled Smart App Control on development-only smokescreen and
-reported native launch verified with state `0`. No further security changes
-are needed; launch success does not establish compatibility or performance
-acceptance.
+Quoted and unquoted dotted names are literal keys. Use `.["profile.city"]` to
+query that literal name; recursive headers such as `profile{city}` explicitly
+construct a nested `profile` object. Uniform array rows and keyed object values
+use the first row's recursive header order. Later matching rows may have a
+different insertion order; ordinary expanded objects and keyed entry order do
+not gain a general order-insensitive comparison.
 
-## Rust library migration to 0.4.0
+Root/object-field empty arrays use `[]`; anonymous nested arrays retain counted
+list headers, including `[0]:`. Full-line comments, BOM/CRLF, and quoted control
+escapes are accepted. Encoding and strict input acceptance follow 4.1 rather
+than retaining v3 folding behavior. JSON and TOON sequence directions and
+default LF result terminators are unchanged.
 
-The incompatible API boundary is 0.4.0; the current upgrade target is 0.4.1.
-Upgrade all workspace crates together from 0.3.0 to 0.4.1 to avoid mixing
+Identity transcode prepares complete object/array shapes in a shared bounded
+arena and replay store before selecting canonical layouts. Replay bodies may
+spill, but active key indexes and recursive schemas remain memory-bounded.
+Non-strict duplicate semantics use a staged/document path where consumers
+cannot retract values.
+
+## Remaining independent work
+
+Fresh native jq 1.8.2 manual acceptance and token accounting, along with the
+focused migration wall-time guard, are separate acceptance obligations. PR #71's
+native implementation behavior and historical records do not establish those
+results, waive their gates, or turn prior observations into new evidence.
+
+## Rust library migration to 0.5.0
+
+The incompatible value-model boundary remains 0.4.0; the current upgrade target
+is 0.5.0. Upgrade all workspace crates together from 0.3.0 to 0.5.0 to avoid mixing
 incompatible value types. This pre-1.0 API change does not change the jq language
 target or establish a completed compatibility claim.
 
@@ -72,11 +86,9 @@ Building from source now requires Rust 1.95 or newer for `wait4 0.2.0`
 native benchmark accounting. The earlier parity checkpoint required Rust 1.88:
 the previous 1.87 declaration was incompatible with existing let chains and
 the pinned JSON5 dependency.
-The parser checkpoint passed workspace checks for all targets and features
-with Rust 1.88 selected explicitly; the compatibility test campaigns used
-Rust 1.98.0. These are separate checks, not a claim that the full test campaign
-ran under Rust 1.88. Final acceptance requires rerunning checks after the
-remaining performance work.
+The source-build minimum is a compiler/dependency requirement only. It does not
+establish manual compatibility or performance acceptance; those require their
+own identity-bound evidence.
 
 ## Output selection
 

@@ -2,6 +2,7 @@
 type: Report
 title: jq compatibility
 description: Supported jq behavior, intentional differences, and compatibility evidence.
+generated: { by: "process:toon-4-1-evidence-review", at: "2026-10-07T05:53:56.657Z" }
 ---
 
 # jq compatibility
@@ -130,97 +131,30 @@ Identity JSON or strict TOON conversion may use the optimized `transcode` plan:
 
 ## Compatibility evidence
 
-- [Coverage summary](tests/jq-manual/coverage.md): current results and the practical impact of each difference.
-- [Manual comparison](tests/jq-manual/index.md): per-test outputs and tokenizer measurements.
+- [Coverage summary](tests/jq-manual/coverage.md): documented manual differences and their practical impact.
+- [Manual comparison](tests/jq-manual/index.md): per-case outputs and token observations with their recorded provenance.
 - [Campaign instructions](../tests/compatibility/readme.md): reference setup and reproduction commands.
 - [Native-format review](../tests/compatibility/reviews/native-formats-v1.md): format-specific comparison evidence.
 
-The latest 2026-10-06 macOS **newhelp-final** and Linux **help-final**
-[closeout evidence](../tests/compatibility/reviews/parity-closeout.toon) is bound
-to 884-file snapshots at base `3e0dedb` plus uncommitted fixes, not clean-commit
-releases or claims about later edits. Final `crates/tq-cli/src/args.rs` help and
-its regression distinguish CLI ambient access from embedded admission, removing
-the false redaction wording without changing runtime policy. Earlier evidence
-remains checkpoint-only; final product/helper hashes differ. Frozen release
-runs against jq 1.8.2 record macOS ARM64 **943/952**
-primary, **919/921** compact, **921/921** TOON matches and Linux x86_64
-**937/952**, **913/921**, **921/921**. Both preserve all 518 original cases and
-303 protected exact contracts. Strict manual exit 1 remains on both.
+The 0.4.1 manual comparisons and token totals remain historical evidence; they
+are not renewed native TOON 4.1 acceptance. This implementation documentation
+does not claim fresh manual execution, refreshed result/token summaries, or
+release-wide compatibility acceptance.
 
-macOS retains the existing user-accepted scoped `erfc(2)` 2-ULP and
-`tgamma(0.5)` 1-ULP differences, 6 intentional ANSI presentations governed by
-the main `output-colors` contract, and jq's internal `--run-tests` diagnostic
-suffix (both supplied programs pass and exit 0). These are not exact matches
-or fresh executable approvals; current strict reports apply no reviewed disparities.
-Safe Rust `libm` and pinned jq round the two math inputs differently; the exact
-regression witnesses are in `tests/compatibility/cases/manual-math-boundaries.jsonl`.
-Color regressions are in `crates/tq-cli/tests/output_colors.rs`; supplied-test
-runner regressions are in `crates/tq-cli/tests/extended_cli.rs`. The closeout
-record maps cases, causes, regression paths and reconsideration conditions;
-library/reference or presentation/runner changes require exact witness reruns.
+The unchanged [PR68 closeout ledger](../tests/compatibility/reviews/parity-closeout.toon)
+retains historical 0.4.1 native observations and ownership. PR68's owner-created
+[parity archive](../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/tasks.md)
+is inherited from its merged final tree, not re-archived by this migration.
+Its Windows record retains 60 unique differences, all 303 protected IDs but
+only 291 primary and 289 primary-plus-compact protected matches—not 303 exact.
+Windows newline/reference/module obligations remain separately owned by
+[#69](https://github.com/commandzero/tq/issues/69), and Linux's 15 differences by
+[#70](https://github.com/commandzero/tq/issues/70). Their historical workspaces,
+overlays and calibrated-accounting limits are not silently renamed candidate proof.
 
-Windows now has native release/default evidence in
-`target/closeout/windows/final-286b5f6/native`: **912/952 primary, 879/921 compact,
-921/921 TOON**, with **60 unique differences** and strict exit 1. All **303
-protected IDs** are present, but only **291 primary** and **289 primary-plus-compact**
-match—not 303 exact. macOS/Linux retain 303 exact. The Windows full campaign
-covers 1,220 cases/4,804 executed observations, zero harness/contract failures and
-146 difference cases. All 297 CLI composition cases execute, retaining 8 deferred
-math/reference-availability differences; 297 embedded witnesses and resource/
-recursion/cancellation checks pass. Final all-feature workspace, strict Clippy
-and formatting pass; 10 ignored entries and five explicitly passed reference
-tests are recorded separately, without inventing a workspace pass total.
-
-Windows source is base `286b5f6` plus one integration-test-only overlay in
-`crates/tq-test-support/tests/compatibility_catalog_contracts.rs`, SHA-256
-`a86772509c2e279b823e6f02529e976c73b8c75ed30d23bea1620acf828a6c30`.
-The patch keeps exact assertions and adds structured Windows `--binary` reference
-arguments; final extraction resolves a test lint, not runtime behavior. Product/
-helper source and frozen binary hashes are unchanged across the overlay, so
-release campaigns are mapped—not claimed rebuilt/rerun after the test fix.
-macOS/Linux final-help product/helper sources remain unchanged with this test-only
-delta. System `/usr/bin/ssh`/`scp` succeeded, and native PowerShell executes the
-campaigns; earlier macOS-client failures are historical, WSL is transport only,
-and no security changes were made. Older Windows v6 raw evidence remains retained
-and hash-scoped, not conflated with the renewed release.
-
-Live #69/#70/#31 bodies were verified at the preceding 2026-10-06 checkpoint.
-The user-approved scope transfer assigns only the enumerated
-Windows 60 to [#69](https://github.com/commandzero/tq/issues/69) and Linux 15 to
-[#70](https://github.com/commandzero/tq/issues/70); they remain unresolved, with
-target/case ownership, practical impact, and reconsideration criteria in the
-closeout record. Recheck exact witnesses and protected contracts after
-implementation or reference/library/platform changes before changing verdicts.
-
-Corrected shared full campaigns cover 1,220 cases and 4,804 executed observations
-with zero harness errors or declared-contract failures, retaining pairwise
-mismatches and unsupported observations as `observed-differences`, not strict
-acceptance. macOS retains the separately hashed P2 campaign that **predates the
-help fix**, not a final-help full rerun: only diagnostic help strings/test differ
-among crate sources, but final CLI/helper/embedded hashes are not equal. Linux
-reruns the full campaign with final-help binaries. Its workspace records **1,891
-passed, 0 failed, 11 ignored**, with four reference/relocation entries explicitly
-passed separately; remaining ignored accounting/worker/helper entries are not
-acceptance or calibration proof. macOS final full preflight/all-feature tests
-pass. P2 adversarial denial and companion contracts remain tested.
-
-The parent rendered the newest macOS report into all 21 generated Results blocks
-and updated index provenance; only the help capture changes. Help regression
-`args::tests::help_distinguishes_cli_ambient_access_from_embedded_admission`
-passes on both platforms; parser/capability/help changes require rechecking it,
-release `--help` and embedded guards. No fresh disparity approvals follow.
-
-Calibration/performance acceptance remains deferred under
-[#31](https://github.com/commandzero/tq/issues/31) and platform follow-ups. No fresh
-calibration is established on any platform; Windows accounting checks do not
-prove macOS calibration. Unfinished macOS calibration and affected benchmark
-comparisons remain unpublished as accepted performance evidence. Native Windows
-renewal is complete; strict differences are not resolved by execution success.
-Linux full validator preflight remains a #70 follow-up. The implementation/evidence
-change is verified, synchronized into the main specs, and
-[archived](../openspec/changes/archive/2026-10-06-achieve-jq-manual-parity/tasks.md)
-with all 69 tasks complete under the approved scope. That closeout does not
-establish exact compatibility or calibrated performance acceptance.
+The prior performance reports remain historical evidence. No calibrated or
+all-platform performance acceptance is established; #31 and the native-platform
+follow-ups remain unresolved.
 
 - Ordered JSON results and process behavior are compared.
 - Compact JSON also requires exact stdout bytes.

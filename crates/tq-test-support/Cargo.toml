@@ -17,7 +17,7 @@ signal-hook = "0.3.18"
 tempfile = "3.27.0"
 thiserror = "2.0.21"
 tiktoken-rs = "0.12.1"
-toon-format = { version = "=0.5.0", default-features = false }
+toon-format = { version = "=0.6.0", default-features = false }
 tq-cli = { path = "../tq-cli", default-features = false }
 tq-core = { path = "../tq-core" }
 tq-formats = { path = "../tq-formats" }

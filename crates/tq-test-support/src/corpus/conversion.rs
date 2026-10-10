@@ -6,11 +6,12 @@ use std::{
     io::{self, Read, Write},
     path::Path,
     process::{Command, Stdio},
+    sync::Arc,
 };
 
 use serde::{
     Deserialize, Deserializer,
-    de::{self, DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor},
+    de::{self, DeserializeOwned, DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor},
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -19,7 +20,7 @@ use thiserror::Error;
 
 use super::{ArtifactIdentity, GeneratedArtifacts, encode_hex};
 
-const SEMANTIC_POLICY_VERSION: &str = "tq-semantic-equivalence-v3";
+const SEMANTIC_POLICY_VERSION: &str = "tq-semantic-equivalence-v5-format-specific-header-order";
 
 /// Kind of semantic JSON-model divergence.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -137,8 +138,9 @@ pub fn finalize_generated_representations_with_tq(
 }
 
 /// Compares tq's canonical JSON result streams using a value-aware digest:
-/// object members, arrays, and result sequences stay in encounter order.
-/// Numeric tokens use exact decimal normalization without binary64 rounding.
+/// Object members, arrays, and result sequences stay in encounter order, except
+/// TOON table-value fields may follow their recursive header order. Numeric
+/// tokens use exact decimal normalization without binary64 rounding.
 ///
 /// # Errors
 ///
@@ -149,9 +151,10 @@ pub fn validate_generated_representations_with_tq(
     yaml_input: &Path,
     toon_input: &Path,
 ) -> Result<(), ConversionError> {
-    let source = tq_canonical_digest(tq, source_json, "json")?;
     for (format, input) in [("yaml", yaml_input), ("toon", toon_input)] {
-        let actual = tq_canonical_digest(tq, input, format)?;
+        let normalize_headers = format == "toon";
+        let source = tq_canonical_digest(tq, source_json, "json", normalize_headers)?;
+        let actual = tq_canonical_digest(tq, input, format, normalize_headers)?;
         if actual != source {
             return Err(ConversionError::TqSemantic {
                 format: format.to_owned(),
@@ -375,6 +378,7 @@ fn tq_canonical_digest(
     tq: &Path,
     input: &Path,
     input_format: &str,
+    normalize_toon_headers: bool,
 ) -> Result<String, ConversionError> {
     let stderr = NamedTempFile::new()?;
     let input_bytes = fs::metadata(input)?.len();
@@ -399,7 +403,7 @@ fn tq_canonical_digest(
         format: input_format.to_owned(),
         message: "tq stdout was not captured".to_owned(),
     })?;
-    let digest = stream_semantic_digest(stdout);
+    let digest = stream_semantic_digest_mode(stdout, normalize_toon_headers);
     if digest.is_err() {
         let _ = child.kill();
     }
@@ -418,16 +422,47 @@ fn tq_canonical_digest(
 }
 
 /// Reduces each JSON value to a digest while consuming result streams in order.
-/// Memory follows nesting depth, object key sets, and individual token size,
-/// rather than the length of any array or the complete document.
+/// Only TOON streams may use the narrow table/keyed-header normalization.
 fn stream_semantic_digest<R: Read>(reader: R) -> Result<[u8; 32], io::Error> {
+    stream_semantic_digest_impl::<_, ValueDigest>(reader)
+}
+
+fn stream_semantic_digest_mode<R: Read>(
+    reader: R,
+    toon_headers: bool,
+) -> Result<[u8; 32], io::Error> {
+    if toon_headers {
+        stream_semantic_digest_impl::<_, ToonValueDigest>(reader)
+    } else {
+        stream_semantic_digest(reader)
+    }
+}
+
+trait HashedValue {
+    fn digest(&self) -> &[u8; 32];
+}
+
+impl HashedValue for ValueDigest {
+    fn digest(&self) -> &[u8; 32] {
+        &self.digest
+    }
+}
+
+impl HashedValue for ToonValueDigest {
+    fn digest(&self) -> &[u8; 32] {
+        &self.0.digest
+    }
+}
+
+fn stream_semantic_digest_impl<R: Read, T: DeserializeOwned + HashedValue>(
+    reader: R,
+) -> Result<[u8; 32], io::Error> {
     let mut hasher = Sha256::new();
     hasher.update(b"results\0");
     let mut count = 0_u64;
-    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<ValueDigest>();
-    for result in stream {
+    for result in serde_json::Deserializer::from_reader(reader).into_iter::<T>() {
         let value = result.map_err(|error| invalid_json(error.to_string()))?;
-        hasher.update(value.0);
+        hasher.update(value.digest());
         count = count
             .checked_add(1)
             .ok_or_else(|| invalid_json("result count overflow"))?;
@@ -440,32 +475,303 @@ fn stream_semantic_digest<R: Read>(reader: R) -> Result<[u8; 32], io::Error> {
 }
 
 const SERDE_JSON_NUMBER_TOKEN: &str = "$serde_json::private::Number";
+const MAX_VALUE_FIELDS: usize = 65_536;
+const MAX_VALUE_SCHEMA_BYTES: usize = 16 * 1024 * 1024;
 
-struct ValueDigest([u8; 32]);
+struct ValueDigest {
+    digest: [u8; 32],
+    header_digest: [u8; 32],
+    keyed_digest: Option<[u8; 32]>,
+    shape: ValueShape,
+    retained_schema_bytes: usize,
+}
+
+struct ToonValueDigest(ValueDigest);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ValueShape {
+    Primitive,
+    Array,
+    Object(Option<RowSchema>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RowSchema(Vec<SchemaField>);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SchemaField {
+    key: Arc<str>,
+    nested: Option<Box<RowSchema>>,
+}
 
 impl<'de> Deserialize<'de> for ValueDigest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        ValueDigestSeed.deserialize(deserializer)
+        ValueDigestSeed {
+            toon_headers: false,
+            allow_layout: false,
+        }
+        .deserialize(deserializer)
     }
 }
 
-struct ValueDigestSeed;
+impl<'de> Deserialize<'de> for ToonValueDigest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        ValueDigestSeed {
+            toon_headers: true,
+            allow_layout: true,
+        }
+        .deserialize(deserializer)
+        .map(Self)
+    }
+}
+
+struct ValueDigestSeed {
+    toon_headers: bool,
+    allow_layout: bool,
+}
 
 impl<'de> DeserializeSeed<'de> for ValueDigestSeed {
     type Value = ValueDigest;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_any(ValueDigestVisitor)
+        deserializer.deserialize_any(ValueDigestVisitor {
+            toon_headers: self.toon_headers,
+            allow_layout: self.allow_layout,
+        })
     }
 }
 
-struct ValueDigestVisitor;
+struct ValueDigestVisitor {
+    toon_headers: bool,
+    allow_layout: bool,
+}
 
 impl ValueDigestVisitor {
+    fn scalar(digest: [u8; 32]) -> ValueDigest {
+        ValueDigest {
+            digest,
+            header_digest: digest,
+            keyed_digest: None,
+            shape: ValueShape::Primitive,
+            retained_schema_bytes: 0,
+        }
+    }
+
     fn number<E: de::Error>(text: &str) -> Result<ValueDigest, E> {
         let canonical = crate::benchmark::canonical_number(text).map_err(E::custom)?;
-        Ok(ValueDigest(hash_scalar(b"number", canonical.as_bytes())))
+        Ok(Self::scalar(hash_scalar(b"number", canonical.as_bytes())))
     }
+    fn ordered_map<'de, A: MapAccess<'de>>(mut map: A) -> Result<ValueDigest, A::Error> {
+        let mut hasher = Sha256::new();
+        hasher.update(b"object\0");
+        let mut keys = HashSet::<String>::new();
+        let mut name_bytes = 0_usize;
+        while let Some(key) = map.next_key::<DigestKey>()? {
+            if key.synthetic_number {
+                let literal = map.next_value::<String>()?;
+                return Self::number(&literal);
+            }
+            if keys.contains(&key.text) {
+                return Err(A::Error::custom("duplicate object key"));
+            }
+            if keys.len() == MAX_VALUE_FIELDS {
+                return Err(A::Error::custom(
+                    "schema resource limit: too many object fields",
+                ));
+            }
+            name_bytes = name_bytes
+                .checked_add(key.text.len())
+                .ok_or_else(|| A::Error::custom("schema resource limit: key-byte overflow"))?;
+            if name_bytes > MAX_VALUE_SCHEMA_BYTES {
+                return Err(A::Error::custom(
+                    "schema resource limit: object keys exceed byte limit",
+                ));
+            }
+            let value = map.next_value_seed(ValueDigestSeed {
+                toon_headers: false,
+                allow_layout: false,
+            })?;
+            hasher.update((key.text.len() as u64).to_be_bytes());
+            hasher.update(key.text.as_bytes());
+            hasher.update(value.digest);
+            keys.insert(key.text);
+        }
+        let digest = hasher.finalize().into();
+        Ok(ValueDigest {
+            digest,
+            header_digest: digest,
+            keyed_digest: None,
+            shape: ValueShape::Object(None),
+            retained_schema_bytes: 0,
+        })
+    }
+    fn toon_map<'de, A: MapAccess<'de>>(
+        mut map: A,
+        allow_layout: bool,
+        toon_headers: bool,
+    ) -> Result<ValueDigest, A::Error> {
+        let mut ordered = Sha256::new();
+        ordered.update(b"object\0");
+        let mut entries = Vec::<(Arc<str>, ValueDigest)>::new();
+        let mut keys = HashSet::<Arc<str>>::new();
+        let mut name_bytes = 0_usize;
+        let mut retained = 0_usize;
+        while let Some(key) = map.next_key::<DigestKey>()? {
+            // serde_json's arbitrary_precision numbers arrive as a synthetic
+            // one-entry map. Real objects with this key remain ordinary maps.
+            if key.synthetic_number {
+                let literal = map.next_value::<String>()?;
+                return Self::number(&literal);
+            }
+            if keys.contains(key.text.as_str()) {
+                return Err(A::Error::custom("duplicate object key"));
+            }
+            if keys.len() == MAX_VALUE_FIELDS {
+                return Err(A::Error::custom(
+                    "schema resource limit: too many object fields",
+                ));
+            }
+            name_bytes = name_bytes
+                .checked_add(key.text.len())
+                .ok_or_else(|| A::Error::custom("schema resource limit: key-byte overflow"))?;
+            if name_bytes > MAX_VALUE_SCHEMA_BYTES {
+                return Err(A::Error::custom(
+                    "schema resource limit: object keys exceed byte limit",
+                ));
+            }
+            let key: Arc<str> = Arc::from(key.text);
+            let value = map.next_value_seed(ValueDigestSeed {
+                toon_headers,
+                allow_layout: true,
+            })?;
+            retained = Self::retain_entry::<A::Error>(retained, &key, &value)?;
+            keys.insert(Arc::clone(&key));
+            ordered.update((key.len() as u64).to_be_bytes());
+            ordered.update(key.as_bytes());
+            ordered.update(value.digest);
+            entries.push((key, value));
+        }
+        Self::finish_map(&entries, ordered, retained, toon_headers, allow_layout)
+    }
+
+    fn retain_entry<E: de::Error>(
+        retained: usize,
+        key: &Arc<str>,
+        value: &ValueDigest,
+    ) -> Result<usize, E> {
+        let next_retained = retained
+            .checked_add(std::mem::size_of::<(Arc<str>, ValueDigest)>())
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Arc<str>>()))
+            .and_then(|bytes| bytes.checked_add(key.len()))
+            .and_then(|bytes| bytes.checked_add(value.retained_schema_bytes))
+            .ok_or_else(|| E::custom("schema resource limit: byte-count overflow"))?;
+        if next_retained > MAX_VALUE_SCHEMA_BYTES {
+            return Err(E::custom(
+                "schema resource limit: retained object schema exceeds byte limit",
+            ));
+        }
+        Ok(next_retained)
+    }
+
+    fn finish_map<E: de::Error>(
+        entries: &[(Arc<str>, ValueDigest)],
+        ordered: Sha256,
+        retained: usize,
+        toon_headers: bool,
+        allow_layout: bool,
+    ) -> Result<ValueDigest, E> {
+        let schema_valid = !entries.is_empty()
+            && entries.iter().all(|(_, value)| match &value.shape {
+                ValueShape::Primitive | ValueShape::Object(Some(_)) => true,
+                ValueShape::Object(None) | ValueShape::Array => false,
+            });
+        let schema_bytes = if schema_valid {
+            schema_fields_bytes(entries)
+                .ok_or_else(|| E::custom("schema resource limit: schema-size overflow"))?
+        } else {
+            0
+        };
+        let sorted_bytes = entries
+            .len()
+            .checked_mul(std::mem::size_of::<&(Arc<str>, ValueDigest)>())
+            .ok_or_else(|| E::custom("schema resource limit: index-size overflow"))?;
+        let retained = retained
+            .checked_add(schema_bytes)
+            .and_then(|bytes| bytes.checked_add(sorted_bytes))
+            .ok_or_else(|| E::custom("schema resource limit: byte-count overflow"))?;
+        if retained > MAX_VALUE_SCHEMA_BYTES {
+            return Err(E::custom(
+                "schema resource limit: recursive schema exceeds byte limit",
+            ));
+        }
+
+        let mut sorted = entries.iter().collect::<Vec<_>>();
+        sorted.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+        let mut header = Sha256::new();
+        header.update(b"object\0");
+        let mut schema_fields = schema_valid.then(|| Vec::with_capacity(entries.len()));
+        for (key, value) in &sorted {
+            header.update((key.len() as u64).to_be_bytes());
+            header.update(key.as_bytes());
+            header.update(header_field_digest(value));
+            if let Some(schema_fields) = &mut schema_fields {
+                let nested = match &value.shape {
+                    ValueShape::Primitive => None,
+                    ValueShape::Object(Some(schema)) => Some(Box::new(schema.clone())),
+                    ValueShape::Object(None) | ValueShape::Array => unreachable!(),
+                };
+                schema_fields.push(SchemaField {
+                    key: Arc::clone(key),
+                    nested,
+                });
+            }
+        }
+        let header_digest = header.finalize().into();
+        let object_schema = schema_fields.map(RowSchema);
+        let keyed_digest = if toon_headers && allow_layout && entries.len() >= 2 {
+            let first_schema = match &entries[0].1.shape {
+                ValueShape::Object(Some(schema)) => Some(schema),
+                _ => None,
+            };
+            first_schema
+                .filter(|schema| {
+                    entries.iter().all(|(_, value)| {
+                        matches!(&value.shape, ValueShape::Object(Some(other)) if other == *schema)
+                    })
+                })
+                .map(|_| {
+                    let mut keyed = Sha256::new();
+                    keyed.update(b"object\0");
+                    for (key, value) in entries {
+                        keyed.update((key.len() as u64).to_be_bytes());
+                        keyed.update(key.as_bytes());
+                        keyed.update(value.header_digest);
+                    }
+                    keyed.finalize().into()
+                })
+        } else {
+            None
+        };
+        let ordered = ordered.finalize().into();
+        Ok(ValueDigest {
+            digest: keyed_digest.unwrap_or(ordered),
+            header_digest,
+            keyed_digest,
+            shape: ValueShape::Object(object_schema),
+            retained_schema_bytes: schema_bytes,
+        })
+    }
+}
+
+fn header_field_digest(value: &ValueDigest) -> &[u8; 32] {
+    value
+        .keyed_digest
+        .as_ref()
+        .unwrap_or(if matches!(&value.shape, ValueShape::Object(_)) {
+            &value.header_digest
+        } else {
+            &value.digest
+        })
 }
 
 impl<'de> Visitor<'de> for ValueDigestVisitor {
@@ -476,11 +782,11 @@ impl<'de> Visitor<'de> for ValueDigestVisitor {
     }
 
     fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(ValueDigest(hash_scalar(b"null", b"")))
+        Ok(Self::scalar(hash_scalar(b"null", b"")))
     }
 
     fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
-        Ok(ValueDigest(hash_scalar(
+        Ok(Self::scalar(hash_scalar(
             b"bool",
             if value {
                 b"true".as_slice()
@@ -491,7 +797,7 @@ impl<'de> Visitor<'de> for ValueDigestVisitor {
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
-        Ok(ValueDigest(hash_scalar(b"string", value.as_bytes())))
+        Ok(Self::scalar(hash_scalar(b"string", value.as_bytes())))
     }
 
     fn visit_string<E: de::Error>(self, value: String) -> Result<Self::Value, E> {
@@ -506,43 +812,100 @@ impl<'de> Visitor<'de> for ValueDigestVisitor {
         Self::number(&value.to_string())
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let mut hasher = Sha256::new();
-        hasher.update(b"object\0");
-        let mut keys = HashSet::new();
-        while let Some(key) = map.next_key::<DigestKey>()? {
-            // serde_json's arbitrary_precision numbers arrive as a synthetic
-            // one-entry map. Its key is borrowed, unlike real keys read from
-            // an IO reader (which always visit_str). Never reinterpret a real
-            // object with this private key, even when its value looks numeric.
-            if key.synthetic_number {
-                let literal = map.next_value::<String>()?;
-                return Self::number(&literal);
-            }
-            let value = map.next_value_seed(ValueDigestSeed)?;
-            hasher.update((key.text.len() as u64).to_be_bytes());
-            hasher.update(key.text.as_bytes());
-            hasher.update(value.0);
-            if !keys.insert(key.text) {
-                return Err(A::Error::custom("duplicate object key"));
-            }
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+        if !self.toon_headers {
+            return Self::ordered_map(map);
         }
-        Ok(ValueDigest(hasher.finalize().into()))
+        Self::toon_map(map, self.allow_layout, self.toon_headers)
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
-        let mut hasher = Sha256::new();
-        hasher.update(b"array\0");
+        let mut ordered = Sha256::new();
+        ordered.update(b"array\0");
+        let mut candidate = Sha256::new();
+        candidate.update(b"array\0");
+        let mut row_schema: Option<RowSchema> = None;
+        let mut candidate_valid = self.toon_headers && self.allow_layout;
         let mut count = 0_u64;
-        while let Some(value) = sequence.next_element_seed(ValueDigestSeed)? {
-            hasher.update(value.0);
+        while let Some(value) = sequence.next_element_seed(ValueDigestSeed {
+            toon_headers: self.toon_headers,
+            allow_layout: false,
+        })? {
+            ordered.update(value.digest);
+            if candidate_valid {
+                let ValueShape::Object(Some(schema)) = &value.shape else {
+                    candidate_valid = false;
+                    count = count
+                        .checked_add(1)
+                        .ok_or_else(|| A::Error::custom("array length overflow"))?;
+                    continue;
+                };
+                if let Some(expected) = &row_schema {
+                    if expected != schema {
+                        candidate_valid = false;
+                    }
+                } else {
+                    let size = row_schema_bytes(schema).ok_or_else(|| {
+                        A::Error::custom("schema resource limit: schema-size overflow")
+                    })?;
+                    if size > MAX_VALUE_SCHEMA_BYTES {
+                        return Err(A::Error::custom(
+                            "schema resource limit: table row schema exceeds byte limit",
+                        ));
+                    }
+                    row_schema = Some(schema.clone());
+                }
+                if candidate_valid {
+                    candidate.update(value.header_digest);
+                }
+            }
             count = count
                 .checked_add(1)
                 .ok_or_else(|| A::Error::custom("array length overflow"))?;
         }
-        hasher.update(count.to_be_bytes());
-        Ok(ValueDigest(hasher.finalize().into()))
+        ordered.update(count.to_be_bytes());
+        candidate.update(count.to_be_bytes());
+        let ordered = ordered.finalize().into();
+        let digest = if candidate_valid && count != 0 {
+            candidate.finalize().into()
+        } else {
+            ordered
+        };
+        Ok(ValueDigest {
+            digest,
+            header_digest: digest,
+            keyed_digest: None,
+            shape: ValueShape::Array,
+            retained_schema_bytes: 0,
+        })
     }
+}
+
+fn schema_fields_bytes(entries: &[(Arc<str>, ValueDigest)]) -> Option<usize> {
+    entries.iter().try_fold(0_usize, |total, (key, value)| {
+        let nested_bytes = match &value.shape {
+            ValueShape::Primitive => Some(0),
+            ValueShape::Object(Some(schema)) => row_schema_bytes(schema),
+            ValueShape::Object(None) | ValueShape::Array => return None,
+        }?;
+        total
+            .checked_add(std::mem::size_of::<SchemaField>())
+            .and_then(|bytes| bytes.checked_add(key.len()))
+            .and_then(|bytes| bytes.checked_add(nested_bytes))
+    })
+}
+
+fn row_schema_bytes(schema: &RowSchema) -> Option<usize> {
+    schema.0.iter().try_fold(0_usize, |total, field| {
+        total
+            .checked_add(std::mem::size_of::<SchemaField>())
+            .and_then(|bytes| bytes.checked_add(field.key.len()))
+            .and_then(|bytes| {
+                field.nested.as_deref().map_or(Some(bytes), |nested| {
+                    row_schema_bytes(nested)?.checked_add(bytes)
+                })
+            })
+    })
 }
 
 struct DigestKey {
@@ -707,7 +1070,7 @@ pub fn validate_generated_representations(
         .value
         .to_json()
         .map_err(|error| ConversionError::Toon(error.to_string()))?;
-    compare_ordered(&source, &toon).map_err(|difference| ConversionError::Semantic {
+    compare_toon_ordered(&source, &toon).map_err(|difference| ConversionError::Semantic {
         format: "toon".to_owned(),
         difference,
     })
@@ -746,10 +1109,21 @@ pub fn finalize_generated_representations(
 ///
 /// Returns the first semantic difference with its exact path.
 pub fn compare_ordered(expected: &Value, actual: &Value) -> Result<(), SemanticDifference> {
-    compare_at(expected, actual, "")
+    compare_at(expected, actual, "", false, false, true)
 }
 
-fn compare_at(expected: &Value, actual: &Value, path: &str) -> Result<(), SemanticDifference> {
+fn compare_toon_ordered(expected: &Value, actual: &Value) -> Result<(), SemanticDifference> {
+    compare_at(expected, actual, "", false, true, true)
+}
+
+fn compare_at(
+    expected: &Value,
+    actual: &Value,
+    path: &str,
+    header_order_allowed: bool,
+    allow_toon_header_order: bool,
+    layout_allowed: bool,
+) -> Result<(), SemanticDifference> {
     match (expected, actual) {
         (Value::Null, Value::Null) => Ok(()),
         (Value::Bool(left), Value::Bool(right)) => primitive(left, right, path),
@@ -793,20 +1167,40 @@ fn compare_at(expected: &Value, actual: &Value, path: &str) -> Result<(), Semant
                     actual: right.len().to_string(),
                 });
             }
+            let table_rows = allow_toon_header_order
+                && layout_allowed
+                && uniform_object_values(left.iter())
+                && uniform_object_values(right.iter());
             for (index, (left, right)) in left.iter().zip(right).enumerate() {
-                compare_at(left, right, &join(path, &index.to_string()))?;
+                compare_at(
+                    left,
+                    right,
+                    &join(path, &index.to_string()),
+                    table_rows,
+                    allow_toon_header_order,
+                    false,
+                )?;
             }
             Ok(())
         }
         (Value::Object(left), Value::Object(right)) => {
-            if left.len() != right.len() {
+            if !object_keys_match(left, right, allow_toon_header_order && header_order_allowed) {
                 return Err(object_keys_difference(left, right, path));
             }
-            if left.keys().ne(right.keys()) {
-                return Err(object_keys_difference(left, right, path));
-            }
+            let keyed_rows = allow_toon_header_order
+                && layout_allowed
+                && left.len() >= 2
+                && uniform_object_values(left.values())
+                && uniform_object_values(right.values());
             for (key, value) in left {
-                compare_at(value, &right[key], &join(path, &escape(key)))?;
+                compare_at(
+                    value,
+                    &right[key],
+                    &join(path, &escape(key)),
+                    header_order_allowed || keyed_rows,
+                    allow_toon_header_order,
+                    true,
+                )?;
             }
             Ok(())
         }
@@ -817,6 +1211,41 @@ fn compare_at(expected: &Value, actual: &Value, path: &str) -> Result<(), Semant
             actual: type_name(actual).to_owned(),
         }),
     }
+}
+
+pub(crate) fn uniform_object_values<'a>(mut values: impl Iterator<Item = &'a Value>) -> bool {
+    let Some(first @ Value::Object(_)) = values.next() else {
+        return false;
+    };
+    matching_row_shape(first, first) && values.all(|value| matching_row_shape(first, value))
+}
+
+fn matching_row_shape(first: &Value, value: &Value) -> bool {
+    let (Value::Object(first), Value::Object(object)) = (first, value) else {
+        return false;
+    };
+    !first.is_empty()
+        && object.len() == first.len()
+        && first.iter().all(|(key, expected)| {
+            object.get(key).is_some_and(|actual| match expected {
+                Value::Object(_) => matching_row_shape(expected, actual),
+                Value::Array(_) => false,
+                _ => !actual.is_object() && !actual.is_array(),
+            })
+        })
+}
+
+fn object_keys_match(
+    expected: &serde_json::Map<String, Value>,
+    actual: &serde_json::Map<String, Value>,
+    allow_reorder: bool,
+) -> bool {
+    expected.len() == actual.len()
+        && if allow_reorder {
+            expected.keys().all(|key| actual.contains_key(key))
+        } else {
+            expected.keys().eq(actual.keys())
+        }
 }
 
 fn object_keys_difference(
@@ -848,7 +1277,7 @@ const NUMBER_MARKER_SUFFIX: char = 'z';
 pub(crate) fn encode_toon_exact(source: &Value) -> Result<String, ConversionError> {
     let mut numbers = Vec::new();
     let marked = mark_numbers(source, &mut numbers)?;
-    let template = toon_format::encode(&marked, &toon_format::EncodeOptions::default())
+    let template = toon_format::encode_default(&marked)
         .map_err(|error| ConversionError::Toon(error.to_string()))?;
     replace_number_markers(&template, &numbers)
 }
@@ -1106,12 +1535,78 @@ fn identify_existing(
 mod tests {
     use std::io::Cursor;
 
-    use super::stream_semantic_digest;
+    use super::{compare_ordered, compare_toon_ordered, stream_semantic_digest};
+    use serde_json::Value;
+
+    #[test]
+    fn ordered_comparison_allows_only_recursive_table_header_order() {
+        let expected: Value = serde_json::from_str(
+            r#"{"before":{"left":0,"right":1},"rows":[{"id":1,"meta":{"x":2,"y":3}},{"id":2,"meta":{"x":4,"y":5}}],"after":9}"#,
+        )
+        .unwrap();
+        let reordered: Value = serde_json::from_str(
+            r#"{"before":{"left":0,"right":1},"rows":[{"meta":{"y":3,"x":2},"id":1},{"meta":{"y":5,"x":4},"id":2}],"after":9}"#,
+        )
+        .unwrap();
+        assert!(compare_ordered(&expected, &reordered).is_err());
+        assert!(compare_toon_ordered(&expected, &reordered).is_ok());
+        assert!(
+            compare_toon_ordered(
+                &serde_json::json!([[{"a":1,"b":2},{"a":3,"b":4}]]),
+                &serde_json::json!([[{"b":2,"a":1},{"b":4,"a":3}]])
+            )
+            .is_err()
+        );
+        assert!(
+            compare_toon_ordered(
+                &serde_json::json!([{"x":{"a":1,"b":2},"y":{"a":3,"b":4}},{}]),
+                &serde_json::json!([{"x":{"b":2,"a":1},"y":{"b":4,"a":3}},{}])
+            )
+            .is_err()
+        );
+        let root_table = serde_json::json!([{"a":{"x":1,"y":2},"b":3},{"a":{"x":4,"y":5},"b":6}]);
+        let root_table_reordered =
+            serde_json::json!([{"b":3,"a":{"y":2,"x":1}},{"b":6,"a":{"y":5,"x":4}}]);
+        assert!(compare_toon_ordered(&root_table, &root_table_reordered).is_ok());
+        let field_table = serde_json::json!({"rows":[{"a":1,"b":2},{"a":3,"b":4}]});
+        let field_table_reordered = serde_json::json!({"rows":[{"b":2,"a":1},{"b":4,"a":3}]});
+        assert!(compare_toon_ordered(&field_table, &field_table_reordered).is_ok());
+        let outer_reordered: Value = serde_json::from_str(
+            r#"{"before":{"right":1,"left":0},"rows":[{"id":1,"meta":{"x":2,"y":3}},{"id":2,"meta":{"x":4,"y":5}}],"after":9}"#,
+        )
+        .unwrap();
+        assert!(compare_ordered(&expected, &outer_reordered).is_err());
+        let rows_reordered = serde_json::json!({"before":{"left":0,"right":1},"rows":[{"id":2,"meta":{"x":4,"y":5}},{"id":1,"meta":{"x":2,"y":3}}],"after":9});
+        assert!(compare_ordered(&expected, &rows_reordered).is_err());
+
+        let keyed_expected: Value =
+            serde_json::from_str(r#"{"alice":{"name":"A","age":1},"bob":{"name":"B","age":2}}"#)
+                .unwrap();
+        let keyed_reordered: Value =
+            serde_json::from_str(r#"{"alice":{"age":1,"name":"A"},"bob":{"age":2,"name":"B"}}"#)
+                .unwrap();
+        assert!(compare_ordered(&keyed_expected, &keyed_reordered).is_err());
+        assert!(compare_toon_ordered(&keyed_expected, &keyed_reordered).is_ok());
+        let keyed_outer_reordered: Value =
+            serde_json::from_str(r#"{"bob":{"name":"B","age":2},"alice":{"name":"A","age":1}}"#)
+                .unwrap();
+        assert!(compare_ordered(&keyed_expected, &keyed_outer_reordered).is_err());
+        assert!(
+            compare_ordered(
+                &serde_json::json!({"rows":[{"id":1},{"id":2}]}),
+                &serde_json::json!({"rows":[{"id":"1"},{"id":2}]})
+            )
+            .is_err()
+        );
+    }
 
     fn digest(input: &str) -> [u8; 32] {
         stream_semantic_digest(Cursor::new(input.as_bytes())).expect("semantic digest")
     }
-
+    fn toon_digest(input: &str) -> [u8; 32] {
+        super::stream_semantic_digest_mode(Cursor::new(input.as_bytes()), true)
+            .expect("TOON semantic digest")
+    }
     #[test]
     fn stream_digest_preserves_nested_object_array_and_result_order() {
         let original = r#"{"first":[{"a":34.0,"b":[1,{"x":true,"y":null}]}],"second":2}
@@ -1139,6 +1634,41 @@ mod tests {
         );
         assert_ne!(digest("1\n2"), digest("2\n1"));
         assert_ne!(digest("[1,2]"), digest("[2,1]"));
+    }
+
+    #[test]
+    fn toon_stream_digest_normalizes_only_eligible_recursive_headers() {
+        let source = r#"{"before":0,"rows":[{"id":1,"meta":{"x":2,"y":3}},{"id":2,"meta":{"y":5,"x":4}}],"after":9}"#;
+        let toon = r#"{"before":0,"rows":[{"meta":{"y":3,"x":2},"id":1},{"meta":{"y":5,"x":4},"id":2}],"after":9}"#;
+        assert_eq!(toon_digest(source), toon_digest(toon));
+        assert_ne!(
+            toon_digest(r#"{"before":0,"after":9}"#),
+            toon_digest(r#"{"after":9,"before":0}"#)
+        );
+        assert_ne!(
+            toon_digest(r#"{"rows":[{"id":1,"meta":[1]},{"id":2,"meta":[2]}]}"#),
+            toon_digest(r#"{"rows":[{"meta":[1],"id":1},{"meta":[2],"id":2}]}"#)
+        );
+        assert_ne!(
+            toon_digest(r#"{"rows":[{"id":1},{"id":2}]}"#),
+            toon_digest(r#"{"rows":[{"id":2},{"id":1}]}"#)
+        );
+
+        let keyed = r#"{"users":{"alice":{"id":1,"name":"A"},"bob":{"id":2,"name":"B"}}}"#;
+        let keyed_reordered =
+            r#"{"users":{"alice":{"name":"A","id":1},"bob":{"name":"B","id":2}}}"#;
+        let keyed_entries_reordered =
+            r#"{"users":{"bob":{"id":2,"name":"B"},"alice":{"id":1,"name":"A"}}}"#;
+        assert_eq!(toon_digest(keyed), toon_digest(keyed_reordered));
+        assert_ne!(toon_digest(keyed), toon_digest(keyed_entries_reordered));
+        assert_ne!(
+            toon_digest(r#"{"rows":[{"id":"1"}]}"#),
+            toon_digest(r#"{"rows":[{"id":1}]}"#)
+        );
+        assert_ne!(
+            toon_digest(r#"{"items":[[{"id":1,"name":"A"},{"id":2,"name":"B"}]]}"#),
+            toon_digest(r#"{"items":[[{"name":"A","id":1},{"name":"B","id":2}]]}"#)
+        );
     }
 
     #[test]

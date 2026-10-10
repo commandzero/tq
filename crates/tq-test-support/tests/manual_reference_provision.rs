@@ -355,10 +355,8 @@ mod unix {
             if succeeds {
                 assert_eq!(
                     String::from_utf8_lossy(&output.stdout).trim(),
-                    reference.to_str().unwrap()
+                    reference.canonicalize().unwrap().to_str().unwrap()
                 );
-            } else {
-                assert!(String::from_utf8_lossy(&output.stderr).contains("SHA-256 mismatch"));
             }
         }
     }

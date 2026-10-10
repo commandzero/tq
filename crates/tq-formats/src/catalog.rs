@@ -106,7 +106,7 @@ pub struct FormatDescriptor {
 pub enum OutputControls {
     /// Scalar row encoding without JSON or TOON controls.
     Delimited,
-    /// TOON indentation, folding, and framing.
+    /// TOON indentation, delimiter, and framing.
     Toon,
     /// JSON indentation, ASCII escaping, and color.
     Json,

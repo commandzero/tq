@@ -34,7 +34,7 @@ use tq_formats::{
     stream_json_selected_roots_with_control, stream_toon,
 };
 use tq_toon::{
-    ArrayPreparationConfig, DuplicateKeyPolicy, KeyFolding, PreparationArena, PreparationLimits,
+    ArrayPreparationConfig, DuplicateKeyPolicy, PreparationArena, PreparationLimits,
     PreparationObservations, PublicationBuffer, PublicationError, SpoolError, TranscodeConsumer,
     TranscodeError, WriterError,
 };
@@ -351,7 +351,7 @@ fn run_with_io_policy_capture<R: Read + Send, W: Write, E: Write>(
         Command::Version => {
             writeln!(
                 stdout,
-                "tq {} (TOON v3; jq target 1.8.x; revision {})",
+                "tq {} (TOON v4.1; jq target 1.8.x; revision {})",
                 env!("CARGO_PKG_VERSION"),
                 option_env!("TQ_BUILD_REVISION").unwrap_or("unknown")
             )?;
@@ -1281,7 +1281,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
             if options.files.is_empty() || options.files.iter().any(|path| path == Path::new("-")) {
                 let bytes = read_limited(&mut *stdin, options.limits.input_bytes, "<stdin>")?;
                 let stdin_events = match probe_format(&bytes, options.limits.lookahead_bytes) {
-                    Ok(probe) => decoder_events_available(probe.selected),
+                    Ok(probe) => decoder_events_available(options, probe.selected),
                     Err(error) if proxyable_format_error(&error) => false,
                     Err(error) => return Err(error.into()),
                 };
@@ -1326,7 +1326,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
                 options,
                 resolved,
                 &variables,
-                file_events && decoder_events_available(probe.selected),
+                file_events && decoder_events_available(options, probe.selected),
                 transcode_input,
                 &detections,
                 &mut replay,
@@ -1352,11 +1352,7 @@ fn run_filter<R: Read + Send, W: Write, E: Write>(
         options,
         resolved,
         &variables,
-        automatic_mode
-            && matches!(
-                options.input_format,
-                InputFormat::Json | InputFormat::JsonLines | InputFormat::Toon
-            ),
+        automatic_mode && decoder_events_available(options, options.input_format),
         match options.input_format {
             InputFormat::Json | InputFormat::Toon if !json_sequence_input_requested(options) => {
                 Some(options.input_format)
@@ -1440,7 +1436,15 @@ fn auto_file_common_format(options: &RunOptions) -> Result<CommonInputFormat, Ru
     })
 }
 
-const fn decoder_events_available(format: InputFormat) -> bool {
+fn requires_staged_toon_events(options: &RunOptions, format: InputFormat) -> bool {
+    !options.strict && matches!(format, InputFormat::Toon | InputFormat::ToonSequence)
+}
+
+fn decoder_events_available(options: &RunOptions, format: InputFormat) -> bool {
+    // Duplicate writes cannot be retracted by automatic event consumers.
+    if requires_staged_toon_events(options, format) {
+        return false;
+    }
     match tq_formats::NativeFormat::from_input(format) {
         // Recoverable RS payloads need complete-document validation in normal
         // mode. Explicit --stream can publish partial events before recovery.
@@ -1460,12 +1464,12 @@ fn auto_file_events_available(options: &RunOptions) -> Result<bool, RunError> {
     for path in options.files.iter().filter(|path| *path != Path::new("-")) {
         let identity = path.display().to_string();
         if let Some(format) = format_from_path(path) {
-            available &= decoder_events_available(format);
+            available &= decoder_events_available(options, format);
         } else {
             let reader =
                 LimitedReader::new(open_path(path)?, options.limits.input_bytes, &identity);
             match probe_reader(reader, options.limits.lookahead_bytes) {
-                Ok((probe, _)) => available &= decoder_events_available(probe.selected),
+                Ok((probe, _)) => available &= decoder_events_available(options, probe.selected),
                 Err(error) if options.proxy_on_error && proxyable_format_error(&error) => {
                     available = false;
                 }
@@ -2247,9 +2251,6 @@ fn transcode_proof(
     if options.sort_keys {
         return Err("sorted-key output requires document execution");
     }
-    if options.toon_writer.key_folding != KeyFolding::Off {
-        return Err("safe key folding requires sibling collision analysis");
-    }
     let (input, duplicate_policy) = match format {
         Some(InputFormat::Json) => (TranscodeInput::Json, TranscodeDuplicatePolicy::Reject),
         Some(InputFormat::Toon) if options.strict => {
@@ -2263,7 +2264,6 @@ fn transcode_proof(
         duplicate_policy,
         late_errors: true,
         canonical_toon_writer: true,
-        key_folding_disabled: true,
         commitment: match options.framing {
             ToonFraming::Values => TranscodeCommitment::DirectValues,
             ToonFraming::Sequence => TranscodeCommitment::DirectSequence,
@@ -2491,13 +2491,28 @@ fn map_transcode_message(format: InputFormat, message: String) -> RunError {
     }
 }
 
+fn transcode_error_resource(resource: &'static str) -> &'static str {
+    match resource {
+        "depth" => "depth",
+        "field count" => "fields",
+        "retained bytes" => "preparation-memory",
+        _ => "transcode-preparation",
+    }
+}
+
 fn map_transcode_error(error: TranscodeError) -> RunError {
     match error {
         TranscodeError::ResultLimit => RunError::Resource("result-count"),
         TranscodeError::Cancelled | TranscodeError::Spool(SpoolError::Cancelled) => {
             RunError::Interrupted
         }
-        TranscodeError::Spool(SpoolError::Io(error))
+        TranscodeError::Writer(WriterError::Schema { resource, .. })
+        | TranscodeError::Spool(SpoolError::Writer(WriterError::Schema { resource, .. })) => {
+            RunError::Resource(transcode_error_resource(resource))
+        }
+        TranscodeError::Spool(
+            SpoolError::Io(error) | SpoolError::Writer(WriterError::Io(error)),
+        )
         | TranscodeError::Writer(WriterError::Io(error))
         | TranscodeError::Io(error) => {
             if let Some(mapped) = map_wrapped_spool_error(&error) {
@@ -2536,7 +2551,12 @@ fn map_wrapped_spool_error(error: &io::Error) -> Option<RunError> {
         | SpoolError::Disabled
         | SpoolError::Limit
         | SpoolError::NestingLimit => RunError::Resource("transcode-preparation"),
-        SpoolError::Io(_) | SpoolError::Decode(_) => return None,
+        SpoolError::Writer(WriterError::Schema { resource, .. }) => {
+            RunError::Resource(transcode_error_resource(resource))
+        }
+        SpoolError::Writer(WriterError::Io(_)) | SpoolError::Io(_) | SpoolError::Decode(_) => {
+            return None;
+        }
     })
 }
 
@@ -2843,19 +2863,31 @@ fn write_explain(
 ) -> Result<(), RunError> {
     let capabilities = analyzed.capabilities();
     let plan = analysis.selected_plan;
-    let retained = match plan {
-        PlanKind::Transcode => "decoder frames plus one shared bounded preparation arena",
-        PlanKind::Events if capabilities.fold_state => {
-            "decoder frames, current path, one event value, and one fold accumulator"
+    let staged_toon_stream = options.stream && !options.strict;
+    let retained = if staged_toon_stream {
+        "when input is non-strict TOON, complete documents are staged for last-write-wins before semantic event projection"
+    } else {
+        match plan {
+            PlanKind::Transcode => {
+                "whole object/array candidates and recursive schemas in a bounded preparation arena; spills only as needed"
+            }
+            PlanKind::Events if capabilities.fold_state => {
+                "decoder frames, current path, one event value, and one fold accumulator"
+            }
+            PlanKind::Events => "decoder frames, current path, and one scalar event value",
+            PlanKind::WholeInput => "all input documents",
+            PlanKind::Blocking => "one document plus blocking operator state",
+            PlanKind::Subtree => "one selected complete subtree",
+            PlanKind::HybridBlocking => {
+                "bounded decoder state plus cardinality-proportional projected collection and blocking state"
+            }
+            PlanKind::Document => "one complete document",
         }
-        PlanKind::Events => "decoder frames, current path, and one scalar event value",
-        PlanKind::WholeInput => "all input documents",
-        PlanKind::Blocking => "one document plus blocking operator state",
-        PlanKind::Subtree => "one selected complete subtree",
-        PlanKind::HybridBlocking => {
-            "bounded decoder state plus cardinality-proportional projected collection and blocking state"
-        }
-        PlanKind::Document => "one complete document",
+    };
+    let spool_policy = if plan == PlanKind::Transcode {
+        "whole object/array shape preparation remains in memory within its budget and spills only as required, subject to the spool limit"
+    } else {
+        "not used by this plan"
     };
     let detection = input_format_name(options.input_format);
     match format {
@@ -2865,7 +2897,7 @@ fn write_explain(
             writeln!(stderr, "input-detection: {detection}")?;
             writeln!(stderr, "retained-working-set: {retained}")?;
             writeln!(stderr, "blocking: {}", capabilities.blocking)?;
-            writeln!(stderr, "spool-required: {}", plan == PlanKind::Transcode)?;
+            writeln!(stderr, "spool-policy: {spool_policy}")?;
             if let Some(proof) = &analysis.transcode_proof {
                 writeln!(stderr, "identity-proof: semantic-identity")?;
                 writeln!(stderr, "duplicate-policy: {:?}", proof.duplicate_policy)?;
@@ -2950,7 +2982,14 @@ fn write_explain(
                 "input_detection": detection,
                 "retained_working_set": retained,
                 "blocking": capabilities.blocking,
-                "spool_required": plan == PlanKind::Transcode,
+                "spool_policy": spool_policy,
+                "preparation_policy": if staged_toon_stream {
+                    "when selected input is non-strict TOON, stage each complete document to resolve last-write-wins before EventProjector; other inputs use their selected stream route"
+                } else if plan == PlanKind::Transcode {
+                    "stage whole object/array candidates and recursive schemas; spill as required by preparation-memory budget"
+                } else {
+                    "not used by this plan"
+                },
                 "proof": if plan == PlanKind::Transcode {
                     serde_json::to_value(analysis.transcode_proof)?
                 } else {
@@ -5132,6 +5171,10 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
     executor: &mut StreamExecutor<'_, W, E>,
 ) -> Result<(), RunError> {
     let reader = LimitedReader::new(reader, options.limits.input_bytes, identity);
+    if requires_staged_toon_events(options, format) {
+        return stream_projected_input(options, format, reader, identity, executor);
+    }
+
     if format == InputFormat::JsonSequence {
         return stream_projected_input(options, format, reader, identity, executor);
     }
@@ -5152,6 +5195,9 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
                 InputFormat::Json => {
                     stream_json_into(buffered_input(replay), stream_options, executor)
                 }
+                InputFormat::Toon if requires_staged_toon_events(options, InputFormat::Toon) => {
+                    stream_projected_input(options, InputFormat::Toon, replay, identity, executor)
+                }
                 InputFormat::Toon => stream_toon_into(replay, options, stream_options, executor),
                 InputFormat::JsonSequence => {
                     stream_projected_input(options, InputFormat::JsonSequence, replay, identity, executor)
@@ -5159,10 +5205,23 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
                 InputFormat::Yaml => Err(RunError::Unsupported(
                     "auto-detection selected YAML, which is document-at-a-time and cannot satisfy --stream; use --input-format json for JSON syntax".to_owned(),
                 )),
-                InputFormat::Auto
-                | InputFormat::Json5
-                | InputFormat::JsonLines
-                | InputFormat::ToonSequence => unreachable!("probe candidate"),
+                InputFormat::ToonSequence
+                    if requires_staged_toon_events(options, InputFormat::ToonSequence) =>
+                {
+                    stream_projected_input(
+                        options,
+                        InputFormat::ToonSequence,
+                        replay,
+                        identity,
+                        executor,
+                    )
+                }
+                InputFormat::ToonSequence => Err(RunError::Unsupported(
+                    "TOON sequence input cannot currently be nested inside --stream".to_owned(),
+                )),
+                InputFormat::Auto | InputFormat::Json5 | InputFormat::JsonLines => {
+                    unreachable!("probe candidate")
+                }
                 InputFormat::Csv | InputFormat::Tsv => Err(RunError::Unsupported(
                     "auto-detection selected delimited input, which cannot satisfy --stream"
                         .to_owned(),
@@ -5173,6 +5232,17 @@ fn stream_reader_inner<R: Read, W: Write, E: Write>(
             "YAML input is document-at-a-time and cannot satisfy --stream".to_owned(),
         )),
         InputFormat::Json5 => Err(RunError::Unsupported(JSON5_STREAM_UNSUPPORTED.to_owned())),
+        InputFormat::ToonSequence
+            if requires_staged_toon_events(options, InputFormat::ToonSequence) =>
+        {
+            stream_projected_input(
+                options,
+                InputFormat::ToonSequence,
+                reader,
+                identity,
+                executor,
+            )
+        }
         InputFormat::ToonSequence => Err(RunError::Unsupported(
             "TOON sequence input cannot currently be nested inside --stream".to_owned(),
         )),
@@ -5264,14 +5334,7 @@ fn stream_toon_into<R: Read, W: Write, E: Write>(
     let mut execution_error = None;
     let decoded = stream_toon(
         BufReader::new(reader),
-        tq_toon::DecoderConfig {
-            strict: options.strict,
-            maximum_depth: options.limits.depth,
-            maximum_token_bytes: options.limits.token_bytes,
-            maximum_line_bytes: options.limits.line_bytes,
-            maximum_lookahead_bytes: options.limits.lookahead_bytes,
-            ..tq_toon::DecoderConfig::default()
-        },
+        toon_decoder_config(options),
         stream_options,
         |record| match executor.accept(record) {
             Ok(()) => Ok(()),
@@ -5305,12 +5368,17 @@ where
     use tq_toon::EventConsumer;
 
     let format = NativeFormat::from_input(format).expect("input is committed");
+    let staged_toon_events = requires_staged_toon_events(options, format.descriptor().input);
+    if staged_toon_events {
+        return project_staged_toon_input(options, format, reader, identity, emit);
+    }
     if !format.descriptor().events {
         return Err(RunError::Unsupported(format!(
             "{} input is document-at-a-time and cannot satisfy --stream",
             format.descriptor().name
         )));
     }
+
     let input = format
         .select_input(
             decode_options(options, format.descriptor().input),
@@ -5381,6 +5449,148 @@ where
             }))
         }
     }
+}
+fn project_staged_toon_input<R: Read, F>(
+    options: &RunOptions,
+    format: NativeFormat,
+    reader: R,
+    identity: &str,
+    emit: &mut F,
+) -> Result<bool, RunError>
+where
+    F: FnMut(StructuredInput) -> Result<bool, RunError>,
+{
+    let mut source = format
+        .select_input(
+            decode_options(options, format.descriptor().input),
+            InputRepresentation::Documents,
+        )?
+        .open(reader, identity);
+    let execution_error = std::cell::RefCell::new(None);
+    let stopped = std::cell::Cell::new(false);
+    let emit = std::cell::RefCell::new(emit);
+    let mut emit_record =
+        |record: StreamRecord| match emit.borrow_mut()(StructuredInput::Value(record.into_value()))
+        {
+            Ok(true) => Ok(()),
+            Ok(false) => {
+                stopped.set(true);
+                Err("input consumer stopped".to_owned())
+            }
+            Err(error) => {
+                execution_error.replace(Some(error));
+                Err("input consumer failed".to_owned())
+            }
+        };
+    let mut projector = tq_formats::EventProjector::new(
+        StreamOptions {
+            maximum_depth: options.limits.depth,
+            maximum_token_bytes: options.limits.token_bytes,
+            errors_as_values: options.stream_errors,
+        },
+        &mut emit_record,
+    );
+    while let Some(observation) = source.next_observation()? {
+        let result = match observation {
+            NativeInputObservation::Document(document) => {
+                emit_value_events(&document.value, &mut projector)
+            }
+            NativeInputObservation::Failure(failure) if options.stream_errors => {
+                projector.error_value(failure.message)
+            }
+            NativeInputObservation::Failure(failure) => {
+                projector.reset();
+                match emit.borrow_mut()(StructuredInput::Failure(failure)) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => {
+                        stopped.set(true);
+                        Err("input consumer stopped".to_owned())
+                    }
+                    Err(error) => {
+                        execution_error.replace(Some(error));
+                        Err("input consumer failed".to_owned())
+                    }
+                }
+            }
+            NativeInputObservation::Event(_) => unreachable!("document representation"),
+        };
+        if let Some(error) = execution_error.borrow_mut().take() {
+            return Err(error);
+        }
+        if stopped.get() {
+            return Ok(false);
+        }
+        result.map_err(|message| {
+            RunError::Input(FormatError::Parse {
+                format: format.descriptor().input,
+                message,
+            })
+        })?;
+    }
+    Ok(true)
+}
+
+fn emit_value_events(
+    value: &Value,
+    consumer: &mut impl tq_toon::EventConsumer<Error = String>,
+) -> Result<(), String> {
+    use tq_toon::Event;
+
+    fn emit(
+        value: &Value,
+        span: tq_core::Span,
+        consumer: &mut impl tq_toon::EventConsumer<Error = String>,
+    ) -> Result<(), String> {
+        use tq_toon::{Event, Scalar};
+        match value {
+            Value::Null => consumer.consume(Event::Scalar {
+                span,
+                value: Scalar::Null,
+            }),
+            Value::Bool(value) => consumer.consume(Event::Scalar {
+                span,
+                value: Scalar::Bool(*value),
+            }),
+            Value::Number(value) => consumer.consume(Event::Scalar {
+                span,
+                value: Scalar::Number(value.clone()),
+            }),
+            Value::String(value) => consumer.consume(Event::Scalar {
+                span,
+                value: Scalar::String(Arc::clone(value)),
+            }),
+            Value::Array(values) => {
+                consumer.consume(Event::ArrayStart {
+                    span,
+                    declared_count: Some(u64::try_from(values.len()).unwrap_or(u64::MAX)),
+                })?;
+                for value in values.iter() {
+                    emit(value, span, consumer)?;
+                }
+                consumer.consume(Event::ArrayEnd {
+                    span,
+                    observed_count: u64::try_from(values.len()).unwrap_or(u64::MAX),
+                })
+            }
+            Value::Object(values) => {
+                consumer.consume(Event::ObjectStart { span })?;
+                for (key, value) in values.iter() {
+                    consumer.consume(Event::Key {
+                        span,
+                        value: Arc::clone(key),
+                        quoted: false,
+                    })?;
+                    emit(value, span, consumer)?;
+                }
+                consumer.consume(Event::ObjectEnd { span })
+            }
+        }
+    }
+    let span = tq_core::Span::new(SourceId::new(0), 0, 0);
+
+    consumer.consume(Event::DocumentStart { span })?;
+    emit(value, span, consumer)?;
+    consumer.consume(Event::DocumentEnd { span })
 }
 
 fn proxyable_format_error(error: &FormatError) -> bool {
@@ -5958,10 +6168,7 @@ fn parse_external_arguments(options: &RunOptions) -> Result<BTreeMap<Arc<str>, V
                 decode_json_argument(argument.value.as_bytes(), "--argjson")?
             }
             ExternalArgumentKind::Toon => {
-                let config = tq_toon::DecoderConfig {
-                    strict: options.strict,
-                    ..tq_toon::DecoderConfig::default()
-                };
+                let config = toon_decoder_config(options);
                 decode_toon(argument.value.as_bytes(), "--argtoon", config)?
                     .pop()
                     .ok_or_else(|| RunError::Unsupported("--argtoon produced no value".to_owned()))?
@@ -6596,6 +6803,19 @@ fn selected_input_format(options: &RunOptions, path: &Path) -> InputFormat {
     }
 }
 
+fn toon_decoder_config(options: &RunOptions) -> tq_toon::DecoderConfig {
+    tq_toon::DecoderConfig {
+        strict: options.strict,
+        maximum_fields: options.limits.fields,
+        maximum_name_bytes: options.limits.preparation_memory_bytes,
+        maximum_depth: options.limits.depth,
+        maximum_token_bytes: options.limits.token_bytes,
+        maximum_line_bytes: options.limits.line_bytes,
+        maximum_lookahead_bytes: options.limits.lookahead_bytes,
+        ..tq_toon::DecoderConfig::default()
+    }
+}
+
 fn decode_options(options: &RunOptions, format: InputFormat) -> DecodeOptions {
     DecodeOptions {
         format,
@@ -6605,14 +6825,7 @@ fn decode_options(options: &RunOptions, format: InputFormat) -> DecodeOptions {
         maximum_token_bytes: options.limits.token_bytes,
         maximum_line_bytes: options.limits.line_bytes,
         maximum_fields: options.limits.fields,
-        toon: tq_toon::DecoderConfig {
-            strict: options.strict,
-            maximum_depth: options.limits.depth,
-            maximum_token_bytes: options.limits.token_bytes,
-            maximum_line_bytes: options.limits.line_bytes,
-            maximum_lookahead_bytes: options.limits.lookahead_bytes,
-            ..tq_toon::DecoderConfig::default()
-        },
+        toon: toon_decoder_config(options),
     }
 }
 
@@ -6720,6 +6933,7 @@ fn write_report(
     plan: PlanKind,
     execution: ReportExecution<'_>,
 ) -> Result<(), RunError> {
+    let staged_toon_stream = options.stream && !options.strict;
     let ReportExecution {
         analysis,
         retention,
@@ -6737,14 +6951,18 @@ fn write_report(
             "hybrid_proof": analysis.hybrid_proof,
             "optimizer_rewrites": analysis.optimizer_rewrites,
             "stream_rejection": analysis.stream_rejection,
-            "retained_working_set": match plan {
-                PlanKind::Transcode => "bounded-structural-preparation",
-                PlanKind::Events => "decoder-events",
-                PlanKind::Subtree => "selected-subtree",
-                PlanKind::HybridBlocking => "projected-collection-and-blocking-state",
-                PlanKind::Document => "document",
-                PlanKind::WholeInput => "whole-input",
-                PlanKind::Blocking => "document-and-blocking-state",
+            "retained_working_set": if staged_toon_stream {
+                "when input is non-strict TOON, complete documents are staged for last-write-wins before semantic event projection"
+            } else {
+                match plan {
+                    PlanKind::Transcode => "whole object/array candidates and recursive schemas in bounded preparation",
+                    PlanKind::Events => "decoder events",
+                    PlanKind::Subtree => "selected subtree",
+                    PlanKind::HybridBlocking => "projected collection and blocking state",
+                    PlanKind::Document => "document",
+                    PlanKind::WholeInput => "whole input",
+                    PlanKind::Blocking => "document and blocking state",
+                }
             },
             "retention_high_water": {
                 "bytes": retention.bytes_high_water,
@@ -6771,7 +6989,14 @@ fn write_report(
                     "spool_bytes_written": retention.root_staging_spool_bytes_written_high_water,
                     "fixed_io_bytes_high_water": retention.runtime_spool_fixed_io_bytes_high_water,
                 },
-                "root_materialized": !matches!(plan, PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking | PlanKind::Transcode),
+                "root_materialized": if staged_toon_stream {
+                    None
+                } else {
+                    Some(!matches!(
+                        plan,
+                        PlanKind::Events | PlanKind::Subtree | PlanKind::HybridBlocking | PlanKind::Transcode
+                    ))
+                },
             },
             "resource_outcome": resource_outcome,
         },
@@ -6864,16 +7089,16 @@ fn write_transcode_report(
             "proof": analysis.transcode_proof,
             "transcode_rejection": analysis.transcode_rejection,
             "duplicate_key_limitation": duplicate_key_limitation(analysis.transcode_proof),
-            "retained_working_set": "bounded-structural-preparation",
-            "materialized_root": false,
+            "retained_working_set": "whole object/array candidates and recursive schemas in a bounded preparation arena; spills only as needed within configured limits",
+            "preparation_policy": "replay complete candidate object/array bodies after recursive schema and layout selection; use spool only when memory preparation limits require it",
             "spooled": observations.spool_bytes_written > 0,
             "commitment_mode": proof.commitment,
             "input_stage_bytes_written": 0,
             "input_stage_bytes_replayed": 0,
             "preparation_high_water_bytes": observations.memory_high_water_bytes,
             "preparation_nesting_high_water": observations.nesting_high_water,
-            "object_index_spills": observations.object_index_spills,
             "array_preparations": observations.array_preparations,
+            "object_preparations": observations.object_preparations,
             "spool_bytes_written": observations.spool_bytes_written,
             "spool_bytes_replayed": observations.spool_bytes_replayed,
             "prepared_output_bytes": observations.output_bytes,
@@ -6989,6 +7214,29 @@ mod tests {
         options.report_file = report.then(|| std::path::PathBuf::from("unit-test-report.json"));
         options.stream = stream;
         *options
+    }
+
+    #[test]
+    fn recursive_schema_resource_errors_keep_cli_resource_classification() {
+        let writer = tq_toon::TranscodeError::Writer(tq_toon::WriterError::Schema {
+            resource: "field count",
+            limit: 1,
+        });
+        assert!(matches!(
+            super::map_transcode_error(writer),
+            super::RunError::Resource("fields")
+        ));
+
+        let spool = tq_toon::TranscodeError::Spool(tq_toon::SpoolError::Writer(
+            tq_toon::WriterError::Schema {
+                resource: "retained bytes",
+                limit: 1,
+            },
+        ));
+        assert!(matches!(
+            super::map_transcode_error(spool),
+            super::RunError::Resource("preparation-memory")
+        ));
     }
 
     #[test]
@@ -7340,6 +7588,63 @@ mod tests {
     }
 
     #[test]
+    fn non_strict_toon_stream_projects_last_write_wins_documents() {
+        let (status, output, error) = execute(
+            &[
+                "--stream",
+                "--non-strict",
+                "--output-format",
+                "json",
+                "--compact-output",
+                ".",
+            ],
+            b"a: 1\na: 2",
+        );
+        assert_eq!(status.unwrap(), ExitStatus::Success);
+        assert_eq!(output, b"[[\"a\"],2]\n[[\"a\"]]\n");
+        assert_eq!(error, [] as [u8; 0]);
+    }
+
+    #[test]
+    fn non_strict_keyed_toon_and_toon_sequence_streams_project_staged_documents() {
+        for (options, input) in [
+            (
+                &[
+                    "--stream",
+                    "--non-strict",
+                    "--input-format",
+                    "toon",
+                    "--output-format",
+                    "json",
+                    "--compact-output",
+                    ".",
+                ][..],
+                b"m[2:]{v}:\n  a: 1\n  a: 2".as_slice(),
+            ),
+            (
+                &[
+                    "--stream",
+                    "--non-strict",
+                    "--toon-sequence-input",
+                    "--output-format",
+                    "json",
+                    "--compact-output",
+                    ".",
+                ][..],
+                b"\x1em[2:]{v}:\n  a: 1\n  a: 2\n".as_slice(),
+            ),
+        ] {
+            let (status, output, error) = execute(options, input);
+            assert_eq!(status.unwrap(), ExitStatus::Success);
+            assert_eq!(
+                output,
+                b"[[\"m\",\"a\",\"v\"],2]\n[[\"m\",\"a\",\"v\"]]\n[[\"m\",\"a\"]]\n[[\"m\"]]\n"
+            );
+            assert_eq!(error, [] as [u8; 0]);
+        }
+    }
+
+    #[test]
     fn unknown_filter_fails_before_input() {
         let command = parse_args([
             "--input-format",
@@ -7547,7 +7852,6 @@ mod tests {
         assert_eq!(report["execution"]["detection"][0]["identity"], "<stdin>");
         assert!(report["execution"]["detection"][0]["lookahead_bytes"].is_u64());
         assert!(report["execution"]["detection"][0]["commitment_bytes"].is_u64());
-        assert_eq!(report["execution"]["materialized_root"], false);
     }
 
     #[test]
@@ -7605,13 +7909,6 @@ mod tests {
                 "--input-format",
                 "json",
                 "--sort-keys",
-                "--explain-json",
-                ".",
-            ],
-            [
-                "--input-format",
-                "json",
-                "--fold-keys",
                 "--explain-json",
                 ".",
             ],

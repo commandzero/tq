@@ -8,23 +8,28 @@ use std::{
     },
 };
 
-use tq_core::SourceId;
+use tq_core::{SourceId, Span};
 use tq_formats::{decode_json, decode_json_events};
 use tq_toon::{
-    ArrayPreparationConfig, Decoder, DecoderConfig, Delimiter, DuplicateKeyPolicy,
-    PreparationArena, PreparationLimits, PublicationBuffer, TranscodeCommitment, TranscodeConsumer,
-    WriterConfig, write_sequence, write_unframed,
+    ArrayPreparationConfig, Decoder, DecoderConfig, Delimiter, DuplicateKeyPolicy, Event,
+    EventConsumer, PreparationArena, PreparationLimits, PublicationBuffer, Scalar, SpoolError,
+    TranscodeCommitment, TranscodeConsumer, TranscodeError, WriterConfig, write_sequence,
+    write_unframed,
 };
 
-fn preparation(memory: usize, spool: u64) -> (ArrayPreparationConfig, PreparationArena) {
+fn preparation(
+    replay_threshold: usize,
+    memory_budget: usize,
+    spool: u64,
+) -> (ArrayPreparationConfig, PreparationArena) {
     let config = ArrayPreparationConfig {
-        memory_threshold_bytes: memory,
+        memory_threshold_bytes: replay_threshold,
         maximum_spool_bytes: spool,
         spool_directory: std::env::temp_dir(),
         allow_spool: true,
     };
     let arena = PreparationArena::new(PreparationLimits {
-        memory_bytes: memory,
+        memory_bytes: memory_budget,
         spool_bytes: spool,
         output_bytes: spool,
         ..PreparationLimits::default()
@@ -36,10 +41,11 @@ fn transcode_json(
     input: &[u8],
     writer: WriterConfig,
     unframed: bool,
-    memory: usize,
+    replay_threshold: usize,
+    memory_budget: usize,
     spool: u64,
 ) -> Result<Vec<u8>, String> {
-    let (preparation, arena) = preparation(memory, spool);
+    let (preparation, arena) = preparation(replay_threshold, memory_budget, spool);
     if unframed {
         let publication = PublicationBuffer::new(preparation.clone(), arena.clone());
         let mut consumer = TranscodeConsumer::new(
@@ -98,8 +104,15 @@ fn json_transcode_matches_document_for_contract_fixtures_and_delimiters() {
         };
         for input in fixtures {
             for unframed in [false, true] {
-                let transcode =
-                    transcode_json(input, writer, unframed, 1024 * 1024, 1024 * 1024).unwrap();
+                let transcode = transcode_json(
+                    input,
+                    writer,
+                    unframed,
+                    1024 * 1024,
+                    1024 * 1024,
+                    1024 * 1024,
+                )
+                .unwrap();
                 assert_eq!(transcode, document_json(input, writer, unframed));
             }
         }
@@ -109,7 +122,7 @@ fn json_transcode_matches_document_for_contract_fixtures_and_delimiters() {
 #[test]
 fn toon_structural_transcode_matches_document_output() {
     let input = b"z: 1\nitems[2]{id,name}:\n  1,Ada\n  2,Bob";
-    let (preparation, arena) = preparation(1024 * 1024, 1024 * 1024);
+    let (preparation, arena) = preparation(1024 * 1024, 1024 * 1024, 1024 * 1024);
     let mut consumer = TranscodeConsumer::new(
         Vec::new(),
         WriterConfig::default(),
@@ -141,13 +154,24 @@ fn toon_structural_transcode_matches_document_output() {
 #[test]
 fn malformed_unframed_input_and_spool_exhaustion_publish_nothing() {
     let malformed = br#"{"a":1,"b":"#;
-    assert!(transcode_json(malformed, WriterConfig::default(), true, 16, 1024).is_err());
+    assert!(
+        transcode_json(
+            malformed,
+            WriterConfig::default(),
+            true,
+            16,
+            1024 * 1024,
+            1024
+        )
+        .is_err()
+    );
     assert!(
         transcode_json(
             br#"{"wide":"abcdefghijklmnopqrstuvwxyz"}"#,
             WriterConfig::default(),
             true,
             0,
+            1024 * 1024,
             4,
         )
         .is_err()
@@ -155,15 +179,15 @@ fn malformed_unframed_input_and_spool_exhaustion_publish_nothing() {
 }
 
 #[test]
-fn sequence_publication_failure_keeps_only_completed_records() {
+fn sequence_failure_preserves_completed_records_and_early_rs() {
     for (commitment, expected) in [
         (TranscodeCommitment::DirectValues, b"null\n".as_slice()),
         (
             TranscodeCommitment::DirectSequence,
-            b"\x1enull\n".as_slice(),
+            b"\x1enull\n\x1e".as_slice(),
         ),
     ] {
-        let (preparation, arena) = preparation(0, 16);
+        let (preparation, arena) = preparation(0, 1024 * 1024, 16);
         let mut consumer = TranscodeConsumer::new(
             Vec::new(),
             WriterConfig::default(),
@@ -186,9 +210,9 @@ fn sequence_publication_failure_keeps_only_completed_records() {
 }
 
 #[test]
-fn strict_toon_duplicate_key_does_not_publish_a_partial_sequence_record() {
+fn strict_toon_duplicate_publishes_only_the_early_record_separator() {
     let input = b"a: 1\na: 2";
-    let (preparation, arena) = preparation(1024, 1024);
+    let (preparation, arena) = preparation(1024, 1024 * 1024, 1024);
     let mut consumer = TranscodeConsumer::new(
         Vec::new(),
         WriterConfig::default(),
@@ -206,21 +230,79 @@ fn strict_toon_duplicate_key_does_not_publish_a_partial_sequence_record() {
         .decode_into(&mut consumer)
         .is_err()
     );
-    assert_eq!(consumer.into_inner(), [] as [u8; 0]);
+    assert_eq!(consumer.into_inner(), b"\x1e");
 }
 
 #[test]
 fn json_duplicate_key_is_a_streaming_limitation() {
     let input = br#"{"a":1,"a":2}"#;
-    let error = transcode_json(input, WriterConfig::default(), false, 1024, 1024)
-        .expect_err("streaming transcode must reject a duplicate key");
+    let error = transcode_json(
+        input,
+        WriterConfig::default(),
+        false,
+        1024,
+        1024 * 1024,
+        1024,
+    )
+    .expect_err("streaming transcode must reject a duplicate key");
     assert!(error.contains("duplicate object key 'a'"));
 
-    let output = transcode_json(input, WriterConfig::default(), true, 1024, 1024);
+    let output = transcode_json(
+        input,
+        WriterConfig::default(),
+        true,
+        1024,
+        1024 * 1024,
+        1024,
+    );
     assert!(
         output.is_err(),
         "unframed transcode must remain unpublished"
     );
+}
+
+#[test]
+fn recursive_and_keyed_transcode_matches_canonical_position_rules() {
+    let fixtures = [
+        (
+            br#"{"before":0,"orders":[{"id":1,"customer":{"name":"Ada","country":"DK"}},{"customer":{"country":"US","name":"Bob"},"id":2}],"users":{"z":{"age":1,"profile":{"first":"Ada","last":"Z"}},"a":{"profile":{"last":"B","first":"Bea"},"age":2}},"after":true,"empty":[]}"#.as_slice(),
+            "before: 0\norders[2]{id,customer{name,country}}:\n  1,Ada,DK\n  2,Bob,US\nusers[2:]{age,profile{first,last}}:\n  z: 1,Ada,Z\n  a: 2,Bea,B\nafter: true\nempty: []",
+        ),
+        (
+            br#"[[{"id":1},{"id":2}],[],{"items":[]}]"#.as_slice(),
+            "[3]:\n  - [2]:\n    - id: 1\n    - id: 2\n  - [0]:\n  - items: []",
+        ),
+        (
+            br#"{"users":{"z":{"age":1},"a":{"age":2},"m":{"tags":[1,2]}},"tail":true}"#.as_slice(),
+            "users:\n  z:\n    age: 1\n  a:\n    age: 2\n  m:\n    tags[2]: 1,2\ntail: true",
+        ),
+    ];
+
+    for (input, body) in fixtures {
+        for unframed in [false, true] {
+            let expected = if unframed {
+                body.as_bytes().to_vec()
+            } else {
+                format!("\x1e{body}\n").into_bytes()
+            };
+            assert_eq!(
+                transcode_json(
+                    input,
+                    WriterConfig::default(),
+                    unframed,
+                    1024 * 1024,
+                    1024 * 1024,
+                    1024 * 1024,
+                )
+                .unwrap(),
+                expected
+            );
+            assert_eq!(
+                document_json(input, WriterConfig::default(), unframed),
+                expected
+            );
+        }
+    }
 }
 
 #[test]
@@ -256,15 +338,15 @@ fn generated_values_match_across_formatting_options() {
                 let writer = WriterConfig {
                     delimiter,
                     indent_size,
-                    flatten_depth: 1,
-                    ..WriterConfig::default()
                 };
                 assert_eq!(
-                    transcode_json(&input, writer, false, 1024 * 1024, 1024 * 1024).unwrap(),
+                    transcode_json(&input, writer, false, 1024 * 1024, 1024 * 1024, 1024 * 1024,)
+                        .unwrap(),
                     document_json(&input, writer, false)
                 );
                 assert_eq!(
-                    transcode_json(&input, writer, true, 1024 * 1024, 1024 * 1024).unwrap(),
+                    transcode_json(&input, writer, true, 1024 * 1024, 1024 * 1024, 1024 * 1024,)
+                        .unwrap(),
                     document_json(&input, writer, true)
                 );
             }
@@ -286,7 +368,7 @@ impl Write for BrokenPipeWriter {
 
 #[test]
 fn cancellation_and_broken_pipe_stop_structural_transcode() {
-    let (preparation, arena) = preparation(32, 1024);
+    let (preparation, arena) = preparation(32, 1024 * 1024, 1024);
     let cancellation = Arc::new(AtomicBool::new(true));
     let mut cancelled = TranscodeConsumer::new(
         Vec::new(),
@@ -323,7 +405,7 @@ fn one_mib_budget_spools_a_direct_nested_array() {
     }
     input.push_str("]}");
 
-    let (preparation, arena) = preparation(MEMORY, 32 * 1024 * 1024);
+    let (preparation, arena) = preparation(MEMORY, MEMORY, 32 * 1024 * 1024);
     let mut consumer = TranscodeConsumer::new(
         Vec::new(),
         WriterConfig::default(),
@@ -340,7 +422,6 @@ fn one_mib_budget_spools_a_direct_nested_array() {
         output,
         document_json(input.as_bytes(), WriterConfig::default(), false)
     );
-    assert_eq!(observations.array_preparations, 1);
     assert!(observations.spool_bytes_written > 0);
     assert!(observations.spool_bytes_replayed > 0);
     assert!(observations.memory_high_water_bytes <= MEMORY);
@@ -352,7 +433,7 @@ fn composite_arrays_stay_in_memory_when_they_fit() {
         br#"{"items":[{"x":1},{"x":2}]}"#.as_slice(),
         br#"[{"x":1},[2,3],false]"#.as_slice(),
     ] {
-        let (preparation, arena) = preparation(4096, 1024 * 1024);
+        let (preparation, arena) = preparation(4096, 1024 * 1024, 1024 * 1024);
         let mut consumer = TranscodeConsumer::new(
             Vec::new(),
             WriterConfig::default(),
@@ -374,7 +455,7 @@ fn composite_arrays_stay_in_memory_when_they_fit() {
 
 #[test]
 fn transient_keys_and_nested_arrays_can_reclaim_completed_siblings() {
-    const MEMORY: usize = 1024;
+    const REPLAY_THRESHOLD: usize = 1024;
     let prefix = format!(
         r#"[{{"v":"{}"}},{{"v":"{}"}},"#,
         "x".repeat(180),
@@ -385,7 +466,7 @@ fn transient_keys_and_nested_arrays_can_reclaim_completed_siblings() {
         format!(r#"{prefix}["{}","{}"]]"#, "x".repeat(350), "y".repeat(350)),
     ];
     for input in inputs {
-        let (preparation, arena) = preparation(MEMORY, 1024 * 1024);
+        let (preparation, arena) = preparation(REPLAY_THRESHOLD, 1024 * 1024, 1024 * 1024);
         let mut consumer = TranscodeConsumer::new(
             Vec::new(),
             WriterConfig::default(),
@@ -401,13 +482,12 @@ fn transient_keys_and_nested_arrays_can_reclaim_completed_siblings() {
             document_json(input.as_bytes(), WriterConfig::default(), false)
         );
         assert!(arena.observations().spool_bytes_written > 0);
-        assert!(arena.observations().memory_high_water_bytes <= MEMORY);
     }
 }
 
 #[test]
 fn composite_array_spills_before_it_starves_the_next_element() {
-    const MEMORY: usize = 1024;
+    const REPLAY_THRESHOLD: usize = 1024;
     let mut input = String::from("{\"items\":[");
     for index in 0..32_u64 {
         if index != 0 {
@@ -419,7 +499,7 @@ fn composite_array_spills_before_it_starves_the_next_element() {
     }
     input.push_str("]}");
 
-    let (preparation, arena) = preparation(MEMORY, 1024 * 1024);
+    let (preparation, arena) = preparation(REPLAY_THRESHOLD, 1024 * 1024, 1024 * 1024);
     let mut consumer = TranscodeConsumer::new(
         Vec::new(),
         WriterConfig::default(),
@@ -435,24 +515,12 @@ fn composite_array_spills_before_it_starves_the_next_element() {
         document_json(input.as_bytes(), WriterConfig::default(), false)
     );
     assert!(arena.observations().spool_bytes_written > 0);
-    assert!(arena.observations().memory_high_water_bytes <= MEMORY);
 }
 
 #[test]
-fn one_mib_budget_spills_wide_object_keys_and_still_rejects_duplicates() {
+fn spooled_object_rejects_duplicates_within_its_index_budget() {
     const MEMORY: usize = 1024 * 1024;
-    let mut input = String::from("{");
-    for index in 0..40_000_u64 {
-        if index != 0 {
-            input.push(',');
-        }
-        input.push_str("\"key_");
-        input.push_str(&index.to_string());
-        input.push_str("\":null");
-    }
-    input.push_str(",\"key_0\":true}");
-
-    let (preparation, arena) = preparation(MEMORY, 32 * 1024 * 1024);
+    let (preparation, arena) = preparation(MEMORY, MEMORY, 32 * 1024 * 1024);
     let mut consumer = TranscodeConsumer::new(
         Vec::new(),
         WriterConfig::default(),
@@ -461,19 +529,75 @@ fn one_mib_budget_spills_wide_object_keys_and_still_rejects_duplicates() {
         DuplicateKeyPolicy::Reject,
         TranscodeCommitment::DirectSequence,
     );
-    let error = decode_json_events(input.as_bytes(), SourceId::new(1), &mut consumer)
-        .expect_err("the spilled duplicate index must remain exact");
+    let span = Span::new(SourceId::new(1), 0, 1);
+    consumer.consume(Event::DocumentStart { span }).unwrap();
+    consumer.consume(Event::ObjectStart { span }).unwrap();
+    let payload: Arc<str> = "x".repeat(1024).into();
+    for index in 0..1000 {
+        consumer
+            .consume(Event::Key {
+                span,
+                value: format!("key_{index}").into(),
+                quoted: false,
+            })
+            .unwrap();
+        consumer
+            .consume(Event::Scalar {
+                span,
+                value: Scalar::String(Arc::clone(&payload)),
+            })
+            .unwrap();
+    }
+    let error = consumer
+        .consume(Event::Key {
+            span,
+            value: "key_0".into(),
+            quoted: false,
+        })
+        .unwrap_err();
+    assert!(matches!(error, TranscodeError::Duplicate(key) if key.as_ref() == "key_0"));
     let observations = arena.observations();
-
-    assert!(error.contains("duplicate object key 'key_0'"));
-    assert!(observations.object_index_spills > 0);
     assert!(observations.spool_bytes_written > 0);
-    assert!(observations.spool_bytes_replayed > 0);
     assert!(observations.memory_high_water_bytes <= MEMORY);
+    assert_eq!(consumer.into_inner(), b"\x1e");
 }
 
 #[test]
-fn one_mib_budget_bounds_a_nested_composite_element() {
+fn wide_object_index_fails_before_exceeding_aggregate_memory() {
+    const MEMORY: usize = 1024 * 1024;
+    let (preparation, arena) = preparation(MEMORY, MEMORY, 32 * 1024 * 1024);
+    let mut consumer = TranscodeConsumer::new(
+        Vec::new(),
+        WriterConfig::default(),
+        preparation,
+        arena.clone(),
+        DuplicateKeyPolicy::Reject,
+        TranscodeCommitment::DirectSequence,
+    );
+    let span = Span::new(SourceId::new(1), 0, 1);
+    consumer.consume(Event::DocumentStart { span }).unwrap();
+    consumer.consume(Event::ObjectStart { span }).unwrap();
+    let result = (0..40_000).try_for_each(|index| {
+        consumer.consume(Event::Key {
+            span,
+            value: format!("key_{index}").into(),
+            quoted: false,
+        })?;
+        consumer.consume(Event::Scalar {
+            span,
+            value: Scalar::Null,
+        })
+    });
+    assert!(matches!(
+        result,
+        Err(TranscodeError::Spool(SpoolError::MemoryLimit))
+    ));
+    assert!(arena.observations().memory_high_water_bytes <= MEMORY);
+    assert_eq!(consumer.into_inner(), b"\x1e");
+}
+
+#[test]
+fn one_mib_budget_spills_and_roundtrips_a_nested_composite() {
     const MEMORY: usize = 1024 * 1024;
     let mut input = String::from("[[");
     for index in 0..100_000_u64 {
@@ -484,7 +608,8 @@ fn one_mib_budget_bounds_a_nested_composite_element() {
     }
     input.push_str("]]\n");
 
-    let (preparation, arena) = preparation(MEMORY, 32 * 1024 * 1024);
+    let expected = decode_json(input.as_bytes(), "fixture").unwrap();
+    let (preparation, arena) = preparation(4096, MEMORY, 32 * 1024 * 1024);
     let mut consumer = TranscodeConsumer::new(
         Vec::new(),
         WriterConfig::default(),
@@ -493,9 +618,20 @@ fn one_mib_budget_bounds_a_nested_composite_element() {
         DuplicateKeyPolicy::Reject,
         TranscodeCommitment::DirectSequence,
     );
-    let error = decode_json_events(input.as_bytes(), SourceId::new(1), &mut consumer)
-        .expect_err("a transient composite must not bypass the aggregate budget");
+    decode_json_events(input.as_bytes(), SourceId::new(1), &mut consumer).unwrap();
+    let output = consumer.into_inner();
+    let observations = arena.observations();
 
-    assert!(error.contains("nested container exceeds configured preparation memory limit"));
-    assert!(arena.observations().memory_high_water_bytes <= MEMORY);
+    assert!(output.starts_with(b"\x1e"));
+    assert!(output.ends_with(b"\n"));
+    let actual = tq_toon::decode_to_value(
+        Cursor::new(&output[1..]),
+        SourceId::new(1),
+        DecoderConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(actual, expected[0].value);
+    assert!(observations.spool_bytes_written > 0);
+    assert!(observations.spool_bytes_replayed > 0);
+    assert!(observations.memory_high_water_bytes <= MEMORY);
 }

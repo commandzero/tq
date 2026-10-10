@@ -147,12 +147,15 @@ impl OutputError {
     #[must_use]
     pub fn is_broken_pipe(&self) -> bool {
         match self {
-            Self::Toon(SequenceError::Io(error)) | Self::Io(error) => {
-                error.kind() == std::io::ErrorKind::BrokenPipe
-            }
+            Self::Toon(
+                SequenceError::Io(error) | SequenceError::Writer(WriterError::Io(error)),
+            )
+            | Self::Io(error) => error.kind() == std::io::ErrorKind::BrokenPipe,
             Self::Json(error) => error.io_error_kind() == Some(std::io::ErrorKind::BrokenPipe),
             Self::Yaml(_)
-            | Self::Toon(SequenceError::Cardinality(_))
+            | Self::Toon(
+                SequenceError::Writer(WriterError::Schema { .. }) | SequenceError::Cardinality(_),
+            )
             | Self::UnsupportedFormat(_)
             | Self::InvalidOptions(_)
             | Self::Profile(_)
@@ -337,9 +340,16 @@ impl NativeOutputSequence {
                 .take()
                 .ok_or(SequenceError::Cardinality(tq_toon::CardinalityError::Zero))?;
             tq_toon::write_value_colored(writer, &value, self.options.toon, self.options.palette())
-                .map_err(|WriterError::Io(error)| OutputError::Io(error))?;
+                .map_err(map_toon_writer_error)?;
         }
         Ok(())
+    }
+}
+
+fn map_toon_writer_error(error: WriterError) -> OutputError {
+    match error {
+        WriterError::Io(error) => OutputError::Io(error),
+        WriterError::Schema { resource, .. } => OutputError::Resource(resource),
     }
 }
 
@@ -356,12 +366,12 @@ fn write_document(
             ToonFraming::Sequence => {
                 crate::rs_framing::write_frame(writer, |writer| {
                     tq_toon::write_value_colored(writer, value, options.toon, options.palette())
-                        .map_err(|WriterError::Io(error)| OutputError::Io(error))
+                        .map_err(map_toon_writer_error)
                 })?;
             }
             ToonFraming::Values => {
                 tq_toon::write_value_colored(&mut *writer, value, options.toon, options.palette())
-                    .map_err(|WriterError::Io(error)| OutputError::Io(error))?;
+                    .map_err(map_toon_writer_error)?;
                 writer.write_all(b"\n")?;
             }
             ToonFraming::Unframed => unreachable!("unframed TOON is buffered by the sequence"),
@@ -487,7 +497,7 @@ mod tests {
     use serde::{Serialize, Serializer};
     use tq_core::{Number, Object, Value};
 
-    use super::{NativeOutputSequence, OutputOptions, ToonFraming, write_results};
+    use super::{NativeOutputSequence, OutputError, OutputOptions, ToonFraming, write_results};
     use crate::{NativeFormat, OutputFormat};
 
     #[test]
@@ -503,6 +513,34 @@ mod tests {
             .unwrap();
         sequence.finish(&mut output).unwrap();
         assert_eq!(output, b"\x1enull\n\x1etrue\n");
+    }
+
+    #[test]
+    fn toon_schema_bounds_remain_output_resource_errors() {
+        let mut value = Value::Null;
+        for _ in 0..257 {
+            let mut object = Object::new();
+            object.insert("child".into(), value);
+            value = Value::object(object);
+        }
+
+        for framing in [
+            ToonFraming::Values,
+            ToonFraming::Sequence,
+            ToonFraming::Unframed,
+        ] {
+            let error = write_results(
+                &mut Vec::new(),
+                [&value],
+                OutputOptions {
+                    toon_framing: framing,
+                    ..OutputOptions::default()
+                },
+            )
+            .unwrap_err();
+            assert!(!error.is_broken_pipe());
+            assert!(matches!(error, OutputError::Resource("depth")));
+        }
     }
 
     #[test]

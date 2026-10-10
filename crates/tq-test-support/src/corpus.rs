@@ -31,7 +31,7 @@ pub use conversion::{
     validate_generated_representations, validate_generated_representations_cached,
     validate_generated_representations_with_tq,
 };
-pub(crate) use conversion::{encode_toon_exact, json_to_yaml};
+pub(crate) use conversion::{encode_toon_exact, json_to_yaml, uniform_object_values};
 pub use geojson::{GeoJsonError, GeoJsonMetadata, validate_geojson};
 pub use inventory::{CorpusInventory, InventoryError, SnapshotInventory, inventory_snapshots};
 pub use manifest::{

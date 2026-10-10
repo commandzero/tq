@@ -15,6 +15,7 @@ const STREAM_ERROR_CONTEXT_BYTES: usize = 64 * 1024;
 use tq_core::{JsonInputError, JsonLimit, Number, Object, PathComponent, SourceId, Value};
 use tq_toon::{DecodeIntoError, Decoder, Event, EventConsumer, Scalar};
 
+use crate::adapters::require_strict_toon_events;
 use crate::structural::{
     decode_json_event_stream_typed, decode_json_events_selected_with_options_control_typed,
 };
@@ -1000,6 +1001,7 @@ where
     R: BufRead,
     F: FnMut(Value) -> Result<(), String>,
 {
+    require_strict_toon_events(config)?;
     let mut emit_record = |record: StreamRecord| emit(record.into_value());
     let mut decoder = Decoder::new(reader, SourceId::new(0), config);
     let mut consumer = EventProjector {
@@ -1036,6 +1038,7 @@ where
     R: BufRead,
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
+    require_strict_toon_events(config)?;
     let mut decoder = Decoder::new(reader, SourceId::new(0), config);
     let mut consumer = EventProjector {
         projector: Projector::new(
@@ -1102,6 +1105,7 @@ where
     R: BufRead,
     F: FnMut(StreamRecord) -> Result<(), String>,
 {
+    require_strict_toon_events(config)?;
     let mut decoder = Decoder::new(reader, SourceId::new(0), config);
     let mut projector = Projector::selected(
         options.maximum_depth,
@@ -1707,7 +1711,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::{
-        io::{BufReader, Cursor, Read},
+        io::{self, BufRead, BufReader, Cursor, Read},
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -1723,8 +1727,91 @@ mod tests {
         SelectionReplacement, StreamOptions, StreamRecord, StreamSelection, stream_json,
         stream_json_records, stream_json_selected_records,
         stream_json_selected_records_with_control, stream_json_selected_roots_with_control,
-        stream_toon,
+        stream_toon, stream_toon_records, stream_toon_selected_records,
+        stream_toon_selected_records_with_control,
     };
+
+    struct NoRead;
+
+    impl Read for NoRead {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            panic!("non-strict TOON stream read input before admission")
+        }
+    }
+
+    impl BufRead for NoRead {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            panic!("non-strict TOON stream read input before admission")
+        }
+
+        fn consume(&mut self, _: usize) {}
+    }
+
+    fn non_strict_config() -> tq_toon::DecoderConfig {
+        tq_toon::DecoderConfig {
+            strict: false,
+            ..tq_toon::DecoderConfig::default()
+        }
+    }
+
+    #[test]
+    fn toon_stream_apis_reject_non_strict_before_reading_or_emitting() {
+        let selection = StreamSelection::new(vec![PathComponent::Key(Arc::from("items"))], None);
+        let mut emissions = 0;
+        assert!(
+            stream_toon(
+                NoRead,
+                non_strict_config(),
+                StreamOptions::default(),
+                |_| {
+                    emissions += 1;
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            stream_toon_records(
+                NoRead,
+                non_strict_config(),
+                StreamOptions::default(),
+                |_| {
+                    emissions += 1;
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            stream_toon_selected_records(
+                NoRead,
+                non_strict_config(),
+                StreamOptions::default(),
+                selection.clone(),
+                |_| {
+                    emissions += 1;
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert!(
+            stream_toon_selected_records_with_control(
+                NoRead,
+                non_strict_config(),
+                StreamOptions::default(),
+                selection,
+                None,
+                &mut SelectedStreamObservations::default(),
+                |_| {
+                    emissions += 1;
+                    Ok(())
+                },
+            )
+            .is_err()
+        );
+        assert_eq!(emissions, 0);
+    }
 
     fn json_lines(values: &[tq_core::Value]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()
@@ -2802,6 +2889,39 @@ mod tests {
                 r#"["Expected another array element at line 1, column {expected_column}",[2]]"#
             )
         );
+    }
+
+    #[test]
+    fn grouped_toon_stream_preserves_jq_close_paths_across_utf8_fragments() {
+        let input = "# grouped\r\nitems[2]{id,profile{name}}:\r\n  1,λ\r\n  2,🦀\r\nempty: []\r\n";
+        // jq 1.8 closes a nonempty container at its last child's path.
+        let expected = [
+            r#"[["items",0,"id"],1]"#,
+            r#"[["items",0,"profile","name"],"λ"]"#,
+            r#"[["items",0,"profile","name"]]"#,
+            r#"[["items",0,"profile"]]"#,
+            r#"[["items",1,"id"],2]"#,
+            r#"[["items",1,"profile","name"],"🦀"]"#,
+            r#"[["items",1,"profile","name"]]"#,
+            r#"[["items",1,"profile"]]"#,
+            r#"[["items",1]]"#,
+            r#"[["empty"],[]]"#,
+            r#"[["empty"]]"#,
+        ];
+        for capacity in [1, 2, 3, 7, 4096] {
+            let mut values = Vec::new();
+            stream_toon(
+                BufReader::with_capacity(capacity, Cursor::new(input.as_bytes())),
+                tq_toon::DecoderConfig::default(),
+                StreamOptions::default(),
+                |value| {
+                    values.push(value);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(json_lines(&values), expected, "reader capacity {capacity}");
+        }
     }
 
     #[test]
