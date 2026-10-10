@@ -3,6 +3,7 @@ type: Report
 title: "jq manual: arity-inventory token comparison"
 description: Generated jq and tq output comparisons and token counts.
 generated: { by: codex/gpt-6-astra, at: 2026-09-13T15:30:24Z }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # jq manual: arity-inventory token comparison
@@ -36,8 +37,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 3 | 2 | +200% |
-| `cl100k_base` | 1 | 3 | 2 | +200% |
+| `o200k_base` | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 0 | +0% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -62,12 +63,12 @@ jq '["abs/0","acos/0","acosh/0","add/0","add/1","all/0","all/1","all/2","any/0",
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 <!-- tq-manual-compare:end -->

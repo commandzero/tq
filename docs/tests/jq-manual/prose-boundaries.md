@@ -3,6 +3,7 @@ type: Report
 title: "jq manual: prose-boundaries token comparison"
 description: Generated jq and tq output comparisons and token counts.
 generated: { by: "tq-manual-compare/0.1.0", at: "2026-09-10T20:22:34.585009Z" }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # jq manual: prose-boundaries token comparison
@@ -36,8 +37,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1444 | 870 | -574 | -39.75% |
-| `cl100k_base` | 1421 | 869 | -552 | -38.85% |
+| `o200k_base` | 1444 | 861 | -583 | -40.37% |
+| `cl100k_base` | 1421 | 861 | -560 | -39.41% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -246,13 +247,13 @@ jq '[match("z"), capture("(?<x>z)"), scan("z")]'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.audit.regex.null-flags
 
@@ -297,14 +298,14 @@ jq '[test("a"; null), test(["a",null]), match(["a",null]), capture(["(?<x>a)",nu
   - offset: 0
     length: 1
     string: a
-    captures[0]:
+    captures: []
   - x: a
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 49 | 49 | 40 | -9 | -18.37% |
-| `cl100k_base` | 49 | 49 | 40 | -9 | -18.37% |
+| `o200k_base` | 49 | 49 | 39 | -10 | -20.41% |
+| `cl100k_base` | 49 | 49 | 39 | -10 | -20.41% |
 
 #### manual.audit.regex.split-literal-overload
 
@@ -639,7 +640,7 @@ jq 'fromstream((1, [], {}, [1,[2]]) | tostream)'
 
 # tq
 1
-[0]:
+[]
 
 [2]:
   - 1
@@ -648,8 +649,8 @@ jq 'fromstream((1, [], {}, [1,[2]]) | tostream)'
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 18 | 18 | 21 | +3 | +16.67% |
-| `cl100k_base` | 18 | 18 | 21 | +3 | +16.67% |
+| `o200k_base` | 18 | 18 | 19 | +1 | +5.56% |
+| `cl100k_base` | 18 | 18 | 20 | +2 | +11.11% |
 
 #### manual.audit.streaming.scalar-empty-leaves
 
@@ -778,13 +779,13 @@ jq '[empty]'
 []
 
 # tq
-[0]:
+[]
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 1 | 1 | 3 | +2 | +200% |
-| `cl100k_base` | 1 | 1 | 3 | +2 | +200% |
+| `o200k_base` | 1 | 1 | 1 | 0 | +0% |
+| `cl100k_base` | 1 | 1 | 1 | 0 | +0% |
 
 #### manual.audit.types.json-finite-input-extensions
 
@@ -856,13 +857,13 @@ jq: parse error: Invalid \uXXXX\uXXXX surrogate pair escape at line 1, column 8
 
 
 [stderr]
-tq: Toon input rejected: invalid TOON at SourcePosition { byte: 2, line: 1, column: 3 }: invalid TOON string escape
+tq: Toon input rejected: invalid TOON at SourcePosition { byte: 2, line: 1, column: 3 }: surrogate escape is invalid
 
 # tq
 
 
 [stderr]
-tq: Toon input rejected: invalid TOON at SourcePosition { byte: 2, line: 1, column: 3 }: invalid TOON string escape
+tq: Toon input rejected: invalid TOON at SourcePosition { byte: 2, line: 1, column: 3 }: surrogate escape is invalid
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
@@ -923,15 +924,15 @@ null
 null
 
 null
-[0]:
+[]
 null
 x
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 10 | 10 | 11 | +1 | +10% |
-| `cl100k_base` | 10 | 10 | 11 | +1 | +10% |
+| `o200k_base` | 10 | 10 | 9 | -1 | -10% |
+| `cl100k_base` | 10 | 10 | 9 | -1 | -10% |
 
 #### manual.audit.types.nonfinite-fromjson-invalid-suffix
 

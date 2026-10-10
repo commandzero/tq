@@ -3,6 +3,7 @@ type: Report
 title: "Regular expressions coverage audit"
 description: "Recorded review of Regular expressions coverage audit."
 generated: { by: codex/gpt-6-astra, at: 2026-09-14T00:50:03Z }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # Regular expressions coverage audit
@@ -72,8 +73,8 @@ JSON equivalence ignores whitespace and object key order but retains array and r
 
 | Tokenizer | JSON tokens | TOON tokens | Diff | % |
 | --- | ---: | ---: | ---: | ---: |
-| `o200k_base` | 570 | 353 | -217 | -38.07% |
-| `cl100k_base` | 568 | 353 | -215 | -37.85% |
+| `o200k_base` | 570 | 348 | -222 | -38.95% |
+| `cl100k_base` | 568 | 348 | -220 | -38.73% |
 
 Only successful jq/JSON/TOON-equivalent results enter the totals. A negative `Diff` means TOON uses fewer tokens; `%` is negative for savings and positive for growth. The manual is a correctness corpus, not a representative workload benchmark.
 
@@ -182,13 +183,13 @@ jq 'match(["foo"])'
 offset: 0
 length: 3
 string: foo
-captures[0]:
+captures: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
-| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
 
 #### manual.regex.array-test
 
@@ -288,13 +289,13 @@ jq 'match("a|ab"; "l")'
 offset: 0
 length: 2
 string: ab
-captures[0]:
+captures: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
-| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
 
 #### manual.regex.flag-m
 
@@ -516,13 +517,13 @@ jq 'match("foo")'
 offset: 0
 length: 3
 string: foo
-captures[0]:
+captures: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 28 | 28 | 18 | -10 | -35.71% |
-| `cl100k_base` | 28 | 28 | 18 | -10 | -35.71% |
+| `o200k_base` | 28 | 28 | 17 | -11 | -39.29% |
+| `cl100k_base` | 28 | 28 | 17 | -11 | -39.29% |
 
 #### manual.regex.table-005
 
@@ -562,17 +563,17 @@ jq 'match(["foo", "ig"])'
 offset: 0
 length: 3
 string: foo
-captures[0]:
+captures: []
 offset: 8
 length: 3
 string: FOO
-captures[0]:
+captures: []
 ```
 
 | Tokenizer | jq | tq -o json | tq | Diff | % |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `o200k_base` | 57 | 57 | 37 | -20 | -35.09% |
-| `cl100k_base` | 57 | 57 | 37 | -20 | -35.09% |
+| `o200k_base` | 57 | 57 | 35 | -22 | -38.6% |
+| `cl100k_base` | 57 | 57 | 35 | -22 | -38.6% |
 
 #### manual.regex.table-006
 

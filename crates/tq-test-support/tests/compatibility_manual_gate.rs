@@ -45,6 +45,80 @@ fn passing_report() -> Value {
 }
 
 #[test]
+fn saved_render_rejects_stale_catalog_and_incomplete_tokens_before_writing_pages() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("report.json");
+    let destination = directory.path().join("markdown");
+    let mut report = passing_report();
+    let index = report["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|row| row["contract"] == "result-sequence")
+        .unwrap();
+    report["cases"][index]["tokens"] = serde_json::json!({
+        "o200k_base": {"json": 10, "toon": 5},
+        "cl100k_base": {"json": 20, "toon": 8}
+    });
+    report["cases"][index]["verdict"] = serde_json::json!("failure");
+    report["cases"][index]["reason"] = serde_json::json!("Recorded historical mismatch.");
+    let render = |value: &Value| {
+        std::fs::write(&source, serde_json::to_vec(value).unwrap()).unwrap();
+        std::process::Command::new(env!("CARGO_BIN_EXE_tq-manual-compare"))
+            .arg("--render-only")
+            .arg(&source)
+            .arg("--markdown-dir")
+            .arg(&destination)
+            .output()
+            .unwrap()
+    };
+    let output = render(&report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let documents = || {
+        std::fs::read_dir(&destination)
+            .unwrap()
+            .map(|entry| {
+                let path = entry.unwrap().path();
+                (path.clone(), std::fs::read(path).unwrap())
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let original = documents();
+    for (field, value) in [
+        ("case_fingerprint", Value::Null),
+        ("case_fingerprint", "stale".into()),
+        ("contract", "raw-bytes".into()),
+        ("tokens", serde_json::json!({})),
+        (
+            "tokens",
+            serde_json::json!({"o200k_base": {"json": 10, "toon": 5}}),
+        ),
+        (
+            "tokens",
+            serde_json::json!({"o200k_base": {"json": 10, "toon": 5}, "cl100k_base": {"json": 20}}),
+        ),
+        (
+            "tokens",
+            serde_json::json!({"o200k_base": {"json": 10, "toon": 5}, "cl100k_base": {"json": "20", "toon": 8}}),
+        ),
+    ] {
+        let mut changed = report.clone();
+        changed["cases"][index][field] = value;
+        let output = render(&changed);
+        assert_eq!(output.status.code(), Some(2), "{field}");
+        assert_eq!(documents(), original, "{field} must not change pages");
+        assert_eq!(
+            std::fs::read(&source).unwrap(),
+            serde_json::to_vec(&changed).unwrap()
+        );
+    }
+}
+
+#[test]
 fn encoding_campaigns_cannot_be_omitted_or_forged_by_a_semantic_match() {
     let (catalog, inventory, review_ids, _) = baseline_inputs();
     for (field, value) in [

@@ -178,7 +178,7 @@ TQ_JQ=target/reference-build/jq/jq cargo test --locked -p tq-test-support \
 
 ### JSON equivalence and output size
 
-The [jq manual report](../../docs/tests/jq-manual/index.md) records the latest
+The [jq manual report](../../docs/tests/jq-manual/overview.md) records the latest
 macOS comparison against pinned jq 1.8.2, including compatibility verdicts,
 per-example outputs, and tokenizer counts. It is not an all-platform completion report. Generate fresh full
 TOON evidence under ignored `target/` storage to retain executable identities,
@@ -192,15 +192,13 @@ TQ_JQ=target/reference-build/jq/jq TQ_BIN=target/debug/tq \
 ```
 
 This separate command writes the TOON evidence and one Markdown token report per
-case collection under `target/jq-manual-review`. The index shows unique-case
-totals; section pages can share cases referenced by more than one collection.
+case collection under `target/jq-manual-review`. The measured comparison
+overview shows unique-case totals; section pages can share cases referenced by
+more than one collection.
 Use `--render-only` with the saved TOON evidence to regenerate pages without
-running the reference tools. Human-readable source reviews are in
-[docs/tests/jq-manual](../../docs/tests/jq-manual/index.md); their machine-readable
+running the reference tools. [Human-readable source reviews](../../docs/tests/jq-manual/index.md)
+navigate the section reviews and measured overview; their machine-readable
 collections are in `reviews/jq-manual`.
-Only promote reviewed campaign results to `docs/tests/jq-manual`; retain the
-historical labels until current executable identities and completion gates
-have been verified.
 
 `reviews/` stores versioned test metadata, not campaign output: source-to-case
 mappings, reference pins, approved disparity expectations, and small historical

@@ -113,11 +113,13 @@ pub fn summarize_manual_comparison(report: &mut Value) -> Result<(), Box<dyn std
         if row["toon_sequence"] != true
             && row["json_equivalent"] == true
             && row["toon_equivalent"] == true
+            && row["differences"].as_array().is_some_and(Vec::is_empty)
+            && row["toon_contract_match"] == true
             && let Some(token_rows) = row["tokens"].as_object()
         {
             samples += 1;
-            for (encoding, counts) in token_rows {
-                let totals = tokens.entry(encoding.clone()).or_default();
+            for (encoding, totals) in &mut tokens {
+                let counts = token_rows.get(encoding).ok_or("missing tokenizer counts")?;
                 totals.0 += counts["json"].as_u64().ok_or("missing JSON token count")?;
                 totals.1 += counts["toon"].as_u64().ok_or("missing TOON token count")?;
             }
@@ -229,6 +231,8 @@ fn compare_case(
         && successful
         && json_equivalent == Some(true)
         && toon_equivalent == Some(true)
+        && differences.is_empty()
+        && toon_contract_match == Some(true)
     {
         token_sizes(&reference, &actual, toon.as_ref(), tokenizers)
     } else {
