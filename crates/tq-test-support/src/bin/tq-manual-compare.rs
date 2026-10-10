@@ -516,8 +516,6 @@ fn bind_benchmark_runs(
                 } else {
                     existing_binaries.insert(name, binary);
                 }
-            } else {
-                existing_binaries.entry(name).or_insert(binary);
             }
         }
     } else {
@@ -1231,6 +1229,9 @@ mod tests {
         let initial = super::bind_benchmark_runs(body, &report).unwrap();
         let mut metadata = super::parse_frontmatter(&initial).unwrap();
         let matched = &mut metadata["benchmark_runs"][0];
+        let matched_binaries = matched["binaries"].as_object_mut().unwrap();
+        matched_binaries.remove("yq");
+        matched_binaries.remove("helper");
         matched["source_role"] = json!("authored");
         matched["binaries"]["tq"]["capture_note"] = json!("retained");
         matched["binaries"]["tq"]["identity_status"] = json!("not-recorded");
@@ -1258,6 +1259,8 @@ mod tests {
             runs[0]["binaries"]["tq"]["capture_note"],
             metadata["benchmark_runs"][0]["binaries"]["tq"]["capture_note"]
         );
+        assert!(!runs[0]["binaries"].as_object().unwrap().contains_key("yq"));
+        assert!(!runs[0]["binaries"].as_object().unwrap().contains_key("helper"));
         assert_eq!(runs[0]["binaries"]["tq"]["identity_status"], "measured");
         assert_eq!(
             actual["custom"],
@@ -1851,6 +1854,37 @@ mod tests {
             super::relative_markdown_link(&output, &target).unwrap(),
             "../reviews%20%23%20space/sample%20%23%20%25.toon"
         );
+    }
+
+    #[test]
+    fn saved_token_totals_exclude_rows_without_matching_process_contracts() {
+        for (field, value) in [
+            ("differences", json!([{"summary": "exit status differs"}])),
+            ("differences", json!(null)),
+            ("toon_contract_match", json!(false)),
+            ("toon_contract_match", json!(null)),
+        ] {
+            let mut report = tiny_report();
+            let mut excluded = report["cases"][0].clone();
+            excluded["id"] = json!("sample.ineligible");
+            excluded["verdict"] = json!("failure");
+            excluded[field] = value;
+            excluded["tokens"] = json!({
+                "o200k_base": {"json": 100, "toon": 50},
+                "cl100k_base": {"json": 200, "toon": 80}
+            });
+            report["cases"].as_array_mut().unwrap().push(excluded);
+
+            tq_test_support::compatibility::summarize_manual_comparison(&mut report).unwrap();
+
+            assert_eq!(report["summary"]["cases"], 3);
+            assert_eq!(report["summary"]["failures"], 1);
+            assert_eq!(report["summary"]["size_samples"], 1, "{field}");
+            for encoding in ["o200k_base", "cl100k_base"] {
+                assert_eq!(report["summary"]["tokens"][encoding]["json"], 1, "{field}");
+                assert_eq!(report["summary"]["tokens"][encoding]["toon"], 1, "{field}");
+            }
+        }
     }
 
     fn tiny_report() -> serde_json::Value {

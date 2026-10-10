@@ -176,6 +176,11 @@ The 877 eligible macOS samples count 11,391 JSON versus 8,152 TOON tokens with
 `o200k_base` (−28.43%) and 11,365 versus 8,165 with `cl100k_base` (−28.16%).
 Exact complete ordinary stdout includes LF; signed growth, unavailable
 zero-denominator percentages, exclusions and section deduplication are retained.
+Saved-report rendering recomputes aggregate and section totals from eligible
+rows rather than trusting persisted summaries. Token blocks are excluded when
+process differences are present or the TOON process contract is not explicitly
+matched, including historical rows missing either eligibility field. Raw
+observations and token blocks remain unchanged.
 Linux's separately scoped 871-sample and Windows's 857-sample totals are in the
 [native coverage table](tests/jq-manual/coverage.md#native-platform-results).
 The Windows origin-module witness also retains changed process observations:

@@ -113,6 +113,8 @@ pub fn summarize_manual_comparison(report: &mut Value) -> Result<(), Box<dyn std
         if row["toon_sequence"] != true
             && row["json_equivalent"] == true
             && row["toon_equivalent"] == true
+            && row["differences"].as_array().is_some_and(Vec::is_empty)
+            && row["toon_contract_match"] == true
             && let Some(token_rows) = row["tokens"].as_object()
         {
             samples += 1;
