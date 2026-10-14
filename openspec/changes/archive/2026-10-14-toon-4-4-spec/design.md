@@ -32,3 +32,26 @@ Oracle: exact `toon-format =0.7.0`, tag object `651a878554a3f22dfc38d35256992289
 ## Review lifecycle
 
 The main specs already contain these requirement changes. Before archival, verify the deltas against the reviewed implementation and verify exact delta-to-main correspondence. Apply any needed synchronization before moving the active change; do not reapply a rename whose source is already absent merely to manufacture a synchronization mutation. The repository's committed-head archive-completion gate remains required.
+
+## Post-review verification
+
+Reviewed implementation: `a108fd91f8d493fd71cc332757830afbb8d939f4`.
+[Current-head Copilot review](https://github.com/commandzero/tq/pull/75#pullrequestreview-5525034000)
+completed with zero unresolved findings and no review in flight. The summary
+retains “Needs a closer look”; this is not represented as an approval
+recommendation. Archival proceeds under explicit authorization after verification.
+
+The complete official decode/encode runners passed again on the reviewed
+implementation (20 tests covering all 404 decode and 160 encode cases), and
+native strict change validation passed. Inspection confirmed that adopted
+content depth retains the original scope-closing boundary and that strict
+declared-count validation remains independent of non-strict width checks.
+Full ordinary preflight, the real extracted-package smoke, and minimum Rust
+1.95.0 all-target workspace compilation passed after the review fix.
+
+All 12 modified requirements and their complete scenario bodies match main
+specs after whitespace normalization: seven `toon-stream-io`, three
+`streaming-transcode`, and two `tq-cli` requirements. Each renamed source title
+is absent and its new title is present. No unapplied synchronization remains;
+archive without reapplying already-synchronized renames, then run the
+repository's committed-head correspondence gate.
