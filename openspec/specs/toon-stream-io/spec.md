@@ -19,7 +19,7 @@ The TOON decoder SHALL consume `Read`/`BufRead` input incrementally without firs
 - **THEN** decoding stops with a source-positioned input error and does not replace the bytes silently
 
 ### Requirement: Unified structural event contract
-The decoder SHALL emit a stable ordered semantic event stream representing document boundaries, object boundaries, keys, array boundaries and typed scalar values. Physical TOON 4.1 table schemas, declared counts and delimiters SHALL be interpreted and validated during decoding; nested field groups SHALL reconstruct nested object events and keyed tables SHALL reconstruct object entries rather than arrays. Both document construction and explicit stream execution MUST consume this same event contract.
+The decoder SHALL emit a stable ordered semantic event stream representing document boundaries, object boundaries, keys, array boundaries and typed scalar values. Physical TOON 4.4 table schemas, declared counts and delimiters SHALL be interpreted and validated during decoding; nested field groups SHALL reconstruct nested object events and keyed tables SHALL reconstruct object entries rather than arrays. Both document construction and explicit stream execution MUST consume this same event contract.
 
 #### Scenario: Tabular array
 - **WHEN** a tabular TOON array with recursive fields is decoded
@@ -34,7 +34,7 @@ The decoder SHALL emit a stable ordered semantic event stream representing docum
 - **THEN** consumers receive object entries in encounter order and nested values in recursive header order, not a synthetic array
 
 ### Requirement: Strict validation during consumption
-Strict decoding SHALL validate root shape, indentation, whitespace rules, string escapes, delimiter scope, array/entry count, recursive tabular leaf width, field-list uniqueness at each level, duplicate sibling keys, and configured nesting/token limits while events are consumed, according to TOON 4.1. Validation MUST apply to event consumers as well as materialized documents. Declared counts MUST NOT cause proportional preallocation.
+Strict decoding SHALL validate root shape, indentation, whitespace rules, string escapes, delimiter scope, array/entry count, recursive tabular leaf width, field-list uniqueness at each level, duplicate sibling keys, and configured nesting/token limits while events are consumed, according to TOON 4.4. Validation MUST apply to event consumers as well as materialized documents. Declared counts MUST NOT cause proportional preallocation.
 
 #### Scenario: Declared count mismatch
 - **WHEN** an array ends after a different number of elements than its declared length
@@ -53,7 +53,7 @@ Strict decoding SHALL validate root shape, indentation, whitespace rules, string
 - **THEN** strict decoding still reports the source-positioned defect
 
 ### Requirement: Ordered loss-aware document model
-The DOM builder SHALL preserve array order, object insertion order, string contents, boolean/null identity, and supported numeric representations. TOON 4.1 tabular rows and keyed entry values SHALL reconstruct object keys in header order recursively; equality SHALL allow this specified reordering only within those values. Dotted keys SHALL remain literal. Strict duplicate sibling keys SHALL error; non-strict duplicates SHALL use deterministic last-write-wins in document order. Out-of-envelope number behavior MUST be documented and compatibility-tested.
+The DOM builder SHALL preserve array order, object insertion order, string contents, boolean/null identity, and supported numeric representations. TOON 4.4 tabular rows and keyed entry values SHALL reconstruct object keys in header order recursively; equality SHALL allow this specified reordering only within those values. Dotted keys SHALL remain literal. Strict duplicate sibling keys SHALL error; non-strict duplicates SHALL use deterministic last-write-wins in document order. Out-of-envelope number behavior MUST be documented and compatibility-tested.
 
 #### Scenario: Ordered object
 - **WHEN** an ordinary object contains keys in non-lexicographic order
@@ -72,7 +72,7 @@ The DOM builder SHALL preserve array order, object insertion order, string conte
 - **THEN** its later value replaces the earlier value deterministically without a duplicate diagnostic
 
 ### Requirement: Canonical structured output
-The TOON writer SHALL emit valid canonical TOON 4.1 to a sink with LF line endings, no trailing spaces, no document-internal trailing newline, correct quoting/escapes, canonical number formatting, declared array/entry lengths, deterministic object order, and configured delimiter and indent. Form selection SHALL follow whole-value shape and position, not a formatting preference. Uniform non-empty object arrays SHALL use recursively nested field groups where eligible. Root/object-field objects with at least two uniform non-empty object values SHALL use keyed tabular form. Root/object-field empty arrays SHALL use `[]`; empty list-item arrays SHALL use a zero-length header. Anonymous nested array list items SHALL NOT use fields-bearing keyless headers. The writer SHALL write completed output where shape and framing permit and MUST NOT require a result-sized string intermediate or perform key folding.
+The TOON writer SHALL emit valid canonical TOON 4.4 to a sink with LF line endings, no trailing spaces, no document-internal trailing newline, correct quoting/escapes, canonical number formatting, declared array/entry lengths, deterministic object order, and configured delimiter and indent. Form selection SHALL follow whole-value shape and position, not a formatting preference. Uniform non-empty object arrays SHALL use recursively nested field groups where eligible. Root/object-field objects with at least two uniform non-empty object values SHALL use keyed tabular form. Root/object-field empty arrays SHALL use `[]`; empty list-item arrays SHALL use a zero-length header. Anonymous nested array list items SHALL NOT use fields-bearing keyless headers. The writer SHALL write completed output where shape and framing permit and MUST NOT require a result-sized string intermediate or perform key folding.
 
 #### Scenario: Canonical round trip
 - **WHEN** a supported runtime value is encoded and decoded in strict mode
@@ -103,7 +103,7 @@ The TOON writer SHALL emit valid canonical TOON 4.1 to a sink with LF line endin
 - **THEN** its header stays on the hyphen line, rows are at hyphen depth plus two, and later sibling fields are at hyphen depth plus one
 
 ### Requirement: Bounded array preparation and spooling
-When an output array's or object's final count or recursive table schema is unknown, the writer SHALL retain only one replayable representation of pending values. All active replay preparations, schema state and transient composites SHALL use one configurable aggregate in-memory threshold and then spool securely where supported. State that cannot spill MUST fail with a resource diagnostic rather than allocate past that threshold. The writer MUST choose the canonical TOON 4.1 form after sufficient whole-shape information is known, write its final header before its body, replay values once in order, and expose whether spooling occurred.
+When an output array's or object's final count or recursive table schema is unknown, the writer SHALL retain only one replayable representation of pending values. All active replay preparations, schema state and transient composites SHALL use one configurable aggregate in-memory threshold and then spool securely where supported. State that cannot spill MUST fail with a resource diagnostic rather than allocate past that threshold. The writer MUST choose the canonical TOON 4.4 form after sufficient whole-shape information is known, write its final header before its body, replay values once in order, and expose whether spooling occurred.
 
 #### Scenario: Unknown large array
 - **WHEN** a generated array exceeds the aggregate in-memory preparation threshold
@@ -200,18 +200,18 @@ With a consumer that does not materialize subtrees, event decoding SHALL retain 
 - **THEN** completed feature values are released and peak parser memory does not grow with the feature count
 
 ### Requirement: I/O conformance and differential tests
-The I/O implementation SHALL pass the official pinned TOON 4.1 conformance fixtures, round-trip property tests, malformed-input tests, and event-versus-DOM equivalence tests before it is used by tq compatibility benchmarks. Reference differentials SHALL use a declared conforming reference version and document numeric/depth-domain exclusions; reference behavior MUST NOT override official fixture expectations. Fixture provenance and complete applicable coverage SHALL be auditable without name-based silent skips.
+The I/O implementation SHALL pass the official pinned TOON 4.4 conformance fixtures, round-trip property tests, malformed-input tests, and event-versus-DOM equivalence tests before it is used by tq compatibility benchmarks. Reference differentials SHALL use a declared conforming reference version and document numeric/depth-domain exclusions; reference behavior MUST NOT override official fixture expectations. Fixture provenance and complete applicable coverage SHALL be auditable without name-based silent skips.
 
 #### Scenario: Event and DOM agreement
 - **WHEN** a valid fixture is decoded through events and built into a document
 - **THEN** its value equals the established conforming decoder result within the documented shared domain
 
 #### Scenario: Encoder fixture
-- **WHEN** an official 4.1 encoder fixture is exercised through document and transcode output
+- **WHEN** an official 4.4 encoder fixture is exercised through document and transcode output
 - **THEN** each applicable path matches its canonical bytes and declared framing separately
 
-### Requirement: TOON 4.1 lexical and non-strict interpretation
-Decoding SHALL apply TOON 4.1 BOM, CRLF, full-line comment, quoted-token, Unicode escape, U+0020-only trimming, scope, empty-array, and strict/non-strict rules. Comments SHALL be excluded before structural interpretation without changing source locations or surrounding scopes. Encoders SHALL quote hash-leading strings and non-ASCII-pattern keys and escape control characters. Surrogate escapes, malformed quoted tokens and misplaced scalar lines SHALL error in all modes. Non-strict counts SHALL NOT truncate scopes; missing row leaves SHALL be absent and surplus cells SHALL contribute nothing. Legacy empty-array headers and empty list-item `- []` SHALL remain valid input.
+### Requirement: TOON 4.4 lexical and non-strict interpretation
+Decoding SHALL apply TOON 4.4 BOM, CRLF, full-line comment, quoted-token, Unicode escape, U+0020-only trimming, scope, empty-array, and strict/non-strict rules. Comments SHALL be excluded before structural interpretation without changing source locations or surrounding scopes. Encoders SHALL quote hash-leading strings and non-ASCII-pattern keys and escape only U+0000–U+001F controls. Surrogate escapes, malformed quoted tokens, malformed headers, row-width mismatches, trailing root content, and out-of-scope lines SHALL error in all modes. Non-strict decoding SHALL apply exactly the five recoveries for counts, duplicate keys, indentation, blank lines, and initial nested-scope depth jumps; counts SHALL NOT truncate scopes. Legacy empty-array headers and empty list-item `- []` SHALL remain valid input.
 
 #### Scenario: Comment between rows
 - **WHEN** a full-line comment with arbitrary leading spaces occurs between table rows
@@ -232,4 +232,17 @@ Decoding SHALL apply TOON 4.1 BOM, CRLF, full-line comment, quoted-token, Unicod
 #### Scenario: Misplaced scalar
 - **WHEN** a bare scalar line occurs inside an object or array scope without a valid row/item role
 - **THEN** decoding fails in both strict and non-strict modes
+
+#### Scenario: Non-strict malformed header
+- **WHEN** non-strict input contains `a[2|]{x,y}: 1|2`
+- **THEN** decoding fails with a header delimiter error instead of treating the header text as a literal key
+
+#### Scenario: Non-strict row width
+- **WHEN** a tabular or keyed row has fewer or more cells than its declared leaf-field count
+- **THEN** decoding fails in both modes rather than dropping or inventing fields
+
+#### Scenario: Non-strict initial depth jump
+- **WHEN** the first line of a newly opened nested scope is deeper than its expected content depth
+- **THEN** the scope adopts that initial depth, retains its original closing boundary, and rejects subsequent scope lines shallower than the adopted depth
+
 

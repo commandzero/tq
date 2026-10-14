@@ -20,7 +20,7 @@ Historical release entries retain their original ordering.
 ### Changed
 
 - **Breaking:** Upgrade the tq Rust crates together to 0.5.0; see the [native TOON 4.1 migration notes](docs/jq-parity-migration.md#native-toon-41-migration-to-050) (#71).
-- **Breaking:** Native TOON now follows 4.1, with recursive field groups, keyed tables, position-specific empty arrays/list indentation, comments, and control escapes. Canonical bytes and strict input acceptance change; default LF and explicit sequence/unframed output contracts remain unchanged (#71).
+- **Breaking:** Native TOON now follows 4.4, with recursive field groups, keyed tables, position-specific empty arrays/list indentation, comments, and control escapes. Non-strict input permits only the five specified recoveries; malformed headers, row-width mismatches, trailing root content, and out-of-scope lines are rejected. Quoted DEL and U+0080–U+009F remain literal. See the [4.4 migration notes](docs/jq-parity-migration.md#native-toon-44-input-migration); default LF and explicit sequence/unframed output contracts remain unchanged.
 - **Breaking:** `-c` and `--compact-output` now select compact JSON. Remove `-c` when expecting TOON; combining it with explicit TOON output is rejected (#42).
 - **Breaking:** Default TOON output now emits zero or more LF-terminated values, preserving earlier results on later errors. Use `-o toon-seq` for RS framing or `--unframed` to require exactly one document (#41, #42).
 - **Breaking:** `--seq` now reads JSON sequences and emits TOON sequences by default. Use `--seq -o json` or `--seq -c` to retain JSON sequence output (#42).

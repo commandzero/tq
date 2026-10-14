@@ -33,7 +33,7 @@ cargo install tq-cli
 
 `tq` autodetects the input format on stdin and outputs TOON by default.
 
-Native input and canonical output follow TOON 4.1. Uniform nested rows use
+Native input and canonical output follow TOON 4.4. Uniform nested rows use
 recursive field groups, and uniform keyed objects use keyed table headers.
 Dotted names remain literal keys: `profile.city` is not expanded into an object.
 The removed `--fold-keys` and `--flatten-depth` switches are unknown options.

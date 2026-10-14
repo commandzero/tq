@@ -1,4 +1,4 @@
-//! Shared pinned-fixture loading and ordered semantic assertions.
+//! Shared TOON 4.4 pinned-fixture loading and ordered semantic assertions.
 
 use std::{collections::BTreeSet, fmt::Write as _, fs, path::PathBuf};
 
@@ -8,9 +8,9 @@ use tq_core::{Object, Value};
 use tq_toon::{DecoderConfig, Delimiter, WriterConfig};
 
 pub fn fixtures(category: &str) -> Vec<(String, JsonValue)> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spec-v4.1");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/spec-v4.4");
     let manifest: JsonValue =
-        serde_json::from_str(include_str!("../fixtures/spec-v4.1/manifest.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/spec-v4.4/manifest.json")).unwrap();
     let records = manifest["files"].as_array().unwrap();
     let mut expected_paths = BTreeSet::new();
     let mut selected = Vec::new();

@@ -281,7 +281,7 @@ fn append_character(
         '\n' => b"\\n",
         '\r' => b"\\r",
         '\t' => b"\\t",
-        character if character.is_control() => {
+        character if character <= '\u{001f}' => {
             let code = character as u32;
             escaped[..2].copy_from_slice(b"\\u");
             escaped[2] = HEX[((code >> 12) & 15) as usize];
