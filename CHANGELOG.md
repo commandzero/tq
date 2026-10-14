@@ -33,6 +33,11 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
+- Color benchmark regeneration now preserves separate week/month binary identities, migrates legacy scoped provenance without duplicate records, and rejects blank captured versions before changing the page (#73).
+- The TOON migration guard now rejects a byte-identical baseline/candidate pair before executing workloads, including copies at different paths (#73).
+- Migration guard runs now require a new report path and leave prior checkpoints unchanged on setup or candidate failures (#73).
+- Benchmark regeneration now retains authored per-binary fields and rejects duplicate host campaign IDs before publication; color version probes are bounded and legacy Stack Overflow index summaries are removed during regeneration (#73).
+- Legacy report regeneration no longer replaces recorded binary versions or digests with unknown values; the Stack Overflow summary specification now matches overview results and index navigation (#73).
 - Non-strict TOON-sequence `--stream` input now reaches the existing staged last-write-wins projection, emitting jq-compatible leaf and container-close records.
 - jq-manual token savings now exclude otherwise equal values when a required jq/JSON or JSON/TOON process contract differs, retaining the exact mismatch and strict failure.
 - Large comma-expression queries, including right-nested expressions, no longer overflow the Windows CLI's default stack (#68).

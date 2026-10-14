@@ -31,6 +31,8 @@ pub struct ColorReport {
     pub source_bytes: u64,
     pub binary: PathBuf,
     #[serde(default)]
+    pub tq_version: Option<String>,
+    #[serde(default)]
     pub source_sha256: Option<String>,
     #[serde(default)]
     pub binary_sha256: Option<String>,
@@ -133,6 +135,13 @@ fn validate(report: &ColorReport) -> Result<(), Box<dyn Error>> {
     if report.rows.len() != 8 || report.measured_samples == 0 || report.source_bytes == 0 {
         return Err("incomplete color report".into());
     }
+    if report
+        .tq_version
+        .as_deref()
+        .is_some_and(|version| version.trim().is_empty())
+    {
+        return Err("captured tq version must not be blank".into());
+    }
     let mut seen = BTreeSet::new();
     for row in &report.rows {
         if row.color_present != Some(row.flag == "-C") {
@@ -177,6 +186,52 @@ fn cell(value: &str) -> String {
     value.replace('|', "\\|").replace(['\n', '\r'], " ")
 }
 
+fn scope_legacy_color_runs(source: String) -> Result<String, Box<dyn Error>> {
+    let Some(rest) = source
+        .strip_prefix("---\n")
+        .or_else(|| source.strip_prefix("---\r\n"))
+    else {
+        return Ok(source);
+    };
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            let mut metadata: yaml_serde::Value = yaml_serde::from_str(&rest[..offset])?;
+            let mut changed = false;
+            if let Some(runs) = metadata
+                .get_mut("benchmark_runs")
+                .and_then(yaml_serde::Value::as_sequence_mut)
+            {
+                for run in runs {
+                    let scope = match run["run_scope"].as_str() {
+                        Some("week-corpus") => "week",
+                        Some("month-corpus") => "month",
+                        _ => continue,
+                    };
+                    if let Some(id) = run["campaign_id"].as_str()
+                        && !id.ends_with(":color-week")
+                        && !id.ends_with(":color-month")
+                    {
+                        run["campaign_id"] = format!("{id}:color-{scope}").into();
+                        changed = true;
+                    }
+                }
+            }
+            return if changed {
+                Ok(format!(
+                    "---\n{}---\n{}",
+                    yaml_serde::to_string(&metadata)?,
+                    &rest[offset + line.len()..]
+                ))
+            } else {
+                Ok(source)
+            };
+        }
+        offset += line.len();
+    }
+    Err("unterminated benchmark YAML frontmatter".into())
+}
+
 pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dyn Error>> {
     if reports.len() != 2 {
         return Err("supply week and month reports, in that order".into());
@@ -186,8 +241,31 @@ pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dy
     }
     let generated = render(reports)?;
     let source = fs::read_to_string(page)?;
-    let updated = replace_results_region(page, &source, &generated)?;
-    // All reports and markers are validated before replacing the page.
+    let mut updated = scope_legacy_color_runs(replace_results_region(page, &source, &generated)?)?;
+    for (label, report) in ["week", "month"].into_iter().zip(reports) {
+        // Week and month share a capture timestamp, but each retains its own identity.
+        let campaign_id = report
+            .environment
+            .as_ref()
+            .map(|environment| environment.collected_at.as_str())
+            .filter(|identity| !identity.trim().is_empty())
+            .unwrap_or("not-recorded");
+        let run_id = format!("{campaign_id}:color-{label}");
+        let mut binary = serde_json::json!({
+            "version": report.tq_version,
+            "sha256": report.binary_sha256,
+        });
+        if report.tq_version.is_none() {
+            binary["identity_status"] = serde_json::Value::String("not-recorded".to_owned());
+            binary["provenance"] = serde_json::Value::String(
+                "legacy color report has no retained tq --version output".to_owned(),
+            );
+        }
+        let binaries = serde_json::json!({"tq": binary});
+        let binaries = yaml_serde::from_str(&binaries.to_string())?;
+        updated = tq_test_support::benchmark::merge_benchmark_run(&updated, &run_id, binaries)?;
+    }
+    // All reports, markers, and frontmatter are validated before replacing the page.
     fs::write(page, updated)?;
     Ok(())
 }

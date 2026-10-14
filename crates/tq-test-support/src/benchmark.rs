@@ -9,6 +9,8 @@ mod markdown;
 mod measure;
 #[cfg(windows)]
 mod measure_windows;
+mod metadata;
+pub mod migration_guard;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod native_process;
 #[cfg(windows)]
@@ -48,6 +50,7 @@ pub use measure::{
     RssProvenance, collector_source_sha256, measure_process, measure_process_uninstrumented,
     measure_process_worker, measure_process_worker_uninstrumented, preflight_rss,
 };
+pub use metadata::merge_benchmark_run;
 pub use report::{
     BenchmarkCampaignReport, BenchmarkCorpusIdentity, BenchmarkFinalStatus, BenchmarkOutcome,
     BenchmarkRow, BenchmarkSample, CampaignExecution, Comparability, LaunchIsolationEvidence,

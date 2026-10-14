@@ -3,6 +3,19 @@ type: Report
 title: Output color performance
 description: Regenerable monochrome and colored output test results.
 generated: { by: codex, at: 2026-09-13T22:04:09Z }
+benchmark_runs:
+  - campaign_id: "2026-09-13:color-week"
+    run_scope: week-corpus
+    identity_status: not-recorded
+    provenance: "Retained raw report: /Users/reno/Development/commandzero/tq-benchmarks/.work/output-colors-20260913/week-recorded.json. Report identity is transcribed from historical-review.md; no unique campaign ID or exact --version output was recorded."
+    binaries:
+      tq: { version: null, sha256: "a943425168c26e7fb5aa397be3d3bb0ad0bf11dc45a87b78bc59799a4a0d8ddd", identity_status: not-recorded }
+  - campaign_id: "2026-09-13:color-month"
+    run_scope: month-corpus
+    identity_status: not-recorded
+    provenance: "Retained raw report: /Users/reno/Development/commandzero/tq-benchmarks/.work/output-colors-20260913/month-recorded.json. Report identity is transcribed from historical-review.md; no unique campaign ID or exact --version output was recorded."
+    binaries:
+      tq: { version: null, sha256: "a943425168c26e7fb5aa397be3d3bb0ad0bf11dc45a87b78bc59799a4a0d8ddd", identity_status: not-recorded }
 ---
 
 # Output color performance
@@ -18,6 +31,18 @@ change. Automatic redirected output stays plain.
 The correctness gate matches the exact monochrome capture while allowing only
 additional complete SGR sequences. Literal ESC bytes and literal SGR content
 must remain present; their presence alone is not evidence of generated color.
+
+Regeneration keeps week and month provenance in separate
+`<capture timestamp>:color-week` and `<capture timestamp>:color-month` run
+identities, even when both reports share one environment capture. Legacy reports
+without a timestamp use `not-recorded:color-week` and `not-recorded:color-month`;
+missing versions remain explicitly not recorded. A captured version containing
+only whitespace is invalid and leaves the authored page unchanged.
+Legacy bare campaign IDs with `week-corpus` or `month-corpus` scope are migrated
+to these scoped IDs while retaining authored provenance and unrelated captures.
+Fresh color runs capture `tq --version` with a five-second deadline and a 4 KiB
+limit per output stream. A timed-out, oversized, unsuccessful, non-UTF-8, or
+blank identity fails before any measurement report is written.
 
 ## Results
 
