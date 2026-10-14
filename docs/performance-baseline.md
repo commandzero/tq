@@ -91,6 +91,9 @@ ordered semantic witnesses, process correctness, plan/preparation observations
 and every selected workload. Version-specific TOON inputs may differ in bytes
 but must reconstruct the same ordered model. A spool workload must actually
 write and replay temporary data.
+Before executing any workload, the guard rejects a candidate with the frozen
+baseline's executable size and SHA-256, including a copy at a different path.
+A self-comparison cannot establish migration acceptance.
 
 Each row receives one warmup and three alternating measured baseline/candidate
 pairs. A bounded seven-pair confirmation resolves a suspected hard-limit slowdown

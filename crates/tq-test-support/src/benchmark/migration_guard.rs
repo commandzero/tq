@@ -1368,6 +1368,16 @@ fn run_row(
     Ok(())
 }
 
+fn check_distinct_executables(
+    baseline: &ArtifactIdentity,
+    candidate: &ArtifactIdentity,
+) -> Result<()> {
+    if candidate.bytes == baseline.bytes && candidate.sha256 == baseline.sha256 {
+        return Err("candidate executable is byte-identical to the frozen baseline".into());
+    }
+    Ok(())
+}
+
 fn identify_candidate(
     candidate: &Path,
     directory: &Path,
@@ -1404,6 +1414,7 @@ fn identify_candidate(
     }
     let candidate = identify(candidate, directory)?;
     deadline.remaining()?;
+    check_distinct_executables(&baseline.executable, &candidate.executable)?;
     if candidate.build_features != baseline.build_features
         || candidate.runtime_libraries != baseline.runtime_libraries
     {
@@ -1548,4 +1559,19 @@ pub fn run(
         save_json(report_path, &report)?;
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::{check_distinct_executables, identity};
+
+    #[test]
+    fn identical_executable_bytes_are_rejected_even_at_a_different_path() {
+        let baseline = identity("baseline", b"baseline bytes");
+        let copied = identity("candidate-copy", b"baseline bytes");
+        assert!(check_distinct_executables(&baseline, &baseline).is_err());
+        assert!(check_distinct_executables(&baseline, &copied).is_err());
+        let changed = identity("candidate", b"candidate data");
+        assert!(check_distinct_executables(&baseline, &changed).is_ok());
+    }
 }
