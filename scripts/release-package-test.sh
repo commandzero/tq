@@ -28,7 +28,7 @@ case "$1" in
         cat > target/aarch64-apple-darwin/release/tq <<'BINARY'
 #!/bin/bash
 if [[ ${1:-} == --version ]]; then
-    echo "tq ${BINARY_VERSION:-0.5.0} (TOON v4.1; jq target 1.8.x; revision fixture)"
+    echo "tq ${BINARY_VERSION:-0.5.0}"
 else
     echo "${QUERY_RESULT:-42}"
 fi

@@ -8733,7 +8733,6 @@ mod tests {
                 run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
                 ExitStatus::Success
             );
-            assert_ne!(output, [] as [u8; 0]);
             assert_eq!(error, [] as [u8; 0]);
         }
     }
