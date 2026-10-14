@@ -7,3 +7,10 @@ These checked tasks preserve the original completed acceptance record. They are 
 - [x] 8.3 Exercise the actual baseline/candidate guard on the fixed matrix and final frozen release/default candidate, verifying shared semantic/process correctness despite changed canonical bytes, a real spool path, same-host comparability and an explicit deadline; retain initial/confirmation rounds and fail or leave acceptance blocked for every significant or unresolved noisy result without omitting rows or shrinking inputs.
 - [x] 8.4 Record the final native target, per-workload wall-time ratios, samples/dispersion, output sizes and actual gate outcome with CPU/RSS diagnostics when available; verify the report makes no calibrated publication or all-platform claim and document any mitigation followed by a fresh candidate verification.
 - [x] 8.5 Apply the user-approved greater-than-20% hard wall-time limit and greater-than-10% advisory review notes; verify exact boundaries, advisory non-failure, hard-limit failure/noise handling, persistent/CLI notes and a fresh complete fixed-matrix run without relabeling earlier reports.
+
+## PR review contract corrections
+
+These tasks concern the reviewed publication implementation, not a new benchmark
+execution or a renewal of the preserved historical acceptance above.
+
+- [x] Align the Stack Overflow summary requirement and campaign scenario with `overview.md` results and frontmatter-free `index.md` navigation; verify saved-report rendering against that contract.

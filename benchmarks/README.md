@@ -26,8 +26,10 @@ corpus artifacts remain in the benchmark archive.
 
 Regeneration updates measured binary versions and digests without discarding
 authored per-binary provenance, allocator/worker fields, or separately recorded
-tools. Multi-host publication requires distinct campaign IDs; duplicate IDs are
-rejected before any page is changed.
+tools. Missing generated versions or digests do not replace retained non-null
+identities; absent fields are still recorded explicitly as null. Multi-host
+publication requires distinct campaign IDs; duplicate IDs are rejected before
+any page is changed.
 
 Every benchmark report must include the measured host's CPU model, logical
 CPU count, RAM capacity, OS, architecture, kernel, and build profile. Use

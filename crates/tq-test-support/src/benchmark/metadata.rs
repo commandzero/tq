@@ -73,7 +73,13 @@ fn merge_binaries(existing: &mut Value, generated: Value) {
         (Value::Mapping(existing), Value::Mapping(generated)) => {
             for (tool, identity) in generated {
                 match (existing.get_mut(&tool), identity) {
-                    (Some(Value::Mapping(old)), Value::Mapping(new)) => old.extend(new),
+                    (Some(Value::Mapping(old)), Value::Mapping(new)) => {
+                        for (field, value) in new {
+                            if !value.is_null() || !old.contains_key(&field) {
+                                old.insert(field, value);
+                            }
+                        }
+                    }
                     (_, identity) => {
                         existing.insert(tool, identity);
                     }
@@ -152,6 +158,44 @@ mod tests {
         );
         assert_eq!(
             merge_benchmark_run(&rendered, "run-1", binaries("new")).unwrap(),
+            rendered
+        );
+        assert!(rendered.ends_with("Authored body.\n"));
+    }
+
+    #[test]
+    fn legacy_rerender_keeps_recorded_identity_and_marks_only_missing_fields_unknown() {
+        let source = "---\nbenchmark_runs:\n  - campaign_id: color-week\n    binaries:\n      tq: {version: captured, sha256: retained-digest, allocator: mimalloc}\n      jq: {version: retained-jq}\n---\nAuthored body.\n";
+        let legacy: Value = yaml_serde::from_str(
+            "{tq: {version: null, sha256: null}, jq: {version: updated-jq, sha256: null}, yq: {version: null, sha256: null}}",
+        ).unwrap();
+        let rendered = merge_benchmark_run(source, "color-week", legacy.clone()).unwrap();
+        let yaml = rendered
+            .strip_prefix("---\n")
+            .unwrap()
+            .split_once("\n---\n")
+            .unwrap()
+            .0;
+        let metadata: Value = yaml_serde::from_str(yaml).unwrap();
+        let tools = &metadata["benchmark_runs"][0]["binaries"];
+        assert_eq!(tools["tq"]["version"].as_str(), Some("captured"));
+        assert_eq!(tools["tq"]["sha256"].as_str(), Some("retained-digest"));
+        assert_eq!(tools["tq"]["allocator"].as_str(), Some("mimalloc"));
+        assert_eq!(tools["jq"]["version"].as_str(), Some("updated-jq"));
+        assert_eq!(
+            tools["jq"].as_mapping().unwrap().get("sha256"),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            tools["yq"].as_mapping().unwrap().get("version"),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            tools["yq"].as_mapping().unwrap().get("sha256"),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            merge_benchmark_run(&rendered, "color-week", legacy).unwrap(),
             rendered
         );
         assert!(rendered.ends_with("Authored body.\n"));
