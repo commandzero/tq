@@ -123,11 +123,10 @@ fn blank_captured_versions_do_not_modify_the_page() {
 fn shared_campaign_retains_both_scope_identities_on_regeneration() {
     let dir = tempfile::tempdir().unwrap();
     let page = dir.path().join("colors.md");
-    fs::write(
-        &page,
-        format!("# Test\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n"),
-    )
-    .unwrap();
+    let legacy = format!(
+        "---\ntitle: Authored\nbenchmark_runs:\n  - campaign_id: shared-campaign\n    run_scope: week-corpus\n    provenance: retained-week\n  - campaign_id: shared-campaign\n    run_scope: month-corpus\n    provenance: retained-month\n  - campaign_id: older-campaign\n    binaries: {{tq: {{version: older}}}}\n---\n# Test\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n"
+    );
+    fs::write(&page, legacy).unwrap();
     let mut reports = [report(), report()];
     for (index, report) in reports.iter_mut().enumerate() {
         report.environment = Some(
@@ -160,7 +159,14 @@ fn shared_campaign_retains_both_scope_identities_on_regeneration() {
             .find(|run| run["campaign_id"].as_str() == Some(&id))
             .unwrap();
         assert_eq!(run["binaries"]["tq"]["version"].as_str(), Some(version));
+        assert_eq!(
+            run["provenance"].as_str(),
+            Some(format!("retained-{scope}").as_str())
+        );
     }
+    assert_eq!(runs.len(), 3);
+    assert_eq!(runs[2]["campaign_id"].as_str(), Some("older-campaign"));
+    assert_eq!(runs[2]["binaries"]["tq"]["version"].as_str(), Some("older"));
 }
 
 #[test]

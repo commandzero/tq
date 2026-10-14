@@ -186,6 +186,52 @@ fn cell(value: &str) -> String {
     value.replace('|', "\\|").replace(['\n', '\r'], " ")
 }
 
+fn scope_legacy_color_runs(source: String) -> Result<String, Box<dyn Error>> {
+    let Some(rest) = source
+        .strip_prefix("---\n")
+        .or_else(|| source.strip_prefix("---\r\n"))
+    else {
+        return Ok(source);
+    };
+    let mut offset = 0;
+    for line in rest.split_inclusive('\n') {
+        if line.trim_end_matches(['\r', '\n']) == "---" {
+            let mut metadata: yaml_serde::Value = yaml_serde::from_str(&rest[..offset])?;
+            let mut changed = false;
+            if let Some(runs) = metadata
+                .get_mut("benchmark_runs")
+                .and_then(yaml_serde::Value::as_sequence_mut)
+            {
+                for run in runs {
+                    let scope = match run["run_scope"].as_str() {
+                        Some("week-corpus") => "week",
+                        Some("month-corpus") => "month",
+                        _ => continue,
+                    };
+                    if let Some(id) = run["campaign_id"].as_str()
+                        && !id.ends_with(":color-week")
+                        && !id.ends_with(":color-month")
+                    {
+                        run["campaign_id"] = format!("{id}:color-{scope}").into();
+                        changed = true;
+                    }
+                }
+            }
+            return if changed {
+                Ok(format!(
+                    "---\n{}---\n{}",
+                    yaml_serde::to_string(&metadata)?,
+                    &rest[offset + line.len()..]
+                ))
+            } else {
+                Ok(source)
+            };
+        }
+        offset += line.len();
+    }
+    Err("unterminated benchmark YAML frontmatter".into())
+}
+
 pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dyn Error>> {
     if reports.len() != 2 {
         return Err("supply week and month reports, in that order".into());
@@ -195,7 +241,7 @@ pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dy
     }
     let generated = render(reports)?;
     let source = fs::read_to_string(page)?;
-    let mut updated = replace_results_region(page, &source, &generated)?;
+    let mut updated = scope_legacy_color_runs(replace_results_region(page, &source, &generated)?)?;
     for (label, report) in ["week", "month"].into_iter().zip(reports) {
         // Week and month share a capture timestamp, but each retains its own identity.
         let campaign_id = report
