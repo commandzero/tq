@@ -33,6 +33,7 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
+- Color benchmark regeneration now preserves separate week/month binary identities and rejects blank captured versions before changing the page (#73).
 - Non-strict TOON-sequence `--stream` input now reaches the existing staged last-write-wins projection, emitting jq-compatible leaf and container-close records.
 - jq-manual token savings now exclude otherwise equal values when a required jq/JSON or JSON/TOON process contract differs, retaining the exact mismatch and strict failure.
 - Large comma-expression queries, including right-nested expressions, no longer overflow the Windows CLI's default stack (#68).

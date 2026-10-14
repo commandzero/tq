@@ -135,6 +135,13 @@ fn validate(report: &ColorReport) -> Result<(), Box<dyn Error>> {
     if report.rows.len() != 8 || report.measured_samples == 0 || report.source_bytes == 0 {
         return Err("incomplete color report".into());
     }
+    if report
+        .tq_version
+        .as_deref()
+        .is_some_and(|version| version.trim().is_empty())
+    {
+        return Err("captured tq version must not be blank".into());
+    }
     let mut seen = BTreeSet::new();
     for row in &report.rows {
         if row.color_present != Some(row.flag == "-C") {
@@ -190,18 +197,14 @@ pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dy
     let source = fs::read_to_string(page)?;
     let mut updated = replace_results_region(page, &source, &generated)?;
     for (label, report) in ["week", "month"].into_iter().zip(reports) {
+        // Week and month share a capture timestamp, but each retains its own identity.
         let campaign_id = report
             .environment
             .as_ref()
             .map(|environment| environment.collected_at.as_str())
-            .filter(|identity| !identity.is_empty())
-            .unwrap_or_else(|| {
-                if label == "week" {
-                    "not-recorded:color-week"
-                } else {
-                    "not-recorded:color-month"
-                }
-            });
+            .filter(|identity| !identity.trim().is_empty())
+            .unwrap_or("not-recorded");
+        let run_id = format!("{campaign_id}:color-{label}");
         let mut binary = serde_json::json!({
             "version": report.tq_version,
             "sha256": report.binary_sha256,
@@ -214,7 +217,7 @@ pub fn render_reports(page: &Path, reports: &[ColorReport]) -> Result<(), Box<dy
         }
         let binaries = serde_json::json!({"tq": binary});
         let binaries = yaml_serde::from_str(&binaries.to_string())?;
-        updated = tq_test_support::benchmark::merge_benchmark_run(&updated, campaign_id, binaries)?;
+        updated = tq_test_support::benchmark::merge_benchmark_run(&updated, &run_id, binaries)?;
     }
     // All reports, markers, and frontmatter are validated before replacing the page.
     fs::write(page, updated)?;

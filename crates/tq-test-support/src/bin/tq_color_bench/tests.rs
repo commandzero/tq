@@ -57,6 +57,12 @@ fn regeneration_is_idempotent_and_updates_metrics_without_touching_authored_text
     let mut reports = vec![report(), report()];
     render_reports(&page, &reports).unwrap();
     let first = fs::read_to_string(&page).unwrap();
+    let body = first.split_once("\n---\n").unwrap().1;
+    let (before, results) = body.split_once(RESULTS_START_MARKER).unwrap();
+    let (_, after) = results.split_once(RESULTS_END_MARKER).unwrap();
+    assert_eq!(before, authored.split_once(RESULTS_START_MARKER).unwrap().0);
+    assert_eq!(after, authored.split_once(RESULTS_END_MARKER).unwrap().1);
+    assert!(!results.contains("\nstale\n"));
     render_reports(&page, &reports).unwrap();
     assert_eq!(fs::read_to_string(&page).unwrap(), first);
     for sample in &mut reports[0].rows[1].samples {
@@ -95,6 +101,66 @@ fn invalid_samples_or_markers_do_not_modify_the_page() {
     }
     assert!(render_reports(&page, &[good]).is_err());
     assert_eq!(fs::read_to_string(&page).unwrap(), authored);
+}
+
+#[test]
+fn blank_captured_versions_do_not_modify_the_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("colors.md");
+    let authored = format!(
+        "# Test\n\n## Results\n{RESULTS_START_MARKER}\nkeep results\n{RESULTS_END_MARKER}\n"
+    );
+    fs::write(&page, &authored).unwrap();
+    for version in ["", " \t\n"] {
+        let mut bad = report();
+        bad.tq_version = Some(version.into());
+        assert!(render_reports(&page, &[report(), bad]).is_err());
+        assert_eq!(fs::read_to_string(&page).unwrap(), authored);
+    }
+}
+
+#[test]
+fn shared_campaign_retains_both_scope_identities_on_regeneration() {
+    let dir = tempfile::tempdir().unwrap();
+    let page = dir.path().join("colors.md");
+    fs::write(
+        &page,
+        format!("# Test\n\n## Results\n{RESULTS_START_MARKER}\n{RESULTS_END_MARKER}\n"),
+    )
+    .unwrap();
+    let mut reports = [report(), report()];
+    for (index, report) in reports.iter_mut().enumerate() {
+        report.environment = Some(
+            serde_json::from_value(serde_json::json!({
+                "collected_at": "shared-campaign",
+                "os": "synthetic",
+                "architecture": "synthetic",
+                "compiler_profile": "synthetic",
+                "machine_identity": "synthetic"
+            }))
+            .unwrap(),
+        );
+        report.tq_version = Some(format!("captured-{index}"));
+    }
+    render_reports(&page, &reports).unwrap();
+    render_reports(&page, &reports).unwrap();
+    let rendered = fs::read_to_string(&page).unwrap();
+    let yaml = rendered
+        .strip_prefix("---\n")
+        .unwrap()
+        .split_once("\n---\n")
+        .unwrap()
+        .0;
+    let metadata: yaml_serde::Value = yaml_serde::from_str(yaml).unwrap();
+    let runs = metadata["benchmark_runs"].as_sequence().unwrap();
+    for (scope, version) in [("week", "captured-0"), ("month", "captured-1")] {
+        let id = format!("shared-campaign:color-{scope}");
+        let run = runs
+            .iter()
+            .find(|run| run["campaign_id"].as_str() == Some(&id))
+            .unwrap();
+        assert_eq!(run["binaries"]["tq"]["version"].as_str(), Some(version));
+    }
 }
 
 #[test]

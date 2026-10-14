@@ -32,6 +32,13 @@ The correctness gate matches the exact monochrome capture while allowing only
 additional complete SGR sequences. Literal ESC bytes and literal SGR content
 must remain present; their presence alone is not evidence of generated color.
 
+Regeneration keeps week and month provenance in separate
+`<capture timestamp>:color-week` and `<capture timestamp>:color-month` run
+identities, even when both reports share one environment capture. Legacy reports
+without a timestamp use `not-recorded:color-week` and `not-recorded:color-month`;
+missing versions remain explicitly not recorded. A captured version containing
+only whitespace is invalid and leaves the authored page unchanged.
+
 ## Results
 
 <!-- benchmark-results:start -->
