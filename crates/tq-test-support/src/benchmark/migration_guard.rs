@@ -1482,7 +1482,7 @@ pub fn run(
         report.elapsed_seconds = deadline.started.elapsed().as_secs_f64();
         return Ok(report);
     }
-    save_json(report_path, &report)?;
+    write_new(report_path, &serde_json::to_vec_pretty(&report)?)?;
     let identities = identify_candidate(candidate, &directory, &report, &deadline);
     match identities {
         Err(error) => {

@@ -94,6 +94,9 @@ write and replay temporary data.
 Before executing any workload, the guard rejects a candidate with the frozen
 baseline's executable size and SHA-256, including a copy at a different path.
 A self-comparison cannot establish migration acceptance.
+Each `run` invocation requires a new report path. Existing reports, including
+interrupted checkpoints, are never replaced or resumed by a later invocation;
+choose a separate path to retain completed rows and raw samples.
 
 Each row receives one warmup and three alternating measured baseline/candidate
 pairs. A bounded seven-pair confirmation resolves a suspected hard-limit slowdown

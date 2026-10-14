@@ -306,3 +306,30 @@ fn immutable_input_verification_rejects_changes_without_rewriting_them() {
         changed
     );
 }
+
+#[test]
+fn failed_guard_run_preserves_an_existing_checkpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let report = directory.path().join("checkpoint.json");
+    let checkpoint = serde_json::to_vec(&json!({
+        "profile": "focused-migration-repeated",
+        "exit_code": 2,
+        "rows": [{"workload": {"id": "decode-flat"}, "initial": [
+            {"baseline": {"wall_time_micros": 100}, "candidate": {"wall_time_micros": 110}}
+        ]}]
+    }))
+    .unwrap();
+    fs::write(&report, &checkpoint).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tq-toon-regression"))
+        .args(["run", "--candidate", "missing-candidate", "--directory"])
+        .arg(directory.path())
+        .arg("--build-manifest")
+        .arg(directory.path().join("missing-build.json"))
+        .arg("--report-file")
+        .arg(&report)
+        .args(["--deadline-seconds", "60"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(fs::read(&report).unwrap(), checkpoint);
+}

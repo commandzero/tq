@@ -170,28 +170,25 @@ fn main() -> ExitCode {
         Ok(code) => code,
         Err(error) => {
             eprintln!("tq-toon-regression: {error}");
-            // Missing/invalid campaign inputs must leave a durable non-passing
-            // report, without discarding an existing checkpoint's raw samples.
+            // Run reports are immutable across invocations; preparation checkpoints
+            // retain their completed correctness evidence when preparation fails.
             let path = options
                 .report
                 .unwrap_or_else(|| options.directory.join("prepare-report.json"));
             let previous: Option<serde_json::Value> = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-            let is_checkpoint = previous.as_ref().is_some_and(|report| {
-                if options.prepare {
+            let is_checkpoint = options.prepare
+                && previous.as_ref().is_some_and(|report| {
                     report["completed_correctness"].is_array() && report["current_row"].is_string()
-                } else {
-                    report["profile"] == "focused-migration-repeated" && report["rows"].is_array()
-                }
-            });
+                });
             let path_entry = fs::symlink_metadata(&path).ok();
             if path_entry
                 .as_ref()
                 .is_some_and(|entry| entry.file_type().is_symlink() || !is_checkpoint)
             {
                 eprintln!(
-                    "refusing to overwrite non-checkpoint report path {}",
+                    "refusing to overwrite existing report path {}",
                     path.display()
                 );
                 return ExitCode::from(2);
