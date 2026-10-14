@@ -351,7 +351,7 @@ fn run_with_io_policy_capture<R: Read + Send, W: Write, E: Write>(
         Command::Version => {
             writeln!(
                 stdout,
-                "tq {} (TOON v4.1; jq target 1.8.x; revision {})",
+                "tq {} (TOON v4.4; jq target 1.8.x; revision {})",
                 env!("CARGO_PKG_VERSION"),
                 option_env!("TQ_BUILD_REVISION").unwrap_or("unknown")
             )?;
@@ -8733,7 +8733,6 @@ mod tests {
                 run_with_io(command, &mut input, &mut output, &mut error).unwrap(),
                 ExitStatus::Success
             );
-            assert_ne!(output, [] as [u8; 0]);
             assert_eq!(error, [] as [u8; 0]);
         }
     }

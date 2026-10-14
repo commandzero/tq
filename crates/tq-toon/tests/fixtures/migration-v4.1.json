@@ -1,6 +1,6 @@
 {
   "category": "encode",
-  "description": "Native consumer regressions supplementing, not modifying, the official 4.1 fixture set",
+  "description": "Native consumer regressions authored for the 4.1 migration, supplementing, not modifying, the official 4.4 fixture set",
   "tests": [
     {
       "name": "root keyed values recursively follow the first schema without reordering entry keys",

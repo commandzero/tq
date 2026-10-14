@@ -8,7 +8,7 @@ canonical TOON without constructing a complete runtime document.
 ## Requirements
 
 ### Requirement: Proven transcode eligibility
-The system SHALL select the transcode plan only when analysis proves that the resolved query is semantic identity, the selected decoder exposes ordered structural events with the requested duplicate-key semantics, and the requested output is canonical TOON 4.1 with supported options. The proof MUST be complete before semantic input consumption. If any condition fails, the system SHALL select another sound plan without speculative transcode output. Removed folding options SHALL NOT remain proof conditions.
+The system SHALL select the transcode plan only when analysis proves that the resolved query is semantic identity, the selected decoder exposes ordered structural events with the requested duplicate-key semantics, and the requested output is canonical TOON 4.4 with supported options. The proof MUST be complete before semantic input consumption. If any condition fails, the system SHALL select another sound plan without speculative transcode output. Removed folding options SHALL NOT remain proof conditions.
 
 #### Scenario: JSON identity conversion
 - **WHEN** a JSON input uses the identity query and default TOON writer options
@@ -31,7 +31,7 @@ The system SHALL select the transcode plan only when analysis proves that the re
 - **THEN** analysis chooses a path that can preserve those values before consuming input and does not claim direct event equivalence
 
 ### Requirement: Document-equivalent output
-For every accepted input without duplicate object names, the transcode plan SHALL emit the same canonical TOON 4.1 bytes and result framing as the document plan under the same input and output options. It MUST preserve outer object encounter order, array order, supported exact numbers, string contents, booleans, nulls, and empty containers. Table-value object key order SHALL follow the recursive header order required by 4.1, identically in both paths.
+For every accepted input without duplicate object names, the transcode plan SHALL emit the same canonical TOON 4.4 bytes and result framing as the document plan under the same input and output options. It MUST preserve outer object encounter order, array order, supported exact numbers, string contents, booleans, nulls, and empty containers. Table-value object key order SHALL follow the recursive header order required by 4.4, identically in both paths.
 
 #### Scenario: Differential identity conversion
 - **WHEN** a correctness fixture is encoded through both transcode and forced-document plans
@@ -86,7 +86,7 @@ value.
 - **THEN** the RS byte becomes observable before the complete document has been read
 
 ### Requirement: Single-source array preparation
-When TOON 4.1 array or keyed-object syntax requires a final count or recursive layout decision, the transcode plan SHALL retain one replayable representation of each pending element or entry. All active replay preparations, schema state and transient composites MUST share the configured in-memory budget. Once exhausted, eligible root/object-field preparations SHALL move to secure bounded spooling; unspillable state SHALL fail with a resource diagnostic rather than allocate past the aggregate budget. After the candidate closes, the writer MUST select the canonical position-appropriate form and replay stored values once in order.
+When TOON 4.4 array or keyed-object syntax requires a final count or recursive layout decision, the transcode plan SHALL retain one replayable representation of each pending element or entry. All active replay preparations, schema state and transient composites MUST share the configured in-memory budget. Once exhausted, eligible root/object-field preparations SHALL move to secure bounded spooling; unspillable state SHALL fail with a resource diagnostic rather than allocate past the aggregate budget. After the candidate closes, the writer MUST select the canonical position-appropriate form and replay stored values once in order.
 
 #### Scenario: Unknown root array
 - **WHEN** an unknown-length root array exceeds the shared in-memory preparation budget

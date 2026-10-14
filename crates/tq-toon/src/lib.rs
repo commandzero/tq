@@ -32,9 +32,11 @@ pub use writer::{Delimiter, WriterConfig, WriterError, encode, write_value, writ
 /// become allocation capacities.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DecoderConfig {
-    /// Spaces in one indentation level.
+    /// Positive number of spaces in one indentation level.
     pub indent_size: usize,
-    /// Enforce counts, indentation, delimiters, and blank-line rules.
+    /// Enforce every TOON 4.4 decode rule. When false, recover only count
+    /// mismatches, duplicate keys, indentation, blank lines, and initial
+    /// nested-scope depth jumps; malformed headers and row widths still error.
     pub strict: bool,
     /// Maximum active sibling names and recursive schema field nodes combined.
     pub maximum_fields: usize,
@@ -122,7 +124,7 @@ pub enum Event {
     ArrayStart {
         /// Header range.
         span: Span,
-        /// Optional count declared by TOON syntax.
+        /// Declared count, or `None` when unknown or outside the `u64` domain.
         declared_count: Option<u64>,
     },
     /// Array end and observed item count.

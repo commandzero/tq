@@ -14,7 +14,7 @@ consumer can stop after any event without building the rest of the document.
 
 The public event types cover document, object, key, array, and scalar
 boundaries. An array start carries its declared count. Its end reports the
-observed count. The native TOON 4.1 decoder handles UTF-8, BOM/CRLF, full-line
+observed count. The native TOON 4.4 decoder handles UTF-8, BOM/CRLF, full-line
 comments, quoting and escapes, indentation, recursive/keyed schemas, delimiter
 scope, row width, counts, sibling duplicates, and aggregate resource limits.
 Semantic container depth includes implicit row/group objects even when the
@@ -42,6 +42,8 @@ complete document before projecting jq-compatible leaf and container-close
 records. Duplicate replacement therefore finishes before any projected value
 is emitted; this is not direct incremental event decoding.
 
-`toon-format` 0.6.0 is a pinned conformance oracle, not the production decoder or
-writer. Upstream full-document convenience streaming APIs are not used by the
-bounded native event path.
+`toon-format` 0.7.0 (TOON v4.4) is a pinned conformance oracle, not the production
+decoder or writer. Native TOON and the complete official fixtures target v4.4;
+the [fixture execution contract](../crates/tq-toon/tests/fixtures/spec-v4.4/README.md#execution-contract)
+defines exact native/reference comparisons. Upstream full-document convenience
+streaming APIs are not used by the bounded native event path.

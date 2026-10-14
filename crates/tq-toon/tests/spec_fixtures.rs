@@ -1,4 +1,4 @@
-//! Complete pinned TOON 4.1 decode expectations, semantic events and oracle checks.
+//! Complete pinned TOON 4.4 decode expectations, semantic events and oracle checks.
 
 mod support;
 

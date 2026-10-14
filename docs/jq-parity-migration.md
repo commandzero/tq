@@ -17,7 +17,30 @@ reviewed safe-library disparities, and unresolved failures remain separate.
 Neither this migration nor a checked task-history item implies refreshed
 acceptance or calibration.
 
+## Native TOON 4.4 input migration
+
+Native parsing and canonical output now target
+[TOON v4.4](https://github.com/toon-format/spec/blob/v4.4.0/SPEC.md), with
+`toon-format =0.7.0` as the independent test oracle. Official fixtures are
+pinned to v4.4.0; historical v4.1 campaign evidence below remains unchanged.
+
+Non-strict input now permits exactly five recovery classes: declared counts,
+duplicate keys, indentation, blank lines inside header spans, and initial
+nested-scope depth jumps. Malformed headers, mismatched row widths, trailing
+root content, and out-of-scope lines fail in both modes. For example,
+`a[2|]{x,y}: 1|2` is no longer accepted as a literal key/value pair; quote the
+key as `"a[2|]{x,y}": 1|2` when that literal meaning is intended.
+
+Quoted output keeps DEL and U+0080–U+009F literal; only U+0000–U+001F controls
+use control escapes. Exact numeric semantics, recursive header order, result
+framing, and bounded event/replay behavior are unchanged.
+
 ## Native TOON 4.1 migration to 0.5.0
+
+This section records the earlier v3-to-v4.1 implementation cutover for 0.5.0,
+not the current format contract. Current native input and canonical output
+follow the [TOON 4.4 rules above](#native-toon-44-input-migration). The earlier
+upgrade instructions and historical details below are retained for that cutover.
 
 Upgrade `tq-core`, `tq-toon`, `tq-formats`, and `tq-cli` together. `WriterConfig`
 no longer has key-folding/flattening fields; `DecoderConfig` no longer has

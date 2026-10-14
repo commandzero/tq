@@ -1,4 +1,4 @@
-//! Exact-byte checks against the official TOON encode fixtures.
+//! Exact-byte checks against the complete official TOON 4.4 encode fixtures.
 
 mod support;
 

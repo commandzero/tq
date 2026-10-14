@@ -1,4 +1,4 @@
-//! Bounded line-oriented TOON-to-event decoder.
+//! Bounded line-oriented TOON v4.4-to-event decoder.
 
 use std::{collections::VecDeque, io::BufRead, sync::Arc};
 
@@ -27,6 +27,9 @@ pub struct Decoder<R> {
 #[derive(Debug)]
 struct Frame {
     content_depth: usize,
+    // Recovery changes content depth, but not the depth that ends the scope.
+    close_depth: usize,
+    first_line: bool,
     kind: FrameKind,
 }
 
@@ -37,17 +40,17 @@ enum FrameKind {
         name_bytes: usize,
     },
     Array {
-        declared: u64,
+        declared: Option<u64>,
         observed: u64,
     },
     Tabular {
-        declared: u64,
+        declared: Option<u64>,
         observed: u64,
         fields: Arc<Schema>,
         delimiter: Delimiter,
     },
     Keyed {
-        declared: u64,
+        declared: Option<u64>,
         observed: u64,
         fields: Arc<Schema>,
         delimiter: Delimiter,
@@ -130,7 +133,8 @@ struct Line {
 #[derive(Debug)]
 struct Header {
     key: Option<DecodedKey>,
-    declared: u64,
+    // None denotes a canonical declaration larger than the event count domain.
+    declared: Option<u64>,
     delimiter: Delimiter,
     fields: Vec<Field>,
     inline: String,
@@ -308,7 +312,7 @@ impl<R: BufRead> Decoder<R> {
             };
             return Err(self.syntax(&blank, 1, "blank line inside array"));
         }
-        let Some(frame) = self.frames.last() else {
+        let Some(frame) = self.frames.last_mut() else {
             self.root_complete = true;
             return Err(self.syntax(line, 1, "unexpected content after root container"));
         };
@@ -319,12 +323,7 @@ impl<R: BufRead> Decoder<R> {
                 "indentation does not match the active container depth",
             ));
         }
-        if !self.config.strict
-            && matches!(frame.kind, FrameKind::Keyed { .. })
-            && find_unquoted(content.as_bytes(), b':').is_none()
-        {
-            return Ok(());
-        }
+        frame.first_line = false;
         match frame.kind {
             FrameKind::Object { .. } => self.object_member(content, depth, span, line),
             FrameKind::Array { .. } => self.list_item(content, depth, span, line),
@@ -345,33 +344,11 @@ impl<R: BufRead> Decoder<R> {
                 observed_count: 0,
             })?;
             self.root_complete = true;
-        } else if content.starts_with('[') {
-            match self.header(content, line) {
-                Ok(header)
-                    if !self.config.strict
-                        && ((!header.fields.is_empty() && !header.inline.is_empty())
-                            || (header.keyed && header.fields.is_empty())) =>
-                {
-                    self.start_root_object(content, depth, span, line)?;
-                }
-                Ok(header) if header.key.is_none() => {
-                    self.emit_header(header, depth, span, line)?;
-                }
-                Ok(_) => {
-                    return Err(self.syntax(line, 1, "root array header cannot contain a key"));
-                }
-                Err(error)
-                    if !self.config.strict
-                        && find_unquoted(content.as_bytes(), b':').is_some()
-                        && header_fallback_allowed(&error) =>
-                {
-                    self.start_root_object(content, depth, span, line)?;
-                }
-                Err(error) => return Err(error),
-            }
-        } else if self.header_start(content).is_some()
-            || find_unquoted(content.as_bytes(), b':').is_some()
-        {
+        } else if content.starts_with('[') && self.header_start(content).is_some() {
+            let header = self.header(content, line)?;
+            self.emit_header(header, depth, span, line)?;
+            self.root_complete = self.frames.is_empty();
+        } else if find_unquoted(content.as_bytes(), b':').is_some() {
             self.start_root_object(content, depth, span, line)?;
         } else {
             let scalar = self.scalar(trim_spaces(content), line, 1)?;
@@ -394,6 +371,8 @@ impl<R: BufRead> Decoder<R> {
         self.emit(Event::ObjectStart { span })?;
         self.frames.push(Frame {
             content_depth: 0,
+            close_depth: 0,
+            first_line: false,
             kind: FrameKind::Object {
                 keys: std::collections::HashSet::new(),
                 name_bytes: 0,
@@ -411,9 +390,12 @@ impl<R: BufRead> Decoder<R> {
         line: &Line,
     ) -> Result<(), DecodeError> {
         loop {
-            let Some(frame) = self.frames.last() else {
+            let Some(frame) = self.frames.last_mut() else {
                 return Ok(());
             };
+            if !self.config.strict && frame.first_line && depth > frame.content_depth {
+                frame.content_depth = depth;
+            }
             let accepts_same_depth = match frame.kind {
                 FrameKind::Object { .. } | FrameKind::Keyed { .. } => true,
                 FrameKind::Array { .. } => list_marker(content),
@@ -423,8 +405,7 @@ impl<R: BufRead> Decoder<R> {
                     colon.is_none_or(|at| cell.is_some_and(|cell_at| at >= cell_at))
                 }
             };
-            if depth < frame.content_depth || (depth == frame.content_depth && !accepts_same_depth)
-            {
+            if depth < frame.close_depth || (depth == frame.content_depth && !accepts_same_depth) {
                 self.close_frame(span, line)?;
                 continue;
             }
@@ -439,12 +420,12 @@ impl<R: BufRead> Decoder<R> {
             FrameKind::Keyed {
                 declared, observed, ..
             } => {
-                if self.config.strict && declared != observed {
+                if self.config.strict && declared != Some(observed) {
                     return Err(self.syntax(
                         line,
                         1,
                         &format!(
-                            "keyed object declared {declared} entries but observed {observed}"
+                            "keyed object declared {declared:?} entries but observed {observed}"
                         ),
                     ));
                 }
@@ -454,11 +435,11 @@ impl<R: BufRead> Decoder<R> {
             | FrameKind::Tabular {
                 declared, observed, ..
             } => {
-                if self.config.strict && declared != observed {
+                if self.config.strict && declared != Some(observed) {
                     return Err(self.syntax(
                         line,
                         1,
-                        &format!("array declared {declared} items but observed {observed}"),
+                        &format!("array declared {declared:?} items but observed {observed}"),
                     ));
                 }
                 self.emit(Event::ArrayEnd {
@@ -480,25 +461,8 @@ impl<R: BufRead> Decoder<R> {
         span: Span,
         line: &Line,
     ) -> Result<(), DecodeError> {
-        if let Some(header_start) = self.header_start(content) {
-            let header = match self.header(content, line) {
-                Ok(header) => header,
-                Err(error)
-                    if !self.config.strict
-                        && find_unquoted(content.as_bytes(), b':').is_some()
-                        && header_fallback_allowed(&error) =>
-                {
-                    return self.object_member_key_value(content, depth, span, line);
-                }
-                Err(error) => return Err(error),
-            };
-            if !self.config.strict
-                && (header.key.is_none()
-                    || (header.keyed && (header.fields.is_empty() || !header.inline.is_empty()))
-                    || (!header.fields.is_empty() && !header.inline.is_empty()))
-            {
-                return self.object_member_key_value(content, depth, span, line);
-            }
+        if self.header_start(content).is_some() {
+            let header = self.header(content, line)?;
             let key = header
                 .key
                 .clone()
@@ -511,7 +475,6 @@ impl<R: BufRead> Decoder<R> {
                 quoted: key.quoted,
             })?;
             self.emit_header(header, depth, span, line)?;
-            debug_assert!(header_start <= content.len());
             return Ok(());
         }
         self.object_member_key_value(content, depth, span, line)
@@ -548,6 +511,8 @@ impl<R: BufRead> Decoder<R> {
             self.emit(Event::ObjectStart { span })?;
             self.frames.push(Frame {
                 content_depth: depth + 1,
+                close_depth: depth + 1,
+                first_line: true,
                 kind: FrameKind::Object {
                     keys: std::collections::HashSet::new(),
                     name_bytes: 0,
@@ -576,85 +541,64 @@ impl<R: BufRead> Decoder<R> {
         }
         let schema = Schema::new(header.fields);
         self.validate_additional_budget(schema.field_count, schema.name_bytes)?;
-        if header.keyed {
+        let kind = if header.keyed {
             self.emit(Event::ObjectStart { span })?;
-            if header.declared == 0 && self.config.strict {
-                self.emit(Event::ObjectEnd { span })?;
-            } else {
-                self.frames.push(Frame {
-                    content_depth: depth + 1,
-                    kind: FrameKind::Keyed {
-                        declared: header.declared,
-                        observed: 0,
-                        fields: Arc::new(schema),
-                        delimiter: header.delimiter,
-                        keys: std::collections::HashSet::new(),
-                        name_bytes: 0,
-                    },
-                });
-                self.ensure_depth()?;
+            FrameKind::Keyed {
+                declared: header.declared,
+                observed: 0,
+                fields: Arc::new(schema),
+                delimiter: header.delimiter,
+                keys: std::collections::HashSet::new(),
+                name_bytes: 0,
             }
-            return Ok(());
-        }
-        self.emit(Event::ArrayStart {
-            span,
-            declared_count: Some(header.declared),
-        })?;
-        if !schema.fields.is_empty() {
-            if header.declared == 0 && self.config.strict {
-                self.emit(Event::ArrayEnd {
-                    span,
-                    observed_count: 0,
-                })?;
-                return Ok(());
-            }
-            self.frames.push(Frame {
-                content_depth: depth + 1,
-                kind: FrameKind::Tabular {
+        } else {
+            self.emit(Event::ArrayStart {
+                span,
+                declared_count: header.declared,
+            })?;
+            if !schema.fields.is_empty() {
+                FrameKind::Tabular {
                     declared: header.declared,
                     observed: 0,
                     fields: Arc::new(schema),
                     delimiter: header.delimiter,
-                },
-            });
-            self.ensure_depth()?;
-        } else if !header.inline.is_empty() {
-            let tokens = split_delimited(&header.inline, header.delimiter, line, self)?;
-            for token in &tokens {
-                let value = self.scalar(token, line, 1)?;
-                self.emit(Event::Scalar { span, value })?;
-            }
-            let observed = tokens.len() as u64;
-            if self.config.strict && observed != header.declared {
-                return Err(self.syntax(
-                    line,
-                    1,
-                    &format!(
-                        "array declared {} items but observed {observed}",
-                        header.declared
-                    ),
-                ));
-            }
-            self.emit(Event::ArrayEnd {
-                span,
-                observed_count: observed,
-            })?;
-        } else if header.declared == 0 && self.config.strict {
-            self.emit(Event::ArrayEnd {
-                span,
-                observed_count: 0,
-            })?;
-        } else {
-            self.frames.push(Frame {
-                content_depth: depth + 1,
-                kind: FrameKind::Array {
+                }
+            } else if !header.inline.is_empty() {
+                let tokens = split_delimited(&header.inline, header.delimiter);
+                for token in &tokens {
+                    let value = self.scalar(token, line, 1)?;
+                    self.emit(Event::Scalar { span, value })?;
+                }
+                let observed = tokens.len() as u64;
+                if self.config.strict && Some(observed) != header.declared {
+                    return Err(self.syntax(
+                        line,
+                        1,
+                        &format!(
+                            "array declared {:?} items but observed {observed}",
+                            header.declared
+                        ),
+                    ));
+                }
+                self.emit(Event::ArrayEnd {
+                    span,
+                    observed_count: observed,
+                })?;
+                return Ok(());
+            } else {
+                FrameKind::Array {
                     declared: header.declared,
                     observed: 0,
-                },
-            });
-            self.ensure_depth()?;
-        }
-        Ok(())
+                }
+            }
+        };
+        self.frames.push(Frame {
+            content_depth: depth + 1,
+            close_depth: depth + 1,
+            first_line: true,
+            kind,
+        });
+        self.ensure_depth()
     }
 
     fn list_item(
@@ -672,7 +616,7 @@ impl<R: BufRead> Decoder<R> {
         else {
             return Err(self.syntax(line, 1, "list item outside array"));
         };
-        if *observed >= *declared && self.config.strict {
+        if declared.is_some_and(|declared| *observed >= declared) && self.config.strict {
             return Err(self.syntax(line, 1, "array contains more items than declared"));
         }
         *observed += 1;
@@ -689,7 +633,7 @@ impl<R: BufRead> Decoder<R> {
         } else if remainder.is_empty() {
             self.emit(Event::ObjectStart { span })?;
             self.emit(Event::ObjectEnd { span })?;
-        } else if remainder.starts_with('[') {
+        } else if remainder.starts_with('[') && self.header_start(remainder).is_some() {
             let header = self.header(remainder, line)?;
             if header.key.is_some() {
                 return Err(self.syntax(line, 1, "array item header must not contain a key"));
@@ -708,6 +652,8 @@ impl<R: BufRead> Decoder<R> {
             self.emit(Event::ObjectStart { span })?;
             self.frames.push(Frame {
                 content_depth: depth + 1,
+                close_depth: depth + 1,
+                first_line: false,
                 kind: FrameKind::Object {
                     keys: std::collections::HashSet::new(),
                     name_bytes: 0,
@@ -715,14 +661,6 @@ impl<R: BufRead> Decoder<R> {
             });
             self.ensure_depth()?;
             self.object_member(remainder, depth + 1, span, line)?;
-            if let Some(Frame {
-                kind: FrameKind::Tabular { .. } | FrameKind::Array { .. },
-                content_depth,
-                ..
-            }) = self.frames.last_mut()
-            {
-                *content_depth = depth + 2;
-            }
         } else {
             let value = self.scalar(remainder, line, 2)?;
             self.emit(Event::Scalar { span, value })?;
@@ -741,12 +679,12 @@ impl<R: BufRead> Decoder<R> {
                 } => (*declared, *observed, Arc::clone(fields), *delimiter),
                 _ => return Err(self.syntax(line, 1, "tabular row outside array")),
             };
-        if observed >= declared && self.config.strict {
+        if declared.is_some_and(|declared| observed >= declared) && self.config.strict {
             return Err(self.syntax(line, 1, "tabular array contains too many rows"));
         }
-        let values = split_delimited(content, delimiter, line, self)?;
+        let values = split_delimited(content, delimiter);
         let expected = fields.leaf_width;
-        if self.config.strict && values.len() != expected {
+        if values.len() != expected {
             return Err(self.syntax(
                 line,
                 1,
@@ -769,17 +707,14 @@ impl<R: BufRead> Decoder<R> {
     fn emit_field_values(
         &mut self,
         fields: &[Field],
-        values: &[String],
+        values: &[&str],
         index: &mut usize,
         span: Span,
         line: &Line,
     ) -> Result<(), DecodeError> {
         for field in fields {
             if field.children.is_empty() {
-                let Some(token) = values.get(*index) else {
-                    *index += 1;
-                    continue;
-                };
+                let token = &values[*index];
                 self.emit(Event::Key {
                     span,
                     value: Arc::clone(&field.key.value),
@@ -858,15 +793,15 @@ impl<R: BufRead> Decoder<R> {
                 } => (*declared, *observed, Arc::clone(fields), *delimiter),
                 _ => return Err(self.syntax(line, 1, "keyed entry outside keyed object")),
             };
-        if observed >= declared && self.config.strict {
+        if declared.is_some_and(|declared| observed >= declared) && self.config.strict {
             return Err(self.syntax(line, 1, "keyed object contains too many entries"));
         }
         let key = self.decode_key(trim_spaces(&content[..colon]), line)?;
         self.token_limit(&key.value, line)?;
         self.register_key(&key, line, "duplicate keyed entry")?;
-        let values = split_delimited(trim_spaces(&content[colon + 1..]), delimiter, line, self)?;
+        let values = split_delimited(trim_spaces(&content[colon + 1..]), delimiter);
         let expected = fields.leaf_width;
-        if self.config.strict && values.len() != expected {
+        if values.len() != expected {
             return Err(self.syntax(
                 line,
                 colon + 2,
@@ -895,12 +830,7 @@ impl<R: BufRead> Decoder<R> {
         let start = self
             .header_start(content)
             .ok_or_else(|| self.syntax(line, 1, "invalid array header"))?;
-        if start > 0
-            && content[..start]
-                .chars()
-                .last()
-                .is_some_and(char::is_whitespace)
-        {
+        if start > 0 && matches!(content.as_bytes()[start - 1], b' ' | b'\t') {
             return Err(self.syntax(line, start + 1, "whitespace before array header bracket"));
         }
         let close = find_closing(content.as_bytes(), start, b'[', b']')
@@ -952,9 +882,7 @@ impl<R: BufRead> Decoder<R> {
                 "array count must be a canonical unsigned integer",
             ));
         }
-        let declared = declaration
-            .parse::<u64>()
-            .map_err(|_| self.resource("declared-count"))?;
+        let declared = declaration.parse::<u64>().ok();
         let mut cursor = close + 1;
         let mut fields = Vec::new();
         if content.as_bytes().get(cursor) == Some(&b'{') {
@@ -979,6 +907,57 @@ impl<R: BufRead> Decoder<R> {
         })
     }
 
+    fn field_ranges<'a>(
+        &self,
+        text: &'a str,
+        delimiter: Delimiter,
+        line: &Line,
+    ) -> Result<Vec<&'a str>, DecodeError> {
+        let mut ranges = Vec::new();
+        let (mut start, mut brace_depth, mut quoted, mut escaped) = (0, 0usize, false, false);
+        for (index, byte) in text.bytes().enumerate() {
+            if quoted {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    quoted = false;
+                }
+                continue;
+            }
+            match byte {
+                b'"' => quoted = true,
+                b'{' => brace_depth += 1,
+                b'}' => {
+                    brace_depth = brace_depth.checked_sub(1).ok_or_else(|| {
+                        self.syntax(line, index + 1, "unmatched field-list brace")
+                    })?;
+                }
+                value if value == delimiter.byte() && brace_depth == 0 => {
+                    if ranges.len() >= self.config.maximum_fields {
+                        return Err(self.resource("fields"));
+                    }
+                    ranges.push(&text[start..index]);
+                    start = index + 1;
+                }
+                b',' | b'|' | b'\t' if byte != delimiter.byte() => {
+                    return Err(self.syntax(
+                        line,
+                        index + 1,
+                        "field list delimiter does not match header",
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if ranges.len() >= self.config.maximum_fields {
+            return Err(self.resource("fields"));
+        }
+        ranges.push(&text[start..]);
+        Ok(ranges)
+    }
+
     fn parse_fields(
         &self,
         text: &str,
@@ -1001,51 +980,22 @@ impl<R: BufRead> Decoder<R> {
         if depth > self.config.maximum_depth {
             return Err(self.resource("depth"));
         }
-        let bytes = text.as_bytes();
-        let mut ranges = Vec::new();
-        let (mut start, mut brace_depth, mut quoted, mut escaped) = (0, 0usize, false, false);
-        for (index, byte) in bytes.iter().copied().enumerate() {
-            if quoted {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'"' {
-                    quoted = false;
-                }
-                continue;
-            }
-            match byte {
-                b'"' => quoted = true,
-                b'{' => brace_depth += 1,
-                b'}' => brace_depth = brace_depth.saturating_sub(1),
-                value if value == delimiter.byte() && brace_depth == 0 => {
-                    if ranges.len() >= self.config.maximum_fields {
-                        return Err(self.resource("fields"));
-                    }
-                    ranges.push(&text[start..index]);
-                    start = index + 1;
-                }
-                b',' | b'|' | b'\t' if byte != delimiter.byte() && self.config.strict => {
-                    return Err(self.syntax(
-                        line,
-                        index + 1,
-                        "field list delimiter does not match header",
-                    ));
-                }
-                _ => {}
-            }
-        }
-        if ranges.len() >= self.config.maximum_fields {
-            return Err(self.resource("fields"));
-        }
-        ranges.push(&text[start..]);
+        let ranges = self.field_ranges(text, delimiter, line)?;
         let mut fields = Vec::new();
         let mut unique = std::collections::HashSet::new();
         for range in ranges {
             let entry = trim_spaces(range);
+            if entry.is_empty() {
+                return Err(self.syntax(line, 1, "field entry cannot be empty"));
+            }
             let nested = find_unquoted(entry.as_bytes(), b'{');
             let (name, nested_fields) = if let Some(open) = nested {
+                if open == 0 {
+                    return Err(self.syntax(line, 1, "nested field group requires a name"));
+                }
+                if matches!(entry.as_bytes()[open - 1], b' ' | b'\t') {
+                    return Err(self.syntax(line, open, "whitespace before nested field group"));
+                }
                 let close = find_closing(entry.as_bytes(), open, b'{', b'}').ok_or_else(|| {
                     self.syntax(line, open + 1, "unterminated nested field group")
                 })?;
@@ -1097,12 +1047,8 @@ impl<R: BufRead> Decoder<R> {
     fn header_start(&self, content: &str) -> Option<usize> {
         let bytes = content.as_bytes();
         let bracket = find_unquoted(bytes, b'[')?;
-        let colon = find_unquoted(bytes, b':');
-        if colon.is_some_and(|colon| colon < bracket) {
-            None
-        } else {
-            Some(bracket)
-        }
+        let colon = find_unquoted(bytes, b':')?;
+        if colon < bracket { None } else { Some(bracket) }
     }
 
     fn scalar(&self, token: &str, line: &Line, column: usize) -> Result<Scalar, DecodeError> {
@@ -1141,8 +1087,6 @@ impl<R: BufRead> Decoder<R> {
                 value: self.quoted(token, line, 1)?.into(),
                 quoted: true,
             })
-        } else if token.is_empty() {
-            Err(self.syntax(line, 1, "object key cannot be empty"))
         } else {
             Ok(DecodedKey {
                 value: token.into(),
@@ -1180,7 +1124,14 @@ impl<R: BufRead> Decoder<R> {
                         let digits = bytes.get(index + 1..end).ok_or_else(|| {
                             self.syntax(line, column + index, "incomplete Unicode escape")
                         })?;
-                        let text = std::str::from_utf8(digits).expect("hex escape is ASCII");
+                        if !digits.iter().all(u8::is_ascii_hexdigit) {
+                            return Err(self.syntax(
+                                line,
+                                column + index,
+                                "invalid Unicode escape",
+                            ));
+                        }
+                        let text = std::str::from_utf8(digits).expect("validated ASCII hex");
                         let code = u32::from_str_radix(text, 16).map_err(|_| {
                             self.syntax(line, column + index, "invalid Unicode escape")
                         })?;
@@ -1205,13 +1156,6 @@ impl<R: BufRead> Decoder<R> {
                             }
                         });
                     }
-                }
-                byte if byte < 0x20 && byte != b'\t' => {
-                    return Err(self.syntax(
-                        line,
-                        column + index,
-                        "unescaped control byte in string",
-                    ));
                 }
                 _ => {
                     let tail = std::str::from_utf8(&bytes[index..]).map_err(|_| {
@@ -1250,30 +1194,34 @@ impl<R: BufRead> Decoder<R> {
     }
 
     fn indentation<'a>(&self, line: &'a Line) -> Result<(usize, &'a str), DecodeError> {
-        let bom = usize::from(line.number == 1 && line.text.starts_with('\u{feff}'));
-        let prefix = if bom == 1 { '\u{feff}'.len_utf8() } else { 0 };
+        let prefix = if line.number == 1 && line.text.starts_with('\u{feff}') {
+            '\u{feff}'.len_utf8()
+        } else {
+            0
+        };
         let bytes = line.text.as_bytes();
-        let mut spaces = prefix;
-        while bytes.get(spaces) == Some(&b' ') {
-            spaces += 1;
+        let (mut end, mut spaces, mut tabs) = (prefix, 0, 0);
+        while let Some(byte) = bytes.get(end) {
+            match byte {
+                b' ' => spaces += 1,
+                b'\t' => tabs += 1,
+                _ => break,
+            }
+            end += 1;
         }
-        if spaces == bytes.len() {
+        if end == bytes.len() && (!self.config.strict || tabs == 0) {
             return Ok((0, ""));
         }
-        if bytes.get(spaces) == Some(&b'\t') {
-            return Err(self.syntax(line, spaces + 1, "tabs are not allowed in indentation"));
+        if self.config.strict && tabs > 0 {
+            return Err(self.syntax(line, 1, "tabs are not allowed in indentation"));
         }
         if self.config.indent_size == 0 {
-            if spaces != prefix {
-                return Err(self.syntax(line, 1, "indentation is disabled"));
-            }
-            return Ok((0, &line.text[prefix..]));
+            return Err(self.syntax(line, 1, "indent size must be positive"));
         }
-        let indentation = spaces - prefix;
-        if self.config.strict && indentation % self.config.indent_size != 0 {
+        if self.config.strict && spaces % self.config.indent_size != 0 {
             return Err(self.syntax(line, 1, "indentation is not a whole depth unit"));
         }
-        Ok((indentation / self.config.indent_size, &line.text[spaces..]))
+        Ok((tabs + spaces / self.config.indent_size, &line.text[end..]))
     }
 
     fn ensure_depth(&self) -> Result<(), DecodeError> {
@@ -1364,6 +1312,9 @@ impl<R: BufRead> Decoder<R> {
         if bytes.last() == Some(&b'\r') {
             bytes.pop();
         }
+        while bytes.last() == Some(&b' ') {
+            bytes.pop();
+        }
         let text = String::from_utf8(bytes).map_err(|error| DecodeError::Syntax {
             position: SourcePosition {
                 byte: start + error.utf8_error().valid_up_to() as u64,
@@ -1439,27 +1390,13 @@ fn find_closing(bytes: &[u8], start: usize, open: u8, close: u8) -> Option<usize
     None
 }
 
-fn header_fallback_allowed(error: &DecodeError) -> bool {
-    let DecodeError::Syntax { message, .. } = error else {
-        return false;
-    };
-    !["escape", "quoted", "quote", "UTF-8", "surrogate", "string"]
-        .iter()
-        .any(|marker| message.contains(marker))
-}
-
 fn trim_spaces(text: &str) -> &str {
     text.trim_matches(' ')
 }
 
-fn split_delimited<R: BufRead>(
-    text: &str,
-    delimiter: Delimiter,
-    line: &Line,
-    decoder: &Decoder<R>,
-) -> Result<Vec<String>, DecodeError> {
+fn split_delimited(text: &str, delimiter: Delimiter) -> Vec<&str> {
     if text.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
     let bytes = text.as_bytes();
     let mut values = Vec::new();
@@ -1474,15 +1411,12 @@ fn split_delimited<R: BufRead>(
         } else if byte == b'"' {
             quoted = !quoted;
         } else if byte == delimiter.byte() && !quoted {
-            values.push(trim_spaces(&text[start..index]).to_owned());
+            values.push(trim_spaces(&text[start..index]));
             start = index + 1;
         }
     }
-    if quoted || escaped {
-        return Err(decoder.syntax(line, 1, "unterminated quote in delimited values"));
-    }
-    values.push(trim_spaces(&text[start..]).to_owned());
-    Ok(values)
+    values.push(trim_spaces(&text[start..]));
+    values
 }
 
 fn forbidden_leading_zero(token: &str) -> bool {
@@ -1607,29 +1541,20 @@ mod tests {
         )));
     }
     #[test]
-    fn malformed_root_headers_fall_through_only_in_non_strict_mode() {
-        let config = DecoderConfig {
-            strict: false,
-            ..DecoderConfig::default()
-        };
-        let mut decoder = Decoder::new(Cursor::new(b"[03]: a,b"), SourceId::new(1), config);
-        let mut actual = Vec::new();
-        while let Some(event) = decoder.next_event().unwrap() {
-            actual.push(event);
+    fn malformed_headers_are_errors_in_both_modes() {
+        for strict in [true, false] {
+            for input in ["[03]: a,b", "a[2|]{x,y}: 1|2"] {
+                let mut decoder = Decoder::new(
+                    Cursor::new(input.as_bytes()),
+                    SourceId::new(1),
+                    DecoderConfig {
+                        strict,
+                        ..DecoderConfig::default()
+                    },
+                );
+                assert!(decoder.decode_into(&mut crate::DomBuilder::new()).is_err());
+            }
         }
-        assert!(actual.iter().any(|event| matches!(
-            event, Event::Key { value, .. } if value.as_ref() == "[03]"
-        )));
-        assert!(events(b"[03]: a,b").is_err());
-
-        let mut decoder = Decoder::new(Cursor::new(b"a[2|]{x,y}: 1|2"), SourceId::new(1), config);
-        let mut actual = Vec::new();
-        while let Some(event) = decoder.next_event().unwrap() {
-            actual.push(event);
-        }
-        assert!(actual.iter().any(|event| matches!(
-            event, Event::Key { value, .. } if value.as_ref() == "a[2|]{x,y}"
-        )));
     }
 
     #[test]
@@ -1647,28 +1572,73 @@ mod tests {
         assert!(events(b"items[2]:\n  - a\n\n  - b").is_err());
     }
     #[test]
-    fn short_non_strict_nested_rows_keep_the_declared_object_shape() {
-        let config = DecoderConfig {
-            strict: false,
-            ..DecoderConfig::default()
-        };
-        let mut decoder = Decoder::new(
-            Cursor::new(b"items[1]{x,meta{y}}:\n  1"),
-            SourceId::new(1),
-            config,
-        );
-        let mut events = Vec::new();
-        while let Some(event) = decoder.next_event().unwrap() {
-            events.push(event);
+    fn non_strict_row_widths_remain_errors_when_events_are_discarded() {
+        for input in [
+            "items[1]{x,meta{y}}:\n  1",
+            "items[1]{x}:\n  1,2",
+            "m[1:]{x,meta{y}}:\n  k: 1",
+            "m[1:]{x}:\n  k: 1,2",
+        ] {
+            let mut decoder = Decoder::new(
+                BufReader::with_capacity(1, Cursor::new(input.as_bytes())),
+                SourceId::new(1),
+                DecoderConfig {
+                    strict: false,
+                    ..DecoderConfig::default()
+                },
+            );
+            let error = loop {
+                match decoder.next_event() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => panic!("{input:?} accepted a width mismatch"),
+                    Err(error) => break error,
+                }
+            };
+            assert!(matches!(error, crate::DecodeError::Syntax { .. }));
         }
-        let keys = events
-            .iter()
-            .filter_map(|event| match event {
-                Event::Key { value, .. } => Some(value.as_ref()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(keys, ["items", "x", "meta"]);
+    }
+
+    #[test]
+    fn recovered_depth_jumps_keep_semantic_resource_limits() {
+        let input = b"a:\n        b:\n              c: 1\n        d: 2\nz: 3";
+        for capacity in [1, 3, input.len()] {
+            for retain in [false, true] {
+                for maximum_depth in [2, 3] {
+                    let mut decoder = Decoder::new(
+                        BufReader::with_capacity(capacity, Cursor::new(input)),
+                        SourceId::new(1),
+                        DecoderConfig {
+                            strict: false,
+                            maximum_depth,
+                            ..DecoderConfig::default()
+                        },
+                    );
+                    let mut builder = crate::DomBuilder::new();
+                    let result = loop {
+                        match decoder.next_event() {
+                            Ok(Some(event)) => {
+                                if retain {
+                                    crate::EventConsumer::consume(&mut builder, event).unwrap();
+                                }
+                            }
+                            Ok(None) => break Ok(()),
+                            Err(error) => break Err(error),
+                        }
+                    };
+                    if maximum_depth == 2 {
+                        assert!(matches!(result, Err(crate::DecodeError::Resource { .. })));
+                    } else {
+                        result.unwrap();
+                        if retain {
+                            assert_eq!(
+                                builder.finish().unwrap().to_string(),
+                                r#"{"a":{"b":{"c":1},"d":2},"z":3}"#
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
