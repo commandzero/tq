@@ -37,6 +37,11 @@ framing, and bounded event/replay behavior are unchanged.
 
 ## Native TOON 4.1 migration to 0.5.0
 
+This section records the earlier v3-to-v4.1 implementation cutover for 0.5.0,
+not the current format contract. Current native input and canonical output
+follow the [TOON 4.4 rules above](#native-toon-44-input-migration). The earlier
+upgrade instructions and historical details below are retained for that cutover.
+
 Upgrade `tq-core`, `tq-toon`, `tq-formats`, and `tq-cli` together. `WriterConfig`
 no longer has key-folding/flattening fields; `DecoderConfig` no longer has
 path-expansion configuration. Remove those fields and the `KeyFolding` /
