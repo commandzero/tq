@@ -31,6 +31,9 @@ pub enum MarkdownRenderError {
     /// A native report is not ready for stable publication.
     #[error("benchmark Markdown native publication rejected: {0}")]
     InvalidNativeReport(String),
+    /// Two supplied host reports claim the same campaign identity.
+    #[error("benchmark host reports must have distinct campaign IDs: {0}")]
+    DuplicateCampaign(String),
     /// A report workload ID cannot be mapped to one safe Markdown filename.
     #[error("unsafe benchmark workload ID: {0}")]
     UnsafeWorkloadId(String),
@@ -144,6 +147,14 @@ pub fn render_markdown_campaigns(
 ) -> Result<(), MarkdownRenderError> {
     if reports.is_empty() {
         return Err(MarkdownRenderError::NoReports);
+    }
+    let mut campaign_ids = BTreeSet::new();
+    for report in reports {
+        if !campaign_ids.insert(report.campaign_id.as_str()) {
+            return Err(MarkdownRenderError::DuplicateCampaign(
+                report.campaign_id.clone(),
+            ));
+        }
     }
     for report in reports {
         validate_native_publication(report)?;
@@ -1392,6 +1403,7 @@ mod tests {
         linux.environment.architecture = "x86_64".to_owned();
 
         let mut macos = linux.clone();
+        macos.campaign_id = "2026-09-10T04:26:44.169253Z".to_owned();
         macos.environment.os = "macos".to_owned();
         macos.environment.architecture = "aarch64".to_owned();
         macos.cases[0].samples[0].wall_time_micros = 2_345;
@@ -1427,13 +1439,36 @@ mod tests {
             format!("# A\n\n## Results\n{RESULTS_START_MARKER}\nold\n{RESULTS_END_MARKER}\n");
         fs::write(&good, &good_source).expect("good page");
         fs::write(&bad, "# B\n\n## Results\nmissing markers\n").expect("bad page");
-        let reports = [
-            report(vec![row("benchmark.a", BenchmarkOutcome::Timed)]),
-            report(vec![row("benchmark.b", BenchmarkOutcome::Timed)]),
-        ];
+        let first = report(vec![row("benchmark.a", BenchmarkOutcome::Timed)]);
+        let mut second = report(vec![row("benchmark.b", BenchmarkOutcome::Timed)]);
+        second.campaign_id = "2026-09-10T04:26:44.169253Z".to_owned();
+        let reports = [first, second];
 
         assert!(render_markdown_campaigns(directory.path(), &reports).is_err());
         assert_eq!(fs::read_to_string(good).expect("good page"), good_source);
+    }
+
+    #[test]
+    fn duplicate_host_campaign_ids_leave_all_publication_pages_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let page = directory.path().join("blocking-sort.md");
+        let source = format!(
+            "# Sort\n\n## Results\n{RESULTS_START_MARKER}\nprevious\n{RESULTS_END_MARKER}\n"
+        );
+        fs::write(&page, &source).unwrap();
+        let first = report(vec![row(
+            "benchmark.blocking-sort",
+            BenchmarkOutcome::Timed,
+        )]);
+        let mut second = first.clone();
+        second.environment.os = "other-native-host".into();
+        assert!(matches!(
+            render_markdown_campaigns(directory.path(), &[first, second]),
+            Err(super::MarkdownRenderError::DuplicateCampaign(_))
+        ));
+        assert_eq!(fs::read_to_string(&page).unwrap(), source);
+        assert!(!directory.path().join("overview.md").exists());
+        assert!(!directory.path().join("index.md").exists());
     }
 
     #[test]

@@ -24,6 +24,11 @@ authored context that regeneration preserves. Do not embed archive paths, local
 executable paths, or exhaustive provenance in the pages. Raw samples, logs, and
 corpus artifacts remain in the benchmark archive.
 
+Regeneration updates measured binary versions and digests without discarding
+authored per-binary provenance, allocator/worker fields, or separately recorded
+tools. Multi-host publication requires distinct campaign IDs; duplicate IDs are
+rejected before any page is changed.
+
 Every benchmark report must include the measured host's CPU model, logical
 CPU count, RAM capacity, OS, architecture, kernel, and build profile. Use
 recorded run metadata, not specifications from a different machine or a later

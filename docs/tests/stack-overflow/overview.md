@@ -6,7 +6,7 @@ generated: { by: tq-stack-overflow, at: 2026-09-13T00:00:00Z }
 benchmark_runs:
   - campaign_id: "2026-09-13"
     identity_status: not-recorded
-    provenance: "Scenario Results sections preserve native macOS reports but do not record exact campaign IDs or binary hashes. Captured version strings identify tq 0.3.0 revision 24bbd2581677b951c5bf275ca80e64e366c9cefb, jq 1.8.2, and yq 4.53.2."
+    provenance: "The retained native report was collected 2026-09-13T05:50:47.929777Z; its scenario 26 rows match the published 3.127, 5.111, and 2.543 ms medians. Scenario 26 was rendered on 2026-09-14, not measured in a separately documented campaign. The Results sections preserve tool versions; binary hashes are not recorded in these pages."
     binaries:
       tq: { version: "tq 0.3.0 (TOON v3; jq target 1.8.x; revision 24bbd2581677b951c5bf275ca80e64e366c9cefb)", sha256: null }
       jq: { version: "jq-1.8.2", sha256: null }

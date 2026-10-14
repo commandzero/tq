@@ -40,6 +40,9 @@ missing versions remain explicitly not recorded. A captured version containing
 only whitespace is invalid and leaves the authored page unchanged.
 Legacy bare campaign IDs with `week-corpus` or `month-corpus` scope are migrated
 to these scoped IDs while retaining authored provenance and unrelated captures.
+Fresh color runs capture `tq --version` with a five-second deadline and a 4 KiB
+limit per output stream. A timed-out, oversized, unsuccessful, non-UTF-8, or
+blank identity fails before any measurement report is written.
 
 ## Results
 

@@ -4,9 +4,9 @@ title: "How to run jq from gitbash in Windows?"
 description: "Benchmark reproduction and measured results for Stack Overflow scenario 26."
 generated: { by: codex/gpt-5.6-luna, at: 2026-09-14T06:23:44Z }
 benchmark_runs:
-  - campaign_id: "2026-09-14"
+  - campaign_id: "2026-09-13"
     identity_status: not-recorded
-    provenance: "Native macOS scenario results preserve captured tool version strings in the Results section; exact campaign ID and binary hashes are not recorded."
+    provenance: "The retained native report was collected 2026-09-13T05:50:47.929777Z; its scenario 26 rows match the published 3.127, 5.111, and 2.543 ms medians. This page was rendered 2026-09-14; that date does not establish a separate measurement or output-capture campaign. Tool versions are preserved below, but binary hashes are not recorded in this page."
     binaries:
       tq: { version: "tq 0.3.0 (TOON v3; jq target 1.8.x; revision 24bbd2581677b951c5bf275ca80e64e366c9cefb)", sha256: null }
       jq: { version: "jq-1.8.2", sha256: null }

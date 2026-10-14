@@ -3,9 +3,19 @@
 #[path = "tq_color_bench/report.rs"]
 mod report;
 
-use std::{env, error::Error, fs, path::PathBuf, process::Command, time::Duration};
+use std::{
+    collections::BTreeMap,
+    env,
+    error::Error,
+    fs,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 use tq_test_support::benchmark::{
     BenchmarkInvocation, collect_environment, measure_process, preflight_rss, run_allocation_probe,
+};
+use tq_test_support::compatibility::{
+    Invocation, ProcessStatus, run_process_with_environment_bounded,
 };
 
 use report::{
@@ -55,14 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
         }
     }
-    let version = Command::new(&binary).arg("--version").output()?;
-    if !version.status.success() {
-        return Err("tq --version failed before color measurement".into());
-    }
-    let tq_version = String::from_utf8(version.stdout)?.trim().to_owned();
-    if tq_version.is_empty() {
-        return Err("tq --version returned an empty identity".into());
-    }
+    let tq_version = capture_tq_version(&binary, Duration::from_secs(5))?;
     let preflight = preflight_rss(None)?;
     let environment = collect_environment("release");
     let mut reports = Vec::new();
@@ -94,6 +97,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         reports.push(report);
     }
     render_reports(&page, &reports)
+}
+
+fn capture_tq_version(binary: &Path, timeout: Duration) -> Result<String, Box<dyn Error>> {
+    let result = run_process_with_environment_bounded(
+        &Invocation {
+            executable: binary.to_owned(),
+            args: vec!["--version".to_owned()],
+            stdin: Vec::new(),
+            timeout,
+            current_dir: None,
+            environment: BTreeMap::new(),
+        },
+        &BTreeMap::new(),
+        4096,
+    )?;
+    if result.output_limit.is_some() {
+        return Err("tq --version exceeded the output limit before color measurement".into());
+    }
+    let version = result.outcome;
+    if version.status == ProcessStatus::TimedOut {
+        return Err("tq --version timed out before color measurement".into());
+    }
+    if version.status != ProcessStatus::Exited || version.exit_code != Some(0) {
+        return Err("tq --version failed before color measurement".into());
+    }
+    let tq_version = String::from_utf8(version.stdout)?.trim().to_owned();
+    if tq_version.is_empty() {
+        return Err("tq --version returned an empty identity".into());
+    }
+    Ok(tq_version)
 }
 
 fn measure_rows(report: &mut ColorReport, label: &str) -> Result<(), Box<dyn Error>> {
@@ -173,6 +206,40 @@ fn measure_rows(report: &mut ColorReport, label: &str) -> Result<(), Box<dyn Err
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    fn probe_script(script: &str, timeout: Duration) -> Result<String, Box<dyn Error>> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let binary = directory.path().join("tq");
+        fs::write(&binary, format!("#!/bin/sh\n{script}\n")).unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        capture_tq_version(&binary, timeout)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn version_probe_rejects_invalid_and_empty_identity() {
+        for script in [
+            "printf '\\377'",
+            "printf ' \\n'",
+            "printf 'tq 1.0\\n'; exit 1",
+            "printf '%04097d' 0",
+        ] {
+            assert!(
+                probe_script(script, Duration::from_secs(5)).is_err(),
+                "{script}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn version_probe_times_out() {
+        let started = std::time::Instant::now();
+        assert!(probe_script("sleep 10", Duration::from_millis(200)).is_err());
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
 
     #[test]
     #[ignore = "requires TQ_COLOR_TEST_BIN and native child-accounting permissions"]

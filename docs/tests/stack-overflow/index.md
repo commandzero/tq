@@ -68,8 +68,8 @@ and benchmark suites. From the repository root:
 
 The current extended profile takes one warmup and five measured samples per
 configuration; quick takes 0+1 and standard takes 1+3. The historical Results
-below were recorded using a different 30-sample policy and are unchanged by
-this new invocation.
+in the [measured overview](overview.md) were recorded using a different
+30-sample policy and are unchanged by this new invocation.
 
 The 148 successful timing rows used one warmup and 30 measured samples for each
 tool, for 4,440 accepted timing samples. The two correctness-failure rows each
@@ -79,7 +79,7 @@ No workspace tests or builds were launched concurrently with this campaign. This
 native campaign is not directly comparable to the earlier BSD-time/jq 1.8.1
 measurements and does not establish a self-regression baseline.
 
-To regenerate the Results sections from saved measurements:
+To regenerate the Results sections in the overview and scenario pages from saved measurements:
 
 ```console
 cargo run --quiet -p tq-test-support --bin tq-stack-overflow -- render \
@@ -98,35 +98,3 @@ non-JSON, empty output, and errors are excluded. Counts use exact captured
 stdout bytes decoded as UTF-8, including trailing newlines.
 Diff and % are negative when TOON uses fewer tokens.
 
-## Results
-<!-- STACK_OVERFLOW_RESULTS_START -->
-Last updated: 2026-09-13
-Status: `observed-failures`
-Environment: `macos` / `aarch64` / `Apple M4 Pro` / 14 logical CPUs  
-Tools: `jq` jq-1.8.2; `yq` yq (https://github.com/mikefarah/yq/) version v4.53.2; `tq` tq 0.3.0 (TOON v3; jq target 1.8.x; revision 24bbd2581677b951c5bf275ca80e64e366c9cefb)  
-Memory evidence: authoritative peak RSS from the native collector; sampled-group RSS is not used as a substitute.  
-
-Coverage: 50 scenarios, 150 observations.
-
-| Outcome | jq | yq | tq | Total |
-| --- | ---: | ---: | ---: | ---: |
-| timed | 50 | 48 | 50 | 148 |
-| incorrect | 0 | 2 | 0 | 2 |
-| unsupported | 0 | 0 | 0 | 0 |
-| timeout | 0 | 0 | 0 | 0 |
-| resource-limit | 0 | 0 | 0 | 0 |
-| oom-or-signal | 0 | 0 | 0 | 0 |
-
-### Matched successful scenario comparison
-
-Aggregate values use the same 48 complete, RSS-verified scenarios for all three tools. They are medians of per-scenario medians and per-scenario authoritative peak RSS values; incomplete or failed scenarios are excluded from every column.
-
-| Metric | jq | yq | yq Δ vs jq | tq | tq Δ vs jq |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Median wall (ms) | 3.118 | 5.134 | +64.7% | 2.634 | -15.5% |
-| Median peak RSS (MiB) | 2.688 | 15.383 | +472.3% | 4.242 | +57.8% |
-
-### Output token coverage
-
-47 of 47 structured scenarios have successful, equivalent JSON and TOON output, including ordered result streams. Raw and color profiles use separate output gates and do not contribute token savings. Each eligible structured page compares exact TOON stdout with both compact and expanded jq JSON using `o200k_base` and `cl100k_base`. Diff and % are negative for savings. Output captures are separate from timing samples; their exact capture timestamp is preserved in the saved output artifact.
-<!-- STACK_OVERFLOW_RESULTS_END -->

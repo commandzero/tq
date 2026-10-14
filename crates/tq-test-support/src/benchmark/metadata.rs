@@ -46,6 +46,12 @@ pub fn merge_benchmark_run(
     {
         if let Value::Mapping(existing_mapping) = existing {
             for (key, value) in run {
+                if key.as_str() == Some("binaries")
+                    && let Some(existing_binaries) = existing_mapping.get_mut(&key)
+                {
+                    merge_binaries(existing_binaries, value);
+                    continue;
+                }
                 existing_mapping.insert(key, value);
             }
         } else {
@@ -60,6 +66,22 @@ pub fn merge_benchmark_run(
         .map_err(|error| format!("cannot serialize benchmark frontmatter: {error}"))?;
     let encoded = encoded.strip_suffix('\n').unwrap_or(&encoded);
     Ok(format!("---\n{encoded}\n---\n{body}"))
+}
+
+fn merge_binaries(existing: &mut Value, generated: Value) {
+    match (existing, generated) {
+        (Value::Mapping(existing), Value::Mapping(generated)) => {
+            for (tool, identity) in generated {
+                match (existing.get_mut(&tool), identity) {
+                    (Some(Value::Mapping(old)), Value::Mapping(new)) => old.extend(new),
+                    (_, identity) => {
+                        existing.insert(tool, identity);
+                    }
+                }
+            }
+        }
+        (existing, generated) => *existing = generated,
+    }
 }
 
 fn split_frontmatter(source: &str) -> Result<(Option<Value>, &str), String> {
@@ -102,7 +124,7 @@ mod tests {
 
     #[test]
     fn replacing_campaign_metadata_keeps_one_current_identity() {
-        let source = "---\ntitle: authored\nbenchmark_runs:\n  - campaign_id: run-1\n    captured_at: 2026-01-02T03:04:05Z\n    source_role: release\n    binaries: {tq: {version: old, sha256: old}}\n---\nAuthored body.\n";
+        let source = "---\ntitle: authored\nbenchmark_runs:\n  - campaign_id: run-1\n    captured_at: 2026-01-02T03:04:05Z\n    source_role: release\n    binaries:\n      tq: {version: old, sha256: old, allocator: mimalloc, worker_protocol: v4, provenance: retained}\n      calibration-worker: {version: archived, sha256: worker-digest}\n---\nAuthored body.\n";
         let rendered = merge_benchmark_run(source, "run-1", binaries("new")).unwrap();
         let frontmatter = rendered.split("\n---\n").next().unwrap();
         let value: Value = yaml_serde::from_str(frontmatter.trim_start_matches("---\n")).unwrap();
@@ -118,6 +140,19 @@ mod tests {
         assert_eq!(
             value["benchmark_runs"][0]["source_role"].as_str(),
             Some("release")
+        );
+        let tools = &value["benchmark_runs"][0]["binaries"];
+        assert_eq!(tools["tq"]["sha256"].as_str(), Some("digest"));
+        assert_eq!(tools["tq"]["allocator"].as_str(), Some("mimalloc"));
+        assert_eq!(tools["tq"]["worker_protocol"].as_str(), Some("v4"));
+        assert_eq!(tools["tq"]["provenance"].as_str(), Some("retained"));
+        assert_eq!(
+            tools["calibration-worker"]["sha256"].as_str(),
+            Some("worker-digest")
+        );
+        assert_eq!(
+            merge_benchmark_run(&rendered, "run-1", binaries("new")).unwrap(),
+            rendered
         );
         assert!(rendered.ends_with("Authored body.\n"));
     }

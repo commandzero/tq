@@ -447,6 +447,7 @@ fn prepare_navigation(
         Err(error) if error.kind() == io::ErrorKind::NotFound => index_preamble(scenarios),
         Err(error) => return Err(error.into()),
     };
+    source = strip_legacy_navigation_results(index_path, source)?;
     for (legacy, normalized) in migrations {
         let old = legacy.file_name().expect("page filename").to_string_lossy();
         let new = normalized
@@ -465,6 +466,43 @@ fn prepare_navigation(
         source
     } else {
         format!("# Stack Overflow jq top 50\n\n- [Measured overview](overview.md)\n\n{source}")
+    })
+}
+
+fn strip_legacy_navigation_results(path: &Path, source: String) -> Result<String, ReportError> {
+    let headings = results_heading_positions(&source);
+    let starts = all_positions(&source, RESULTS_START_MARKER);
+    let ends = all_positions(&source, RESULTS_END_MARKER);
+    if headings.is_empty() && starts.is_empty() && ends.is_empty() {
+        return Ok(source);
+    }
+    if headings.len() != 1 || starts.len() != 1 || ends.len() != 1 {
+        return Err(ReportError::Invalid(format!(
+            "{} has an unmarked or malformed legacy `## Results` section",
+            path.display()
+        )));
+    }
+    let heading = headings[0] + "## Results".len();
+    let start = starts[0];
+    let end = ends[0];
+    let after_end = &source[end + RESULTS_END_MARKER.len()..];
+    if start < heading
+        || !source[heading..start].trim().is_empty()
+        || end <= start
+        || !source[..end].ends_with('\n')
+        || !(after_end.is_empty() || after_end.starts_with('\n') || after_end.starts_with('\r'))
+    {
+        return Err(ReportError::Invalid(format!(
+            "{} has malformed legacy results markers",
+            path.display()
+        )));
+    }
+    let prefix = source[..headings[0]].trim_end_matches(['\r', '\n']);
+    let suffix = source[end + RESULTS_END_MARKER.len()..].trim_start_matches(['\r', '\n']);
+    Ok(if suffix.is_empty() {
+        format!("{prefix}\n")
+    } else {
+        format!("{prefix}\n\n{suffix}")
     })
 }
 
@@ -648,12 +686,8 @@ fn relative_fixture_path(path: &Path, repository_root: &Path) -> String {
     format!("../../../{relative}")
 }
 
-fn replace_results_region(
-    path: &Path,
-    source: &str,
-    generated: &str,
-) -> Result<String, ReportError> {
-    let heading_positions = source
+fn results_heading_positions(source: &str) -> Vec<usize> {
+    source
         .split_inclusive('\n')
         .scan(0, |offset, line| {
             let current = *offset;
@@ -663,7 +697,15 @@ fn replace_results_region(
         .filter_map(|(offset, line)| {
             (line.trim_end_matches(['\r', '\n']) == "## Results").then_some(offset)
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+fn replace_results_region(
+    path: &Path,
+    source: &str,
+    generated: &str,
+) -> Result<String, ReportError> {
+    let heading_positions = results_heading_positions(source);
     if heading_positions.len() > 1 {
         return Err(ReportError::Invalid(format!(
             "{} has more than one `## Results` heading",
@@ -1513,11 +1555,14 @@ mod tests {
             .replace("## Results", "Authored note.\n\n## Results");
         fs::write(&legacy, &text).unwrap();
         let index = directory.path().join("index.md");
+        let old_index = fs::read_to_string(&index)
+            .unwrap()
+            .replace("(./01-a.md)", "(./01-a-.md)");
         fs::write(
             &index,
-            fs::read_to_string(&index)
-                .unwrap()
-                .replace("(./01-a.md)", "(./01-a-.md)"),
+            format!(
+                "{old_index}\nAuthored navigation note.\n\n## Results\n{RESULTS_START_MARKER}\nStale generated coverage\n{RESULTS_END_MARKER}\n\nAuthored navigation suffix.\n"
+            ),
         )
         .unwrap();
         render_report(&report, &scenarios, directory.path(), directory.path()).unwrap();
@@ -1527,7 +1572,19 @@ mod tests {
                 .unwrap()
                 .contains("Authored note.")
         );
-        assert!(!fs::read_to_string(&index).unwrap().contains("(./01-a-.md)"));
+        let navigation = fs::read_to_string(&index).unwrap();
+        assert!(navigation.contains("(./01-a.md)"));
+        assert!(!navigation.contains("(./01-a-.md)"));
+        assert!(navigation.contains("Authored navigation note."));
+        assert!(navigation.contains("Authored navigation suffix."));
+        assert!(!navigation.contains("## Results"));
+        assert!(!navigation.contains(RESULTS_START_MARKER));
+        assert!(!navigation.contains("Stale generated coverage"));
+        let overview = fs::read_to_string(directory.path().join("overview.md")).unwrap();
+        assert!(overview.contains("## Results"));
+        assert!(overview.contains(RESULTS_START_MARKER));
+        render_report(&report, &scenarios, directory.path(), directory.path()).unwrap();
+        assert_eq!(fs::read_to_string(&index).unwrap(), navigation);
         fs::write(&legacy, "Conflicting legacy text").unwrap();
         let before = fs::read_to_string(&page).unwrap();
         assert!(render_report(&report, &scenarios, directory.path(), directory.path()).is_err());
@@ -1818,6 +1875,21 @@ mod tests {
         assert!(
             replace_results_region(Path::new("page.md"), "## Results\nAuthored notes\n", "new")
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn navigation_migration_rejects_unmarked_results_instead_of_deleting_authored_text() {
+        let path = Path::new("index.md");
+        let authored = "# Navigation\n\n## Results\nAuthored observations.\n";
+        assert!(strip_legacy_navigation_results(path, authored.to_owned()).is_err());
+        assert_eq!(
+            strip_legacy_navigation_results(
+                path,
+                "# Navigation\n\nAuthored observations.\n".to_owned()
+            )
+            .unwrap(),
+            "# Navigation\n\nAuthored observations.\n"
         );
     }
 
