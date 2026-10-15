@@ -113,9 +113,17 @@ Cargo metadata for version 0.5.1 with historical unversioned approval files pres
 reject the missing native version-specific file before compiling the deliberately
 uncompilable candidate. No Cargo or host-name stubs select the result. The native
 workflow runs this boundary check on both required manual hosts.
-Native execution of the integrated completion workflow remains required before
-publication; saved-report validation does not substitute for that run or the
-complete archive/registry/install checks.
+[Integrated run 38673719406](https://github.com/commandzero/tq/actions/runs/38673719406)
+executes completion on source `f8233120712609dca7094919745f8c46c3756528`:
+both native manual gates pass with zero unapproved failures and the exact
+executable digests frozen above. This independently rebuilt native-profile
+evidence establishes byte repeatability on both hosts.
+The subsequent prerequisite suite fails on both hosts because its malformed
+artifact fixture inherits the workflow's real `TQ_HOST_TQ`, bypassing the
+fixture parser. The fixture now clears that override locally; all 12 boundary
+tests pass with the real host override present in the parent environment.
+The complete corrected native workflow and archive/registry/install checks
+remain required before publication.
 Reconsider every approval after implementation, dependency, target, reference,
 recorded identity, or observation changes; do not regenerate approvals in CI.
 

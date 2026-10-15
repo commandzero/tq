@@ -374,6 +374,7 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
             .env("TEST_COMMAND_LOG", &log)
             .env("TEST_BAD_ARTIFACT", bad_artifact)
             .env("TMPDIR", &temporary)
+            .env_remove("TQ_HOST_TQ")
             .output()
             .unwrap();
         if bad_artifact == "malformed" {
