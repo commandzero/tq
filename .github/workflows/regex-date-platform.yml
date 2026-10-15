@@ -64,7 +64,13 @@ jobs:
           toolchain=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
           rustup toolchain install "$toolchain" --profile minimal
       - name: Record release host target
-        run: rustc -vV
+        shell: bash
+        run: |
+          rustc -vV
+          host_target=$(rustc -vV | sed -n 's/^host: //p')
+          test -n "$host_target"
+          # Match release-package.sh's explicit native --target build.
+          printf 'CARGO_BUILD_TARGET=%s\n' "$host_target" >> "$GITHUB_ENV"
       - name: Verify UTC boundaries and portable regex behavior
         run: cargo test --locked -p tq-core regex_date_platform_release_host_contract
       - name: Verify ambient policy and redaction
@@ -95,8 +101,7 @@ jobs:
           "$RUNNER_TEMP/tq-host/bin/tq" --version
           printf 'TQ_HOST_TQ=%s\n' "$RUNNER_TEMP/tq-host/bin/tq" >> "$GITHUB_ENV"
       - name: Run the pinned manual release gate
-        # The command intentionally fails closed when this host has no
-        # reviewed jq pin; a green platform job must carry matched evidence.
+        # Capture exact observations for the archive recipe's native target.
         shell: bash
         run: ./scripts/campaign-run.sh compatibility strict
       - name: Retain native manual evidence
