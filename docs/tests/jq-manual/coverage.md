@@ -15,13 +15,119 @@ A mapped example is covered, but coverage alone does not mean it passes.
 
 ## Results
 
+### Release 0.5.0: fresh native scoped review
+
+[Native capture run 38671391581](https://github.com/commandzero/tq/actions/runs/38671391581)
+executes source `f552701dd015636e2b19c39561ceb61930efe071` on macOS 15 ARM64
+and Ubuntu 24.04 x86_64, against the official pinned jq 1.8.2 artifacts.
+Both hosts pass UTC/regex, ambient-policy, shell, and native math regressions.
+Both strict manual commands exit 1; no exact-parity pass is claimed.
+
+| Native target | Primary exact | Strict failures | Reviewed rounding | Presentation exceptions | Diagnostic exceptions | Compact JSON exact | TOON exact |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| aarch64-macos | 943/952 | 9 | 2 | 6 | 1 | 919/921 | 921/921 |
+| x86_64-linux | 939/952 | 13 | 6 | 6 | 1 | 915/921 | 921/921 |
+
+The versioned approvals are
+[`disparities-aarch64-macos.toon`](../../../tests/compatibility/reviews/release-v0.5.0/disparities-aarch64-macos.toon)
+and
+[`disparities-x86_64-linux.toon`](../../../tests/compatibility/reviews/release-v0.5.0/disparities-x86_64-linux.toon).
+Each retains its exact case fingerprint, reference/target identities, raw
+observations, cause, practical impact, regression coverage, and reconsideration
+conditions. These are new approvals, not renewed jq 1.8.1/TOON v3 records.
+Presentation and diagnostic exceptions are neither safe-library approvals nor
+exact jq matches. Strict report files themselves retain zero approved disparities.
+
+Captured executable identities:
+
+- macOS jq SHA-256: `2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e`;
+  tq 0.5.0 / TOON 4.4: `47592e270c5971e08b95cccc82cdbe772155cd38db554d57c56f482bfd9cd42b`.
+- Linux jq SHA-256: `b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f`;
+  tq 0.5.0 / TOON 4.4: `8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b`.
+
+The retained raw `strict.toon` report SHA-256 digests are
+`76951dfc4a0a9f844c298624c4960efa58134cf8ac4286b7984408af1a6f7fcb`
+(macOS, captured `2026-10-15T02:55:06.127197Z`) and
+`00d39be283af01a361448ed38a2851301f0ae6e14dd6d957789fa1145a1ca277`
+(Linux, captured `2026-10-15T02:51:45.023472231Z`).
+Complete reports and generated manual pages remain in that run's native artifacts;
+approval files preserve the reviewed observations without normalization.
+
+The two `manual.audit.math.integer-scale-boundary` and
+`manual.composition.arity.scalbln.2` witnesses are now exact on both hosts.
+Linux previously returned overflow/unchanged values where pinned jq returned
+zero. The safe target-scoped conversion now distinguishes C `int`/`long` ranges
+before narrowing to libm's exponent range, reproducing the pinned build's
+invalid-conversion sentinel. This is not a universal C conversion guarantee.
+`platform_scalb_contract` and the Linux valid-upper-`long` boundary regression
+pass natively; macOS retains its existing behavior. These defects are fixed,
+not approved as rounding disparities.
+
+Fresh remaining math observations match the individually reviewed library causes
+below: macOS `erfc(2)` differs by 2 ULP and `tgamma(0.5)` by 1 ULP; Linux
+`erfc(2)`, `tgamma(0.5)`, and four direct/composed `y0(1)`/`yn(0;1)` witnesses
+differ by 1 ULP. Safe libm's independent approximations explain these exact
+witnesses, not a function-wide error bound or correctly-rounded accuracy claim.
+Historical wider probes are not renewed.
+
+All presentation/diagnostic witnesses execute normally with exit 0 and empty
+stderr. Stripping SGR for review only leaves identical bytes in every ANSI
+witness, including values, key order, whitespace, framing, and LF. The gate
+still compares their complete raw observations exactly. The supplied runner
+test and summary are identical; only jq's C API self-test diagnostic suffix
+is absent. The individual rationales distinguish each palette/override contract
+and document that internal-suite equivalence is not claimed.
+
+The explicit packaging-profile capture in
+[run 38661350467](https://github.com/commandzero/tq/actions/runs/38661350467)
+also exposed a harness-only failure in `manual.modules.path-origin`: its
+fixed two-parent tq fixture path assumed the default Cargo directory depth.
+That missing-module result is not approved. The case now declares its controlled
+repository-relative fixture through `origin_path` for both adapters. The runner
+calculates a relative tail from each actual executable and retains literal
+`$ORIGIN` substitution in the process argument; it does not rewrite the query,
+substitute absolute module roots, or stage a misleading executable alias.
+Regressions cover default, explicit-target, and external target layouts plus
+escaping paths/missing substitution. An actual CLI relocated outside the
+repository imports the unchanged module and returns `origin-path` for JSON,
+YAML, and TOON input with exit 0 and empty stderr, matching pinned jq.
+The final capture above includes this correction; the origin witness is exact.
+
+It also uses the archive recipe's explicit native target and canonical
+`SOURCE_DATE_EPOCH=1792022563`, with the reserved numeric CFLAGS key tracking
+allocator cache invalidation. Uncontrolled mimalloc `__DATE__`/`__TIME__` had
+changed executable digests between otherwise identical captures. Two independent
+clean local release builds now have identical SHA-256
+`e37a8d24555c8955d56ad5bd46603ea128bc0818d05233a1526f169c1d17587f`;
+changing the epoch/key and restoring it rebuilds the allocator and restores
+that digest. This timestamp denotes source provenance, not build wall time.
+All 952 stable case observations match the preceding corrected native capture.
+Final archive executables must still reconcile with these native identities.
+
+The existing full completion validator accepts both captured reports with these
+explicit approvals, protects the 303 baseline contracts and complete inventory,
+and rejects a removed approval or stale fingerprint. Independent strict
+validation still rejects both reports. The campaign also rejects a missing
+version/target approval file before execution. The shell regression uses real
+Cargo metadata for version 0.5.1 with historical unversioned approval files present: it must
+reject the missing native version-specific file before compiling the deliberately
+uncompilable candidate. No Cargo or host-name stubs select the result. The native
+workflow runs this boundary check on both required manual hosts.
+Native execution of the integrated completion workflow remains required before
+publication; saved-report validation does not substitute for that run or the
+complete archive/registry/install checks.
+Reconsider every approval after implementation, dependency, target, reference,
+recorded identity, or observation changes; do not regenerate approvals in CI.
+
+### Historical measured overview
+
 The detailed historical comparison and token results are in the
 [measured overview](overview.md).
 
 The overview retains the frozen C9 macOS results (943/952 primary,
-919/921 compact JSON, and 921/921 TOON), with strict exit 1. This coverage page
-describes broader native-target scope below; it does not claim fresh manual
-capture, complete parity, or new platform acceptance.
+919/921 compact JSON, and 921/921 TOON), with strict exit 1. That historical
+overview describes its source-bound snapshot, not fresh manual capture,
+complete parity, or acceptance of the release candidate above.
 
 ## Differences by test
 
@@ -88,8 +194,8 @@ process behavior agree. Exact colored-byte checks remain strict.
 The existing user acceptance of these expected scoped behaviors applies only
 to the measured inputs and presentation/test-runner contracts. The 6 ANSI
 cases follow the main `output-colors` contract; `--run-tests` differs in jq's
-internal diagnostic suffix, not failure of the supplied program. This update
-creates no fresh approvals: the strict report records 9 failures and 0 reviewed
+internal diagnostic suffix, not failure of the supplied program. That historical
+update created no fresh approvals: its strict report records 9 failures and 0 reviewed
 disparities. Every exact observation remains, without blanket tolerances.
 
 The math cause is independently rounded safe Rust `libm::erfc`/`libm::tgamma`
@@ -108,7 +214,11 @@ witnesses and protected contracts rather than renewing approvals automatically.
 
 ## Native platform results
 
-Current C9 manual evidence is retained in ignored `target/toon-4-1/candidate-c9/`.
+This section preserves historical C9/native snapshots, not the current release
+acceptance record. Use the version/source-bound release review above for fresh
+candidate observations and approvals.
+
+Frozen C9 manual evidence is retained in ignored `target/toon-4-1/candidate-c9/`.
 The complete 903-file source snapshot is on integrated revision
 `407b35d81681b8ca4ab85968f7186eea645f250f`, SHA-256
 `b0a3e076abc748319859ea9810fd75bc93132b05c5b07cc116f97ffe27ecbc62`.

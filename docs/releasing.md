@@ -18,6 +18,8 @@ The internal test-support crate is never published.
 2. Update the workspace version and all versioned tq path dependencies together.
    Refresh Cargo.lock and create a dated changelog section from Unreleased.
    Update comparison links and leave a fresh Unreleased section.
+   Select the canonical production source epoch in `scripts/release-build-env.sh`
+   before native capture; keep it fixed through metadata-only review commits.
 3. Record compatibility changes, Rust minimum changes, and upgrade actions.
    Follow the [changelog policy](changelog-policy.md).
 4. Pass the [contributor checks](contributor-checks.md), including this PR's
@@ -39,12 +41,50 @@ workflow artifacts. It does not publish a GitHub release or registry package.
 This is the candidate validation matrix, not evidence that a given tag has
 passed. Do not advertise a target until that release's run succeeds.
 The reusable native contract workflow retains main's reviewed jq provisioning,
-shell invocation tests, and strict manual release gate on Linux and macOS.
-It now runs against the candidate tag before publication. Windows execution
-remains deferred; its source tests remain in the repository. Windows, Intel
-macOS, and musl archives have no recipe in this pipeline.
+shell invocation tests, native math regressions, and explicit reviewed-completion
+manual gate on Linux x86_64 and macOS ARM64. It runs against the candidate tag
+before publication. Windows execution remains deferred; its source tests remain
+in the repository. Windows, Intel macOS, and musl archives have no recipe here.
 Record measured OS/ABI minimums before promising older-host compatibility.
 Ubuntu build success alone does not establish compatibility with older glibc.
+
+### Review the manual acceptance scope before tagging
+
+`./scripts/campaign-run.sh compatibility strict` remains an independent exact
+audit: every jq difference fails, including reviewed exceptions. The separate
+`./scripts/campaign-run.sh compatibility completion` command selects
+`tests/compatibility/reviews/release-v<workspace-version>/disparities-<native-target>.toon`.
+Missing version/target files, unapproved differences, stale fingerprints or
+executable/library identities, changed raw observations, skipped cases, crashes,
+timeouts, and coverage regressions fail closed. Other targets cannot inherit
+these approvals.
+
+Approve only individually investigated safe-library limitations or separately
+reviewed native presentation/internal-diagnostic exceptions. Correct safely
+reproducible implementation defects instead of approving them. Preserve
+underlying values, result order/count, framing, required stderr, status, all
+303 protected baseline contracts, and the complete 952-case inventory.
+Do not normalize captures, introduce blanket numeric/ANSI tolerances, regenerate
+approvals during CI, or describe exceptions as exact jq matches.
+
+Record fresh native source/run provenance, exact identities and observations,
+causes, practical impact, regression coverage, and reconsideration conditions in
+the versioned review files and [manual coverage report](tests/jq-manual/coverage.md).
+The release workflow must use the same native host classes, explicit native
+Cargo target, and default-feature release profile as the archive recipes.
+A completion pass does not replace the complete native archive matrix,
+registry dry runs, consumer installation checks, or OpenSpec/review completion.
+
+Timestamp-bearing native dependencies use the shared release build environment.
+Mimalloc embeds C compilation date/time in reachable diagnostics, so release
+entry points and the native workflow export the same `SOURCE_DATE_EPOCH` before
+any bootstrap or candidate compilation. This denotes the reviewed source epoch,
+not the actual build/run time or a changing HEAD timestamp.
+The accompanying reserved CFLAGS epoch key is required: cc forwards the epoch
+but does not track it, so the key invalidates warm allocator caches when the
+policy changes. Preserve the key, do not override it, and use a fresh environment
+if an inherited key conflicts. Independent clean native-profile builds must
+produce identical executable digests before approvals are frozen.
 
 To reproduce one native job, use a clean checkout of the tag:
 
@@ -60,7 +100,7 @@ license file, and a JSON query result.
 
 Archives use `tq-v<version>-<rust-target-triple>.tar.gz`.
 Each archive has `tq`, `LICENSE`, and `release.txt` at its root.
-The metadata records tag, commit, compiler, default features, target, and host.
+The metadata records tag, commit, compiler, source-date epoch, default features, target, and host.
 A `.sha256` sidecar records the digest and archive basename, without a builder
 path. Existing outputs cause failure rather than replacement.
 
@@ -77,8 +117,11 @@ non-clobbering publication. Compiler/preflight steps remain fixture shims;
 this smoke does not replace native release checks or authorize a release.
 Its temporary fixture tags do not tag the product repository.
 
-Download each workflow artifact, verify its sidecar with `shasum -a 256 -c`,
-and collect the complete matrix before creating a draft GitHub release.
+Download each workflow artifact and verify its sidecar with `shasum -a 256 -c`.
+For each manual target, also extract `tq` and compare its executable SHA-256
+with that version/target's reviewed identity; a mismatch blocks publication
+and requires source/profile/identity reconciliation, not a digest-only update.
+Collect the complete verified matrix before creating a draft GitHub release.
 Use the curated changelog section as its notes. Mark prereleases explicitly.
 
 ## Publish packages and install checks

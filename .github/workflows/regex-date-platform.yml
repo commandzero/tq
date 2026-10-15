@@ -104,9 +104,9 @@ jobs:
           "$RUNNER_TEMP/tq-host/bin/tq" --version
           printf 'TQ_HOST_TQ=%s\n' "$RUNNER_TEMP/tq-host/bin/tq" >> "$GITHUB_ENV"
       - name: Run the pinned manual release gate
-        # Capture exact observations for the archive recipe's native target.
+        # Require exact observations or frozen version/target-specific reviews.
         shell: bash
-        run: ./scripts/campaign-run.sh compatibility strict
+        run: ./scripts/campaign-run.sh compatibility completion
       - name: Verify campaign prerequisite boundaries
         run: cargo test --release --locked -p tq-test-support --test campaign_scripts
       - name: Retain native manual evidence
