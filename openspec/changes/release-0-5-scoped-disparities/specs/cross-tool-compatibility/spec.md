@@ -5,7 +5,7 @@ Native release acceptance MAY use reviewed-completion mode only with explicitly 
 
 Approvals SHALL record a demonstrated cause, practical impact, regression coverage, and reconsideration condition. Safe-library rounding SHALL be input/target/identity-specific, never a global numeric tolerance. Intentional presentation and internal-diagnostic release exceptions MAY be reviewed separately against tq's established contracts; they SHALL NOT become exact jq matches or safe-library approvals, and raw captured bytes SHALL remain unchanged. Missing or incorrect implementations that can be corrected safely, changed supplied-program results, reordered or missing values, incorrect status/stderr, skipped cases, crashes, timeouts, missing coverage, and unapproved differences SHALL block completion. The original protected baseline contracts SHALL remain exact regression requirements.
 
-The release campaign SHALL select approvals using the candidate package version and native target and fail closed when no reviewed file exists. Every required native manual target SHALL execute on the same pinned host class used for its packaging recipe. Native archive validation SHALL still run for the complete advertised archive matrix. An unavailable target or reference SHALL NOT inherit another target's approval or be reported as validated. Compiler, dependency, implementation, reference, runtime-library, executable-byte, case, or observation changes SHALL require renewed exact-evidence review before acceptance.
+The release campaign SHALL select approvals using the candidate package version and native target and fail closed when no reviewed file exists. Every required native manual target SHALL execute on the same pinned host class, explicit native Cargo target, and default-feature release profile used for its packaging recipe. Native archive validation SHALL still run for the complete advertised archive matrix, and manual-target archive executable digests SHALL reconcile with the reviewed executable identities before publication. An unavailable target or reference SHALL NOT inherit another target's approval or be reported as validated. Changes to recorded compiler, dependency, implementation, reference, runtime-library, executable-byte, case, or observation identities SHALL require renewed exact-evidence review before acceptance.
 
 #### Scenario: Explicit completion with scoped exceptions
 - **WHEN** every admitted case executes and only exact identity-bound reviewed exceptions remain different
@@ -26,4 +26,9 @@ The release campaign SHALL select approvals using the candidate package version 
 
 #### Scenario: Native source and package matrix
 - **WHEN** a version is proposed for publication
-- **THEN** required jq-manual targets execute with reviewed reference identities on the pinned native packaging host classes, every advertised archive passes its own native checks, and no unverified target is represented as accepted
+- **THEN** required jq-manual targets execute with reviewed reference identities on the pinned native packaging host classes and compilation profiles, every advertised archive passes its own native checks before publication, manual-target executable identities reconcile, and no unverified target is represented as accepted
+
+#### Scenario: Executable-origin fixture layout
+- **WHEN** the native campaign uses an explicit Cargo target or an executable outside the default target directory
+- **THEN** the declared controlled fixture location is made relative to each measured executable while retaining `$ORIGIN` in the invocation, and the unchanged module query must return the same values and process behavior
+- **AND** a fixture layout error is corrected rather than approved as a product or platform disparity

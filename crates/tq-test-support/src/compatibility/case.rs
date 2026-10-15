@@ -47,6 +47,7 @@ impl CompatibilityCase {
                     && !self.adapters.tq.omit_query
                     && self.adapters.tq.query.is_none()
                     && self.adapters.tq.args.is_empty()
+                    && self.adapters.tq.origin_path.is_none()
                     && self.adapters.tq.trailing_args.is_empty()))
     }
 }
@@ -125,6 +126,9 @@ pub struct CaseAdapter {
     /// Environment path values resolved relative to the fixture repository root.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env_paths: BTreeMap<String, std::path::PathBuf>,
+    /// Repository-relative fixture directory for a literal `$ORIGIN` argument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_path: Option<std::path::PathBuf>,
     /// Whether the case applies to this tool.
     #[serde(default)]
     pub supported: bool,
@@ -238,6 +242,7 @@ impl TqContract {
             || !adapter.trailing_args.is_empty()
             || !adapter.env.is_empty()
             || !adapter.env_paths.is_empty()
+            || adapter.origin_path.is_some()
             || adapter.args.len() != 1
         {
             return false;

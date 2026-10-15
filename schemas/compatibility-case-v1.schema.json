@@ -163,7 +163,12 @@
             "properties": {
               "tq": {
                 "required": ["supported"],
-                "not": { "required": ["query"] },
+                "not": {
+                  "anyOf": [
+                    { "required": ["query"] },
+                    { "required": ["origin_path"] }
+                  ]
+                },
                 "properties": {
                   "supported": { "const": true },
                   "omit_query": { "const": false },
@@ -217,6 +222,11 @@
           "type": "object",
           "description": "Existing repository-relative paths resolved for the child environment; cannot overlap env keys.",
           "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "origin_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Existing repository-relative fixture path for a literal $ORIGIN argument; the runner retains substitution and derives the tail from the measured executable."
         },
         "note": {
           "type": "string"

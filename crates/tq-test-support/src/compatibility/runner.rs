@@ -378,6 +378,12 @@ fn execute_with_resources(
         cfg!(windows),
     );
     rewrite_json_module_args(resources.module_directory.as_ref(), &mut args);
+    rewrite_origin_fixture_args(
+        adapter.origin_path.as_deref(),
+        &identity.path,
+        repository_root,
+        &mut args,
+    )?;
     if pin_input_format {
         match identity.tool {
             ToolKind::Jq => {}
@@ -764,6 +770,76 @@ fn rewrite_json_module_args(module_directory: Option<&tempfile::TempDir>, args: 
             *argument = module_directory.path().display().to_string();
         }
     }
+}
+
+fn rewrite_origin_fixture_args(
+    relative: Option<&Path>,
+    executable: &Path,
+    repository_root: &Path,
+    args: &mut [String],
+) -> io::Result<()> {
+    let Some(relative) = relative else {
+        return Ok(());
+    };
+    if relative.as_os_str().is_empty()
+        || relative
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        || !args.iter().any(|argument| argument == "$ORIGIN")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "origin fixture requires a repository-relative path and literal $ORIGIN argument",
+        ));
+    }
+    let root = repository_root.canonicalize()?;
+    let fixture = root.join(relative).canonicalize()?;
+    if !fixture.starts_with(&root) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "origin fixture path escapes repository",
+        ));
+    }
+    let executable = executable.canonicalize()?;
+    let origin = executable.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "executable has no origin directory",
+        )
+    })?;
+    let common = origin
+        .ancestors()
+        .find(|ancestor| fixture.starts_with(ancestor))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "fixture has no common origin root",
+            )
+        })?;
+    let mut tail = std::path::PathBuf::new();
+    for _ in origin
+        .strip_prefix(common)
+        .expect("origin ancestor")
+        .components()
+    {
+        tail.push("..");
+    }
+    tail.push(fixture.strip_prefix(common).expect("fixture ancestor"));
+    let tail = tail.to_str().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "origin fixture path is not UTF-8",
+        )
+    })?;
+    for argument in args
+        .iter_mut()
+        .filter(|argument| argument.as_str() == "$ORIGIN")
+    {
+        argument.reserve(1 + tail.len());
+        argument.push('/');
+        argument.push_str(tail);
+    }
+    Ok(())
 }
 
 fn fixture_bytes(case: &CompatibilityCase, repository_root: &Path) -> Result<Vec<u8>, io::Error> {
@@ -1269,6 +1345,57 @@ mod tests {
 
     #[cfg(unix)]
     use std::{collections::BTreeMap, fs, os::unix::fs::PermissionsExt, time::Duration};
+
+    #[test]
+    fn origin_fixture_resolves_from_native_and_external_cargo_layouts() {
+        use std::fs;
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("repository");
+        let fixture = root.join("tests/modules");
+        fs::create_dir_all(&fixture).unwrap();
+        for location in [
+            "repository/target/release/tq",
+            "repository/target/aarch64-apple-darwin/release/tq",
+            "external-cargo-output/deeper/release/tq",
+        ] {
+            let executable = temporary.path().join(location);
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, []).unwrap();
+            let mut args = vec!["-L".to_owned(), "$ORIGIN".to_owned()];
+            super::rewrite_origin_fixture_args(
+                Some(Path::new("tests/modules")),
+                &executable,
+                &root,
+                &mut args,
+            )
+            .unwrap();
+            let tail = args[1].strip_prefix("$ORIGIN/").unwrap();
+            assert_eq!(
+                executable
+                    .parent()
+                    .unwrap()
+                    .join(tail)
+                    .canonicalize()
+                    .unwrap(),
+                fixture.canonicalize().unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn origin_fixture_rejects_escaping_paths_and_missing_substitution() {
+        let temporary = tempfile::tempdir().unwrap();
+        for (relative, argument) in [("../outside", "$ORIGIN"), ("modules", "modules")] {
+            let error = super::rewrite_origin_fixture_args(
+                Some(Path::new(relative)),
+                Path::new("unused"),
+                temporary.path(),
+                &mut [argument.to_owned()],
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        }
+    }
 
     #[test]
     fn windows_binary_reference_selection_preserves_raw_contracts_and_option_values() {
