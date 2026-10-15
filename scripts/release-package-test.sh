@@ -8,6 +8,7 @@ fixture=$(mktemp -d "${TMPDIR:-/tmp}/tq-package-test.XXXXXX")
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/repo/scripts" "$fixture/bin"
 cp "$root/scripts/release-package.sh" "$fixture/repo/scripts/"
+cp "$root/scripts/release-build-env.sh" "$fixture/repo/scripts/"
 cp "$root/rust-toolchain.toml" "$fixture/repo/"
 printf '#!/bin/bash\nexit 0\n' > "$fixture/repo/scripts/preflight.sh"
 cp "$root/LICENSE" "$fixture/repo/LICENSE"

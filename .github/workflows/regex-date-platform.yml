@@ -71,6 +71,9 @@ jobs:
           test -n "$host_target"
           # Match release-package.sh's explicit native --target build.
           printf 'CARGO_BUILD_TARGET=%s\n' "$host_target" >> "$GITHUB_ENV"
+          source scripts/release-build-env.sh
+          printf 'SOURCE_DATE_EPOCH=%s\nCFLAGS=%s\n' \
+            "$SOURCE_DATE_EPOCH" "$CFLAGS" >> "$GITHUB_ENV"
       - name: Verify UTC boundaries and portable regex behavior
         run: cargo test --locked -p tq-core regex_date_platform_release_host_contract
       - name: Verify ambient policy and redaction
@@ -104,6 +107,8 @@ jobs:
         # Capture exact observations for the archive recipe's native target.
         shell: bash
         run: ./scripts/campaign-run.sh compatibility strict
+      - name: Reject unreviewed release versions before compilation
+        run: cargo test --release --locked -p tq-test-support --test campaign_scripts completion_rejects_an_unreviewed_version_before_building
       - name: Retain native manual evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -5,6 +5,7 @@
 - [x] 1.3 Retrieve complete native reports and inspect every failed case, identity, and process/coverage result without replacing raw evidence.
 - [ ] 1.4 Capture the archive recipe's explicit native Cargo target/profile and freeze approvals from those identities before review and tagging.
 - [x] 1.5 Correct the controlled `$ORIGIN` fixture's fixed-depth layout assumption and prove module results with a real executable relocated outside the default Cargo layout.
+- [x] 1.6 Control allocator compilation timestamps with a shared source epoch and tracked cache input; prove independent release-binary rebuild equality before freezing native identities.
 
 ## 2. Review causes and correct implementation defects
 

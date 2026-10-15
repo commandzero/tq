@@ -291,6 +291,8 @@ fi
 
 case "$campaign:$suite" in
     compatibility:strict|compatibility:completion)
+        # shellcheck source=scripts/release-build-env.sh
+        . ./scripts/release-build-env.sh
         mkdir -p target/compatibility
         markdown_directory=target/compatibility/jq-manual
         if [ "$suite" = completion ]; then

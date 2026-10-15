@@ -32,6 +32,67 @@ fn campaign_stub(bin: &Path) {
 }
 
 #[test]
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+fn completion_rejects_an_unreviewed_version_before_building() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    copy_script(root, "campaign-run.sh");
+    copy_script(root, "release-build-env.sh");
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\n[package]\nname = \"tq-cli\"\nversion = \"0.5.1\"\nedition = \"2024\"\n[[bin]]\nname = \"tq\"\npath = \"src/main.rs\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/main.rs"),
+        "compile_error!(\"unreviewed release must not compile\");\n",
+    )
+    .unwrap();
+    let cargo = env!("CARGO");
+    assert!(
+        Command::new(cargo)
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let older = Path::new("tests/compatibility/reviews");
+    fs::create_dir_all(root.join(older)).unwrap();
+    for target in ["aarch64-macos", "x86_64-linux"] {
+        let relative = older.join(format!("disparities-{target}.toon"));
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(&relative),
+            root.join(relative),
+        )
+        .unwrap();
+    }
+    let build_output = root.join("compiled-artifacts");
+    let output = Command::new("/bin/sh")
+        .arg(root.join("scripts/campaign-run.sh"))
+        .args(["compatibility", "completion"])
+        .current_dir(root)
+        .env("CARGO", cargo)
+        .env("CARGO_TARGET_DIR", &build_output)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(69), "{output:?}");
+    let target = if cfg!(target_os = "macos") {
+        "aarch64-macos"
+    } else {
+        "x86_64-linux"
+    };
+    let missing = format!("tests/compatibility/reviews/release-v0.5.1/disparities-{target}.toon");
+    assert!(String::from_utf8(output.stderr).unwrap().contains(&missing));
+}
+
+#[test]
 fn documentation_check_pins_okf_before_scanning_and_preserves_scan_failures() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
