@@ -263,12 +263,13 @@ never earns size savings.
 
 The optional completion gate accepts a TOON array of reviewed disparity records:
 
-The executable-origin fixture expects tq under `target/debug/` or
-`target/release/` and jq under `target/reference-build/jq/`. When verifying an
-immutable candidate built with another Cargo target directory, copy it into
-one of the expected tq directories under a distinct filename first. Changing
-the executable directory changes `$ORIGIN`; do not treat a missing fixture
-caused by that layout change as a language-semantic regression.
+The executable-origin fixture declares `origin_path` as a repository-relative
+controlled fixture and uses a literal `$ORIGIN` argument. The runner derives
+the fixture's relative tail from each measured executable's canonical directory,
+preserving substitution in the actual invocation. Default, explicit-target,
+and external Cargo directories are supported without copying or aliasing the
+binary. Missing-module results remain failures; fixture relocation is not an
+approval or a query rewrite.
 
 ```bash
 set -o pipefail
@@ -278,12 +279,27 @@ TQ_JQ=target/reference-build/jq/jq TQ_BIN=target/debug/tq \
 
 Each approval must match the case fingerprint, executable identities, contract,
 and observed outputs. Unknown, stale, duplicate, and unlisted approvals fail.
-Approvals cannot excuse regressions outside the frozen gap inventory. Exact
-matches and disparities are counted separately; the default exact gate still
+Approvals cover only explicitly reviewed executable witnesses, while all 303
+original exact baseline contracts remain protected. Exact matches and reviewed
+disparities are counted separately; the default exact gate still
 rejects every disparity. See the [numbered difference list](../../docs/tests/jq-manual/coverage.md#differences-by-test)
 for current observations and their practical impact.
 
-The [macOS registry](reviews/disparities-aarch64-macos.toon) and
+Release acceptance uses the version/target-selected entry point:
+
+```sh
+./scripts/campaign-run.sh compatibility completion
+```
+
+It requires `reviews/release-v<workspace-version>/disparities-<native-target>.toon`;
+there is no fallback to the historical unversioned records. The shared release
+build environment controls dependency timestamps and cache invalidation before
+compilation. Missing/stale/unapproved evidence still fails, and strict mode
+remains an independent nonzero exact audit when reviewed differences remain.
+See [release instructions](../../docs/releasing.md) for the required native
+host/profile, archive, registry, and installation checks.
+
+The historical [macOS registry](reviews/disparities-aarch64-macos.toon) and
 [Linux registry](reviews/disparities-x86_64-linux.toon) retain target-scoped
 approval records. Each record is tied to its recorded executable build, not a
 standing waiver for future builds or other targets.

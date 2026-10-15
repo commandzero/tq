@@ -107,8 +107,8 @@ jobs:
         # Capture exact observations for the archive recipe's native target.
         shell: bash
         run: ./scripts/campaign-run.sh compatibility strict
-      - name: Reject unreviewed release versions before compilation
-        run: cargo test --release --locked -p tq-test-support --test campaign_scripts completion_rejects_an_unreviewed_version_before_building
+      - name: Verify campaign prerequisite boundaries
+        run: cargo test --release --locked -p tq-test-support --test campaign_scripts
       - name: Retain native manual evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
