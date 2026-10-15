@@ -20,4 +20,4 @@
 - [x] 3.2 Switch the native release acceptance command only after reviewed approvals exist; preserve complete native archive/platform/registry checks.
 - [x] 3.3 Update release instructions, changelog corrections, and scoped review documentation with exact counts, identities, causes, impact, tests, and reconsideration conditions.
 - [x] 3.4 Prove positive native completion, stale/missing/unapproved evidence rejection, unchanged strict failure, and protected data/process/coverage contracts.
-- [ ] 3.5 Pass full required preflight and native workflow checks before PR review and post-review synchronization/archival.
+- [x] 3.5 Pass full required preflight and native workflow checks before PR review and post-review synchronization/archival.

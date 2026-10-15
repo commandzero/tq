@@ -120,10 +120,17 @@ executable digests frozen above. This independently rebuilt native-profile
 evidence establishes byte repeatability on both hosts.
 The subsequent prerequisite suite fails on both hosts because its malformed
 artifact fixture inherits the workflow's real `TQ_HOST_TQ`, bypassing the
-fixture parser. The fixture now clears that override locally; all 12 boundary
-tests pass with the real host override present in the parent environment.
-The complete corrected native workflow and archive/registry/install checks
-remain required before publication.
+fixture parser. The fixture now clears that override only in its child;
+all 12 boundary tests pass locally with the real override in the parent.
+[Corrected full native run 38677622888](https://github.com/commandzero/tq/actions/runs/38677622888),
+source `4760f38e79bc5720d74e0ba3bde9181588abdb46`, passes both complete jobs,
+including manual completion and the entire prerequisite suite.
+Both reports retain the same counts, executable identities, and all 952
+stable case observations as the preceding completion capture. Their SHA-256
+digests are `79d6460ae3259f1f1215250d6d2135f9ca28e230dd066dd847128f40e96d090c`
+(macOS) and `b1326c36ec33c41cad4b97ff7e61b7169f66b8bad4d3696b7ef655f26aa43190`
+(Linux). The complete tagged archive matrix, executable reconciliation,
+registry publication, and consumer installation remain required.
 Reconsider every approval after implementation, dependency, target, reference,
 recorded identity, or observation changes; do not regenerate approvals in CI.
 
