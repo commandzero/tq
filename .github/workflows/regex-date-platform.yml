@@ -71,6 +71,8 @@ jobs:
         run: cargo test --locked -p tq-cli ambient
       - name: Verify native shell invocation contracts
         run: cargo test --locked -p tq-cli --test platform_shell
+      - name: Verify native math boundary contracts
+        run: cargo test --locked -p tq-core --test math_compat
       - name: Require a provisioned reviewed jq reference
         # Reusable calls have no reference overrides. They use repository-variable
         # overrides when present, otherwise the matrix's checked-in official

@@ -435,13 +435,17 @@ fn platform_scalb_contract() {
         .to_string(),
         "[0,0,1.7976931348623157e+308,2]"
     );
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    let expected_integer_scales = "[0,1.7976931348623157e+308,0,0,0]";
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    let expected_integer_scales = "[1.7976931348623157e+308,1.7976931348623157e+308,0,2,2]";
     assert_eq!(
         evaluate(
             "[ldexp(2; 2147483648), ldexp(2; 2147483647), ldexp(2; -2147483649), ldexp(2; nan), scalbln(2; nan)]",
             "null",
         )[0]
         .to_string(),
-        "[1.7976931348623157e+308,1.7976931348623157e+308,0,2,2]"
+        expected_integer_scales
     );
     #[cfg(target_os = "linux")]
     assert_eq!(
@@ -451,6 +455,19 @@ fn platform_scalb_contract() {
         )[0]
         .to_string(),
         "[1.7976931348623157e+308,0,null,0,1.7976931348623157e+308,null,null,0]"
+    );
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn native_long_scale_conversion_distinguishes_the_valid_upper_boundary() {
+    assert_eq!(
+        evaluate(
+            "[scalbln(2;9223372036854774784),scalbln(2;9223372036854775808),scalbln(2;infinite),scalbln(2;-infinite)]",
+            "null",
+        )[0]
+        .to_string(),
+        "[1.7976931348623157e+308,0,0,0]"
     );
 }
 

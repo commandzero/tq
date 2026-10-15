@@ -188,13 +188,12 @@ fn scaled(function: &str, arguments: &[f64]) -> Result<MathResult, MathError> {
         });
     };
     match function {
-        // jq's C wrapper passes a JSON double to the C `int`/`long` argument
-        // of these functions; conversion truncates toward zero. Saturating
-        // to libm's i32 API is safe because either extreme has already
-        // overflowed or underflowed every finite f64 input.
+        // Reproduce the pinned target's C argument conversion before narrowing
+        // to libm's i32 exponent range; either range extreme already determines
+        // overflow/underflow for every finite nonzero f64 base.
         "ldexp" | "scalbln" => Ok(MathResult::Scalar(libm::scalbn(
             *value,
-            scale_exponent_saturating(*exponent),
+            native_scale_exponent(function, *exponent),
         ))),
         // The platform `scalb` accepts a floating exponent. Its C behavior
         // truncates finite fractions and has defined non-finite projections.
@@ -244,6 +243,29 @@ fn bessel(
         });
     }
     Ok(MathResult::Scalar(operation(*order as i32, *value)))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn native_scale_exponent(function: &str, value: f64) -> i32 {
+    // The pinned x86_64 jq build's truncating C conversion returns the signed
+    // minimum for NaN, infinities, and unrepresentable int/long arguments.
+    // This is observed build behavior, not a portable guarantee of C casts.
+    let minimum = if function == "ldexp" {
+        f64::from(i32::MIN)
+    } else {
+        -9_223_372_036_854_775_808.0
+    };
+    let truncated = value.trunc();
+    if !truncated.is_finite() || truncated < minimum || truncated >= -minimum {
+        i32::MIN
+    } else {
+        scale_exponent_saturating(truncated)
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn native_scale_exponent(_function: &str, value: f64) -> i32 {
+    scale_exponent_saturating(value)
 }
 
 // The range checks make this truncating conversion provably fit in i32.
