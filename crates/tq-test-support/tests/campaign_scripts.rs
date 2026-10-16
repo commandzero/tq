@@ -97,20 +97,31 @@ fn release_build_profile_rejects_conflicts_on_either_side_of_its_epoch_key() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     copy_script(root, "release-build-env.sh");
-    for mutation in [
-        "CFLAGS=\"$conflicting_flag $CFLAGS\"",
-        "CFLAGS=\"$CFLAGS $conflicting_flag\"",
+    for conflict in [
+        "conflicting_flag=\"-DTQ_RELEASE_SOURCE_DATE_EPOCH=$((SOURCE_DATE_EPOCH + 1))\"",
+        "conflicting_flag=\"-DTQ_RELEASE_SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH\"",
+        "conflicting_flag=\"-D TQ_RELEASE_SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH\"",
+        "conflicting_flag=\"-UTQ_RELEASE_SOURCE_DATE_EPOCH\"",
+        "conflicting_flag=\"-U TQ_RELEASE_SOURCE_DATE_EPOCH\"",
     ] {
-        let program = format!(
-            "set -eu\n. \"$1\" || exit 70\nconflicting_flag=\"-DTQ_RELEASE_SOURCE_DATE_EPOCH=$((SOURCE_DATE_EPOCH + 1))\"\n{mutation}\n. \"$1\"\n"
-        );
-        let output = Command::new("/bin/sh")
-            .args(["-c", &program, "release-epoch-regression"])
-            .arg(root.join("scripts/release-build-env.sh"))
-            .env_remove("CFLAGS")
-            .output()
-            .unwrap();
-        assert_eq!(output.status.code(), Some(69), "{mutation}: {output:?}");
+        for mutation in [
+            "CFLAGS=\"$conflicting_flag $CFLAGS\"",
+            "CFLAGS=\"$CFLAGS $conflicting_flag\"",
+        ] {
+            let program =
+                format!("set -eu\n. \"$1\" || exit 70\n{conflict}\n{mutation}\n. \"$1\"\n");
+            let output = Command::new("/bin/sh")
+                .args(["-c", &program, "release-epoch-regression"])
+                .arg(root.join("scripts/release-build-env.sh"))
+                .env_remove("CFLAGS")
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(69),
+                "{conflict}; {mutation}: {output:?}"
+            );
+        }
     }
 }
 

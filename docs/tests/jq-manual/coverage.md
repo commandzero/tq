@@ -2,8 +2,8 @@
 type: Report
 title: "jq manual coverage"
 description: "Current jq manual test coverage, comparison results, and known differences."
-generated: { by: "process:toon-4-1-evidence-review", at: "2026-10-07T05:53:56.657Z" }
-benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}},{"platform":null,"target":null,"campaign_id":null,"captured_at":null,"source_role":"historical-fix-local-performance","source":"#longest-match-regex-support","binaries":{"jq":{"version":"1.8.1","version_source":"authored historical timing description; exact version stdout not retained","sha256":null,"identity_status":"not-recorded"},"tq":{"version":null,"sha256":null,"identity_status":"not-recorded"}}}]
+generated: { by: "process:toon-4-4-release-evidence-review", at: "2026-10-16T21:25:59Z" }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":"2026-10-15T04:09:44.936239Z","binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)","sha256":"47592e270c5971e08b95cccc82cdbe772155cd38db554d57c56f482bfd9cd42b","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":"2026-10-15T04:04:14.151544565Z","binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)","sha256":"8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}},{"platform":null,"target":null,"campaign_id":null,"captured_at":null,"source_role":"historical-fix-local-performance","source":"#longest-match-regex-support","binaries":{"jq":{"version":"1.8.1","version_source":"authored historical timing description; exact version stdout not retained","sha256":null,"identity_status":"not-recorded"},"tq":{"version":null,"sha256":null,"identity_status":"not-recorded"}}}]
 ---
 
 # jq manual coverage
@@ -12,6 +12,10 @@ The suite covers all **251 published input/output examples** in the jq manual,
 accounts for **68 fenced snippets**, and adds tests for documented behavior,
 composition, and edge cases. It runs **952 unique cases** against pinned jq 1.8.2.
 A mapped example is covered, but coverage alone does not mean it passes.
+
+Frontmatter macOS/Linux identities describe the completed TOON 4.4 native run
+below. The retained Windows TOON 4.1 record and fix-local timing entry remain
+historical; neither is renewed native or calibrated performance acceptance.
 
 ## Results
 
@@ -103,6 +107,15 @@ changing the epoch/key and restoring it rebuilds the allocator and restores
 that digest. This timestamp denotes source provenance, not build wall time.
 All 952 stable case observations match the preceding corrected native capture.
 Final archive executables must still reconcile with these native identities.
+
+Reserved-key regressions reject conflicting values, same-value duplicates,
+split `-D` definitions, and joined/split `-U` undefinitions on either side of
+the canonical key. A real-binary archive fixture also starts with caller
+`SOURCE_DATE_EPOCH=1`, then extracts the actual `release.txt` from the produced
+archive and asserts the reviewed canonical source epoch `1792022563` instead.
+Extraction/query/checksum/non-clobbering and invalid-date boundaries pass.
+This is producer metadata-precedence smoke evidence, not the tagged native
+archive matrix or a new calibrated performance claim.
 
 The existing full completion validator accepts both captured reports with these
 explicit approvals, protects the 303 baseline contracts and complete inventory,

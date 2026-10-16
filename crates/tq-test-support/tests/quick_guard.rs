@@ -224,9 +224,23 @@ fn cooperative_deadline_helper() {
 #[test]
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn guard_rejects_a_budget_above_the_quick_ceiling() {
-    let (output, elapsed) = run_quick("51", "/bin/sh", &["-c", "exit 0"]);
+    let directory = tempfile::tempdir().unwrap();
+    let marker = directory.path().join("child-started");
+    let (output, _) = run_quick(
+        "51",
+        "/bin/sh",
+        &[
+            "-c",
+            "printf started > \"$1\"",
+            "invalid-budget-child",
+            marker.to_str().unwrap(),
+        ],
+    );
     assert_eq!(output.status.code(), Some(2));
-    assert!(elapsed < Duration::from_secs(1));
+    assert!(
+        !marker.exists(),
+        "invalid budget must reject before child launch"
+    );
 }
 
 // This test body runs only inside a separately guarded copy of this test
