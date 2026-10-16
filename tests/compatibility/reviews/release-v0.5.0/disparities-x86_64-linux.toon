@@ -1,0 +1,889 @@
+[13]:
+  - case_id: manual.audit.math.erfc-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Reviewed safe-library rounding disparity for this exact case and input only, not a function-wide tolerance or correctly-rounded accuracy claim. tq dispatches the implemented operation to safe Rust libm 0.2.16; pinned jq 1.8.2 calls its native C math implementation. Last-bit results can affect serialized values, equality and threshold decisions. Existing manual boundary/direct/composition fixtures preserve the witness; historical wider boundary probes are not renewed by this approval. Reconsider on implementation, libm, Rust/compiler, native runtime, target, reference/executable/library identity or observation changes, or availability of a suitable stable safe native implementation. erfc(2): independent FreeBSD/Sun-derived rational approximation and split exponential evaluation; fresh Linux witness must remain 1 ULP from the reference. This is not 1-erf, missing dispatch, or missing output."
+    evidence:
+      case_fingerprint: 14e461f8cb65eed28f86932428699c192637e644ea8269f2ea645735f75b5b87
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047265
+        stdout_hex: 302e3030343637373733343938313034373236350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047266
+        stdout_hex: 302e3030343637373733343938313034373236360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047266
+        stdout_hex: 302e3030343637373733343938313034373236360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047265
+        stdout_hex: 302e3030343637373733343938313034373236350a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.004677734981047266
+        stdout_hex: 302e3030343637373733343938313034373236360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.audit.math.tgamma-ulp
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Reviewed safe-library rounding disparity for this exact case and input only, not a function-wide tolerance or correctly-rounded accuracy claim. tq dispatches the implemented operation to safe Rust libm 0.2.16; pinned jq 1.8.2 calls its native C math implementation. Last-bit results can affect serialized values, equality and threshold decisions. Existing manual boundary/direct/composition fixtures preserve the witness; historical wider boundary probes are not renewed by this approval. Reconsider on implementation, libm, Rust/compiler, native runtime, target, reference/executable/library identity or observation changes, or availability of a suitable stable safe native implementation. tgamma(0.5): Lanczos/exponential/power rounding differs by 1 ULP. tq calls tgamma, not lgamma or the platform gamma alias; no exception for poles, signs, domains or overflow is granted."
+    evidence:
+      case_fingerprint: 09e9b15fc57e248fc8c6056faebfb2ec1efe2464f3f1418a984ed0b4b7808ea2
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.772453850905516
+        stdout_hex: 312e3737323435333835303930353531360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 1.772453850905516
+        stdout_hex: 312e3737323435333835303930353531360a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 1.7724538509055159
+        stdout_hex: 312e373732343533383530393035353135390a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.colors.ansi-values
+    contract: raw-bytes
+    difference_summary: raw stdout
+    rationale: "Reviewed presentation exception, not an exact jq match or safe-library approval. Native source review: crates/tq-formats/src/output_json.rs, output-colors specification, and CLI color tests. Eight supplied JQ_COLORS styles occupy the correct slots. tq assigns enclosing key/string quotes to the structural object role and resets each empty-container delimiter separately; jq includes quotes in content spans. Existing custom_eight_slot_palette_colors_quote_contexts_and_content_separately and empty_container_delimiters_use_structural_color regressions protect this native contract. Fresh capture must have normally executed exit-0 processes, empty stderr, and identical non-SGR stdout including values, order, whitespace, framing, and LF. Only the captured raw bytes are approved; no ANSI normalization is applied by the gate. Reconsider if palette parsing, quote ownership, span/reset policy, environment precedence, serializer/reference implementation, identities, or observations change."
+    evidence:
+      case_fingerprint: 7896cfc74805f1a3340530d8bcb6a8873819b0722140d9639e1201aa6d31e96f
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33366d7b1b5b306d1b5b323b33376d226e756c6c221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33306d6e756c6c1b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d2266616c7365221b5b306d1b5b313b33366d3a1b5b306d1b5b323b33316d66616c73651b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d2274727565221b5b306d1b5b313b33366d3a1b5b306d1b5b343b33326d747275651b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d226e756d626572221b5b306d1b5b313b33366d3a1b5b306d1b5b353b33336d311b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d22737472696e67221b5b306d1b5b313b33366d3a1b5b306d1b5b373b33346d2278221b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d226172726179221b5b306d1b5b313b33366d3a1b5b306d1b5b383b33356d5b5d1b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d226f626a656374221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33366d7b7d1b5b306d1b5b313b33366d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33366d7b1b5b306d1b5b323b33376d226e756c6c221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33306d6e756c6c1b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d2266616c7365221b5b306d1b5b313b33366d3a1b5b306d1b5b323b33316d66616c73651b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d2274727565221b5b306d1b5b313b33366d3a1b5b306d1b5b343b33326d747275651b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d226e756d626572221b5b306d1b5b313b33366d3a1b5b306d1b5b353b33336d311b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d22737472696e67221b5b306d1b5b313b33366d3a1b5b306d1b5b373b33346d2278221b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d226172726179221b5b306d1b5b313b33366d3a1b5b306d1b5b383b33356d5b5d1b5b306d1b5b313b33366d2c1b5b306d1b5b323b33376d226f626a656374221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33366d7b7d1b5b306d1b5b313b33366d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33366d7b1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d6e756c6c1b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33306d6e756c6c1b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d66616c73651b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b323b33316d66616c73651b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d747275651b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b343b33326d747275651b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d6e756d6265721b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b353b33336d311b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d737472696e671b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33366d221b5b306d1b5b373b33346d781b5b306d1b5b313b33366d221b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d61727261791b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b383b33356d5b1b5b306d1b5b383b33356d5d1b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d6f626a6563741b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33366d7b1b5b306d1b5b313b33366d7d1b5b306d1b5b313b33366d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33366d7b1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d6e756c6c1b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33306d6e756c6c1b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d66616c73651b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b323b33316d66616c73651b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d747275651b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b343b33326d747275651b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d6e756d6265721b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b353b33336d311b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d737472696e671b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33366d221b5b306d1b5b373b33346d781b5b306d1b5b313b33366d221b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d61727261791b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b383b33356d5b1b5b306d1b5b383b33356d5d1b5b306d1b5b313b33366d2c1b5b306d1b5b313b33366d221b5b306d1b5b323b33376d6f626a6563741b5b306d1b5b313b33366d221b5b306d1b5b313b33366d3a1b5b306d1b5b313b33366d7b1b5b306d1b5b313b33366d7d1b5b306d1b5b313b33366d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,raw stdout
+  - case_id: manual.colors.custom-1-31
+    contract: raw-bytes
+    difference_summary: raw stdout
+    rationale: "Reviewed presentation exception, not an exact jq match or safe-library approval. Native source review: crates/tq-formats/src/output_json.rs, output-colors specification, and CLI color tests. All supplied slots are 1;31 in both tools. tq resets/reopens spans around quotes and empty-container delimiters rather than merging them as jq does. Existing jq_colors_controls_each_json_value_style and empty_container_delimiters_use_structural_color regressions protect the requested style and structural boundaries. Fresh capture must have normally executed exit-0 processes, empty stderr, and identical non-SGR stdout including values, order, whitespace, framing, and LF. Only the captured raw bytes are approved; no ANSI normalization is applied by the gate. Reconsider if palette parsing, quote ownership, span/reset policy, environment precedence, serializer/reference implementation, identities, or observations change."
+    evidence:
+      case_fingerprint: 508912e653c0c7cccaba10efff9c50ca91fae998f878d2f13a9619f7206e1922
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33316d7b1b5b306d1b5b313b33316d226e756c6c221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d6e756c6c1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d2266616c7365221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d66616c73651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d2274727565221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d747275651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d226e756d626572221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d311b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d22737472696e67221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d2278221b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d226172726179221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d5b5d1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d226f626a656374221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d7b7d1b5b306d1b5b313b33316d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33316d7b1b5b306d1b5b313b33316d226e756c6c221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d6e756c6c1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d2266616c7365221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d66616c73651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d2274727565221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d747275651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d226e756d626572221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d311b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d22737472696e67221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d2278221b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d226172726179221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d5b5d1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d226f626a656374221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d7b7d1b5b306d1b5b313b33316d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33316d7b1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d6e756c6c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d6e756c6c1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d66616c73651b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d66616c73651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d747275651b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d747275651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d6e756d6265721b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d311b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d737472696e671b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d781b5b306d1b5b313b33316d221b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d61727261791b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d5b1b5b306d1b5b313b33316d5d1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d6f626a6563741b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d7b1b5b306d1b5b313b33316d7d1b5b306d1b5b313b33316d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33316d7b1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d6e756c6c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d6e756c6c1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d66616c73651b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d66616c73651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d747275651b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d747275651b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d6e756d6265721b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d311b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d737472696e671b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d781b5b306d1b5b313b33316d221b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d61727261791b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d5b1b5b306d1b5b313b33316d5d1b5b306d1b5b313b33316d2c1b5b306d1b5b313b33316d221b5b306d1b5b313b33316d6f626a6563741b5b306d1b5b313b33316d221b5b306d1b5b313b33316d3a1b5b306d1b5b313b33316d7b1b5b306d1b5b313b33316d7d1b5b306d1b5b313b33316d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,raw stdout
+  - case_id: manual.colors.default-palette
+    contract: raw-bytes
+    difference_summary: raw stdout
+    rationale: "Reviewed presentation exception, not an exact jq match or safe-library approval. Native source review: crates/tq-formats/src/output_json.rs, output-colors specification, and CLI color tests. This fixture explicitly supplies the documented eight-slot jq palette; it does not measure unset defaults. Slot mapping agrees. tq uses object style 1;39 for enclosing quotes where jq uses key 1;34/string 0;32, and resets empty-container delimiters separately. Existing eight-slot palette and stripped-byte regressions protect mapping and data. No exception for arbitrary default palettes is granted. Fresh capture must have normally executed exit-0 processes, empty stderr, and identical non-SGR stdout including values, order, whitespace, framing, and LF. Only the captured raw bytes are approved; no ANSI normalization is applied by the gate. Reconsider if palette parsing, quote ownership, span/reset policy, environment precedence, serializer/reference implementation, identities, or observations change."
+    evidence:
+      case_fingerprint: 7b58f5943357109037f56767cca0e41d0b14267600376665ec087988796cf9b4
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33396d7b1b5b306d1b5b313b33346d226e756c6c221b5b306d1b5b313b33396d3a1b5b306d1b5b303b39306d6e756c6c1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d2266616c7365221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d66616c73651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d2274727565221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d747275651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d226e756d626572221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d311b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d22737472696e67221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33326d2278221b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d226172726179221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d5b5d1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d226f626a656374221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d7b7d1b5b306d1b5b313b33396d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33396d7b1b5b306d1b5b313b33346d226e756c6c221b5b306d1b5b313b33396d3a1b5b306d1b5b303b39306d6e756c6c1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d2266616c7365221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d66616c73651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d2274727565221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d747275651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d226e756d626572221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d311b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d22737472696e67221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33326d2278221b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d226172726179221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d5b5d1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33346d226f626a656374221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d7b7d1b5b306d1b5b313b33396d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33396d7b1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d6e756c6c1b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b39306d6e756c6c1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d66616c73651b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d66616c73651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d747275651b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d747275651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d6e756d6265721b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d311b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d737472696e671b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d221b5b306d1b5b303b33326d781b5b306d1b5b313b33396d221b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d61727261791b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d5b1b5b306d1b5b313b33396d5d1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d6f626a6563741b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d7b1b5b306d1b5b313b33396d7d1b5b306d1b5b313b33396d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33396d7b1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d6e756c6c1b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b39306d6e756c6c1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d66616c73651b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d66616c73651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d747275651b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d747275651b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d6e756d6265721b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b303b33396d311b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d737472696e671b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d221b5b306d1b5b303b33326d781b5b306d1b5b313b33396d221b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d61727261791b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d5b1b5b306d1b5b313b33396d5d1b5b306d1b5b313b33396d2c1b5b306d1b5b313b33396d221b5b306d1b5b313b33346d6f626a6563741b5b306d1b5b313b33396d221b5b306d1b5b313b33396d3a1b5b306d1b5b313b33396d7b1b5b306d1b5b313b33396d7d1b5b306d1b5b313b33396d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,raw stdout
+  - case_id: manual.composition.arity.y0.0
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Reviewed safe-library rounding disparity for this exact case and input only, not a function-wide tolerance or correctly-rounded accuracy claim. tq dispatches the implemented operation to safe Rust libm 0.2.16; pinned jq 1.8.2 calls its native C math implementation. Last-bit results can affect serialized values, equality and threshold decisions. Existing manual boundary/direct/composition fixtures preserve the witness; historical wider boundary probes are not renewed by this approval. Reconsider on implementation, libm, Rust/compiler, native runtime, target, reference/executable/library identity or observation changes, or availability of a suitable stable safe native implementation. y0(1) or yn(0;1): libm y0 rational approximation below 2 differs by 1 ULP at this witness; yn order zero dispatches to y0. Each direct/called-definition contract is bound separately. No bound for other inputs, orders, domains or Bessel zeros is granted; existing Bessel resource/order regressions remain required."
+    evidence:
+      case_fingerprint: a7e7041eccb763936cac1b4743104950e37cc64c473ea68db8337f9f16d31e36
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.composition.arity.yn.2
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Reviewed safe-library rounding disparity for this exact case and input only, not a function-wide tolerance or correctly-rounded accuracy claim. tq dispatches the implemented operation to safe Rust libm 0.2.16; pinned jq 1.8.2 calls its native C math implementation. Last-bit results can affect serialized values, equality and threshold decisions. Existing manual boundary/direct/composition fixtures preserve the witness; historical wider boundary probes are not renewed by this approval. Reconsider on implementation, libm, Rust/compiler, native runtime, target, reference/executable/library identity or observation changes, or availability of a suitable stable safe native implementation. y0(1) or yn(0;1): libm y0 rational approximation below 2 differs by 1 ULP at this witness; yn order zero dispatches to y0. Each direct/called-definition contract is bound separately. No bound for other inputs, orders, domains or Bessel zeros is granted; existing Bessel resource/order regressions remain required."
+    evidence:
+      case_fingerprint: 102506438ae1c42c30ed2177e050aeb01246c842db62a9728b1ea184c8f94d10
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.invoking.color-output
+    contract: raw-bytes
+    difference_summary: raw stdout
+    rationale: "Reviewed presentation exception, not an exact jq match or safe-library approval. Native source review: crates/tq-formats/src/output_json.rs, output-colors specification, and CLI color tests. Forced color and the selected palette agree. tq gives enclosing key quotes structural style 0;90 and content 0;36, whereas jq includes those quotes in the 0;36 key span. Existing default_palette_uses_tq_slots_for_json_scalars_and_keys and every_native_output_format_strips_to_its_plain_bytes regressions protect roles and reversible rendering. Fresh capture must have normally executed exit-0 processes, empty stderr, and identical non-SGR stdout including values, order, whitespace, framing, and LF. Only the captured raw bytes are approved; no ANSI normalization is applied by the gate. Reconsider if palette parsing, quote ownership, span/reset policy, environment precedence, serializer/reference implementation, identities, or observations change."
+    evidence:
+      case_fingerprint: b441af00d8298fb09b5231162d1696973b6c27ab9601b32e233bc62b06cb7b8a
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33396d7b1b5b306d0a20201b5b313b33346d227a221b5b306d1b5b313b33396d3a1b5b306d201b5b303b33396d311b5b306d1b5b313b33396d2c1b5b306d0a20201b5b313b33346d2261221b5b306d1b5b313b33396d3a1b5b306d201b5b303b33396d321b5b306d0a1b5b313b33396d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33396d7b1b5b306d0a20201b5b313b33346d227a221b5b306d1b5b313b33396d3a1b5b306d201b5b303b33396d311b5b306d1b5b313b33396d2c1b5b306d0a20201b5b313b33346d2261221b5b306d1b5b313b33396d3a1b5b306d201b5b303b33396d321b5b306d0a1b5b313b33396d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b303b39306d7b1b5b306d0a20201b5b303b39306d221b5b306d1b5b303b33366d7a1b5b306d1b5b303b39306d221b5b306d1b5b303b39306d3a1b5b306d201b5b303b33356d311b5b306d1b5b303b39306d2c1b5b306d0a20201b5b303b39306d221b5b306d1b5b303b33366d611b5b306d1b5b303b39306d221b5b306d1b5b303b39306d3a1b5b306d201b5b303b33356d321b5b306d0a1b5b303b39306d7d1b5b306d0a
+        raw_stdout_hex: 1b5b303b39306d7b1b5b306d0a20201b5b303b39306d221b5b306d1b5b303b33366d7a1b5b306d1b5b303b39306d221b5b306d1b5b303b39306d3a1b5b306d201b5b303b33356d311b5b306d1b5b303b39306d2c1b5b306d0a20201b5b303b39306d221b5b306d1b5b303b33366d611b5b306d1b5b303b39306d221b5b306d1b5b303b39306d3a1b5b306d201b5b303b33356d321b5b306d0a1b5b303b39306d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,raw stdout
+  - case_id: manual.invoking.jq-colors
+    contract: raw-bytes
+    difference_summary: raw stdout
+    rationale: "Reviewed presentation exception, not an exact jq match or safe-library approval. Native source review: crates/tq-formats/src/output_json.rs, output-colors specification, and CLI color tests. The seven-slot palette correctly falls back from missing key style to number style 1;34 in both tools. tq gives enclosing quotes object style 1;37 while jq includes them in the key span. Existing custom_seven_slot_palette_keeps_number_to_key_fallback and seven_entry_jq_colors_uses_the_number_style_for_object_keys regressions protect fallback and structural quote roles. Fresh capture must have normally executed exit-0 processes, empty stderr, and identical non-SGR stdout including values, order, whitespace, framing, and LF. Only the captured raw bytes are approved; no ANSI normalization is applied by the gate. Reconsider if palette parsing, quote ownership, span/reset policy, environment precedence, serializer/reference implementation, identities, or observations change."
+    evidence:
+      case_fingerprint: 51296518595dbc5814e8a0d0c9c0687754f2f366f79a37b763ade9ea9a791814
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33376d7b1b5b306d0a20201b5b313b33346d227a221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d311b5b306d1b5b313b33376d2c1b5b306d0a20201b5b313b33346d2261221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d321b5b306d0a1b5b313b33376d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33376d7b1b5b306d0a20201b5b313b33346d227a221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d311b5b306d1b5b313b33376d2c1b5b306d0a20201b5b313b33346d2261221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d321b5b306d0a1b5b313b33376d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33376d7b1b5b306d0a20201b5b313b33376d221b5b306d1b5b313b33346d7a1b5b306d1b5b313b33376d221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d311b5b306d1b5b313b33376d2c1b5b306d0a20201b5b313b33376d221b5b306d1b5b313b33346d611b5b306d1b5b313b33376d221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d321b5b306d0a1b5b313b33376d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33376d7b1b5b306d0a20201b5b313b33376d221b5b306d1b5b313b33346d7a1b5b306d1b5b313b33376d221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d311b5b306d1b5b313b33376d2c1b5b306d0a20201b5b313b33376d221b5b306d1b5b313b33346d611b5b306d1b5b313b33376d221b5b306d1b5b313b33376d3a1b5b306d201b5b313b33346d321b5b306d0a1b5b313b33376d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,raw stdout
+  - case_id: manual.invoking.no-color-forced
+    contract: raw-bytes
+    difference_summary: raw stdout
+    rationale: "Reviewed presentation exception, not an exact jq match or safe-library approval. Native source review: crates/tq-formats/src/output_json.rs, output-colors specification, and CLI color tests. Both tools emit color under NO_COLOR=1 with explicit -C. Only structural versus key quote styling and span boundaries differ; this is not a precedence failure. Existing explicit_color_overrides_no_color_and_last_flag_wins protects forced color and both last-flag orders. Fresh capture must have normally executed exit-0 processes, empty stderr, and identical non-SGR stdout including values, order, whitespace, framing, and LF. Only the captured raw bytes are approved; no ANSI normalization is applied by the gate. Reconsider if palette parsing, quote ownership, span/reset policy, environment precedence, serializer/reference implementation, identities, or observations change."
+    evidence:
+      case_fingerprint: 11cce76f0596d8708a53fe4d345fb96792dd22f02663b257f717b3eb3b260074
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b313b33396d7b1b5b306d0a20201b5b313b33346d22666f6f221b5b306d1b5b313b33396d3a1b5b306d201b5b303b33396d311b5b306d0a1b5b313b33396d7d1b5b306d0a
+        raw_stdout_hex: 1b5b313b33396d7b1b5b306d0a20201b5b313b33346d22666f6f221b5b306d1b5b313b33396d3a1b5b306d201b5b303b33396d311b5b306d0a1b5b313b33396d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results: []
+        stdout_hex: 1b5b303b39306d7b1b5b306d0a20201b5b303b39306d221b5b306d1b5b303b33366d666f6f1b5b306d1b5b303b39306d221b5b306d1b5b303b39306d3a1b5b306d201b5b303b33356d311b5b306d0a1b5b303b39306d7d1b5b306d0a
+        raw_stdout_hex: 1b5b303b39306d7b1b5b306d0a20201b5b303b39306d221b5b306d1b5b303b33366d666f6f1b5b306d1b5b303b39306d221b5b306d1b5b303b39306d3a1b5b306d201b5b303b33356d311b5b306d0a1b5b303b39306d7d1b5b306d0a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,raw stdout
+  - case_id: manual.invoking.run-tests
+    contract: exit-status
+    difference_summary: raw stdout
+    rationale: "Reviewed internal-runner diagnostic exception, not an exact jq match or safe-library approval. The supplied . / null / null fixture passes one of one tests in both tools, with identical supplied-test summary and two state-check lines, exit 0 and empty stderr. jq 1.8.2 src/jq_test.c alone appends C API compile-args, recompilation and exhaust/reuse self-test diagnostics, which are not additional supplied fixture tests. tq runner.rs executes supplied cases and its own evaluator checks; it must not print unexecuted jq C API checks. Consumers comparing full transcripts see the omitted suffix; internal-suite equivalence is not claimed. Existing run_tests_executes_stdin_test_files_and_reports_failures protects supplied-result/count/error handling and run_tests_self_checks_match_jq_state_contract protects tq checks. Approve only this exact captured transcript, not skipped inputs, changed summaries, status, stderr, values or order. Reconsider on any runner/reference self-test, identity or observation change."
+    evidence:
+      case_fingerprint: 44a160d34c37cb725c188f62bf7f2bdef749c6446ed1fbf0580351c0ee0176e9
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: raw
+        state: executed
+        results: []
+        stdout_hex: 546573742023313a20272e27206174206c696e65206e756d62657220320a31206f66203120746573747320706173736564202830206d616c666f726d65642c203020736b6970706564290a54657374206a715f73746174653a202e5b5d0a54657374206a715f73746174653a202e5b5d207c206966202e2532203d3d2030207468656e2068616c745f6572726f7220656c7365202e20656e640a54657374206a715f636f6d70696c655f61726773207769746820617272617920617267730a2020737562746573743a2034320a2020737562746573743a202476616c0a2020737562746573743a202478202b2024790a2020737562746573743a202461202b202462202b2024630a2020737562746573743a202478202a2024790a54657374206a71207265636f6d70696c65206f6e2073616d652073746174650a54657374206a71206578686175737420616e642072657573650a
+        raw_stdout_hex: 546573742023313a20272e27206174206c696e65206e756d62657220320a31206f66203120746573747320706173736564202830206d616c666f726d65642c203020736b6970706564290a54657374206a715f73746174653a202e5b5d0a54657374206a715f73746174653a202e5b5d207c206966202e2532203d3d2030207468656e2068616c745f6572726f7220656c7365202e20656e640a54657374206a715f636f6d70696c655f61726773207769746820617272617920617267730a2020737562746573743a2034320a2020737562746573743a202476616c0a2020737562746573743a202478202b2024790a2020737562746573743a202461202b202462202b2024630a2020737562746573743a202478202a2024790a54657374206a71207265636f6d70696c65206f6e2073616d652073746174650a54657374206a71206578686175737420616e642072657573650a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: raw
+        state: executed
+        results: []
+        stdout_hex: 546573742023313a20272e27206174206c696e65206e756d62657220320a31206f66203120746573747320706173736564202830206d616c666f726d65642c203020736b6970706564290a54657374206a715f73746174653a202e5b5d0a54657374206a715f73746174653a202e5b5d207c206966202e2532203d3d2030207468656e2068616c745f6572726f7220656c7365202e20656e640a
+        raw_stdout_hex: 546573742023313a20272e27206174206c696e65206e756d62657220320a31206f66203120746573747320706173736564202830206d616c666f726d65642c203020736b6970706564290a54657374206a715f73746174653a202e5b5d0a54657374206a715f73746174653a202e5b5d207c206966202e2532203d3d2030207468656e2068616c745f6572726f7220656c7365202e20656e640a
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon: null
+      compact_jq: null
+      compact_tq: null
+      toon_contract_match: null
+      compact_exact: null
+      compact_differences: null
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,raw,tq,raw,raw stdout
+  - case_id: manual.math.y0
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Reviewed safe-library rounding disparity for this exact case and input only, not a function-wide tolerance or correctly-rounded accuracy claim. tq dispatches the implemented operation to safe Rust libm 0.2.16; pinned jq 1.8.2 calls its native C math implementation. Last-bit results can affect serialized values, equality and threshold decisions. Existing manual boundary/direct/composition fixtures preserve the witness; historical wider boundary probes are not renewed by this approval. Reconsider on implementation, libm, Rust/compiler, native runtime, target, reference/executable/library identity or observation changes, or availability of a suitable stable safe native implementation. y0(1) or yn(0;1): libm y0 rational approximation below 2 differs by 1 ULP at this witness; yn order zero dispatches to y0. Each direct/called-definition contract is bound separately. No bound for other inputs, orders, domains or Bessel zeros is granted; existing Bessel resource/order regressions remain required."
+    evidence:
+      case_fingerprint: a91bb76cd297827d6b2f93cb64f751f6338fe97735c30a2b0a46edad25d6bbf4
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+  - case_id: manual.math.yn
+    contract: result-sequence
+    difference_summary: result sequence
+    rationale: "Reviewed safe-library rounding disparity for this exact case and input only, not a function-wide tolerance or correctly-rounded accuracy claim. tq dispatches the implemented operation to safe Rust libm 0.2.16; pinned jq 1.8.2 calls its native C math implementation. Last-bit results can affect serialized values, equality and threshold decisions. Existing manual boundary/direct/composition fixtures preserve the witness; historical wider boundary probes are not renewed by this approval. Reconsider on implementation, libm, Rust/compiler, native runtime, target, reference/executable/library identity or observation changes, or availability of a suitable stable safe native implementation. y0(1) or yn(0;1): libm y0 rational approximation below 2 differs by 1 ULP at this witness; yn order zero dispatches to y0. Each direct/called-definition contract is bound separately. No bound for other inputs, orders, domains or Bessel zeros is granted; existing Bessel resource/order regressions remain required."
+    evidence:
+      case_fingerprint: 2ddcb025c3f91d689db8eac1926c65ded83782838e7c1877cdcb9a8ab52c0e6f
+      reference_identity:
+        tool: jq
+        path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+        version: jq-1.8.2
+        executable:
+          path: /home/runner/work/tq/tq/target/reference-build/jq/jq
+          bytes: 2267912
+          sha256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+        build_features[1]: "--host=x86_64-linux-gnu --disable-docs --with-oniguruma=builtin --enable-static --enable-all-static 'CFLAGS=-O2 -pthread -fstack-protector-all' host_alias=x86_64-linux-gnu CC=x86_64-linux-gnu-gcc LDFLAGS=-s CPP=x86_64-linux-gnu-cpp"
+      target_identity:
+        tool: tq
+        path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+        version: tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)
+        executable:
+          path: /home/runner/work/tq/tq/target/x86_64-unknown-linux-gnu/release/tq
+          bytes: 41341400
+          sha256: 8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b
+        build_features: []
+      jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      tq_toon:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_jq:
+        tool: jq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567698
+        stdout_hex: 302e30383832353639363432313536373639380a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      compact_tq:
+        tool: tq
+        input_format: json
+        state: executed
+        results[1]: 0.08825696421567697
+        stdout_hex: 302e30383832353639363432313536373639370a
+        raw_stdout_hex: null
+        stderr_hex: null
+        process_status: exited
+        exit_code: 0
+        error_class: null
+      toon_contract_match: true
+      compact_exact: false
+      compact_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence
+      semantic_differences[1]{left,left_format,right,right_format,summary}:
+        jq,json,tq,json,result sequence

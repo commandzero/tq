@@ -7,6 +7,8 @@ Historical release entries retain their original ordering.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-14
+
 ### Security
 
 - Enforced configured TOON sequence frame limits in byte-slice decoding before document materialization (#35).
@@ -33,6 +35,8 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
+- Linux x86_64 `ldexp`/`scalbln` now reproduce pinned jq exponent-conversion boundaries, including oversized and NaN exponents, without changing other targets (#70).
+- Prevent spurious Unix benchmark output-drain failures when captures complete while the supervisor crosses its cleanup deadline.
 - Non-strict TOON-sequence `--stream` input now reaches the existing staged last-write-wins projection, emitting jq-compatible leaf and container-close records.
 - jq-manual token savings now exclude otherwise equal values when a required jq/JSON or JSON/TOON process contract differs, retaining the exact mismatch and strict failure.
 - Large comma-expression queries, including right-nested expressions, no longer overflow the Windows CLI's default stack (#68).
@@ -113,7 +117,8 @@ Historical release entries retain their original ordering.
 - Added crates.io packaging for `tq-cli`, which installs the `tq` command.
 - Initial release
 
-[Unreleased]: https://github.com/commandzero/tq/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/commandzero/tq/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/commandzero/tq/compare/v0.3.0...v0.5.0
 [0.3.0]: https://github.com/commandzero/tq/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/commandzero/tq/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/commandzero/tq/releases/tag/v0.1.0

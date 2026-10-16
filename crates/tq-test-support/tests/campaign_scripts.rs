@@ -32,6 +32,100 @@ fn campaign_stub(bin: &Path) {
 }
 
 #[test]
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+fn completion_rejects_an_unreviewed_version_before_building() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    copy_script(root, "campaign-run.sh");
+    copy_script(root, "release-build-env.sh");
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\n[package]\nname = \"tq-cli\"\nversion = \"0.5.1\"\nedition = \"2024\"\n[[bin]]\nname = \"tq\"\npath = \"src/main.rs\"\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/main.rs"),
+        "compile_error!(\"unreviewed release must not compile\");\n",
+    )
+    .unwrap();
+    let cargo = env!("CARGO");
+    assert!(
+        Command::new(cargo)
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let older = Path::new("tests/compatibility/reviews");
+    fs::create_dir_all(root.join(older)).unwrap();
+    for target in ["aarch64-macos", "x86_64-linux"] {
+        let relative = older.join(format!("disparities-{target}.toon"));
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../..")
+                .join(&relative),
+            root.join(relative),
+        )
+        .unwrap();
+    }
+    let build_output = root.join("compiled-artifacts");
+    let output = Command::new("/bin/sh")
+        .arg(root.join("scripts/campaign-run.sh"))
+        .args(["compatibility", "completion"])
+        .current_dir(root)
+        .env("CARGO", cargo)
+        .env("CARGO_TARGET_DIR", &build_output)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(69), "{output:?}");
+    let target = if cfg!(target_os = "macos") {
+        "aarch64-macos"
+    } else {
+        "x86_64-linux"
+    };
+    let missing = format!("tests/compatibility/reviews/release-v0.5.1/disparities-{target}.toon");
+    assert!(String::from_utf8(output.stderr).unwrap().contains(&missing));
+}
+
+#[test]
+fn release_build_profile_rejects_conflicts_on_either_side_of_its_epoch_key() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    copy_script(root, "release-build-env.sh");
+    for conflict in [
+        "conflicting_flag=\"-DTQ_RELEASE_SOURCE_DATE_EPOCH=$((SOURCE_DATE_EPOCH + 1))\"",
+        "conflicting_flag=\"-DTQ_RELEASE_SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH\"",
+        "conflicting_flag=\"-D TQ_RELEASE_SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH\"",
+        "conflicting_flag=\"-UTQ_RELEASE_SOURCE_DATE_EPOCH\"",
+        "conflicting_flag=\"-U TQ_RELEASE_SOURCE_DATE_EPOCH\"",
+    ] {
+        for mutation in [
+            "CFLAGS=\"$conflicting_flag $CFLAGS\"",
+            "CFLAGS=\"$CFLAGS $conflicting_flag\"",
+        ] {
+            let program =
+                format!("set -eu\n. \"$1\" || exit 70\n{conflict}\n{mutation}\n. \"$1\"\n");
+            let output = Command::new("/bin/sh")
+                .args(["-c", &program, "release-epoch-regression"])
+                .arg(root.join("scripts/release-build-env.sh"))
+                .env_remove("CFLAGS")
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(69),
+                "{conflict}; {mutation}: {output:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn documentation_check_pins_okf_before_scanning_and_preserves_scan_failures() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
@@ -291,6 +385,7 @@ fn malformed_cargo_artifacts_fail_closed_and_clean_capture_files() {
             .env("TEST_COMMAND_LOG", &log)
             .env("TEST_BAD_ARTIFACT", bad_artifact)
             .env("TMPDIR", &temporary)
+            .env_remove("TQ_HOST_TQ")
             .output()
             .unwrap();
         if bad_artifact == "malformed" {

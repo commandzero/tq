@@ -50,6 +50,7 @@ case "$host" in
     aarch64-apple-darwin|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu) ;;
     *) echo "No validated archive recipe for $host." >&2; exit 1 ;;
 esac
+source scripts/release-build-env.sh
 ./scripts/preflight.sh
 cargo test --locked -p tq-core regex_date_platform_release_host_contract
 cargo test --locked -p tq-cli ambient
@@ -75,6 +76,7 @@ cp "target/$host/release/tq" "$stage/tq"
 cp LICENSE "$stage/LICENSE"
 {
     printf 'tag: %s\ncommit: %s\ntarget: %s\nfeatures: default\n' "$tag" "$commit" "$host"
+    printf 'source_date_epoch: %s\n' "$SOURCE_DATE_EPOCH"
     rustc -vV
     uname -a
     if [[ $host == *linux* ]]; then ldd --version; else sw_vers; fi

@@ -290,17 +290,38 @@ if [ "${TQ_CAMPAIGN_COMPILED:-}" != 1 ]; then
 fi
 
 case "$campaign:$suite" in
-    compatibility:strict)
+    compatibility:strict|compatibility:completion)
+        # shellcheck source=scripts/release-build-env.sh
+        . ./scripts/release-build-env.sh
         mkdir -p target/compatibility
+        markdown_directory=target/compatibility/jq-manual
+        if [ "$suite" = completion ]; then
+            markdown_directory=$markdown_directory-completion
+        fi
+        set -- --markdown-dir "$markdown_directory" "target/compatibility/$suite.toon"
+        if [ "$suite" = completion ]; then
+            case "$(uname -s):$(uname -m)" in
+                Darwin:arm64|Darwin:aarch64) reference_target=aarch64-macos ;;
+                Linux:x86_64) reference_target=x86_64-linux ;;
+                *) echo "no reviewed manual release approvals for this native target" >&2; exit 69 ;;
+            esac
+            package_id=$("$cargo_bin" pkgid --locked -p tq-cli)
+            package_version=${package_id##*#}
+            package_version=${package_version##*@}
+            approvals="tests/compatibility/reviews/release-v$package_version/disparities-$reference_target.toon"
+            if [ ! -f "$approvals" ]; then
+                echo "missing reviewed manual release approvals: $approvals" >&2
+                exit 69
+            fi
+            set -- --completion "$approvals" "$@"
+        fi
         build_tq_cli
         "$cargo_bin" build --quiet --release --locked -p tq-test-support
-        # The preflight refuses PATH/package-manager jq substitutions. The
-        # Rust comparator then validates the executable and runtime identity
-        # against the host-specific reviewed pin before executing any case.
+        # Provisioning rejects unreviewed jq substitutions. The comparator
+        # checks exact identities, observations, and case fingerprints; strict
+        # mode still rejects every difference, including approved disparities.
         exec ./scripts/reference-jq-provision.sh \
-            "$cargo_bin" run --quiet --release --locked -p tq-test-support --bin tq-manual-compare -- \
-            --markdown-dir "target/compatibility/jq-manual" \
-            "target/compatibility/strict.toon"
+            "$cargo_bin" run --quiet --release --locked -p tq-test-support --bin tq-manual-compare -- "$@"
         ;;
     compatibility:smoke|compatibility:full)
         mkdir -p target/compatibility
