@@ -2,8 +2,8 @@
 type: Report
 title: "Modules coverage audit"
 description: "Recorded review of Modules coverage audit."
-generated: { by: codex/gpt-6, at: 2026-09-10T02:12:04Z }
-benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"8a0ba42cf81881829b93ee950db0d4d3f808a22af574b210484be7833b238d00","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"474625b11f0ec3a1fa125bbeb4e55008efa50ec713b0c398822ada48f0289b91","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
+generated: { by: codex/gpt-6.1-sol, at: "2026-10-16T21:15:19+00:00" }
+benchmark_runs: [{"platform":"macos","target":"aarch64-macos","campaign_id":null,"captured_at":"2026-10-15T04:09:44.936239Z","binaries":{"jq":{"version":"jq-1.8.2","sha256":"2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)","sha256":"47592e270c5971e08b95cccc82cdbe772155cd38db554d57c56f482bfd9cd42b","identity_status":"measured"}}},{"platform":"linux","target":"x86_64-linux","campaign_id":null,"captured_at":"2026-10-15T04:04:14.151544565Z","binaries":{"jq":{"version":"jq-1.8.2","sha256":"b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.4; jq target 1.8.x; revision unknown)","sha256":"8c8451aabb4df679893c6e29115406b1c9a9868003b30ec6b9b7e73439b3af1b","identity_status":"measured"}}},{"platform":"windows","target":"x86_64-windows","campaign_id":null,"captured_at":null,"binaries":{"jq":{"version":"jq-1.8.2","sha256":"a6fc67fedaf9128a3309a1e2ebb8b986aeccf70122ee46d2cb4849e423f0c627","identity_status":"measured"},"tq":{"version":"tq 0.5.0 (TOON v4.1; jq target 1.8.x; revision unknown)","sha256":"a1cec37e4c6e70bcd06647a5b5b5617ece0b88e41fe8a1ad9590bafc00992428","identity_status":"measured"}}}]
 ---
 
 # Modules coverage audit
@@ -33,6 +33,17 @@ Source: [jq manual, Modules](https://jqlang.org/manual/#modules). The audit cove
 | 75–79 | `modulemeta` shape and program use | `manual.modules.modulemeta`, `manual.modules.modulemeta-deps` | new/covered |
 
 The jq-target cases deliberately keep tq enabled. Tilde, `$ORIGIN`, HOME auto-sourcing, repeated path components, empty roots, and JSON-module imports are executed through the same documented contracts with controlled environment roots. Result-sequence cases retain the harness’s native TOON output handling.
+
+The generated Results below are re-rendered from the macOS report in
+[native run 38677622888](https://github.com/commandzero/tq/actions/runs/38677622888),
+source `4760f38`, with all 21 module cases exact on both required native hosts.
+The Windows frontmatter record remains historical TOON 4.1 evidence, not renewed
+native acceptance. For `manual.modules.path-origin`, the displayed `$ORIGIN`
+argument is the catalog template: both adapters declare
+`origin_path: tests/fixtures/manual-modules/roots/origin`, and the runner appends
+the controlled fixture's relative tail from each actual executable directory.
+Do not treat bare `$ORIGIN` as a standalone fixture command or restore a fixed
+parent-count suffix when reproducing this witness.
 
 <!-- tq-manual-compare:begin section=modules -->
 ## Results
@@ -458,7 +469,7 @@ including-file
 
 ```
 # input
-jq -L '$ORIGIN/../../../tests/fixtures/manual-modules/roots/origin' 'import "foo" as f; f::value'
+jq -L '$ORIGIN' 'import "foo" as f; f::value'
 
 # jq
 "origin-path"

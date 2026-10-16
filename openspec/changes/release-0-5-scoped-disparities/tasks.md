@@ -21,4 +21,4 @@
 - [x] 3.3 Update release instructions, changelog corrections, and scoped review documentation with exact counts, identities, causes, impact, tests, and reconsideration conditions.
 - [x] 3.4 Prove positive native completion, stale/missing/unapproved evidence rejection, unchanged strict failure, and protected data/process/coverage contracts.
 - [x] 3.5 Pass full required preflight and native workflow checks before PR review and post-review synchronization/archival.
-- [ ] 3.6 Correct the newly reported CI capture-deadline race without changing limits or output/RSS assertions; prove deterministic failing-before/passing-after behavior, the real large-input worker scenario, and passing current Linux ordinary preflight.
+- [x] 3.6 Correct the newly reported CI capture-deadline race without changing limits or output/RSS assertions; prove deterministic failing-before/passing-after behavior, the real large-input worker scenario, and passing current Linux ordinary preflight.
