@@ -256,11 +256,22 @@ impl CaptureWorkers {
     }
 
     fn finish(&mut self, wait_for_eof: bool) -> Result<CaptureResult, MeasureError> {
+        self.finish_with_clock(wait_for_eof, Instant::now)
+    }
+
+    fn finish_with_clock(
+        &mut self,
+        wait_for_eof: bool,
+        mut now: impl FnMut() -> Instant,
+    ) -> Result<CaptureResult, MeasureError> {
         let mut drained = !wait_for_eof;
         let mut drain_timed_out = false;
         if wait_for_eof {
-            let deadline = Instant::now() + CAPTURE_DRAIN_TIMEOUT;
+            let deadline = now() + CAPTURE_DRAIN_TIMEOUT;
             loop {
+                // Observe the clock before completion: readers may finish while
+                // this supervisor is descheduled across the deadline.
+                let deadline_expired = now() >= deadline;
                 if self.stdout.state.finished.load(Ordering::Acquire)
                     && self.stderr.state.finished.load(Ordering::Acquire)
                 {
@@ -273,7 +284,7 @@ impl CaptureWorkers {
                 if self.output_limit_reached() || self.capture_failed() {
                     break;
                 }
-                if Instant::now() >= deadline {
+                if deadline_expired {
                     drain_timed_out = true;
                     break;
                 }
@@ -1396,6 +1407,113 @@ fn exit_signal(status: std::process::ExitStatus) -> Option<i32> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn capture_completion_during_deadline_observation_preserves_both_streams() {
+        use std::io::Write as _;
+        use std::sync::atomic::Ordering;
+        use wait_timeout::ChildExt as _;
+
+        let stdout = tempfile::NamedTempFile::new().unwrap();
+        let stderr = tempfile::NamedTempFile::new().unwrap();
+        let mut child = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "printf 'out\\000\\377\\n'; printf 'err\\000\\376\\n' >&2; read -r release",
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = super::Instant::now();
+        let mut captures = super::CaptureWorkers::spawn(
+            child.stdout.take().unwrap(),
+            child.stderr.take().unwrap(),
+            stdout.reopen().unwrap(),
+            stderr.reopen().unwrap(),
+            1024,
+            started,
+        )
+        .unwrap();
+        let stdout_finished = std::sync::Arc::clone(&captures.stdout.state.finished);
+        let stderr_finished = std::sync::Arc::clone(&captures.stderr.state.finished);
+        let mut observations = 0;
+        let result = captures.finish_with_clock(true, || {
+            observations += 1;
+            if observations == 1 {
+                return started;
+            }
+            // Model a supervisor paused at its deadline observation while real
+            // readers reach EOF and commit both retained output streams.
+            child.stdin.take().unwrap().write_all(b"release\n").unwrap();
+            assert!(
+                child
+                    .wait_timeout(super::Duration::from_secs(5))
+                    .unwrap()
+                    .expect("release capture writer")
+                    .success()
+            );
+            let bound = super::Instant::now() + super::Duration::from_secs(5);
+            while !stdout_finished.load(Ordering::Acquire)
+                || !stderr_finished.load(Ordering::Acquire)
+            {
+                assert!(
+                    super::Instant::now() < bound,
+                    "capture readers did not finish"
+                );
+                std::thread::yield_now();
+            }
+            started + super::CAPTURE_DRAIN_TIMEOUT
+        });
+        let result = result.expect("completed streams must win over the observed deadline");
+        assert_eq!(std::fs::read(stdout.path()).unwrap(), b"out\0\xff\n");
+        assert_eq!(std::fs::read(stderr.path()).unwrap(), b"err\0\xfe\n");
+        assert_eq!(result.stdout_bytes, 6);
+        assert_eq!(result.stderr_bytes, 6);
+        assert!(!result.stdout_limited);
+        assert!(!result.stderr_limited);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn capture_deadline_still_rejects_open_output_writers() {
+        let stdout = tempfile::NamedTempFile::new().unwrap();
+        let stderr = tempfile::NamedTempFile::new().unwrap();
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "read -r release"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started = super::Instant::now();
+        let mut captures = super::CaptureWorkers::spawn(
+            child.stdout.take().unwrap(),
+            child.stderr.take().unwrap(),
+            stdout.reopen().unwrap(),
+            stderr.reopen().unwrap(),
+            1024,
+            started,
+        )
+        .unwrap();
+        let mut observations = 0;
+        let result = captures.finish_with_clock(true, || {
+            observations += 1;
+            if observations == 1 {
+                started
+            } else {
+                started + super::CAPTURE_DRAIN_TIMEOUT
+            }
+        });
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(matches!(
+            result,
+            Err(super::MeasureError::CaptureDrainTimeout)
+        ));
+    }
+
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn setup_and_cleanup_delays_do_not_extend_measured_duration() {

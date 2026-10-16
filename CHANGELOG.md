@@ -36,6 +36,7 @@ Historical release entries retain their original ordering.
 ### Fixed
 
 - Linux x86_64 `ldexp`/`scalbln` now reproduce pinned jq exponent-conversion boundaries, including oversized and NaN exponents, without changing other targets (#70).
+- Prevent spurious Unix benchmark output-drain failures when captures complete while the supervisor crosses its cleanup deadline.
 - Non-strict TOON-sequence `--stream` input now reaches the existing staged last-write-wins projection, emitting jq-compatible leaf and container-close records.
 - jq-manual token savings now exclude otherwise equal values when a required jq/JSON or JSON/TOON process contract differs, retaining the exact mismatch and strict failure.
 - Large comma-expression queries, including right-nested expressions, no longer overflow the Windows CLI's default stack (#68).

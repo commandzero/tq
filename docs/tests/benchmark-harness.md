@@ -86,6 +86,14 @@ includes startup and scheduling, not just exit-observation delay, and is not a
 timer-error bound. Comparisons stay within the same host and OS using the
 same measurement method and concessions; repeated samples retain dispersion.
 
+Current Unix capture completion observes the drain deadline before checking
+reader completion. If the supervisor is descheduled across that observation,
+completed stdout/stderr captures win rather than producing a stale timeout.
+The 250 ms drain bound, real open-writer failure, exact output bytes, target RSS,
+and measured spawn-to-exit boundary remain unchanged. A deterministic real-pipe
+regression covers completion at the deadline; this correction does not renew
+the historical calibration or campaign measurements above.
+
 The standard report has 10,579 primary samples and 180 instrumented samples.
 Smoke adds 540 primary samples; rapid adds 27 primary and three instrumented
 samples. Every sample has positive native peak RSS. Non-empty output always
