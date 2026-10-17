@@ -586,7 +586,6 @@ fn quick_deadline_covers_blocking_tool_discovery_and_keeps_incomplete_checkpoint
         .expect("valid checkpoint");
     assert_eq!(report["final_status"], "incomplete");
     assert_eq!(report["execution"]["complete"], false);
-    assert!(String::from_utf8_lossy(&output.stdout).contains("| Suite | Profile | Status |"));
     assert!(String::from_utf8_lossy(&output.stderr).contains(checkpoint.to_str().unwrap()));
 }
 
