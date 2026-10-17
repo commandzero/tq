@@ -7,10 +7,11 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-26T00:21:30Z }
 
 # Contributing to tq
 
-The workspace requires Rust 1.95 or newer. Development and CI track the latest
-stable Rust toolchain. Run `rustup update stable` before preflight checks, and
-ensure the rustup shims take precedence over standalone Rust installations in
-your `PATH`. Run all commands below from the repository root.
+The workspace requires Rust 1.95 or newer. Development and CI use Rust 1.99.0,
+pinned in `rust-toolchain.toml` to reproduce the reviewed release binaries.
+Run `rustup toolchain install 1.99.0` before preflight checks, and ensure the
+rustup shims take precedence over standalone Rust installations in your `PATH`.
+Run all commands below from the repository root.
 
 Run the repository preflight before submitting a change:
 
