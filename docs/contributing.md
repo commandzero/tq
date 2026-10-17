@@ -7,8 +7,9 @@ generated: { by: codex/gpt-6-astra, at: 2026-09-26T00:21:30Z }
 
 # Contributing to tq
 
-The workspace requires Rust 1.95 or newer. Development and CI use Rust 1.99.0,
-pinned in `rust-toolchain.toml` to reproduce the reviewed release binaries.
+The workspace requires Rust 1.95 or newer. Development and default CI checks use
+Rust 1.99.0, pinned in `rust-toolchain.toml` to reproduce the reviewed release
+binaries. A separate CI check verifies the minimum supported Rust 1.95.0.
 Run `rustup toolchain install 1.99.0` before preflight checks, and ensure the
 rustup shims take precedence over standalone Rust installations in your `PATH`.
 Run all commands below from the repository root.
