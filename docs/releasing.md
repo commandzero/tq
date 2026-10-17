@@ -162,6 +162,40 @@ Publish the draft GitHub release only after the complete matrix and registry
 installation checks pass. Update any Homebrew consumer through a reviewed tap
 PR after verifying archive hashes, layout, and installation on its supported hosts.
 
+### Complete the Homebrew bottle release
+
+The Homebrew formula is part of the coordinated release. Do not declare the
+release complete, promote a source-only formula, or remove/stale existing bottle
+metadata while bottles are absent. A source-build fallback is not a substitute
+for bottles.
+
+Before promoting the updated tap formula or declaring the release complete,
+build, publish, and verify a matching bottle for every supported bottle target:
+
+| Bottle target | Native workflow runner |
+|---|---|
+| macOS ARM64 | `macos-15` |
+| Linux x86_64 | `ubuntu-24.04` |
+| Linux ARM64 | `ubuntu-24.04-arm` |
+
+Use the tap's `.github/workflows/tq-bottles.yml` native build workflow for these
+targets, then publish all verified bottle tarballs to the tap's `bottles` GitHub
+release without replacing existing published bytes. Update formula bottle metadata
+to the published bottle URLs and checksums in a reviewed tap change. Then pass
+`.github/workflows/bottle-install.yml`, the pull-request bottle-pour guard:
+this must install the actual published bottle on each supported runner, not
+build from source or validate a product archive. A successful build alone,
+workflow artifact, checksum, or formula syntax check is not bottle-pour evidence.
+Keep existing published bottle bytes immutable; never overwrite a published
+artifact with different bytes. If a replacement is needed, use a new immutable
+artifact location and update metadata through review.
+
+Intel macOS remains a supported source-install fallback when no bottle target is
+available; do not claim a bottle for it. This exception does not permit deferring
+any supported bottle target. The release completion record must include the
+successful native bottle publication and real bottle-pour guard runs, together
+with the reviewed formula metadata update.
+
 ## Recover a partial failure
 
 If a crate already published successfully, verify its version and continue at the
