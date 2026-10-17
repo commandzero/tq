@@ -165,9 +165,9 @@ PR after verifying archive hashes, layout, and installation on its supported hos
 ### Complete the Homebrew bottle release
 
 The Homebrew formula is part of the coordinated release. Do not declare the
-release complete, promote a source-only formula, or remove/stale existing bottle
-metadata while bottles are absent. A source-build fallback is not a substitute
-for bottles.
+release complete or promote a source-only formula while bottles are absent.
+Do not remove bottle metadata or leave stale metadata for a newly promoted
+formula version. A source-build fallback is not a substitute for bottles.
 
 Before promoting the updated tap formula or declaring the release complete,
 build, publish, and verify a matching bottle for every supported bottle target:
