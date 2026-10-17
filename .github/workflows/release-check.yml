@@ -42,7 +42,7 @@ jobs:
           source scripts/tools-versions.sh
           # Keep the reviewed compiler even when recovering an older tag's tooling.
           toolchain=1.99.0
-          rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt
+          rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt --component llvm-tools-preview
           toolchain_bin=$(dirname "$(rustup which --toolchain "$toolchain" cargo)")
           export PATH="$toolchain_bin:$PATH"
           echo "$toolchain_bin" >> "$GITHUB_PATH"

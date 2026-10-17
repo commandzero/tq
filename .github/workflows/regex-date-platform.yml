@@ -63,7 +63,7 @@ jobs:
         run: |
           # An unpublished tag can still contain a floating development channel.
           toolchain=1.99.0
-          rustup toolchain install "$toolchain" --profile minimal
+          rustup toolchain install "$toolchain" --profile minimal --component llvm-tools-preview
           toolchain_bin=$(dirname "$(rustup which --toolchain "$toolchain" cargo)")
           echo "$toolchain_bin" >> "$GITHUB_PATH"
       - name: Record release host target

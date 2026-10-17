@@ -80,6 +80,8 @@ The compiler is pinned in `rust-toolchain.toml`; do not update it between native
 capture and publication. A compiler update requires fresh native evidence and
 review, not a hash-only approval refresh. Native archive jobs provision Go for
 installing actionlint, and preflight reports a missing Go executable directly.
+Install its `llvm-tools-preview` component as well: release stripping must use
+the complete reviewed LLVM toolset, not a partially installed compiler.
 
 Timestamp-bearing native dependencies use the shared release build environment.
 Mimalloc embeds C compilation date/time in reachable diagnostics, so release
