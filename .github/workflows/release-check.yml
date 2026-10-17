@@ -32,12 +32,21 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: stable
+          cache: false
       - name: Install validation tools
         run: |
+          command -v go >/dev/null || { echo "Release preflight requires Go to install actionlint." >&2; exit 1; }
           source scripts/tools-versions.sh
-          toolchain=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
-          rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt
-          rustup show active-toolchain
+          # Keep the reviewed compiler even when recovering an older tag's tooling.
+          toolchain=1.99.0
+          rustup toolchain install "$toolchain" --profile minimal --component clippy --component rustfmt --component llvm-tools-preview
+          toolchain_bin=$(dirname "$(rustup which --toolchain "$toolchain" cargo)")
+          export PATH="$toolchain_bin:$PATH"
+          echo "$toolchain_bin" >> "$GITHUB_PATH"
+          rustc -vV
           cargo install okf --version "$OKF_VERSION" --locked
           npm install --global "@fission-ai/openspec@$OPENSPEC_VERSION"
           GOBIN="$PWD/target/tools/bin" go install "github.com/rhysd/actionlint/cmd/actionlint@v$ACTIONLINT_VERSION"

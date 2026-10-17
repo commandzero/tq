@@ -15,9 +15,11 @@ compile-fail doctests, and the main OpenSpec specifications.
 
 ## Install the pinned tools
 
-The development compiler tracks `stable` in `rust-toolchain.toml`. Run
-`rustup update stable` before preflight checks. Install rustup,
-Node.js 22 or newer, Go, and ShellCheck, then run from the repository root:
+The compiler is pinned to Rust 1.99.0 in `rust-toolchain.toml` so native release
+builds reproduce the reviewed executable identities. Install it with
+`rustup toolchain install 1.99.0`. Install rustup, Node.js 22 or newer, Go,
+and ShellCheck, then run from the repository root. Preflight checks for Go
+before running validation:
 
 ```sh
 source scripts/tools-versions.sh

@@ -92,6 +92,8 @@ unreaped child at the hard cutoff without extending the deadline. The OS takes
 over reaping after guard exit. A completed checkpoint is accepted only after
 terminal reporting and child cleanup finish. Preparation can consume the budget
 before any measurement exists.
+A deadline during tool discovery can leave an incomplete checkpoint before any
+summary table is rendered. Check completion metadata rather than table wording.
 
 Quick reports are session-only summary evidence, including `SAMPLING=quick`
 with an extended positional profile. Explicit `--output` selects a session

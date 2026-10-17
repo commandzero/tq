@@ -35,6 +35,7 @@ Historical release entries retain their original ordering.
 
 ### Fixed
 
+- Release validation now checks for Go before running preflight, provisions it for native archive jobs, and pins Rust 1.99.0 to preserve the reviewed executable identities.
 - Linux x86_64 `ldexp`/`scalbln` now reproduce pinned jq exponent-conversion boundaries, including oversized and NaN exponents, without changing other targets (#70).
 - Prevent spurious Unix benchmark output-drain failures when captures complete while the supervisor crosses its cleanup deadline.
 - Non-strict TOON-sequence `--stream` input now reaches the existing staged last-write-wins projection, emitting jq-compatible leaf and container-close records.

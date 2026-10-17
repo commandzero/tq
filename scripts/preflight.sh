@@ -4,6 +4,11 @@ set -eu
 repository_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repository_root"
 
+if ! command -v go >/dev/null 2>&1; then
+    echo "Preflight requires Go to install actionlint; install Go and add it to PATH." >&2
+    exit 1
+fi
+
 cargo_bin=${CARGO:-cargo}
 ./scripts/repository-check.sh
 if [ "${1:-}" = --docs ]; then exit 0; fi

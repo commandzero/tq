@@ -24,7 +24,8 @@ The internal test-support crate is never published.
    Follow the [changelog policy](changelog-policy.md).
 4. Pass the [contributor checks](contributor-checks.md), including this PR's
    OpenSpec completion check. Review and merge the release PR before tagging.
-5. Create the version tag on the reviewed release commit. Do not move an existing tag.
+5. Create the version tag on the reviewed release commit. Preserve existing tags
+   except for explicitly authorized unpublished recovery as described below.
 
 ## Validate native archives before publication
 
@@ -74,6 +75,13 @@ The release workflow must use the same native host classes, explicit native
 Cargo target, and default-feature release profile as the archive recipes.
 A completion pass does not replace the complete native archive matrix,
 registry dry runs, consumer installation checks, or OpenSpec/review completion.
+
+The compiler is pinned in `rust-toolchain.toml`; do not update it between native
+capture and publication. A compiler update requires fresh native evidence and
+review, not a hash-only approval refresh. Native archive jobs provision Go for
+installing actionlint, and preflight reports a missing Go executable directly.
+Install its `llvm-tools-preview` component as well: release stripping must use
+the complete reviewed LLVM toolset, not a partially installed compiler.
 
 Timestamp-bearing native dependencies use the shared release build environment.
 Mimalloc embeds C compilation date/time in reachable diagnostics, so release
@@ -158,7 +166,17 @@ PR after verifying archive hashes, layout, and installation on its supported hos
 
 If a crate already published successfully, verify its version and continue at the
 first unpublished dependent crate. Never attempt to replace the registry version.
-If a source correction is needed, prepare a new version and release PR.
+After any crate or release binary has been published, a source correction needs
+a new version and release PR. Before the first publication, release-environment
+corrections may retain the selected version. Moving an existing unpublished tag
+still requires explicit maintainer authorization and complete revalidation.
+
+For a validation-tooling failure, prefer preserving the source tag and running a
+reviewed maintenance workflow ref with that tag as its checkout input. The native
+workflows select Rust 1.99.0 explicitly, including its executable directory, so
+an older tag's floating Rust channel cannot override the reviewed compiler.
+Record the workflow revision, source tag/commit, and successful run with release
+evidence. This does not permit source changes, approval refreshes, or skipped gates.
 
 If a build or upload fails, keep the GitHub release in draft. Retain successful
 artifacts and diagnostics. Compare existing hashes before retrying an upload;
