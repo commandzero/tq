@@ -169,6 +169,13 @@ a new version and release PR. Before the first publication, release-environment
 corrections may retain the selected version. Moving an existing unpublished tag
 still requires explicit maintainer authorization and complete revalidation.
 
+For a validation-tooling failure, prefer preserving the source tag and running a
+reviewed maintenance workflow ref with that tag as its checkout input. The native
+workflows select Rust 1.99.0 explicitly, including its executable directory, so
+an older tag's floating Rust channel cannot override the reviewed compiler.
+Record the workflow revision, source tag/commit, and successful run with release
+evidence. This does not permit source changes, approval refreshes, or skipped gates.
+
 If a build or upload fails, keep the GitHub release in draft. Retain successful
 artifacts and diagnostics. Compare existing hashes before retrying an upload;
 accept identical bytes or fail on a differing artifact. Do not use `--clobber`.

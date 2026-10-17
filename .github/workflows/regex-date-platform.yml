@@ -61,8 +61,11 @@ jobs:
           persist-credentials: false
       - name: Install repository toolchain
         run: |
-          toolchain=$(awk -F '"' '/^channel =/ {print $2}' rust-toolchain.toml)
+          # An unpublished tag can still contain a floating development channel.
+          toolchain=1.99.0
           rustup toolchain install "$toolchain" --profile minimal
+          toolchain_bin=$(dirname "$(rustup which --toolchain "$toolchain" cargo)")
+          echo "$toolchain_bin" >> "$GITHUB_PATH"
       - name: Record release host target
         shell: bash
         run: |
