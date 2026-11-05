@@ -20,7 +20,7 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, get_current_pid};
 pub(crate) fn available_memory_bytes() -> Option<u64> {
     // A zero total means the platform probe did not populate memory data;
     // zero available with a nonzero total is a real constrained observation.
-    let mut system = System::new();
+    let mut system = System::new().ok()?;
     system.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
     let available = system.available_memory();
     if system.total_memory() == 0 {
