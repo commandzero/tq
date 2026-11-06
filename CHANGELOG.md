@@ -7,6 +7,12 @@ Historical release entries retain their original ordering.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-05
+
+### Changed
+
+- Refresh Cargo dependencies and upgrade the tq Rust crates together to 0.5.1.
+
 ## [0.5.0] - 2026-10-14
 
 ### Security
@@ -118,7 +124,8 @@ Historical release entries retain their original ordering.
 - Added crates.io packaging for `tq-cli`, which installs the `tq` command.
 - Initial release
 
-[Unreleased]: https://github.com/commandzero/tq/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/commandzero/tq/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/commandzero/tq/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/commandzero/tq/compare/v0.3.0...v0.5.0
 [0.3.0]: https://github.com/commandzero/tq/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/commandzero/tq/compare/v0.1.0...v0.2.0
