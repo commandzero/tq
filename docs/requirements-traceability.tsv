@@ -35,42 +35,42 @@ cross-tool-compatibility.unsupported-syntax-reaches-tq	cross-tool-compatibility	
 cross-tool-compatibility.common-json-input	cross-tool-compatibility	MVP compatibility coverage	Common JSON input	test:crates/tq-test-support/tests/compatibility_reporting.rs#historical_coverage_summary_preserves_reviewed_jq_target_divergences
 cross-tool-compatibility.common-yaml-input	cross-tool-compatibility	MVP compatibility coverage	Common YAML input	test:crates/tq-test-support/tests/compatibility_reporting.rs#historical_coverage_summary_preserves_reviewed_jq_target_divergences
 cross-tool-compatibility.compatibility-failure-status	cross-tool-compatibility	Compatibility report artifacts	Compatibility failure status	report:crates/tq-test-support/tests/compatibility_reporting.rs#machine_and_human_reports_include_required_sections
-jq-core-language.identity-value-types	jq-core-language	JSON-shaped runtime values	Identity value types	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.empty-versus-null	jq-core-language	JSON-shaped runtime values	Empty versus null	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.empty-array-condition	jq-core-language	jq-compatible truthiness	Empty array condition	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.null-condition	jq-core-language	jq-compatible truthiness	Null condition	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.identity-value-types	jq-core-language	JSON-shaped runtime values	Identity value types	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.empty-versus-null	jq-core-language	JSON-shaped runtime values	Empty versus null	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.empty-array-condition	jq-core-language	jq-compatible truthiness	Empty array condition	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.null-condition	jq-core-language	jq-compatible truthiness	Null condition	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
 jq-core-language.parse-nested-composition	jq-core-language	Core lexical and grammatical forms	Parse nested composition	test:crates/tq-core/src/parser.rs#parses_the_complete_mvp_compatibility_query_surface
 jq-core-language.invalid-syntax	jq-core-language	Core lexical and grammatical forms	Invalid syntax	test:crates/tq-core/src/parser.rs#deferred_and_invalid_inputs_have_stable_classes
-jq-core-language.missing-object-member	jq-core-language	Field and computed access	Missing object member	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.negative-array-index	jq-core-language	Field and computed access	Negative array index	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.slice	jq-core-language	Field and computed access	Slice	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.invalid-index-type	jq-core-language	Field and computed access	Invalid index type	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.array-iteration	jq-core-language	Iteration and generators	Array iteration	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
-jq-core-language.pipe-multiplicity	jq-core-language	Iteration and generators	Pipe multiplicity	test:crates/tq-core/src/eval.rs#wave_one_navigation_and_generators_compose
+jq-core-language.missing-object-member	jq-core-language	Field and computed access	Missing object member	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.negative-array-index	jq-core-language	Field and computed access	Negative array index	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.slice	jq-core-language	Field and computed access	Slice	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.invalid-index-type	jq-core-language	Field and computed access	Invalid index type	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.array-iteration	jq-core-language	Iteration and generators	Array iteration	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
+jq-core-language.pipe-multiplicity	jq-core-language	Iteration and generators	Pipe multiplicity	test:crates/tq-core/src/eval/tests.rs#wave_one_navigation_and_generators_compose
 jq-core-language.array-constructor	jq-core-language	Literal construction	Array constructor	test:crates/tq-core/src/parser.rs#parses_navigation_construction_control_variables_and_updates
 jq-core-language.object-shorthand	jq-core-language	Literal construction	Object shorthand	test:crates/tq-core/src/parser.rs#parses_navigation_construction_control_variables_and_updates
 jq-core-language.computed-object-key	jq-core-language	Literal construction	Computed object key	test:crates/tq-core/src/parser.rs#parses_navigation_construction_control_variables_and_updates
-jq-core-language.alternative	jq-core-language	Conditionals and boolean control	Alternative	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.boolean-short-circuit	jq-core-language	Conditionals and boolean control	Boolean short circuit	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.deep-equality	jq-core-language	Comparison and ordering	Deep equality	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.cross-type-ordering	jq-core-language	Comparison and ordering	Cross-type ordering	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.numeric-arithmetic	jq-core-language	Arithmetic and overloaded addition	Numeric arithmetic	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.object-addition	jq-core-language	Arithmetic and overloaded addition	Object addition	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
-jq-core-language.invalid-arithmetic-types	jq-core-language	Arithmetic and overloaded addition	Invalid arithmetic types	test:crates/tq-core/src/eval.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.alternative	jq-core-language	Conditionals and boolean control	Alternative	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.boolean-short-circuit	jq-core-language	Conditionals and boolean control	Boolean short circuit	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.deep-equality	jq-core-language	Comparison and ordering	Deep equality	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.cross-type-ordering	jq-core-language	Comparison and ordering	Cross-type ordering	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.numeric-arithmetic	jq-core-language	Arithmetic and overloaded addition	Numeric arithmetic	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.object-addition	jq-core-language	Arithmetic and overloaded addition	Object addition	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
+jq-core-language.invalid-arithmetic-types	jq-core-language	Arithmetic and overloaded addition	Invalid arithmetic types	test:crates/tq-core/src/eval/tests.rs#wave_two_construction_control_and_operators_compose
 jq-core-language.large-exact-integer-identity	jq-core-language	jq decimal-literal hybrid numbers	Large exact integer identity	test:crates/tq-core/src/number.rs#preserves_jq_literal_representation
 jq-core-language.arithmetic-leaves-the-literal-domain	jq-core-language	jq decimal-literal hybrid numbers	Arithmetic leaves the literal domain	test:crates/tq-core/src/number.rs#arithmetic_invalidates_literal_and_keeps_runtime_overflow
 jq-core-language.numeric-envelope-exceeded	jq-core-language	jq decimal-literal hybrid numbers	Numeric envelope exceeded	test:crates/tq-core/src/number.rs#enforces_digit_and_exponent_limits
 jq-core-language.non-finite-input	jq-core-language	jq decimal-literal hybrid numbers	Non-finite input	test:crates/tq-core/tests/runtime_numbers.rs#runtime_nan_projects_to_json_null_without_becoming_runtime_null
 jq-core-language.bind-multiple-values	jq-core-language	Variable binding	Bind multiple values	test:crates/tq-core/src/resolve.rs#resolves_scope_shadowing_cli_variables_and_unknowns
 jq-core-language.unknown-variable	jq-core-language	Variable binding	Unknown variable	test:crates/tq-core/src/resolve.rs#resolves_scope_shadowing_cli_variables_and_unknowns
-jq-core-language.map	jq-core-language	Core built-in functions	Map	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.type-selector	jq-core-language	Core built-in functions	Type selector	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.blocking-built-in	jq-core-language	Core built-in functions	Blocking built-in	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.optional-iteration	jq-core-language	Errors, optional access, and try/catch	Optional iteration	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.catch-error	jq-core-language	Errors, optional access, and try/catch	Catch error	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.relative-update	jq-core-language	Path update operators	Relative update	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.selected-path-update	jq-core-language	Path update operators	Selected path update	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-jq-core-language.invalid-update-path	jq-core-language	Path update operators	Invalid update path	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.map	jq-core-language	Core built-in functions	Map	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.type-selector	jq-core-language	Core built-in functions	Type selector	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.blocking-built-in	jq-core-language	Core built-in functions	Blocking built-in	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.optional-iteration	jq-core-language	Errors, optional access, and try/catch	Optional iteration	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.catch-error	jq-core-language	Errors, optional access, and try/catch	Catch error	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.relative-update	jq-core-language	Path update operators	Relative update	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.selected-path-update	jq-core-language	Path update operators	Selected path update	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+jq-core-language.invalid-update-path	jq-core-language	Path update operators	Invalid update path	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
 jq-core-language.deferred-reduce	jq-core-language	Deferred syntax is explicit	Deferred reduce	test:crates/tq-core/src/parser.rs#deferred_and_invalid_inputs_have_stable_classes
 performance-benchmarks.correct-result	performance-benchmarks	Correctness-gated performance cases	Correct result	test:crates/tq-test-support/tests/benchmark_gate.rs#correct_candidate_runs_warmup_and_requested_samples
 performance-benchmarks.incorrect-result	performance-benchmarks	Correctness-gated performance cases	Incorrect result	test:crates/tq-test-support/tests/benchmark_gate.rs#incorrect_candidate_never_receives_timing_samples
@@ -109,8 +109,8 @@ query-runtime.deep-but-allowed-filter	query-runtime	Explicit execution stacks	De
 query-runtime.stack-limit-exceeded	query-runtime	Explicit execution stacks	Stack limit exceeded	test:crates/tq-core/src/vm.rs#errors_unwind_deterministically_and_limits_report_high_water
 query-runtime.branch-input	query-runtime	Immutable structural sharing	Branch input	test:crates/tq-core/src/value.rs#clones_are_shallow_and_equality_ignores_object_encounter_order
 query-runtime.nested-update	query-runtime	Immutable structural sharing	Nested update	test:crates/tq-core/src/path.rs#nested_update_shares_unchanged_sibling
-query-runtime.multi-path-update	query-runtime	Stable path semantics	Multi-path update	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
-query-runtime.stale-path	query-runtime	Stable path semantics	Stale path	test:crates/tq-core/src/eval.rs#wave_three_variables_builtins_errors_and_updates_compose
+query-runtime.multi-path-update	query-runtime	Stable path semantics	Multi-path update	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
+query-runtime.stale-path	query-runtime	Stable path semantics	Stale path	test:crates/tq-core/src/eval/tests.rs#wave_three_variables_builtins_errors_and_updates_compose
 query-runtime.simple-event-consumer	query-runtime	Execution capability analysis	Simple event consumer	test:crates/tq-core/src/phase.rs#analyzed_effects_admit_only_matching_typed_plans
 query-runtime.sort	query-runtime	Execution capability analysis	Sort	test:crates/tq-core/src/phase.rs#analyzed_effects_admit_only_matching_typed_plans
 query-runtime.slurp	query-runtime	Execution capability analysis	Slurp	test:crates/tq-core/src/phase.rs#analyzed_effects_admit_only_matching_typed_plans
@@ -119,20 +119,20 @@ query-runtime.repeat-evaluation	query-runtime	Deterministic evaluation	Repeat ev
 query-runtime.explain-compiled-query	query-runtime	Runtime tracing and disassembly	Explain compiled query	test:crates/tq-core/src/bytecode.rs#compiler_validates_all_mvp_node_families_and_disassembles_spans
 query-runtime.fuzzed-query	query-runtime	Safe input and query handling	Fuzzed query	test:tests/fuzz/fuzz_targets/query_parser.rs#fuzz_target
 query-runtime.enable-language-capability	query-runtime	Differential and property validation	Enable language capability	test:crates/tq-core/src/vm.rs#errors_unwind_deterministically_and_limits_report_high_water
-resource-governance.explain-sort	resource-governance	Pre-execution plan explanation	Explain sort	test:crates/tq-cli/src/runner.rs#explain_json_publishes_plan_detection_and_limits
+resource-governance.explain-sort	resource-governance	Pre-execution plan explanation	Explain sort	test:crates/tq-cli/src/runner/tests.rs#explain_json_publishes_plan_detection_and_limits
 resource-governance.explain-explicit-stream-rejection	resource-governance	Pre-execution plan explanation	Explain explicit stream rejection	test:crates/tq-core/src/phase.rs#document_requirement_rejects_event_plan_before_input
-resource-governance.result-explosion	resource-governance	Configurable resource limits	Result explosion	test:crates/tq-cli/src/runner.rs#result_and_output_limits_preserve_complete_prior_frames
+resource-governance.result-explosion	resource-governance	Configurable resource limits	Result explosion	test:crates/tq-cli/src/runner/tests.rs#result_and_output_limits_preserve_complete_prior_frames
 resource-governance.oversized-token	resource-governance	Configurable resource limits	Oversized token	test:crates/tq-toon/src/decoder.rs#hostile_limits_and_syntax_fail_without_proportional_allocation
 resource-governance.detection-replay-bound	resource-governance	Configurable resource limits	Detection replay bound	test:crates/tq-formats/src/adapters.rs#bounded_probe_is_observable_and_late_failures_do_not_fail_down
 resource-governance.depth-257	resource-governance	Default nesting protection	Depth 257	test:crates/tq-toon/src/decoder.rs#hostile_limits_and_syntax_fail_without_proportional_allocation
-resource-governance.general-jq-filter	resource-governance	Honest memory classification	General jq filter	test:crates/tq-cli/src/runner.rs#explain_json_publishes_plan_detection_and_limits
-resource-governance.event-mode	resource-governance	Honest memory classification	Event mode	test:crates/tq-cli/src/runner.rs#explain_json_publishes_plan_detection_and_limits
+resource-governance.general-jq-filter	resource-governance	Honest memory classification	General jq filter	test:crates/tq-cli/src/runner/tests.rs#explain_json_publishes_plan_detection_and_limits
+resource-governance.event-mode	resource-governance	Honest memory classification	Event mode	test:crates/tq-cli/src/runner/tests.rs#explain_json_publishes_plan_detection_and_limits
 resource-governance.huge-declared-array	resource-governance	Safe declared-length handling	Huge declared array	test:crates/tq-toon/src/decoder.rs#hostile_limits_and_syntax_fail_without_proportional_allocation
 resource-governance.spool-limit	resource-governance	Secure bounded spooling	Spool limit	test:crates/tq-toon/src/spool.rs#disabled_and_limited_spools_fail_before_output
 resource-governance.process-interruption	resource-governance	Secure bounded spooling	Process interruption	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Manual: spool interruption cleanup
 resource-governance.downstream-closes	resource-governance	Cancellation and pipe behavior	Downstream closes	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Manual: downstream pipe closure
 resource-governance.user-interrupts	resource-governance	Cancellation and pipe behavior	User interrupts	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Manual: user interrupt
-resource-governance.error-after-first-result	resource-governance	Partial output transparency	Error after first result	test:crates/tq-cli/src/runner.rs#prior_framed_results_survive_a_later_runtime_error
+resource-governance.error-after-first-result	resource-governance	Partial output transparency	Error after first result	test:crates/tq-cli/src/runner/tests.rs#prior_framed_results_survive_a_later_runtime_error
 resource-governance.step-limit	resource-governance	Resource diagnostics	Step limit	manual:openspec/changes/archive/2026-08-07-build-tq-mvp/verification.md#Critical: resource diagnostic details
 resource-governance.fuzz-regression	resource-governance	Panic-free hostile-input boundary	Fuzz regression	test:tests/fuzz/fuzz_targets/cli_args.rs#fuzz_target
 resource-governance.compare-memory-behavior	resource-governance	Resource observations in reports	Compare memory behavior	manual:benchmarks/README.md#Benchmark campaigns
@@ -160,21 +160,21 @@ toon-stream-io.event-and-dom-agreement	toon-stream-io	I/O conformance and differ
 tq-cli.pipe-input	tq-cli	jq-like command shape	Pipe input	test:crates/tq-cli/src/args.rs#parses_jq_shape_files_stdin_and_filter_file
 tq-cli.multiple-files	tq-cli	jq-like command shape	Multiple files	test:crates/tq-cli/src/args.rs#parses_jq_shape_files_stdin_and_filter_file
 tq-cli.filter-file	tq-cli	jq-like command shape	Filter file	test:crates/tq-cli/src/args.rs#parses_jq_shape_files_stdin_and_filter_file
-tq-cli.default-format	tq-cli	Best-effort input detection with strict override	Default format	test:crates/tq-cli/src/runner.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
-tq-cli.json-interoperability	tq-cli	Best-effort input detection with strict override	JSON interoperability	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.default-format	tq-cli	Best-effort input detection with strict override	Default format	test:crates/tq-cli/src/runner/tests.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
+tq-cli.json-interoperability	tq-cli	Best-effort input detection with strict override	JSON interoperability	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.yaml-interoperability	tq-cli	Best-effort input detection with strict override	YAML interoperability	test:crates/tq-formats/src/adapters.rs#equivalent_formats_share_one_ordered_value_model
 tq-cli.yaml-output-remains-deferred	tq-cli	Best-effort input detection with strict override	YAML output remains deferred	test:crates/tq-cli/src/args.rs#validates_conflicts_missing_values_and_unsupported_options
 tq-cli.ambiguous-content	tq-cli	Best-effort input detection with strict override	Ambiguous content	test:crates/tq-formats/src/adapters.rs#bounded_probe_is_observable_and_late_failures_do_not_fail_down
 tq-cli.json-is-accepted-as-yaml	tq-cli	Best-effort input detection with strict override	JSON is accepted as YAML	test:crates/tq-formats/src/adapters.rs#bounded_probe_is_observable_and_late_failures_do_not_fail_down
-tq-cli.strict-input-override	tq-cli	Best-effort input detection with strict override	Strict input override	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
-tq-cli.mixed-format-files	tq-cli	Best-effort input detection with strict override	Mixed-format files	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
-tq-cli.override-applies-to-every-source	tq-cli	Best-effort input detection with strict override	Override applies to every source	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.strict-input-override	tq-cli	Best-effort input detection with strict override	Strict input override	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.mixed-format-files	tq-cli	Best-effort input detection with strict override	Mixed-format files	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.override-applies-to-every-source	tq-cli	Best-effort input detection with strict override	Override applies to every source	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.all-probes-reject	tq-cli	Best-effort input detection with strict override	All probes reject	test:crates/tq-formats/src/adapters.rs#bounded_probe_is_observable_and_late_failures_do_not_fail_down
 tq-cli.late-selected-format-failure	tq-cli	Best-effort input detection with strict override	Late selected-format failure	test:crates/tq-formats/src/adapters.rs#bounded_probe_is_observable_and_late_failures_do_not_fail_down
-tq-cli.raw-string	tq-cli	Structured and raw output modes	Raw string	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.raw-string	tq-cli	Structured and raw output modes	Raw string	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.raw-non-string	tq-cli	Structured and raw output modes	Raw non-string	report:crates/tq-test-support/tests/compatibility_reporting.rs#historical_coverage_summary_preserves_reviewed_jq_target_divergences
 tq-cli.unframed-cardinality-error	tq-cli	Structured and raw output modes	Unframed cardinality error	test:crates/tq-toon/src/sequence.rs#unframed_validates_cardinality_before_writing
-tq-cli.null-input	tq-cli	Core input modes	Null input	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.null-input	tq-cli	Core input modes	Null input	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.raw-slurp	tq-cli	Core input modes	Raw slurp	report:crates/tq-test-support/tests/compatibility_reporting.rs#historical_coverage_summary_preserves_reviewed_jq_target_divergences
 tq-cli.explicit-stream	tq-cli	Core input modes	Explicit stream	test:crates/tq-formats/src/stream.rs#json_and_toon_form_identical_jq_stream_records
 tq-cli.yaml-stream-is-not-implied	tq-cli	Core input modes	YAML stream is not implied	test:crates/tq-cli/src/args.rs#validates_conflicts_missing_values_and_unsupported_options
@@ -188,10 +188,10 @@ tq-cli.invalid-strict-count	tq-cli	Strictness	Invalid strict count	test:crates/t
 tq-cli.multi-document-yaml	tq-cli	YAML input profile	Multi-document YAML	test:crates/tq-formats/src/adapters.rs#yaml_is_multi_document_and_rejects_profile_violations
 tq-cli.non-string-mapping-key	tq-cli	YAML input profile	Non-string mapping key	test:crates/tq-formats/src/adapters.rs#yaml_is_multi_document_and_rejects_profile_violations
 tq-cli.yaml-numeric-fidelity	tq-cli	YAML input profile	YAML numeric fidelity	test:crates/tq-formats/src/adapters.rs#yaml_never_silently_rounds_large_json_subset_integers
-tq-cli.normal-success	tq-cli	jq-aligned exit statuses	Normal success	test:crates/tq-cli/src/runner.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
-tq-cli.exit-status-false	tq-cli	jq-aligned exit statuses	Exit status false	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
-tq-cli.exit-status-no-output	tq-cli	jq-aligned exit statuses	Exit status no output	test:crates/tq-cli/src/runner.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.normal-success	tq-cli	jq-aligned exit statuses	Normal success	test:crates/tq-cli/src/runner/tests.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
+tq-cli.exit-status-false	tq-cli	jq-aligned exit statuses	Exit status false	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
+tq-cli.exit-status-no-output	tq-cli	jq-aligned exit statuses	Exit status no output	test:crates/tq-cli/src/runner/tests.rs#json_override_raw_join_null_and_exit_status_are_wired
 tq-cli.compile-failure	tq-cli	jq-aligned exit statuses	Compile failure	report:crates/tq-test-support/tests/compatibility_reporting.rs#historical_coverage_summary_preserves_reviewed_jq_target_divergences
-tq-cli.pipeline	tq-cli	stdout and stderr discipline	Pipeline	test:crates/tq-cli/src/runner.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
-tq-cli.compatibility-report	tq-cli	Help, version, and support matrix	Compatibility report	test:crates/tq-cli/src/runner.rs#help_version_and_compatibility_write_only_stdout
+tq-cli.pipeline	tq-cli	stdout and stderr discipline	Pipeline	test:crates/tq-cli/src/runner/tests.rs#identity_uses_lf_terminated_toon_and_keeps_stderr_clean
+tq-cli.compatibility-report	tq-cli	Help, version, and support matrix	Compatibility report	test:crates/tq-cli/src/runner/tests.rs#help_version_and_compatibility_write_only_stdout
 tq-cli.deferred-module-path	tq-cli	Deferred jq CLI options are rejected clearly	Deferred module path	test:crates/tq-cli/src/args.rs#validates_conflicts_missing_values_and_unsupported_options
